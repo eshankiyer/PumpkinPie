@@ -1,7 +1,7 @@
 use pumpkin_util::math::vector3::Vector3;
 
 use super::random_pos::land_get_pos;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 
@@ -91,71 +91,63 @@ impl StrollAroundPoiGoal {
 }
 
 impl Goal for StrollAroundPoiGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let world = mob.get_entity().world.load();
-            // `if (timestamp <= nextOkStartTime.longValue()) return true`
-            // (`StrollAroundPoi.java:27-29`): still satisfied during cooldown, no new
-            // stroll - expressed here as "do not start".
-            let now = world.get_world_age().await;
-            if now <= self.next_ok_start_time {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let world = mob.get_entity().world.load();
+        // `if (timestamp <= nextOkStartTime.longValue()) return true`
+        // (`StrollAroundPoi.java:27-29`): still satisfied during cooldown, no new
+        // stroll - expressed here as "do not start".
+        let now = world.get_world_age();
+        if now <= self.next_ok_start_time {
+            return false;
+        }
 
-            let Some(poi) = self.claimed_poi(mob) else {
-                return false;
-            };
-            if !self.near_poi(mob, poi.to_f64()) {
-                return false;
-            }
+        let Some(poi) = self.claimed_poi(mob) else {
+            return false;
+        };
+        if !self.near_poi(mob, poi.to_f64()) {
+            return false;
+        }
 
-            // Cooldown arms whether or not a spot was found (`StrollAroundPoi.java:33`).
-            self.next_ok_start_time = now + self.min_time_between_strolls;
+        // Cooldown arms whether or not a spot was found (`StrollAroundPoi.java:33`).
+        self.next_ok_start_time = now + self.min_time_between_strolls;
 
-            // `LandRandomPos.getPos(body, STROLL_MAX_XZ_DIST=8, STROLL_MAX_Y_DIST=6)`
-            // (`StrollAroundPoi.java:15-16,31`).
-            self.wanted = land_get_pos(mob, 8, 6);
-            if self.wanted.is_none() {
-                return false;
-            }
-            true
-        })
+        // `LandRandomPos.getPos(body, STROLL_MAX_XZ_DIST=8, STROLL_MAX_Y_DIST=6)`
+        // (`StrollAroundPoi.java:15-16,31`).
+        self.wanted = land_get_pos(mob, 8, 6);
+        if self.wanted.is_none() {
+            return false;
+        }
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let navigator_idle = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            !navigator_idle
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let navigator_idle = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        !navigator_idle
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(wanted) = self.wanted {
-                let pos = mob.get_entity().pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.wanted = None;
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(wanted) = self.wanted {
+            let pos = mob.get_entity().pos.load();
             mob.get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+                .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
+        }
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.wanted = None;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     fn controls(&self) -> Controls {

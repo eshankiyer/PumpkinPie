@@ -1,9 +1,7 @@
-use std::pin::Pin;
-
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use super::BlockEntity;
 
@@ -61,22 +59,26 @@ impl BlockEntity for TestInstanceBlockBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // `loadAdditional` and `saveAdditional` persist `data` and the optional
-            // `errors` list (`TestInstanceBlockEntity.java:160-172`).
-            nbt.put_compound("data", self.data.lock().await.clone());
-            let errors = self.errors.lock().await;
-            if !errors.is_empty() {
-                nbt.put_list(
-                    "errors",
-                    errors.iter().cloned().map(NbtTag::Compound).collect(),
-                );
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        // `loadAdditional` and `saveAdditional` persist `data` and the optional
+        // `errors` list (`TestInstanceBlockEntity.java:160-172`).
+        nbt.put_compound(
+            "data",
+            self.data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        let errors = self
+            .errors
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !errors.is_empty() {
+            nbt.put_list(
+                "errors",
+                errors.iter().cloned().map(NbtTag::Compound).collect(),
+            );
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

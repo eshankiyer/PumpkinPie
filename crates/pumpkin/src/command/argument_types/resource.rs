@@ -15,7 +15,6 @@ use pumpkin_util::identifier::Identifier;
 use pumpkin_util::text::TextComponent;
 use std::any::Any;
 use std::iter::Iterator;
-use std::pin::Pin;
 
 pub static ENTITY_TYPE_REGISTRY: &Identifier = &Identifier::vanilla_static("entity_type");
 // `ResourceArgument` registry keys (`ResourceArgument.java:48-58,72-109`) map to generated
@@ -67,7 +66,7 @@ impl ArgumentType for ResourceArgument {
         &self,
         _context: &CommandContext,
         suggestions_builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send>> {
+    ) -> Suggestions {
         if self.0 == ENTITY_TYPE_REGISTRY {
             Box::pin(async move {
                 let entity_types = EntityType::ALL

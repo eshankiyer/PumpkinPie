@@ -12,7 +12,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal,
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
@@ -109,12 +109,12 @@ impl ZombifiedPiglinEntity {
                                 let Some(anger) = mob.persistent_anger() else {
                                     return false;
                                 };
-                                if anger.is_angry_at(target.entity_uuid).await {
+                                if anger.is_angry_at(target.entity_uuid) {
                                     return true;
                                 }
                                 let universal_anger =
                                     world.level_info.load().game_rules.universal_anger;
-                                anger.is_angry_at_all_players(universal_anger).await
+                                anger.is_angry_at_all_players(universal_anger)
                             }
                         },
                     ),
@@ -131,7 +131,7 @@ impl ZombifiedPiglinEntity {
     /// Vanilla `ZombifiedPiglin.java:98-108`: a transient +0.05 movement speed modifier held
     /// exactly while angry. The `!isBaby()` guard is dropped because Pumpkin models no baby
     /// zombie variants at all, so every zombified piglin is an adult here.
-    async fn update_attacking_speed(&self) {
+    fn update_attacking_speed(&self) {
         let living = &self.mob_entity.living_entity;
 
         if self.persistent_anger.is_angry() {
@@ -143,14 +143,14 @@ impl ZombifiedPiglinEntity {
                         operation: ModifierOperation::Add,
                     });
                 });
-                send_attribute_updates_for_living(living, vec![Attributes::MOVEMENT_SPEED]).await;
+                send_attribute_updates_for_living(living, vec![Attributes::MOVEMENT_SPEED]);
             }
             self.maybe_play_first_anger_sound();
         } else if self.speed_boosted.swap(false, Relaxed) {
             living.update_attribute(&Attributes::MOVEMENT_SPEED, |inst| {
                 inst.remove_modifier(SPEED_MODIFIER_ATTACKING_ID);
             });
-            send_attribute_updates_for_living(living, vec![Attributes::MOVEMENT_SPEED]).await;
+            send_attribute_updates_for_living(living, vec![Attributes::MOVEMENT_SPEED]);
         }
     }
 
@@ -180,19 +180,23 @@ impl ZombifiedPiglinEntity {
     /// only begins once the target is lost. Vanilla's extra early-clear branches (grudge target
     /// gone creative/spectator/peaceful, or a dead `Mob` target) are not modelled; timer expiry is
     /// handled by `PersistentAnger::tick`.
-    async fn update_persistent_anger(&self) {
-        let target = self.mob_entity.target.lock().await.clone();
+    fn update_persistent_anger(&self) {
+        let target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(target) = target {
             self.persistent_anger
-                .set_angry_at(Some(target.get_entity().entity_uuid))
-                .await;
+                .set_angry_at(Some(target.get_entity().entity_uuid));
             self.persistent_anger.start_timer();
         }
     }
 
     /// Vanilla `ZombifiedPiglin.java:127-137`: every 4-6 seconds, if the current target is in
     /// line of sight, spread it to the pack.
-    async fn maybe_alert_others(&self, target: &Arc<dyn EntityBase>) {
+    fn maybe_alert_others(&self, target: &Arc<dyn EntityBase>) {
         if self
             .ticks_until_next_alert
             .fetch_update(Relaxed, Relaxed, |ticks| (ticks > 0).then_some(ticks - 1))
@@ -201,8 +205,8 @@ impl ZombifiedPiglinEntity {
             return;
         }
 
-        if self.has_line_of_sight(target).await {
-            self.alert_others(target).await;
+        if self.has_line_of_sight(target) {
+            self.alert_others(target);
         }
 
         self.ticks_until_next_alert.store(
@@ -211,8 +215,8 @@ impl ZombifiedPiglinEntity {
         );
     }
 
-    async fn has_line_of_sight(&self, target: &Arc<dyn EntityBase>) -> bool {
-        self.mob_entity.has_line_of_sight(target.as_ref()).await
+    fn has_line_of_sight(&self, target: &Arc<dyn EntityBase>) -> bool {
+        self.mob_entity.has_line_of_sight(target.as_ref())
     }
 
     /// Vanilla `ZombifiedPiglin.java:139-149`: hand this piglin's target to every other
@@ -222,7 +226,7 @@ impl ZombifiedPiglinEntity {
     /// Scope reductions: `get_nearby_entities` is a sphere, so the circumscribing sphere is
     /// queried and the box bounds are re-applied per candidate. Vanilla's `!isAlliedTo(target)`
     /// filter is dropped because Pumpkin models no entity teams.
-    async fn alert_others(&self, target: &Arc<dyn EntityBase>) {
+    fn alert_others(&self, target: &Arc<dyn EntityBase>) {
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load();
         let pos = entity.pos.load();
@@ -249,21 +253,27 @@ impl ZombifiedPiglinEntity {
             let Some(other_mob) = nearby.get_mob() else {
                 continue;
             };
-            if other_mob.get_mob_entity().target.lock().await.is_some() {
+            if other_mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+            {
                 continue;
             }
-            other_mob.set_mob_target(Some(target.clone())).await;
+            other_mob.set_mob_target(Some(target.clone()));
         }
     }
 }
 
 impl NBTStorage for ZombifiedPiglinEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async { self.persistent_anger.write_nbt(nbt).await })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.persistent_anger.write_nbt(nbt)
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async { self.persistent_anger.read_nbt(nbt).await })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.persistent_anger.read_nbt(nbt)
     }
 }
 
@@ -278,18 +288,11 @@ impl Mob for ZombifiedPiglinEntity {
 
     /// Vanilla `ZombifiedPiglin.isPreventingPlayerRest` (`ZombifiedPiglin.java:240-242`):
     /// only an angry piglin targeting this player, or angry under universal anger, blocks sleep.
-    fn is_preventing_player_rest(
-        &self,
-        player_uuid: uuid::Uuid,
-        universal_anger: bool,
-    ) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move {
-            self.persistent_anger.is_angry_at(player_uuid).await
-                || self
-                    .persistent_anger
-                    .is_angry_at_all_players(universal_anger)
-                    .await
-        })
+    fn is_preventing_player_rest(&self, player_uuid: uuid::Uuid, universal_anger: bool) -> bool {
+        self.persistent_anger.is_angry_at(player_uuid)
+            || self
+                .persistent_anger
+                .is_angry_at_all_players(universal_anger)
     }
 
     /// Vanilla `ZombifiedPiglin.getAmbientSound` (`ZombifiedPiglin.java:224-227`).
@@ -308,35 +311,40 @@ impl Mob for ZombifiedPiglinEntity {
 
     /// Vanilla `ZombifiedPiglin.java:156-163`: a `null -> non-null` target transition arms the
     /// one-shot anger sound and the first pack-alert interval.
-    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let mut mob_target = self.mob_entity.target.lock().await;
-            if mob_target.is_none() && target.is_some() {
-                let mut rng = rand::rng();
-                self.play_first_anger_sound_in.store(
-                    rng.random_range(0..=FIRST_ANGER_SOUND_DELAY_MAX_TICKS),
-                    Relaxed,
-                );
-                self.ticks_until_next_alert.store(
-                    rng.random_range(ALERT_INTERVAL_MIN_TICKS..=ALERT_INTERVAL_MAX_TICKS),
-                    Relaxed,
-                );
-            }
-            *mob_target = target;
-        })
+    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) {
+        let mut mob_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if mob_target.is_none() && target.is_some() {
+            let mut rng = rand::rng();
+            self.play_first_anger_sound_in.store(
+                rng.random_range(0..=FIRST_ANGER_SOUND_DELAY_MAX_TICKS),
+                Relaxed,
+            );
+            self.ticks_until_next_alert.store(
+                rng.random_range(ALERT_INTERVAL_MIN_TICKS..=ALERT_INTERVAL_MAX_TICKS),
+                Relaxed,
+            );
+        }
+        *mob_target = target;
     }
 
     /// Mirrors `ZombifiedPiglin.customServerAiStep` (`ZombifiedPiglin.java:98-116`), in order.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.persistent_anger.tick().await;
-            self.update_attacking_speed().await;
-            self.update_persistent_anger().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.persistent_anger.tick();
+        self.update_attacking_speed();
+        self.update_persistent_anger();
 
-            let target = self.mob_entity.target.lock().await.clone();
-            if let Some(target) = target {
-                self.maybe_alert_others(&target).await;
-            }
-        })
+        let target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = target {
+            self.maybe_alert_others(&target);
+        }
     }
 }

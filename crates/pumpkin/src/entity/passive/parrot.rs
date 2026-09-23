@@ -16,7 +16,7 @@ use rand::RngExt;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         escape_danger::EscapeDangerGoal, follow_mob::FollowMobGoal, follow_owner::FollowOwnerGoal,
         land_on_owners_shoulder::LandOnOwnersShoulderGoal, look_at_entity::LookAtEntityGoal,
@@ -96,9 +96,9 @@ impl ParrotEntity {
 
     /// `ShoulderRidingEntity.setEntityOnShoulder` (`ShoulderRidingEntity.java:45-56`): saves
     /// this parrot into the given player's shoulder slot and discards the live entity.
-    pub async fn set_entity_on_shoulder(&self, player: &Player) -> bool {
+    pub fn set_entity_on_shoulder(&self, player: &Player) -> bool {
         let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
-        self.write_nbt(&mut nbt).await;
+        self.write_nbt(&mut nbt);
         nbt.put_string(
             "id",
             format!(
@@ -111,8 +111,8 @@ impl ParrotEntity {
             ),
         );
 
-        if player.set_entity_on_shoulder(nbt).await {
-            self.mob_entity.living_entity.entity.remove().await;
+        if player.set_entity_on_shoulder(nbt) {
+            self.mob_entity.living_entity.entity.remove();
             true
         } else {
             false
@@ -121,7 +121,7 @@ impl ParrotEntity {
 
     /// Feeds the parrot a cookie: it is poisoned and then killed, as in vanilla
     /// `Parrot.mobInteract`.
-    async fn eat_cookie(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
+    fn eat_cookie(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
         item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
         self.mob_entity
@@ -134,8 +134,7 @@ impl ParrotEntity {
                 show_particles: true,
                 show_icon: true,
                 blend: true,
-            })
-            .await;
+            });
 
         // Vanilla guards this call with `player.isCreative() || !this.isInvulnerable()`,
         // but `hurt` re-checks invulnerability itself and `player_attack` doesn't bypass
@@ -147,40 +146,29 @@ impl ParrotEntity {
             None,
             Some(player.as_ref()),
             Some(player.as_ref()),
-        )
-        .await;
+        );
     }
 }
 
 impl NBTStorage for ParrotEntity {
     /// `TamableAnimal.addAdditionalSaveData`: owner UUID plus the ordered-to-sit flag.
     /// Without these a tamed parrot reverted to wild on reload.
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if let Some(owner) = self.mob_entity.owner.load() {
-                nbt.put_uuid("Owner", owner);
-            }
-            nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
-        })
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        if let Some(owner) = self.mob_entity.owner.load() {
+            nbt.put_uuid("Owner", owner);
+        }
+        nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(owner) = nbt.get_uuid("Owner") {
-                self.mob_entity.set_owner(owner);
-            }
-            if let Some(sitting) = nbt.get_bool("Sitting") {
-                self.mob_entity.set_ordered_to_sit(sitting);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        if let Some(owner) = nbt.get_uuid("Owner") {
+            self.mob_entity.set_owner(owner);
+        }
+        if let Some(sitting) = nbt.get_bool("Sitting") {
+            self.mob_entity.set_ordered_to_sit(sitting);
+        }
     }
 }
 
@@ -220,70 +208,60 @@ impl Mob for ParrotEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.sync_tame_flags();
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::parrot::OWNER_UUID,
-                    self.mob_entity.owner.load(),
-                )],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.sync_tame_flags();
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::parrot::OWNER_UUID,
+                self.mob_entity.owner.load(),
+            )],
+            None,
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if item_stack
-                .item
-                .has_tag(&tag::Item::MINECRAFT_PARROT_POISONOUS_FOOD)
-            {
-                self.eat_cookie(player, item_stack).await;
-                return true;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if item_stack
+            .item
+            .has_tag(&tag::Item::MINECRAFT_PARROT_POISONOUS_FOOD)
+        {
+            self.eat_cookie(player, item_stack);
+            return true;
+        }
 
-            let entity = &self.mob_entity.living_entity.entity;
-            if !self.mob_entity.is_tamed()
-                && item_stack.item.has_tag(&tag::Item::MINECRAFT_PARROT_FOOD)
-            {
-                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        let entity = &self.mob_entity.living_entity.entity;
+        if !self.mob_entity.is_tamed() && item_stack.item.has_tag(&tag::Item::MINECRAFT_PARROT_FOOD)
+        {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
-                let world = entity.world.load();
-                let pos = entity.pos.load() + Vector3::new(0.0, f64::from(entity.height()), 0.0);
+            let world = entity.world.load();
+            let pos = entity.pos.load() + Vector3::new(0.0, f64::from(entity.height()), 0.0);
 
-                if self.get_random().random_range(0..10) == 0 {
-                    self.mob_entity.set_owner(player.gameprofile.id);
-                    self.sync_tame_flags();
-                    world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Heart);
-                } else {
-                    world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Smoke);
-                }
-
-                return true;
-            }
-
-            // `Parrot.mobInteract` (`Parrot.java:281-286`): a grounded, tamed parrot owned by
-            // this player toggles its ordered-to-sit flag on an empty-handed/other-item click.
-            // `Parrot.isFlying` (`Parrot.java:453-455`) is `!onGround()`.
-            if entity.on_ground.load(std::sync::atomic::Ordering::Relaxed)
-                && self.mob_entity.is_tamed()
-                && self.mob_entity.owner.load() == Some(player.gameprofile.id)
-            {
-                let sitting = !self.mob_entity.is_ordered_to_sit();
-                self.mob_entity.set_ordered_to_sit(sitting);
+            if self.get_random().random_range(0..10) == 0 {
+                self.mob_entity.set_owner(player.gameprofile.id);
                 self.sync_tame_flags();
-                return true;
+                world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Heart);
+            } else {
+                world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Smoke);
             }
 
-            self.mob_entity
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-        })
+            return true;
+        }
+
+        // `Parrot.mobInteract` (`Parrot.java:281-286`): a grounded, tamed parrot owned by
+        // this player toggles its ordered-to-sit flag on an empty-handed/other-item click.
+        // `Parrot.isFlying` (`Parrot.java:453-455`) is `!onGround()`.
+        if entity.on_ground.load(std::sync::atomic::Ordering::Relaxed)
+            && self.mob_entity.is_tamed()
+            && self.mob_entity.owner.load() == Some(player.gameprofile.id)
+        {
+            let sitting = !self.mob_entity.is_ordered_to_sit();
+            self.mob_entity.set_ordered_to_sit(sitting);
+            self.sync_tame_flags();
+            return true;
+        }
+
+        self.mob_entity
+            .mob_interact(player, item_stack, self.can_be_leashed())
     }
 }
 

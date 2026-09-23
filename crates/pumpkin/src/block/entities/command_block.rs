@@ -1,7 +1,4 @@
-use std::{
-    pin::Pin,
-    sync::atomic::{AtomicBool, AtomicU32, Ordering},
-};
+use std::pin::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{
@@ -15,7 +12,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 
 use std::sync::Mutex as StdMutex;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use super::BlockEntity;
 use crate::world::World;
@@ -147,38 +144,45 @@ impl BlockEntity for CommandBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {
-            nbt.put_bool("auto", self.auto.load(Ordering::SeqCst));
-            nbt.put_string("Command", self.command.lock().await.to_string());
-            nbt.put_bool("conditionMet", self.condition_met.load(Ordering::SeqCst));
-            nbt.put_string("LastOutput", self.last_output.lock().await.to_string());
-            nbt.put_bool("powered", self.powered.load(Ordering::SeqCst));
-            nbt.put_bool("TrackOutput", self.track_output.load(Ordering::SeqCst));
-            nbt.put_bool("UpdateLastExecution", false);
-            nbt.put_int(
-                "SuccessCount",
-                self.success_count.load(Ordering::SeqCst).cast_signed(),
-            );
-            if let Some(name) = self
-                .custom_name
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("auto", self.auto.load(Ordering::SeqCst));
+        nbt.put_string(
+            "Command",
+            self.command
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .as_ref()
-                && let Ok(name_json) = pumpkin_util::serde_json::to_string(name)
-            {
-                nbt.put_string("CustomName", name_json);
-            }
-        })
+                .to_string(),
+        );
+        nbt.put_bool("conditionMet", self.condition_met.load(Ordering::SeqCst));
+        nbt.put_string(
+            "LastOutput",
+            self.last_output
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .to_string(),
+        );
+        nbt.put_bool("powered", self.powered.load(Ordering::SeqCst));
+        nbt.put_bool("TrackOutput", self.track_output.load(Ordering::SeqCst));
+        nbt.put_bool("UpdateLastExecution", false);
+        nbt.put_int(
+            "SuccessCount",
+            self.success_count.load(Ordering::SeqCst).cast_signed(),
+        );
+        if let Some(name) = self
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            && let Ok(name_json) = pumpkin_util::serde_json::to_string(name)
+        {
+            nbt.put_string("CustomName", name_json);
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
         futures::executor::block_on(async {
-            self.write_nbt(&mut nbt).await;
+            self.write_nbt(&mut nbt);
         });
         Some(nbt)
     }

@@ -19,8 +19,8 @@ use crate::block::blocks::copper_weathering;
 use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, GetComparatorOutputArgs,
-    NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs, RandomTickArgs, UseWithItemArgs,
+    BlockBehaviour, BlockIsReplacing, BlockMetadata, GetComparatorOutputArgs, NormalUseArgs,
+    OnPlaceArgs, OnStateReplacedArgs, RandomTickArgs, UseWithItemArgs,
 };
 use crate::entity::EntityBase;
 use crate::world::World;
@@ -65,7 +65,7 @@ impl BlockMetadata for CopperGolemStatueBlock {
 impl CopperGolemStatueBlock {
     /// `CopperGolemStatueBlock.updatePose`: cycles the pose, plays the become-statue
     /// sound and emits a `block_change` game event attributed to the player.
-    async fn update_pose(
+    fn update_pose(
         world: &Arc<World>,
         block: &Block,
         state_id: BlockStateId,
@@ -80,9 +80,7 @@ impl CopperGolemStatueBlock {
 
         let mut props = CopperGolemStatueLikeProperties::from_state_id(state_id, block);
         props.copper_golem_pose = next_pose(props.copper_golem_pose);
-        world
-            .set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
 
         let context = player.map_or_else(GameEventContext::none, |player| {
             GameEventContext::of_entity(player.clone() as Arc<dyn EntityBase>)
@@ -96,8 +94,7 @@ impl CopperGolemStatueBlock {
                 f64::from(position.0.z) + 0.5,
             ),
             context,
-        )
-        .await;
+        );
     }
 }
 
@@ -115,29 +112,24 @@ const fn next_pose(pose: CopperGolemPose) -> CopperGolemPose {
 impl BlockBehaviour for CopperGolemStatueBlock {
     /// `getStateForPlacement`: faces away from the placing player, waterlogged when it
     /// replaced a water source. POSE always starts at STANDING (the default state).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = CopperGolemStatueLikeProperties::default(args.block);
-            props.facing = args.player.get_entity().get_horizontal_facing();
-            props.waterlogged = matches!(args.replacing, BlockIsReplacing::Water(_));
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = CopperGolemStatueLikeProperties::default(args.block);
+        props.facing = args.player.get_entity().get_horizontal_facing();
+        props.waterlogged = matches!(args.replacing, BlockIsReplacing::Water(_));
+        props.to_state_id(args.block)
     }
 
     /// `useItemOn` with an empty hand: cycles the pose.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            Self::update_pose(
-                args.world,
-                args.block,
-                state.id,
-                args.position,
-                Some(args.player),
-            )
-            .await;
-            BlockActionResult::Success
-        })
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        let state = args.world.get_block_state(args.position);
+        Self::update_pose(
+            args.world,
+            args.block,
+            state.id,
+            args.position,
+            Some(args.player),
+        );
+        BlockActionResult::Success
     }
 
     /// `WeatheringCopperGolemStatueBlock.useItemOn` (lines 50-82). An axe on the UNAFFECTED
@@ -148,85 +140,66 @@ impl BlockBehaviour for CopperGolemStatueBlock {
     /// UNAFFECTED is the unwaxed `minecraft:copper_golem_statue` alone: the waxed variants are
     /// plain `CopperGolemStatueBlock`s in vanilla (only the unwaxed four extend
     /// `WeatheringCopperGolemStatueBlock`), so an axe de-waxes them instead of releasing.
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let item: &Item = args.item_stack.item;
-            if item.has_tag(&tag::Item::MINECRAFT_AXES) {
-                if args.block.id != BlockId::COPPER_GOLEM_STATUE {
-                    return BlockActionResult::PassToDefaultBlockAction;
-                }
-
-                let state = args.world.get_block_state(args.position);
-                let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
-
-                // The block entity is created on placement (`block/entities/mod.rs`), but a
-                // statue restored from an older world may predate that, and vanilla's own
-                // `useItemOn` no-ops when the block entity is missing.
-                let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                    return BlockActionResult::PassToDefaultBlockAction;
-                };
-                let Some(statue) = block_entity
-                    .as_any()
-                    .downcast_ref::<CopperGolemStatueBlockEntity>()
-                else {
-                    return BlockActionResult::PassToDefaultBlockAction;
-                };
-
-                statue
-                    .remove_statue(args.world, props.facing, props.waterlogged)
-                    .await;
-                // `itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot())`, line 72.
-                args.player
-                    .damage_item_in_slot(args.equipment_slot, 1)
-                    .await;
-                return BlockActionResult::Success;
-            }
-
-            if item.id == Item::HONEYCOMB.id {
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        let item: &Item = args.item_stack.item;
+        if item.has_tag(&tag::Item::MINECRAFT_AXES) {
+            if args.block.id != BlockId::COPPER_GOLEM_STATUE {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
             let state = args.world.get_block_state(args.position);
-            Self::update_pose(
-                args.world,
-                args.block,
-                state.id,
-                args.position,
-                Some(args.player),
-            )
-            .await;
-            BlockActionResult::Success
-        })
+            let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
+
+            // The block entity is created on placement (`block/entities/mod.rs`), but a
+            // statue restored from an older world may predate that, and vanilla's own
+            // `useItemOn` no-ops when the block entity is missing.
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return BlockActionResult::PassToDefaultBlockAction;
+            };
+            let Some(statue) = block_entity
+                .as_any()
+                .downcast_ref::<CopperGolemStatueBlockEntity>()
+            else {
+                return BlockActionResult::PassToDefaultBlockAction;
+            };
+
+            statue.remove_statue(args.world, props.facing, props.waterlogged);
+            // `itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot())`, line 72.
+            args.player.damage_item_in_slot(args.equipment_slot, 1);
+            return BlockActionResult::Success;
+        }
+
+        if item.id == Item::HONEYCOMB.id {
+            return BlockActionResult::PassToDefaultBlockAction;
+        }
+
+        let state = args.world.get_block_state(args.position);
+        Self::update_pose(
+            args.world,
+            args.block,
+            state.id,
+            args.position,
+            Some(args.player),
+        );
+        BlockActionResult::Success
     }
 
     /// `CopperGolemStatueBlock.affectNeighborsAfterRemoval` notifies comparator outputs after
     /// the statue is removed (`CopperGolemStatueBlock.java:157-160`).
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .update_comparators(args.position, args.block)
-                .await;
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        args.world.update_comparators(args.position, args.block);
     }
 
     /// `getAnalogOutputSignal`: `POSE.ordinal() + 1`, i.e. 1..=4.
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            let props = CopperGolemStatueLikeProperties::from_state_id(args.state.id, args.block);
-            let ordinal = match props.copper_golem_pose {
-                CopperGolemPose::Standing => 0,
-                CopperGolemPose::Sitting => 1,
-                CopperGolemPose::Running => 2,
-                CopperGolemPose::Star => 3,
-            };
-            Some(ordinal + 1)
-        })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        let props = CopperGolemStatueLikeProperties::from_state_id(args.state.id, args.block);
+        let ordinal = match props.copper_golem_pose {
+            CopperGolemPose::Standing => 0,
+            CopperGolemPose::Sitting => 1,
+            CopperGolemPose::Running => 2,
+            CopperGolemPose::Star => 3,
+        };
+        Some(ordinal + 1)
     }
 
     /// Vanilla `CopperGolemStatueBlock.getCloneItemStack` and
@@ -259,19 +232,16 @@ impl BlockBehaviour for CopperGolemStatueBlock {
 
     /// `WeatheringCopperGolemStatueBlock.randomTick`: only the unwaxed variants weather,
     /// and FACING/POSE/WATERLOGGED carry over to the next oxidation stage.
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &OXIDATION_FAMILY,
-                |next_block| props.to_state_id(next_block),
-            )
-            .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &OXIDATION_FAMILY,
+            |next_block| props.to_state_id(next_block),
+        );
     }
 }
 

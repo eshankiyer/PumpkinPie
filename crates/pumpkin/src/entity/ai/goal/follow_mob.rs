@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use pumpkin_util::math::vector3::Vector3;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::ai::pathfinder::node::PathType;
@@ -75,114 +75,103 @@ impl FollowMobGoal {
 }
 
 impl Goal for FollowMobGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            self.following = self.find_mob_to_follow(mob);
-            self.following.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.following = self.find_mob_to_follow(mob);
+        self.following.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            // `canContinueToUse` line 55.
-            let Some(following) = self.following.as_ref() else {
-                return false;
-            };
-            let navigator_idle = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            if navigator_idle {
-                return false;
-            }
-            let self_pos = mob.get_entity().pos.load();
-            let target_pos = following.get_entity().pos.load();
-            self_pos.squared_distance_to_vec(&target_pos) > self.stop_distance_sq
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        // `canContinueToUse` line 55.
+        let Some(following) = self.following.as_ref() else {
+            return false;
+        };
+        let navigator_idle = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        if navigator_idle {
+            return false;
+        }
+        let self_pos = mob.get_entity().pos.load();
+        let target_pos = following.get_entity().pos.load();
+        self_pos.squared_distance_to_vec(&target_pos) > self.stop_distance_sq
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // `start` lines 59-63.
-            self.time_to_recalc_path = 0;
-            let mut navigator = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            self.old_water_cost = navigator.get_pathfinding_malus(PathType::Water);
-            navigator.set_pathfinding_malus(PathType::Water, 0.0);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        // `start` lines 59-63.
+        self.time_to_recalc_path = 0;
+        let mut navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.old_water_cost = navigator.get_pathfinding_malus(PathType::Water);
+        navigator.set_pathfinding_malus(PathType::Water, 0.0);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // `stop` lines 66-70.
-            self.following = None;
-            let mut navigator = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+    fn stop(&mut self, mob: &dyn Mob) {
+        // `stop` lines 66-70.
+        self.following = None;
+        let mut navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        navigator.stop();
+        navigator.set_pathfinding_malus(PathType::Water, self.old_water_cost);
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        // `tick` lines 73-95.
+        let Some(following) = self.following.clone() else {
+            return;
+        };
+        let mob_entity = mob.get_mob_entity();
+        let self_entity = mob.get_entity();
+        if self_entity.is_leashed() {
+            return;
+        }
+        let target_entity = following.get_entity();
+        let target_pos = target_entity.pos.load();
+        mob_entity
+            .look_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .look_at(mob, target_pos.x, target_entity.get_eye_y(), target_pos.z);
+
+        self.time_to_recalc_path -= 1;
+        if self.time_to_recalc_path > 0 {
+            return;
+        }
+        self.time_to_recalc_path = to_goal_ticks(RECALC_PATH_INTERVAL);
+
+        let self_pos = self_entity.pos.load();
+        let dist_sq = self_pos.squared_distance_to_vec(&target_pos);
+        let mut navigator = mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if dist_sq > self.stop_distance_sq {
+            navigator.set_progress(NavigatorGoal::new(
+                self_pos,
+                target_pos,
+                self.speed_modifier,
+            ));
+        } else {
             navigator.stop();
-            navigator.set_pathfinding_malus(PathType::Water, self.old_water_cost);
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // `tick` lines 73-95.
-            let Some(following) = self.following.clone() else {
-                return;
-            };
-            let mob_entity = mob.get_mob_entity();
-            let self_entity = mob.get_entity();
-            if self_entity.is_leashed().await {
-                return;
-            }
-            let target_entity = following.get_entity();
-            let target_pos = target_entity.pos.load();
-            mob_entity
-                .look_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at(mob, target_pos.x, target_entity.get_eye_y(), target_pos.z);
-
-            self.time_to_recalc_path -= 1;
-            if self.time_to_recalc_path > 0 {
-                return;
-            }
-            self.time_to_recalc_path = to_goal_ticks(RECALC_PATH_INTERVAL);
-
-            let self_pos = self_entity.pos.load();
-            let dist_sq = self_pos.squared_distance_to_vec(&target_pos);
-            let mut navigator = mob_entity
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if dist_sq > self.stop_distance_sq {
+            // See the type-level note: only the distance half of vanilla's back-away
+            // condition is ported.
+            if dist_sq <= self.stop_distance {
+                let delta = Vector3::new(target_pos.x - self_pos.x, 0.0, target_pos.z - self_pos.z);
                 navigator.set_progress(NavigatorGoal::new(
                     self_pos,
-                    target_pos,
+                    Vector3::new(self_pos.x - delta.x, self_pos.y, self_pos.z - delta.z),
                     self.speed_modifier,
                 ));
-            } else {
-                navigator.stop();
-                // See the type-level note: only the distance half of vanilla's back-away
-                // condition is ported.
-                if dist_sq <= self.stop_distance {
-                    let delta =
-                        Vector3::new(target_pos.x - self_pos.x, 0.0, target_pos.z - self_pos.z);
-                    navigator.set_progress(NavigatorGoal::new(
-                        self_pos,
-                        Vector3::new(self_pos.x - delta.x, self_pos.y, self_pos.z - delta.z),
-                        self.speed_modifier,
-                    ));
-                }
             }
-        })
+        }
     }
 
     fn controls(&self) -> Controls {

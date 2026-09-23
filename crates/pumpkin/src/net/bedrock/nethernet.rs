@@ -145,7 +145,7 @@ impl NetherNetListener {
     }
 
     pub async fn accept(&self) -> Option<IncomingSession> {
-        self.incoming.lock().await.recv().await
+        self.incoming.lock().recv().await
     }
 
     pub const fn local_addr(&self) -> SocketAddr {
@@ -309,7 +309,7 @@ async fn negotiate_inner(
         address,
         state.incoming.clone(),
     ));
-    *handler.session.lock().await = Some(session.clone());
+    *handler.session.lock() = Some(session.clone());
 
     let offer = RTCSessionDescription::offer(offer).map_err(|error| error.to_string())?;
     peer.set_remote_description(offer)
@@ -417,7 +417,7 @@ struct NetherNetEventHandler {
 #[async_trait]
 impl PeerConnectionEventHandler for NetherNetEventHandler {
     async fn on_data_channel(&self, channel: Arc<dyn DataChannel>) {
-        if let Some(session) = self.session.lock().await.as_ref() {
+        if let Some(session) = self.session.lock().as_ref() {
             let label = channel.label().await;
             let ordered = channel.ordered().await;
             let negotiated = channel.negotiated().await;
@@ -444,7 +444,7 @@ impl PeerConnectionEventHandler for NetherNetEventHandler {
             RTCPeerConnectionState::Failed
                 | RTCPeerConnectionState::Disconnected
                 | RTCPeerConnectionState::Closed
-        ) && let Some(session) = self.session.lock().await.as_ref()
+        ) && let Some(session) = self.session.lock().as_ref()
         {
             session.mark_closed();
         }
@@ -660,7 +660,7 @@ impl NetherNetSession {
         }
 
         let packet = {
-            let mut fragments = self.fragments.lock().await;
+            let mut fragments = self.fragments.lock();
             fragments.push(remaining, payload)?
         };
         if let Some(packet) = packet {
@@ -673,7 +673,7 @@ impl NetherNetSession {
     }
 
     pub async fn recv(&self) -> Option<Bytes> {
-        let mut packets = self.packets.lock().await;
+        let mut packets = self.packets.lock();
         tokio::select! {
             () = self.closed.cancelled() => None,
             packet = packets.recv() => packet,

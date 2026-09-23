@@ -14,10 +14,10 @@ use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::difficulty::Difficulty;
 use rand::RngExt;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_at_entity::LookAtEntityGoal, pathfind_to_raid::PathfindToRaidGoal,
@@ -141,37 +141,39 @@ impl PillagerEntity {
 }
 
 impl NBTStorage for PillagerEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
 
-            let inventory = self.banner_inventory.lock().await;
-            let mut items = Vec::with_capacity(BANNER_INVENTORY_SIZE);
-            for slot in inventory.iter() {
-                let mut item_nbt = NbtCompound::new();
-                if let Some(stack) = slot {
-                    stack.write_item_stack(&mut item_nbt);
-                }
-                items.push(NbtTag::Compound(item_nbt));
+        let inventory = self
+            .banner_inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut items = Vec::with_capacity(BANNER_INVENTORY_SIZE);
+        for slot in inventory.iter() {
+            let mut item_nbt = NbtCompound::new();
+            if let Some(stack) = slot {
+                stack.write_item_stack(&mut item_nbt);
             }
-            nbt.put("Inventory", NbtTag::List(items));
-        })
+            items.push(NbtTag::Compound(item_nbt));
+        }
+        nbt.put("Inventory", NbtTag::List(items));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
 
-            if let Some(NbtTag::List(items)) = nbt.get("Inventory") {
-                let mut inventory = self.banner_inventory.lock().await;
-                for (slot, tag) in inventory.iter_mut().zip(items.iter()) {
-                    *slot = tag
-                        .extract_compound()
-                        .and_then(ItemStack::read_item_stack)
-                        .filter(|stack| !stack.is_empty());
-                }
+        if let Some(NbtTag::List(items)) = nbt.get("Inventory") {
+            let mut inventory = self
+                .banner_inventory
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for (slot, tag) in inventory.iter_mut().zip(items.iter()) {
+                *slot = tag
+                    .extract_compound()
+                    .and_then(ItemStack::read_item_stack)
+                    .filter(|stack| !stack.is_empty());
             }
-        })
+        }
     }
 }
 
@@ -206,51 +208,52 @@ impl Mob for PillagerEntity {
     /// `raid/pillager_post_wave_3` (Quick Charge I); below those thresholds no provider
     /// applies and the pillager keeps its current crossbow. Unlike a vindicator's axe, an
     /// unenchanted roll leaves the slot untouched (`Pillager.java:248-253`).
-    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            // `this.getCurrentRaid()` / `raid.getEnchantOdds()` (`Pillager.java:238-239`).
-            // Pumpkin keeps only the raid membership cached on the entity, so a missing
-            // membership/raid skips the roll entirely (vanilla can never reach this method
-            // without an active raid).
-            let living = &self.mob_entity.living_entity;
-            let should_enchant = {
-                let world = living.entity.world.load();
-                let raids = world.raids.lock().await;
-                living
-                    .raid_membership
-                    .load()
-                    .and_then(|membership| raids.raid(membership.raid_id))
-                    .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
-            };
-            if !should_enchant {
-                return;
-            }
-
-            // `Pillager.java:240-245`: provider selection by wave threshold; `null` keeps
-            // the existing crossbow.
-            let quick_charge_level = if wave > num_groups_for_difficulty(Difficulty::Normal) {
-                2
-            } else if wave > num_groups_for_difficulty(Difficulty::Easy) {
-                1
-            } else {
-                return;
-            };
-
-            let mut crossbow = ItemStack::new(1, &Item::CROSSBOW);
-            enchant_item_from_single_enchantment(
-                &mut crossbow,
-                &Enchantment::QUICK_CHARGE,
-                quick_charge_level,
-            );
-            // `this.setItemSlot(EquipmentSlot.MAINHAND, crossbow)` (`Pillager.java:252`),
-            // synced to observers the same way other direct equipment writes broadcast.
-            living
-                .entity_equipment
+    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) {
+        // `this.getCurrentRaid()` / `raid.getEnchantOdds()` (`Pillager.java:238-239`).
+        // Pumpkin keeps only the raid membership cached on the entity, so a missing
+        // membership/raid skips the roll entirely (vanilla can never reach this method
+        // without an active raid).
+        let living = &self.mob_entity.living_entity;
+        let should_enchant = {
+            let world = living.entity.world.load();
+            let raids = world
+                .raids
                 .lock()
-                .await
-                .put(&EquipmentSlot::MAIN_HAND, crossbow.clone());
-            living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, crossbow)]);
-        })
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            living
+                .raid_membership
+                .load()
+                .and_then(|membership| raids.raid(membership.raid_id))
+                .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
+        };
+        if !should_enchant {
+            return;
+        }
+
+        // `Pillager.java:240-245`: provider selection by wave threshold; `null` keeps
+        // the existing crossbow.
+        let quick_charge_level = if wave > num_groups_for_difficulty(Difficulty::Normal) {
+            2
+        } else if wave > num_groups_for_difficulty(Difficulty::Easy) {
+            1
+        } else {
+            return;
+        };
+
+        let mut crossbow = ItemStack::new(1, &Item::CROSSBOW);
+        enchant_item_from_single_enchantment(
+            &mut crossbow,
+            &Enchantment::QUICK_CHARGE,
+            quick_charge_level,
+        );
+        // `this.setItemSlot(EquipmentSlot.MAINHAND, crossbow)` (`Pillager.java:252`),
+        // synced to observers the same way other direct equipment writes broadcast.
+        living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .put(&EquipmentSlot::MAIN_HAND, crossbow.clone());
+        living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, crossbow)]);
     }
 
     /// Vanilla: `Pillager.setChargingCrossbow`. Drives `getArmPose()`'s `CROSSBOW_CHARGE` state

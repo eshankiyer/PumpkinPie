@@ -8,8 +8,8 @@ use pumpkin_world::inventory::Inventory;
 
 impl JavaClient {
     pub async fn handle_set_beacon(&self, player: &Arc<Player>, packet: &SSetBeacon) {
-        let screen_handler_lock = player.current_screen_handler.lock().await;
-        let mut screen_handler = screen_handler_lock.lock().await;
+        let screen_handler_lock = player.current_screen_handler.lock();
+        let mut screen_handler = screen_handler_lock.lock();
 
         let Some(beacon_handler) = screen_handler
             .as_any_mut()
@@ -31,7 +31,7 @@ impl JavaClient {
         };
 
         // Check if payment slot has an item
-        if beacon_entity.payment.lock().await.is_empty() {
+        if beacon_entity.payment.lock().is_empty() {
             return;
         }
 
@@ -51,8 +51,7 @@ impl JavaClient {
             self.kick(TextComponent::translate(
                 "multiplayer.disconnect.generic",
                 &[],
-            ))
-            .await;
+            ));
             return;
         }
 
@@ -64,10 +63,10 @@ impl JavaClient {
             .store(secondary_id.unwrap_or(-1), Ordering::Relaxed);
 
         // Remove 1 item from payment slot
-        beacon_entity.remove_stack_specific(0, 1).await;
+        beacon_entity.remove_stack_specific(0, 1);
         beacon_entity.mark_dirty();
 
-        screen_handler.sync_state().await;
+        screen_handler.sync_state();
 
         info!(
             "Player {} updated beacon effects: primary {:?}, secondary {:?}",

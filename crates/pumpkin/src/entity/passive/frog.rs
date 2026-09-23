@@ -13,7 +13,7 @@ use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         breed::BreedGoal,
@@ -204,31 +204,27 @@ impl Animal for FrogEntity {
 }
 
 impl NBTStorage for FrogEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_string("variant", self.get_variant().as_str().to_string());
-            // Vanilla stores `IS_PREGNANT` inside the serialized brain; there is no brain here,
-            // so it gets its own key. A frog written by vanilla therefore loads as not pregnant.
-            nbt.put_bool("IsPregnant", self.is_pregnant());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_string("variant", self.get_variant().as_str().to_string());
+        // Vanilla stores `IS_PREGNANT` inside the serialized brain; there is no brain here,
+        // so it gets its own key. A frog written by vanilla therefore loads as not pregnant.
+        nbt.put_bool("IsPregnant", self.is_pregnant());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            if let Some(variant_str) = nbt.get_string("variant") {
-                self.set_variant(FrogVariant::from_name(variant_str));
-            }
-            self.is_pregnant.store(
-                nbt.get_bool("IsPregnant").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(variant_str) = nbt.get_string("variant") {
+            self.set_variant(FrogVariant::from_name(variant_str));
+        }
+        self.is_pregnant.store(
+            nbt.get_bool("IsPregnant").unwrap_or(false),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -254,89 +250,76 @@ impl Mob for FrogEntity {
     /// `finalizeSpawnChildFromBreeding(level, partner, null)` with a null child, i.e. the
     /// offspring is discarded; only the XP orb and the love-mode reset survive. Returning `None`
     /// here reproduces that: `BreedGoal::breed` still applies both cooldowns and the XP drop.
-    fn create_offspring<'a>(
-        &'a self,
-        _mate: &'a dyn EntityBase,
-        _world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move { None })
+    fn create_offspring(
+        &self,
+        _mate: &dyn EntityBase,
+        _world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        None
     }
 
     /// The other half of `Frog.spawnChildFromBreeding`: the frog becomes pregnant instead, and
     /// `FrogLaySpawnGoal` turns that into a frogspawn block.
-    fn spawn_breeding_result<'a>(
-        &'a self,
+    fn spawn_breeding_result(
+        &self,
         _offspring: Option<Arc<dyn EntityBase>>,
-        _world: &'a Arc<crate::world::World>,
+        _world: &Arc<crate::world::World>,
         _parent_pos: pumpkin_util::math::vector3::Vector3<f64>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.set_pregnant(true);
-        })
+    ) {
+        self.set_pregnant(true);
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.ageable_ai_step();
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.ageable_ai_step();
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::frog::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
-            // `Frog.finalizeSpawn` (`Frog.java:265`): rolls the variant by biome via
-            // `VariantUtils.selectVariantToSpawn`, backed by `FrogVariant.selectors()`
-            // (`FrogVariant.java:38-40`) testing each variant's data-driven `spawn_conditions`
-            // (`data/minecraft/frog_variant/{cold,warm,temperate}.json`): cold/warm each require
-            // their biome tag at priority 1, temperate is the priority-0 fallback. Only roll on
-            // a fresh spawn -- an NBT-restored frog already has its variant loaded (see
-            // `read_nbt_non_mut` above), matching `fox.rs`'s `VARIANT_UNSET` guard.
-            if self.variant.load(Ordering::Relaxed) == FROG_VARIANT_UNSET {
-                let world = entity.world.load();
-                let pos = entity.block_pos.load();
-                let variant = world
-                    .get_biome(&pos)
-                    .map_or(FrogVariant::Temperate, |biome| {
-                        if biome.has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_COLD_VARIANT_FROGS) {
-                            FrogVariant::Cold
-                        } else if biome
-                            .has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_WARM_VARIANT_FROGS)
-                        {
-                            FrogVariant::Warm
-                        } else {
-                            FrogVariant::Temperate
-                        }
-                    });
-                self.set_variant(variant);
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::frog::VARIANT,
-                    VarInt(self.get_variant().id()),
+                    pumpkin_data::tracked_data::frog::BABY_ID,
+                    true,
                 )],
                 None,
             );
-        })
+        }
+        // `Frog.finalizeSpawn` (`Frog.java:265`): rolls the variant by biome via
+        // `VariantUtils.selectVariantToSpawn`, backed by `FrogVariant.selectors()`
+        // (`FrogVariant.java:38-40`) testing each variant's data-driven `spawn_conditions`
+        // (`data/minecraft/frog_variant/{cold,warm,temperate}.json`): cold/warm each require
+        // their biome tag at priority 1, temperate is the priority-0 fallback. Only roll on
+        // a fresh spawn -- an NBT-restored frog already has its variant loaded (see
+        // `read_nbt_non_mut` above), matching `fox.rs`'s `VARIANT_UNSET` guard.
+        if self.variant.load(Ordering::Relaxed) == FROG_VARIANT_UNSET {
+            let world = entity.world.load();
+            let pos = entity.block_pos.load();
+            let variant = world
+                .get_biome(&pos)
+                .map_or(FrogVariant::Temperate, |biome| {
+                    if biome.has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_COLD_VARIANT_FROGS) {
+                        FrogVariant::Cold
+                    } else if biome
+                        .has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_WARM_VARIANT_FROGS)
+                    {
+                        FrogVariant::Warm
+                    } else {
+                        FrogVariant::Temperate
+                    }
+                });
+            self.set_variant(variant);
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::frog::VARIANT,
+                VarInt(self.get_variant().id()),
+            )],
+            None,
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            self.animal_interact(player, item_stack, Sound::EntityFrogAmbient)
-                .await
-        })
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        self.animal_interact(player, item_stack, Sound::EntityFrogAmbient)
     }
 }

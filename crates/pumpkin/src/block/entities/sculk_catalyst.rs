@@ -12,8 +12,8 @@ use pumpkin_util::random::RandomGenerator;
 use pumpkin_util::random::xoroshiro128::Xoroshiro;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
 
 use crate::block::blocks::sculk::sculk_catalyst::CatalystListener;
 use crate::block::blocks::sculk::sculk_spreader::SculkSpreader;
@@ -51,13 +51,11 @@ impl BlockEntity for SculkCatalystBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.spreader.lock().await.save_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.spreader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .save_nbt(nbt);
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -68,30 +66,28 @@ impl BlockEntity for SculkCatalystBlockEntity {
 
     /// `SculkCatalystBlockEntity.serverTick` (lines 37-39):
     /// `getSculkSpreader().updateCursors(level, pos, level.getRandom(), true)`.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.ensure_listener_registered(world).await;
+    fn tick(&self, world: &Arc<World>) {
+        self.ensure_listener_registered(world);
 
-            let mut spreader = self.spreader.lock().await;
-            if spreader.cursors().is_empty() {
-                return;
-            }
-            let mut random =
-                RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::random::<u64>()));
-            let target = WorldSpreadTarget { world };
-            let events = spreader
-                .update_cursors(&target, self.position, &mut random, true)
-                .await;
-            drop(spreader);
+        let mut spreader = self
+            .spreader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if spreader.cursors().is_empty() {
+            return;
+        }
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::random::<u64>()));
+        let target = WorldSpreadTarget { world };
+        let events = spreader.update_cursors(&target, self.position, &mut random, true);
+        drop(spreader);
 
-            for event in events {
-                world.sync_world_event(
-                    pumpkin_data::world::WorldEvent::ParticlesSculkCharge,
-                    event.pos,
-                    event.data,
-                );
-            }
-        })
+        for event in events {
+            world.sync_world_event(
+                pumpkin_data::world::WorldEvent::ParticlesSculkCharge,
+                event.pos,
+                event.data,
+            );
+        }
     }
 
     fn on_block_replaced<'a>(
@@ -103,7 +99,7 @@ impl BlockEntity for SculkCatalystBlockEntity {
         Self: 'a,
     {
         Box::pin(async move {
-            world.unregister_game_event_listener_at(&position).await;
+            world.unregister_game_event_listener_at(&position);
         })
     }
 
@@ -131,14 +127,14 @@ impl SculkCatalystBlockEntity {
     /// the block entity's first tick. The scan makes it idempotent: a listener leaked by a
     /// chunk unload (nothing unregisters on unload) is reused rather than duplicated, and
     /// such a leaked listener is inert because it resolves through `get_block_entity`.
-    async fn ensure_listener_registered(&self, world: &Arc<World>) {
+    fn ensure_listener_registered(&self, world: &Arc<World>) {
         if self.listener_registered.swap(true, Ordering::AcqRel) {
             return;
         }
         let already_present = world
             .game_event_listeners
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .any(|listener| {
                 matches!(
@@ -147,9 +143,7 @@ impl SculkCatalystBlockEntity {
                 )
             });
         if !already_present {
-            world
-                .register_game_event_listener(Arc::new(CatalystListener { pos: self.position }))
-                .await;
+            world.register_game_event_listener(Arc::new(CatalystListener { pos: self.position }));
         }
     }
 }
@@ -160,22 +154,22 @@ mod tests {
     use crate::block::sculk_behaviour::ChargeCursor;
 
     #[tokio::test]
-    async fn cursors_survive_an_nbt_round_trip() {
+    fn cursors_survive_an_nbt_round_trip() {
         let entity = SculkCatalystBlockEntity::new(BlockPos::new(4, 5, 6));
         entity
             .spreader
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .add_cursors(BlockPos::new(4, 6, 6), 1500);
 
         let mut nbt = NbtCompound::new();
-        entity.write_nbt(&mut nbt).await;
+        entity.write_nbt(&mut nbt);
 
         let loaded = SculkCatalystBlockEntity::from_nbt(&nbt, BlockPos::new(4, 5, 6));
         let cursors: Vec<i32> = loaded
             .spreader
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .cursors()
             .iter()
             .map(ChargeCursor::charge)
@@ -184,8 +178,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_fresh_catalyst_has_no_cursors() {
+    fn a_fresh_catalyst_has_no_cursors() {
         let entity = SculkCatalystBlockEntity::new(BlockPos::new(0, 0, 0));
-        assert!(entity.spreader.lock().await.cursors().is_empty());
+        assert!(
+            entity
+                .spreader
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .cursors()
+                .is_empty()
+        );
     }
 }

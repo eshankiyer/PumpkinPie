@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
@@ -31,7 +31,7 @@ impl EscapeDangerGoal {
         })
     }
 
-    async fn is_in_danger(mob: &dyn Mob) -> bool {
+    fn is_in_danger(mob: &dyn Mob) -> bool {
         let living = &mob.get_mob_entity().living_entity;
 
         // `last_damage_state` is (sequence, tick, causes_panic); the sequence only orders
@@ -42,7 +42,11 @@ impl EscapeDangerGoal {
         }
 
         let world = living.entity.world.load();
-        let game_time = world.level_time.lock().await.world_age;
+        let game_time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
         panic_damage_is_recent(last_damage, game_time)
     }
 
@@ -115,45 +119,37 @@ impl Goal for EscapeDangerGoal {
         true
     }
 
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !Self::is_in_danger(mob).await {
-                return false;
-            }
-            self.target = Self::find_escape_target(mob);
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !Self::is_in_danger(mob) {
+            return false;
+        }
+        self.target = Self::find_escape_target(mob);
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let navigator = mob
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !navigator.is_idle()
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(target) = self.target {
+            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
+            let mut navigator = mob
                 .get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            !navigator.is_idle()
-        })
+            navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(target) = self.target {
-                let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                let mut navigator = mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
     }
 
     fn controls(&self) -> Controls {

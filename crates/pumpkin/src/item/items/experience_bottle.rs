@@ -57,32 +57,29 @@ impl ItemBehaviour for ExperienceBottleItem {
                 POWER,
                 DIVERGENCE,
             );
-            world.spawn_entity(Arc::new(bottle)).await;
+            world.spawn_entity(Arc::new(bottle));
 
             // `ExperienceBottleItem.use` awards ITEM_USED before consuming the stack
             // (`ExperienceBottleItem.java:22-40`).
-            player
-                .increment_stat(StatisticCategory::Used, item.id as i32, 1)
-                .await;
+            player.increment_stat(StatisticCategory::Used, item.id as i32, 1);
 
-            let mut main_hand = player.inventory.held_item().await;
+            let mut main_hand = player.inventory.held_item();
             let consumed =
                 if !main_hand.is_empty() && main_hand.item.id == Item::EXPERIENCE_BOTTLE.id {
                     main_hand.decrement_unless_creative(player.gamemode.load(), 1);
-                    player.inventory.set_held_item(main_hand).await;
+                    player.inventory.set_held_item(main_hand);
                     true
                 } else {
                     false
                 };
 
             if !consumed {
-                let mut off_hand = player.inventory.off_hand_item().await;
+                let mut off_hand = player.inventory.off_hand_item();
                 if !off_hand.is_empty() && off_hand.item.id == Item::EXPERIENCE_BOTTLE.id {
                     off_hand.decrement_unless_creative(player.gamemode.load(), 1);
                     player
                         .inventory
-                        .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand)
-                        .await;
+                        .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand);
                 }
             }
         })

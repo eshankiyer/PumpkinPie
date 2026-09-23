@@ -1,4 +1,4 @@
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
 
@@ -27,42 +27,32 @@ impl FoxFaceplantGoal {
 }
 
 impl Goal for FoxFaceplantGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            mob.cast_any()
-                .downcast_ref::<FoxEntity>()
-                .is_some_and(FoxEntity::is_faceplanted)
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        mob.cast_any()
+            .downcast_ref::<FoxEntity>()
+            .is_some_and(FoxEntity::is_faceplanted)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let faceplanted = mob
-                .cast_any()
-                .downcast_ref::<FoxEntity>()
-                .is_some_and(FoxEntity::is_faceplanted);
-            faceplanted && self.countdown > 0
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let faceplanted = mob
+            .cast_any()
+            .downcast_ref::<FoxEntity>()
+            .is_some_and(FoxEntity::is_faceplanted);
+        faceplanted && self.countdown > 0
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.countdown = FACEPLANT_TICKS;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.countdown = FACEPLANT_TICKS;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.set_faceplanted(false);
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.set_faceplanted(false);
+        }
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.countdown -= 1;
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.countdown -= 1;
     }
 
     fn controls(&self) -> Controls {

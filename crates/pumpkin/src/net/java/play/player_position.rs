@@ -128,11 +128,11 @@ impl JavaClient {
         if !player.has_client_loaded() {
             return;
         }
-        if player.get_entity().has_vehicle().await {
+        if player.get_entity().has_vehicle() {
             return;
         }
         // Ignore movement packets while awaiting a teleport confirmation (vanilla behavior)
-        if player.awaiting_teleport.lock().await.is_some() {
+        if player.awaiting_teleport.lock().is_some() {
             return;
         }
         // y = feet Y
@@ -142,8 +142,7 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
         let position = Vector3::new(
@@ -153,7 +152,7 @@ impl JavaClient {
         );
         let entity = player.get_entity();
         let last_pos = entity.pos.load();
-        let flying = player.abilities.lock().await.flying;
+        let flying = player.abilities.lock().flying;
         let position =
             Self::maybe_back_off_from_edge(player, &player.world(), position, last_pos, flying);
         let (player_movement_check, elytra_movement_check) = {
@@ -200,15 +199,14 @@ impl JavaClient {
                 let distance = last_pos.squared_distance_to_vec(&pos).sqrt();
                 let cm = (distance * 100.0) as i32;
                 if cm > 0 {
-                    let stat = player.get_movement_statistic().await;
+                    let stat = player.get_movement_statistic();
                     player
-                        .increment_stat(StatisticCategory::Custom, stat as i32, cm)
-                        .await;
+                        .increment_stat(StatisticCategory::Custom, stat as i32, cm);
                 }
 
                 let height_difference = pos.y - last_pos.y;
                 if entity.on_ground.load(Ordering::Relaxed) && packet.collision & FLAG_ON_GROUND == 0 && height_difference > 0.0 {
-                    player.jump().await;
+                    player.jump();
                 }
 
                 let new_on_ground = packet.collision & FLAG_ON_GROUND != 0;
@@ -220,7 +218,7 @@ impl JavaClient {
                     Ordering::Relaxed,
                 );
                 if new_on_ground && entity.is_fall_flying() {
-                    entity.set_fall_flying(false).await;
+                    entity.set_fall_flying(false);
                 }
                 // `handleMovePlayer` resets impulse context after a ground or liquid landing
                 // (`ServerGamePacketListenerImpl.java:1178-1184`).
@@ -270,9 +268,8 @@ impl JavaClient {
                         height_difference,
                         pos.z - last_pos.z,
                         packet.collision & FLAG_ON_GROUND != 0,
-                    )
-                    .await;
-                chunker::update_position(player).await;
+                    );
+                chunker::update_position(player);
                 let delta = Vector3::new(
                     pos.x - last_pos.x,
                     pos.y - last_pos.y,
@@ -304,11 +301,11 @@ impl JavaClient {
         if !player.has_client_loaded() {
             return;
         }
-        if player.get_entity().has_vehicle().await {
+        if player.get_entity().has_vehicle() {
             return;
         }
         // Ignore movement packets while awaiting a teleport confirmation (vanilla behavior)
-        if player.awaiting_teleport.lock().await.is_some() {
+        if player.awaiting_teleport.lock().is_some() {
             return;
         }
         // y = feet Y
@@ -318,8 +315,7 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
 
@@ -330,7 +326,7 @@ impl JavaClient {
         );
         let entity = player.get_entity();
         let last_pos = entity.pos.load();
-        let flying = player.abilities.lock().await.flying;
+        let flying = player.abilities.lock().flying;
         let position =
             Self::maybe_back_off_from_edge(player, &player.world(), position, last_pos, flying);
         let (player_movement_check, elytra_movement_check) = {
@@ -376,10 +372,9 @@ impl JavaClient {
                 let distance = last_pos.squared_distance_to_vec(&pos).sqrt();
                 let cm = (distance * 100.0) as i32;
                 if cm > 0 {
-                    let stat = player.get_movement_statistic().await;
+                    let stat = player.get_movement_statistic();
                     player
-                        .increment_stat(StatisticCategory::Custom, stat as i32, cm)
-                        .await;
+                        .increment_stat(StatisticCategory::Custom, stat as i32, cm);
                 }
 
                 let height_difference = pos.y - last_pos.y;
@@ -387,7 +382,7 @@ impl JavaClient {
                     && (packet.collision & FLAG_ON_GROUND) != 0
                     && height_difference > 0.0
                 {
-                    player.jump().await;
+                    player.jump();
                 }
                 entity
                     .on_ground
@@ -410,7 +405,7 @@ impl JavaClient {
                 entity.set_rotation(wrap_degrees(packet.yaw) % 360.0, wrap_degrees(packet.pitch));
                 // `Entity.turn` notifies the vehicle after passenger rotation changes
                 // (`Entity.java:490-501`).
-                entity.notify_vehicle_of_turn().await;
+                entity.notify_vehicle_of_turn();
 
                 let entity_id = entity.entity_id;
 
@@ -468,9 +463,8 @@ impl JavaClient {
                         height_difference,
                         pos.z - last_pos.z,
                         (packet.collision & FLAG_ON_GROUND) != 0,
-                    )
-                    .await;
-                chunker::update_position(player).await;
+                    );
+                chunker::update_position(player);
                 let delta = Vector3::new(
                     pos.x - last_pos.x,
                     pos.y - last_pos.y,
@@ -494,7 +488,7 @@ impl JavaClient {
 
     pub async fn force_tp(&self, player: &Arc<Player>, position: Vector3<f64>) {
         let teleport_id = player.teleport_id_count.fetch_add(1, Ordering::Relaxed) + 1;
-        *player.awaiting_teleport.lock().await = Some((teleport_id.into(), position));
+        *player.awaiting_teleport.lock() = Some((teleport_id.into(), position));
         self.enqueue_client_packet(&CPlayerPosition::new(
             teleport_id.into(),
             player.get_entity().pos.load(),

@@ -552,7 +552,7 @@ fn block_item_place_sound(block: &Block) -> (Sound, f32, f32) {
 }
 
 impl BlockRegistry {
-    pub async fn bone_meal(
+    pub fn bone_meal(
         &self,
         block: &Block,
         world: &Arc<World>,
@@ -572,7 +572,7 @@ impl BlockRegistry {
             return false;
         }
         if behaviour.is_bonemeal_success(args) {
-            behaviour.perform_bonemeal(args).await;
+            behaviour.perform_bonemeal(args);
         }
         true
     }
@@ -629,11 +629,7 @@ impl BlockRegistry {
     /// server's generic block-item placement path. Vanilla writes water back to the upper
     /// position when it was water and otherwise clears the replaceable position to air before
     /// placing the lower half. `TallPlantBlock::placed` then installs the upper half.
-    async fn prepare_double_high_block_placement(
-        world: &Arc<World>,
-        block: &Block,
-        position: &BlockPos,
-    ) {
+    fn prepare_double_high_block_placement(world: &Arc<World>, block: &Block, position: &BlockPos) {
         if !TallPlantBlock::ids().contains(&block.id) {
             return;
         }
@@ -649,13 +645,11 @@ impl BlockRegistry {
         } else {
             Block::AIR.default_state.id
         };
-        world
-            .set_block_state(&above, replacement, BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(&above, replacement, BlockFlags::NOTIFY_ALL);
     }
 
     #[expect(clippy::too_many_lines)]
-    pub async fn place_block(
+    pub fn place_block(
         &self,
         player: &Arc<Player>,
         placed_block: &'static Block,
@@ -683,18 +677,16 @@ impl BlockRegistry {
         if location.0.y + face.to_offset().y > world.get_top_y() {
             // Vanilla uses `ServerPlayer.sendOverlayMessage` for placement-limit feedback
             // (`ServerPlayer.java:1798-1805`).
-            player
-                .send_overlay_message(
-                    &pumpkin_util::text::TextComponent::translate_cross(
-                        pumpkin_data::translation::java::BUILD_TOOHIGH,
-                        pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
-                        vec![pumpkin_util::text::TextComponent::text(
-                            (world.get_top_y()).to_string(),
-                        )],
-                    )
-                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+            player.send_overlay_message(
+                &pumpkin_util::text::TextComponent::translate_cross(
+                    pumpkin_data::translation::java::BUILD_TOOHIGH,
+                    pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
+                    vec![pumpkin_util::text::TextComponent::text(
+                        (world.get_top_y()).to_string(),
+                    )],
                 )
-                .await;
+                .color_named(pumpkin_util::text::color::NamedColor::Red),
+            );
             return Err(BlockPlacingError::BlockOutOfWorld);
         }
 
@@ -781,18 +773,16 @@ impl BlockRegistry {
             return Ok(None);
         }
 
-        let new_state = self
-            .on_place(
-                server,
-                &world,
-                player,
-                placed_block,
-                &final_block_pos,
-                final_face,
-                replacing,
-                use_item_on,
-            )
-            .await;
+        let new_state = self.on_place(
+            server,
+            &world,
+            player,
+            placed_block,
+            &final_block_pos,
+            final_face,
+            replacing,
+            use_item_on,
+        );
 
         // Mirror vanilla obstruction checks: only entities that block building should prevent
         // placement. (e.g. arrows/xp orbs/displays/markers should not)
@@ -816,11 +806,10 @@ impl BlockRegistry {
         };
         server
             .plugin_manager
-            .fire::<crate::plugin::block::block_can_build::BlockCanBuildEvent>(
+            .fire_blocking::<crate::plugin::block::block_can_build::BlockCanBuildEvent>(
                 server,
                 &mut can_build_event,
-            )
-            .await;
+            );
         if can_build_event.cancelled || !can_build_event.buildable {
             return Ok(None);
         }
@@ -834,20 +823,19 @@ impl BlockRegistry {
         );
         server
             .plugin_manager
-            .fire::<crate::plugin::block::block_place::BlockPlaceEvent>(server, &mut event)
-            .await;
+            .fire_blocking::<crate::plugin::block::block_place::BlockPlaceEvent>(
+                server, &mut event,
+            );
         if event.cancelled {
             return Ok(None);
         }
 
-        Self::prepare_double_high_block_placement(&world, placed_block, &final_block_pos).await;
+        Self::prepare_double_high_block_placement(&world, placed_block, &final_block_pos);
 
         let hand = Hand::from_packet_id(use_item_on.hand.0).unwrap_or(Hand::Right);
-        let item_stack = player.inventory().get_stack_in_hand(hand).await;
+        let item_stack = player.inventory().get_stack_in_hand(hand);
 
-        world
-            .set_block_state(&final_block_pos, new_state, BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(&final_block_pos, new_state, BlockFlags::NOTIFY_ALL);
 
         // `SignItem.updateCustomBlockEntityTag` uses this result to decide whether its editor
         // fallback runs (`SignItem.java:23-35`; `BlockItem.java:76-81,148-170`).
@@ -891,8 +879,7 @@ impl BlockRegistry {
             crate::world::game_event::GameEventContext::of_entity(
                 player.clone() as std::sync::Arc<dyn EntityBase>
             ),
-        )
-        .await;
+        );
 
         self.player_placed(
             &world,
@@ -902,16 +889,13 @@ impl BlockRegistry {
             face,
             player,
             custom_data_applied,
-        )
-        .await;
+        );
 
-        player
-            .trigger_advancement(
-                crate::entity::player::advancement::trigger::AdvancementTrigger::PlacedBlock {
-                    block_id: format!("minecraft:{}", placed_block.name),
-                },
-            )
-            .await;
+        player.trigger_advancement(
+            crate::entity::player::advancement::trigger::AdvancementTrigger::PlacedBlock {
+                block_id: format!("minecraft:{}", placed_block.name),
+            },
+        );
 
         Ok(Some((final_block_pos, new_state)))
     }
@@ -933,7 +917,7 @@ impl BlockRegistry {
         }
     }
 
-    pub async fn on_synced_block_event(
+    pub fn on_synced_block_event(
         &self,
         block: &Block,
         world: &Arc<World>,
@@ -943,20 +927,18 @@ impl BlockRegistry {
     ) -> bool {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .on_synced_block_event(OnSyncedBlockEventArgs {
-                    world,
-                    block,
-                    position,
-                    r#type,
-                    data,
-                })
-                .await;
+            return pumpkin_block.on_synced_block_event(OnSyncedBlockEventArgs {
+                world,
+                block,
+                position,
+                r#type,
+                data,
+            });
         }
         false
     }
 
-    pub async fn on_entity_collision(
+    pub fn on_entity_collision(
         &self,
         block: &Block,
         world: &Arc<World>,
@@ -967,16 +949,14 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .on_entity_collision(OnEntityCollisionArgs {
-                    server,
-                    world,
-                    block,
-                    state,
-                    position,
-                    entity,
-                })
-                .await;
+            pumpkin_block.on_entity_collision(OnEntityCollisionArgs {
+                server,
+                world,
+                block,
+                state,
+                position,
+                entity,
+            });
         }
     }
 
@@ -985,7 +965,7 @@ impl BlockRegistry {
         clippy::too_many_arguments,
         reason = "mirrors the block callback context"
     )]
-    pub async fn on_projectile_hit(
+    pub fn on_projectile_hit(
         &self,
         block: &Block,
         server: &Server,
@@ -998,20 +978,18 @@ impl BlockRegistry {
         let Some(pumpkin_block) = self.get_pumpkin_block(block.id) else {
             return;
         };
-        pumpkin_block
-            .on_projectile_hit(OnProjectileHitArgs {
-                server,
-                world,
-                block,
-                state,
-                position,
-                projectile,
-                hit,
-            })
-            .await;
+        pumpkin_block.on_projectile_hit(OnProjectileHitArgs {
+            server,
+            world,
+            block,
+            state,
+            position,
+            projectile,
+            hit,
+        });
     }
 
-    pub async fn on_entity_step(
+    pub fn on_entity_step(
         &self,
         block: &Block,
         world: &Arc<World>,
@@ -1021,27 +999,25 @@ impl BlockRegistry {
         below_supporting_block: bool,
     ) {
         if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
-            pumpkin_block
-                .on_entity_step(OnEntityStepArgs {
-                    world,
-                    block,
-                    state,
-                    position,
-                    entity,
-                    below_supporting_block,
-                })
-                .await;
+            pumpkin_block.on_entity_step(OnEntityStepArgs {
+                world,
+                block,
+                state,
+                position,
+                entity,
+                below_supporting_block,
+            });
         }
     }
 
-    pub async fn on_entity_collision_fluid(&self, fluid: &Fluid, entity: &dyn EntityBase) {
+    pub fn on_entity_collision_fluid(&self, fluid: &Fluid, entity: &dyn EntityBase) {
         let pumpkin_fluid = self.get_pumpkin_fluid(fluid.id);
         if let Some(pumpkin_fluid) = pumpkin_fluid {
-            pumpkin_fluid.on_entity_collision(entity).await;
+            pumpkin_fluid.on_entity_collision(entity);
         }
     }
 
-    pub async fn on_use(
+    pub fn on_use(
         &self,
         block: &Block,
         player: &Arc<Player>,
@@ -1052,16 +1028,14 @@ impl BlockRegistry {
     ) -> BlockActionResult {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .normal_use(NormalUseArgs {
-                    server,
-                    world,
-                    block,
-                    position,
-                    player,
-                    hit,
-                })
-                .await;
+            return pumpkin_block.normal_use(NormalUseArgs {
+                server,
+                world,
+                block,
+                position,
+                player,
+                hit,
+            });
         }
         BlockActionResult::Pass
     }
@@ -1090,7 +1064,7 @@ impl BlockRegistry {
     /// calls the normal block-use callback. Keep the allowlist explicit so a
     /// spectator cannot toggle redstone, consume items, or otherwise mutate a
     /// block while opening a container screen.
-    pub async fn on_use_for_spectator(
+    pub fn on_use_for_spectator(
         &self,
         block: &Block,
         player: &Arc<Player>,
@@ -1134,7 +1108,6 @@ impl BlockRegistry {
 
         if has_menu_provider {
             self.on_use(block, player, position, hit, server, world)
-                .await
         } else {
             BlockActionResult::Pass
         }
@@ -1161,22 +1134,20 @@ impl BlockRegistry {
         }
     }
 
-    pub async fn explode(&self, block: &Block, world: &Arc<World>, position: &BlockPos) {
+    pub fn explode(&self, block: &Block, world: &Arc<World>, position: &BlockPos) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .explode(ExplodeArgs {
-                    world,
-                    block,
-                    position,
-                    can_trigger_blocks: false,
-                })
-                .await;
+            pumpkin_block.explode(ExplodeArgs {
+                world,
+                block,
+                position,
+                can_trigger_blocks: false,
+            });
         }
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub async fn use_with_item(
+    pub fn use_with_item(
         &self,
         block: &Block,
         player: &Arc<Player>,
@@ -1189,23 +1160,21 @@ impl BlockRegistry {
     ) -> BlockActionResult {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .use_with_item(UseWithItemArgs {
-                    server,
-                    world,
-                    block,
-                    position,
-                    player,
-                    hit,
-                    item_stack,
-                    equipment_slot,
-                })
-                .await;
+            return pumpkin_block.use_with_item(UseWithItemArgs {
+                server,
+                world,
+                block,
+                position,
+                player,
+                hit,
+                item_stack,
+                equipment_slot,
+            });
         }
         BlockActionResult::Pass
     }
 
-    pub async fn use_with_item_fluid(
+    pub fn use_with_item_fluid(
         &self,
         fluid: &Fluid,
         player: &Arc<Player>,
@@ -1216,9 +1185,7 @@ impl BlockRegistry {
     ) -> BlockActionResult {
         let pumpkin_fluid = self.get_pumpkin_fluid(fluid.id);
         if let Some(pumpkin_fluid) = pumpkin_fluid {
-            return pumpkin_fluid
-                .use_with_item(fluid, player, position, item, server, world)
-                .await;
+            return pumpkin_fluid.use_with_item(fluid, player, position, item, server, world);
         }
         BlockActionResult::Pass
     }
@@ -1280,7 +1247,7 @@ impl BlockRegistry {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub async fn on_place(
+    pub fn on_place(
         &self,
         server: &Server,
         world: &World,
@@ -1293,24 +1260,22 @@ impl BlockRegistry {
     ) -> BlockStateId {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .on_place(OnPlaceArgs {
-                    server,
-                    world,
-                    block,
-                    position,
-                    direction,
-                    player,
-                    replacing,
-                    use_item_on,
-                })
-                .await;
+            return pumpkin_block.on_place(OnPlaceArgs {
+                server,
+                world,
+                block,
+                position,
+                direction,
+                player,
+                replacing,
+                use_item_on,
+            });
         }
         block.default_state.id
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub async fn player_placed(
+    pub fn player_placed(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1322,21 +1287,19 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .player_placed(PlayerPlacedArgs {
-                    world,
-                    block,
-                    state_id,
-                    position,
-                    direction,
-                    player,
-                    custom_data_applied,
-                })
-                .await;
+            pumpkin_block.player_placed(PlayerPlacedArgs {
+                world,
+                block,
+                state_id,
+                position,
+                direction,
+                player,
+                custom_data_applied,
+            });
         }
     }
 
-    pub async fn on_placed(
+    pub fn on_placed(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1356,20 +1319,18 @@ impl BlockRegistry {
 
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .placed(PlacedArgs {
-                    world,
-                    block,
-                    state_id,
-                    old_state_id,
-                    position,
-                    notify,
-                })
-                .await;
+            pumpkin_block.placed(PlacedArgs {
+                world,
+                block,
+                state_id,
+                old_state_id,
+                position,
+                notify,
+            });
         }
     }
 
-    pub async fn on_placed_fluid(
+    pub fn on_placed_fluid(
         &self,
         world: &Arc<World>,
         fluid: &Fluid,
@@ -1380,13 +1341,11 @@ impl BlockRegistry {
     ) {
         let pumpkin_fluid = self.get_pumpkin_fluid(fluid.id);
         if let Some(pumpkin_fluid) = pumpkin_fluid {
-            pumpkin_fluid
-                .placed(world, fluid, state_id, position, old_state_id, notify)
-                .await;
+            pumpkin_fluid.placed(world, fluid, state_id, position, old_state_id, notify);
         }
     }
 
-    pub async fn on_landed_upon(
+    pub fn on_landed_upon(
         &self,
         block: &Block,
         world: &Arc<World>,
@@ -1396,35 +1355,27 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .on_landed_upon(OnLandedUponArgs {
-                    world,
-                    position,
-                    fall_distance,
-                    entity,
-                })
-                .await;
+            pumpkin_block.on_landed_upon(OnLandedUponArgs {
+                world,
+                position,
+                fall_distance,
+                entity,
+            });
         }
     }
 
-    pub async fn update_entity_movement_after_fall_on(
-        &self,
-        block: &Block,
-        entity: &dyn EntityBase,
-    ) {
+    pub fn update_entity_movement_after_fall_on(&self, block: &Block, entity: &dyn EntityBase) {
         if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
-            pumpkin_block
-                .update_entity_movement_after_fall_on(UpdateEntityMovementAfterFallOnArgs {
-                    entity,
-                })
-                .await;
+            pumpkin_block.update_entity_movement_after_fall_on(
+                UpdateEntityMovementAfterFallOnArgs { entity },
+            );
         } else {
             stop_vertical_movement_after_fall(entity);
         }
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub async fn broken(
+    pub fn broken(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1439,22 +1390,20 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .broken(BrokenArgs {
-                    block,
-                    player,
-                    position,
-                    server,
-                    world,
-                    state,
-                    drop_experience,
-                    block_entity,
-                })
-                .await;
+            pumpkin_block.broken(BrokenArgs {
+                block,
+                player,
+                position,
+                server,
+                world,
+                state,
+                drop_experience,
+                block_entity,
+            });
         }
     }
 
-    pub async fn player_will_destroy(
+    pub fn player_will_destroy(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1463,19 +1412,17 @@ impl BlockRegistry {
         state: &BlockState,
     ) {
         if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
-            pumpkin_block
-                .player_will_destroy(PlayerWillDestroyArgs {
-                    block,
-                    player,
-                    position,
-                    world,
-                    state,
-                })
-                .await;
+            pumpkin_block.player_will_destroy(PlayerWillDestroyArgs {
+                block,
+                player,
+                position,
+                world,
+                state,
+            });
         }
     }
 
-    pub async fn on_state_replaced(
+    pub fn on_state_replaced(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1485,20 +1432,18 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .on_state_replaced(OnStateReplacedArgs {
-                    world,
-                    block,
-                    old_state_id,
-                    position,
-                    moved,
-                })
-                .await;
+            pumpkin_block.on_state_replaced(OnStateReplacedArgs {
+                world,
+                block,
+                old_state_id,
+                position,
+                moved,
+            });
         }
     }
 
     /// Updates state of all neighbors of the block
-    pub async fn post_process_state(
+    pub fn post_process_state(
         &self,
         world: &Arc<World>,
         position: &BlockPos,
@@ -1511,8 +1456,8 @@ impl BlockRegistry {
             let neighbor_state_id = world.get_block_state_id(&neighbor_pos);
             let pumpkin_block = self.get_pumpkin_block(block.id);
             if let Some(pumpkin_block) = pumpkin_block {
-                let new_state = pumpkin_block
-                    .get_state_for_neighbor_update(GetStateForNeighborUpdateArgs {
+                let new_state =
+                    pumpkin_block.get_state_for_neighbor_update(GetStateForNeighborUpdateArgs {
                         world,
                         block,
                         state_id,
@@ -1520,14 +1465,13 @@ impl BlockRegistry {
                         direction: direction.opposite(),
                         neighbor_position: &neighbor_pos,
                         neighbor_state_id,
-                    })
-                    .await;
-                world.set_block_state(&neighbor_pos, new_state, flags).await;
+                    });
+                world.set_block_state(&neighbor_pos, new_state, flags);
             }
         }
     }
 
-    pub async fn prepare(
+    pub fn prepare(
         &self,
         world: &Arc<World>,
         position: &BlockPos,
@@ -1537,20 +1481,18 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .prepare(PrepareArgs {
-                    world,
-                    block,
-                    state_id,
-                    position,
-                    flags,
-                })
-                .await;
+            pumpkin_block.prepare(PrepareArgs {
+                world,
+                block,
+                state_id,
+                position,
+                flags,
+            });
         }
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub async fn get_state_for_neighbor_update(
+    pub fn get_state_for_neighbor_update(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1562,22 +1504,20 @@ impl BlockRegistry {
     ) -> BlockStateId {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .get_state_for_neighbor_update(GetStateForNeighborUpdateArgs {
-                    world,
-                    block,
-                    state_id,
-                    position,
-                    direction,
-                    neighbor_position: neighbor_location,
-                    neighbor_state_id,
-                })
-                .await;
+            return pumpkin_block.get_state_for_neighbor_update(GetStateForNeighborUpdateArgs {
+                world,
+                block,
+                state_id,
+                position,
+                direction,
+                neighbor_position: neighbor_location,
+                neighbor_state_id,
+            });
         }
         state_id
     }
 
-    pub async fn update_neighbors(
+    pub fn update_neighbors(
         &self,
         world: &Arc<World>,
         position: &BlockPos,
@@ -1596,7 +1536,7 @@ impl BlockRegistry {
         }
     }
 
-    pub async fn on_neighbor_update(
+    pub fn on_neighbor_update(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1606,15 +1546,13 @@ impl BlockRegistry {
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            pumpkin_block
-                .on_neighbor_update(OnNeighborUpdateArgs {
-                    world,
-                    block,
-                    position,
-                    source_block,
-                    notify,
-                })
-                .await;
+            pumpkin_block.on_neighbor_update(OnNeighborUpdateArgs {
+                world,
+                block,
+                position,
+                source_block,
+                notify,
+            });
         }
     }
 
@@ -1635,7 +1573,7 @@ impl BlockRegistry {
         })
     }
 
-    pub async fn emits_redstone_power(
+    pub fn emits_redstone_power(
         &self,
         block: &Block,
         state: &BlockState,
@@ -1643,18 +1581,16 @@ impl BlockRegistry {
     ) -> bool {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .emits_redstone_power(EmitsRedstonePowerArgs {
-                    block,
-                    state,
-                    direction,
-                })
-                .await;
+            return pumpkin_block.emits_redstone_power(EmitsRedstonePowerArgs {
+                block,
+                state,
+                direction,
+            });
         }
         false
     }
 
-    pub async fn get_weak_redstone_power(
+    pub fn get_weak_redstone_power(
         &self,
         block: &Block,
         world: &World,
@@ -1664,20 +1600,18 @@ impl BlockRegistry {
     ) -> u8 {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .get_weak_redstone_power(GetRedstonePowerArgs {
-                    world,
-                    block,
-                    state,
-                    position,
-                    direction,
-                })
-                .await;
+            return pumpkin_block.get_weak_redstone_power(GetRedstonePowerArgs {
+                world,
+                block,
+                state,
+                position,
+                direction,
+            });
         }
         0
     }
 
-    pub async fn get_strong_redstone_power(
+    pub fn get_strong_redstone_power(
         &self,
         block: &Block,
         world: &World,
@@ -1687,20 +1621,18 @@ impl BlockRegistry {
     ) -> u8 {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .get_strong_redstone_power(GetRedstonePowerArgs {
-                    world,
-                    block,
-                    state,
-                    position,
-                    direction,
-                })
-                .await;
+            return pumpkin_block.get_strong_redstone_power(GetRedstonePowerArgs {
+                world,
+                block,
+                state,
+                position,
+                direction,
+            });
         }
         0
     }
 
-    pub async fn get_inside_collision_shape(
+    pub fn get_inside_collision_shape(
         &self,
         block: &Block,
         world: &World,
@@ -1709,14 +1641,12 @@ impl BlockRegistry {
     ) -> BoundingBox {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
-            return pumpkin_block
-                .get_inside_collision_shape(GetInsideCollisionShapeArgs {
-                    world,
-                    block,
-                    state,
-                    position,
-                })
-                .await;
+            return pumpkin_block.get_inside_collision_shape(GetInsideCollisionShapeArgs {
+                world,
+                block,
+                state,
+                position,
+            });
         }
         BoundingBox::full_block()
     }

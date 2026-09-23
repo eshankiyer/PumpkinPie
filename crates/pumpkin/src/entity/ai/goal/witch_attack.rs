@@ -11,7 +11,7 @@ use pumpkin_data::potion::Potion;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::mob::witch::WitchEntity;
@@ -67,7 +67,7 @@ impl WitchAttackGoal {
         }
     }
 
-    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
+    fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
         let shooter_pos = shooter.pos.load();
@@ -88,15 +88,12 @@ impl WitchAttackGoal {
                     living.health.load(),
                     living
                         .get_effect(&pumpkin_data::effect::StatusEffect::SLOWNESS)
-                        .await
                         .is_some(),
                     living
                         .get_effect(&pumpkin_data::effect::StatusEffect::POISON)
-                        .await
                         .is_some(),
                     living
                         .get_effect(&pumpkin_data::effect::StatusEffect::WEAKNESS)
-                        .await
                         .is_some(),
                 )
             } else {
@@ -134,7 +131,7 @@ impl WitchAttackGoal {
         );
         let projectile_entity = Entity::new(world.clone(), shooter_pos, &EntityType::SPLASH_POTION);
         let projectile = SplashPotionEntity::new_shot(projectile_entity, shooter);
-        projectile.set_item_stack(stack).await;
+        projectile.set_item_stack(stack);
         projectile.thrown.set_velocity(
             x,
             y + distance * 0.2,
@@ -142,7 +139,7 @@ impl WitchAttackGoal {
             if distance <= 2.0 { 0.45 } else { 0.75 },
             8.0,
         );
-        world.spawn_entity(Arc::new(projectile)).await;
+        world.spawn_entity(Arc::new(projectile));
         world.play_sound(
             Sound::EntityWitchThrow,
             SoundCategory::Hostile,
@@ -152,102 +149,98 @@ impl WitchAttackGoal {
         // Vanilla: a witch that decides to help a hurt raid-mate immediately clears its own
         // target, rather than continuing to treat it as an attack target.
         if is_raider {
-            mob.set_mob_target(None).await;
+            mob.set_mob_target(None);
         }
     }
 }
 
 impl Goal for WitchAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self
-                .witch
-                .upgrade()
-                .is_some_and(|witch| witch.is_drinking_potion())
-            {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self
+            .witch
+            .upgrade()
+            .is_some_and(|witch| witch.is_drinking_potion())
+        {
+            return false;
+        }
+        mob.get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|target| target.get_entity().is_alive())
+    }
+
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        if self
+            .witch
+            .upgrade()
+            .is_some_and(|witch| witch.is_drinking_potion())
+        {
+            return false;
+        }
+        mob.get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|target| target.get_entity().is_alive())
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        self.cooldown = 0;
+        mob.get_mob_entity().set_attacking(true);
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        mob.get_mob_entity().set_attacking(false);
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        if self
+            .witch
+            .upgrade()
+            .is_some_and(|witch| witch.is_drinking_potion())
+        {
+            return;
+        }
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let shooter = mob.get_entity();
+        let shooter_pos = shooter.pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let distance_squared = shooter_pos.squared_distance_to_vec(&target_pos);
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 30.0, 30.0);
+        self.cooldown = (self.cooldown - 1).max(0);
+        if distance_squared > self.range * self.range {
             mob.get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive())
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self
-                .witch
-                .upgrade()
-                .is_some_and(|witch| witch.is_drinking_potion())
-            {
-                return false;
-            }
-            mob.get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive())
-        })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.cooldown = 0;
-            mob.get_mob_entity().set_attacking(true);
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-            mob.get_mob_entity().set_attacking(false);
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if self
-                .witch
-                .upgrade()
-                .is_some_and(|witch| witch.is_drinking_potion())
-            {
-                return;
-            }
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return;
-            };
-            let shooter = mob.get_entity();
-            let shooter_pos = shooter.pos.load();
-            let target_pos = target.get_entity().pos.load();
-            let distance_squared = shooter_pos.squared_distance_to_vec(&target_pos);
-            mob.get_mob_entity()
-                .look_control
+                .navigator
                 .lock()
                 .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-            self.cooldown = (self.cooldown - 1).max(0);
-            if distance_squared > self.range * self.range {
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap()
-                    .set_progress(NavigatorGoal {
-                        current_progress: shooter_pos,
-                        destination: target_pos,
-                        speed: 1.0,
-                    });
-            } else {
-                mob.get_mob_entity().navigator.lock().unwrap().stop();
-                if self.cooldown == 0 {
-                    self.shoot(mob, target.as_ref()).await;
-                    self.cooldown = self.interval;
-                }
+                .set_progress(NavigatorGoal {
+                    current_progress: shooter_pos,
+                    destination: target_pos,
+                    speed: 1.0,
+                });
+        } else {
+            mob.get_mob_entity().navigator.lock().unwrap().stop();
+            if self.cooldown == 0 {
+                self.shoot(mob, target.as_ref());
+                self.cooldown = self.interval;
             }
-        })
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

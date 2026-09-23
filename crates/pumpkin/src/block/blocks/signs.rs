@@ -22,7 +22,6 @@ use pumpkin_world::world::BlockAccessor;
 use uuid::Uuid;
 
 use crate::block::BlockBehaviour;
-use crate::block::BlockFuture;
 use crate::block::CanPlaceAtArgs;
 use crate::block::GetStateForNeighborUpdateArgs;
 use crate::block::NormalUseArgs;
@@ -58,7 +57,7 @@ pub(crate) trait SignTextAccess: Send + Sync {
     fn set_waxed(&self) -> bool;
     fn front_text(&self) -> &crate::block::entities::sign::Text;
     fn back_text(&self) -> &crate::block::entities::sign::Text;
-    fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>>;
+    fn editing_player(&self) -> &Arc<std::sync::Mutex<Option<Uuid>>>;
     fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound;
     fn update_text(&self, is_front_text: bool, messages: [Box<str>; 4]);
 }
@@ -80,7 +79,7 @@ impl SignTextAccess for SignBlockEntity {
         &self.back_text
     }
 
-    fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>> {
+    fn editing_player(&self) -> &Arc<std::sync::Mutex<Option<Uuid>>> {
         &self.currently_editing_player
     }
 
@@ -111,7 +110,7 @@ impl SignTextAccess for HangingSignBlockEntity {
         &self.back_text
     }
 
-    fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>> {
+    fn editing_player(&self) -> &Arc<std::sync::Mutex<Option<Uuid>>> {
         &self.currently_editing_player
     }
 
@@ -153,7 +152,7 @@ fn click_command(line: &str) -> Option<String> {
     }
 }
 
-async fn execute_click_commands_if_present(
+fn execute_click_commands_if_present(
     sign_entity: &dyn SignTextAccess,
     is_front_text: bool,
     server: &Arc<Server>,
@@ -172,12 +171,11 @@ async fn execute_click_commands_if_present(
         let Some(command) = click_command(line) else {
             continue;
         };
-        let source = CommandSender::Dummy.into_source(server).await;
+        let source = CommandSender::Dummy.into_source(server);
         server
             .command_dispatcher
             .load()
-            .handle_command(&source, &command)
-            .await;
+            .handle_command(&source, &command);
         executed = true;
     }
     executed
@@ -484,44 +482,38 @@ impl SignBlock {
 }
 
 impl BlockBehaviour for SignBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let support = Self::detect_support(args.world, args.position);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let support = Self::detect_support(args.world, args.position);
 
-            let Some(placement) = Self::determine_placement(&args, &support) else {
-                return BlockStateId::AIR; // Invalid placement
-            };
+        let Some(placement) = Self::determine_placement(&args, &support) else {
+            return BlockStateId::AIR; // Invalid placement
+        };
 
-            let actual_block = Block::from_id(placement.block_id);
-            Self::apply_placement_properties(actual_block, &placement)
-        })
+        let actual_block = Block::from_id(placement.block_id);
+        Self::apply_placement_properties(actual_block, &placement)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block.name.contains("hanging") {
-                args.world
-                    .add_block_entity(Arc::new(HangingSignBlockEntity::empty(*args.position)));
-            } else {
-                args.world
-                    .add_block_entity(Arc::new(SignBlockEntity::empty(*args.position)));
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        if args.block.name.contains("hanging") {
+            args.world
+                .add_block_entity(Arc::new(HangingSignBlockEntity::empty(*args.position)));
+        } else {
+            args.world
+                .add_block_entity(Arc::new(SignBlockEntity::empty(*args.position)));
+        }
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `SignItem.updateCustomBlockEntityTag` opens the editor only when its superclass
-            // did not load typed data (`SignItem.java:23-35`; `BlockItem.java:148-170`).
-            if should_open_text_editor(args.custom_data_applied) {
-                match args.player.client.as_ref() {
-                    crate::net::ClientPlatform::Java(java) => {
-                        java.send_sign_packet(*args.position, true).await;
-                    }
-                    crate::net::ClientPlatform::Bedrock(_bedrock) => {}
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
+        // `SignItem.updateCustomBlockEntityTag` opens the editor only when its superclass
+        // did not load typed data (`SignItem.java:23-35`; `BlockItem.java:148-170`).
+        if should_open_text_editor(args.custom_data_applied) {
+            match args.player.client.as_ref() {
+                crate::net::ClientPlatform::Java(java) => {
+                    java.send_sign_packet(*args.position, true).await;
                 }
+                crate::net::ClientPlatform::Bedrock(_bedrock) => {}
             }
-        })
+        }
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -590,16 +582,14 @@ impl BlockBehaviour for SignBlock {
         }
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world.remove_block_entity(args.position);
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        args.world.remove_block_entity(args.position);
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
         let is_hanging = args.block.name.contains("hanging");
         let is_wall_sign = args.block.name.contains("wall");
 
@@ -651,201 +641,210 @@ impl BlockBehaviour for SignBlock {
     /// `net/minecraft/world/level/block/SignBlock.java:128-159`: execute the sign's click
     /// commands first, refuse waxed signs, and only claim the editor for a player who may build
     /// when every line has plain-text contents.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::Pass;
-            };
-            // Vanilla receives any `SignBlockEntity` here, hanging signs included
-            // (SignBlock.java:128-159); the two Pumpkin structs are unified by
-            // `SignTextAccess`.
-            let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
-                return BlockActionResult::Pass;
-            };
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return BlockActionResult::Pass;
+        };
+        // Vanilla receives any `SignBlockEntity` here, hanging signs included
+        // (SignBlock.java:128-159); the two Pumpkin structs are unified by
+        // `SignTextAccess`.
+        let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
+            return BlockActionResult::Pass;
+        };
 
-            // `canExecuteClickCommands` gates `executeClickCommandsIfPresent` on wax
-            // (`SignBlockEntity.java:185-213`).
-            let executed_command = if sign_entity.sign_is_waxed()
-                && let Some(server) = args.world.server.upgrade()
-            {
-                let is_facing_front =
-                    is_facing_front_text(args.world, args.position, args.block, args.player);
-                execute_click_commands_if_present(sign_entity, is_facing_front, &server).await
-            } else {
-                false
-            };
-
-            if sign_entity.sign_is_waxed() {
-                // Vanilla plays `getSignInteractionFailedSoundEvent()`, which differs per
-                // sign type (SignBlock.java:135-137, SignBlockEntity.java:278-280,
-                // HangingSignBlockEntity.java:27-29).
-                args.world.play_block_sound(
-                    sign_entity.waxed_interact_fail_sound(),
-                    pumpkin_data::sound::SoundCategory::Blocks,
-                    *args.position,
-                );
-                return BlockActionResult::SuccessServer;
-            }
-            if executed_command {
-                return BlockActionResult::SuccessServer;
-            }
-
-            let mut currently_editing = sign_entity.editing_player().lock().await;
-            if other_player_is_editing_sign(
-                *currently_editing,
-                &args.player.gameprofile.id,
-                args.world,
-                args.position,
-            ) {
-                return BlockActionResult::Pass;
-            }
-
-            let is_facing_front_text =
+        // `canExecuteClickCommands` gates `executeClickCommandsIfPresent` on wax
+        // (`SignBlockEntity.java:185-213`).
+        let executed_command = if sign_entity.sign_is_waxed()
+            && let Some(server) = args.world.server.upgrade()
+        {
+            let is_facing_front =
                 is_facing_front_text(args.world, args.position, args.block, args.player);
-            let text = if is_facing_front_text {
-                sign_entity.front_text()
-            } else {
-                sign_entity.back_text()
-            };
-            let may_build = args.player.abilities.lock().await.allow_modify_world;
-            if !has_editable_text(text) || !may_build {
-                return BlockActionResult::Pass;
-            }
+            execute_click_commands_if_present(sign_entity, is_facing_front, &server)
+        } else {
+            false
+        };
 
-            *currently_editing = Some(args.player.gameprofile.id);
-            drop(currently_editing);
-            match args.player.client.as_ref() {
-                ClientPlatform::Java(java) => {
-                    java.send_sign_packet(*args.position, is_facing_front_text)
-                        .await;
-                }
-                ClientPlatform::Bedrock(_bedrock) => {}
-            }
+        if sign_entity.sign_is_waxed() {
+            // Vanilla plays `getSignInteractionFailedSoundEvent()`, which differs per
+            // sign type (SignBlock.java:135-137, SignBlockEntity.java:278-280,
+            // HangingSignBlockEntity.java:27-29).
+            args.world.play_block_sound(
+                sign_entity.waxed_interact_fail_sound(),
+                pumpkin_data::sound::SoundCategory::Blocks,
+                *args.position,
+            );
+            return BlockActionResult::SuccessServer;
+        }
+        if executed_command {
+            return BlockActionResult::SuccessServer;
+        }
 
-            BlockActionResult::SuccessServer
-        })
+        let mut currently_editing = sign_entity
+            .editing_player()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if other_player_is_editing_sign(
+            *currently_editing,
+            &args.player.gameprofile.id,
+            args.world,
+            args.position,
+        ) {
+            return BlockActionResult::Pass;
+        }
+
+        let is_facing_front_text =
+            is_facing_front_text(args.world, args.position, args.block, args.player);
+        let text = if is_facing_front_text {
+            sign_entity.front_text()
+        } else {
+            sign_entity.back_text()
+        };
+        let may_build = args
+            .player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .allow_modify_world;
+        if !has_editable_text(text) || !may_build {
+            return BlockActionResult::Pass;
+        }
+
+        *currently_editing = Some(args.player.gameprofile.id);
+        drop(currently_editing);
+        match args.player.client.as_ref() {
+            ClientPlatform::Java(java) => {
+                java.send_sign_packet(*args.position, is_facing_front_text)
+                    .await;
+            }
+            ClientPlatform::Bedrock(_bedrock) => {}
+        }
+
+        BlockActionResult::SuccessServer
     }
 
     /// Mirrors `SignBlock.useItemOn` from
     /// `net/minecraft/world/level/block/SignBlock.java:91-125`: only a build-capable sign
     /// applicator may mutate the text, and an item attempt must not claim the text editor.
     #[expect(clippy::too_many_lines)]
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::Pass;
-            };
-            let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
-                return BlockActionResult::Pass;
-            };
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return BlockActionResult::Pass;
+        };
+        let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
+            return BlockActionResult::Pass;
+        };
 
-            if sign_entity.sign_is_waxed() {
-                return BlockActionResult::PassToDefaultBlockAction;
-            }
+        if sign_entity.sign_is_waxed() {
+            return BlockActionResult::PassToDefaultBlockAction;
+        }
 
-            let Some(pumpkin_item) = args
-                .server
-                .item_registry
-                .get_pumpkin_item(args.item_stack.item.id)
-            else {
-                return BlockActionResult::PassToDefaultBlockAction;
-            };
+        let Some(pumpkin_item) = args
+            .server
+            .item_registry
+            .get_pumpkin_item(args.item_stack.item.id)
+        else {
+            return BlockActionResult::PassToDefaultBlockAction;
+        };
 
-            let is_sign_applicator = pumpkin_item
+        let is_sign_applicator = pumpkin_item
+            .as_any()
+            .downcast_ref::<HoneyCombItem>()
+            .is_some()
+            || pumpkin_item
                 .as_any()
-                .downcast_ref::<HoneyCombItem>()
+                .downcast_ref::<GlowingInkSacItem>()
                 .is_some()
-                || pumpkin_item
-                    .as_any()
-                    .downcast_ref::<GlowingInkSacItem>()
-                    .is_some()
-                || pumpkin_item.as_any().downcast_ref::<InkSacItem>().is_some()
-                || pumpkin_item.as_any().downcast_ref::<DyeItem>().is_some();
-            let may_build = args.player.abilities.lock().await.allow_modify_world;
-            if !is_sign_applicator || !may_build {
-                return BlockActionResult::PassToDefaultBlockAction;
+            || pumpkin_item.as_any().downcast_ref::<InkSacItem>().is_some()
+            || pumpkin_item.as_any().downcast_ref::<DyeItem>().is_some();
+        let may_build = args
+            .player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .allow_modify_world;
+        if !is_sign_applicator || !may_build {
+            return BlockActionResult::PassToDefaultBlockAction;
+        }
+
+        let currently_editing = sign_entity
+            .editing_player()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if other_player_is_editing_sign(
+            *currently_editing,
+            &args.player.gameprofile.id,
+            args.world,
+            args.position,
+        ) {
+            return BlockActionResult::PassToDefaultBlockAction;
+        }
+        drop(currently_editing);
+
+        let text = if is_facing_front_text(args.world, args.position, args.block, args.player) {
+            sign_entity.front_text()
+        } else {
+            sign_entity.back_text()
+        };
+
+        let result = pumpkin_item
+            .as_any()
+            .downcast_ref::<HoneyCombItem>()
+            .map_or_else(
+                || {
+                    pumpkin_item
+                        .as_any()
+                        .downcast_ref::<GlowingInkSacItem>()
+                        .map_or_else(
+                            || {
+                                if let Some(ink_sac_item) =
+                                    pumpkin_item.as_any().downcast_ref::<InkSacItem>()
+                                {
+                                    ink_sac_item.apply_to_sign(&args, &block_entity, text)
+                                } else if let Some(dye) =
+                                    pumpkin_item.as_any().downcast_ref::<DyeItem>()
+                                {
+                                    let color_name = args
+                                        .item_stack
+                                        .item
+                                        .registry_key
+                                        .strip_suffix("_dye")
+                                        .unwrap_or(args.item_stack.item.registry_key);
+                                    dye.apply_to_sign(&args, &block_entity, text, color_name)
+                                } else {
+                                    BlockActionResult::PassToDefaultBlockAction
+                                }
+                            },
+                            |g_ink_sac_item| {
+                                g_ink_sac_item.apply_to_sign(&args, &block_entity, text)
+                            },
+                        )
+                },
+                |_honeycomb_item| HoneyCombItem::apply_to_sign(&args, &block_entity, sign_entity),
+            );
+
+        if result == BlockActionResult::Success {
+            // Vanilla invokes `executeClickCommandsIfPresent` after a successful sign
+            // applicator (`SignBlock.java:103-112`), so use the same live path here.
+            if let Some(server) = args.world.server.upgrade() {
+                let is_facing_front =
+                    is_facing_front_text(args.world, args.position, args.block, args.player);
+                execute_click_commands_if_present(sign_entity, is_facing_front, &server);
             }
-
-            let currently_editing = sign_entity.editing_player().lock().await;
-            if other_player_is_editing_sign(
-                *currently_editing,
-                &args.player.gameprofile.id,
-                args.world,
-                args.position,
-            ) {
-                return BlockActionResult::PassToDefaultBlockAction;
-            }
-            drop(currently_editing);
-
-            let text = if is_facing_front_text(args.world, args.position, args.block, args.player) {
-                sign_entity.front_text()
-            } else {
-                sign_entity.back_text()
-            };
-
-            let result = pumpkin_item
+            if pumpkin_item
                 .as_any()
-                .downcast_ref::<HoneyCombItem>()
-                .map_or_else(
-                    || {
-                        pumpkin_item
-                            .as_any()
-                            .downcast_ref::<GlowingInkSacItem>()
-                            .map_or_else(
-                                || {
-                                    if let Some(ink_sac_item) =
-                                        pumpkin_item.as_any().downcast_ref::<InkSacItem>()
-                                    {
-                                        ink_sac_item.apply_to_sign(&args, &block_entity, text)
-                                    } else if let Some(dye) =
-                                        pumpkin_item.as_any().downcast_ref::<DyeItem>()
-                                    {
-                                        let color_name = args
-                                            .item_stack
-                                            .item
-                                            .registry_key
-                                            .strip_suffix("_dye")
-                                            .unwrap_or(args.item_stack.item.registry_key);
-                                        dye.apply_to_sign(&args, &block_entity, text, color_name)
-                                    } else {
-                                        BlockActionResult::PassToDefaultBlockAction
-                                    }
-                                },
-                                |g_ink_sac_item| {
-                                    g_ink_sac_item.apply_to_sign(&args, &block_entity, text)
-                                },
-                            )
-                    },
-                    |_honeycomb_item| {
-                        HoneyCombItem::apply_to_sign(&args, &block_entity, sign_entity)
-                    },
+                .downcast_ref::<crate::item::items::glowing_ink_sac::GlowingInkSacItem>()
+                .is_some()
+            {
+                args.player.trigger_advancement(
+                    crate::entity::player::advancement::trigger::AdvancementTrigger::GlowedSign,
                 );
-
-            if result == BlockActionResult::Success {
-                // Vanilla invokes `executeClickCommandsIfPresent` after a successful sign
-                // applicator (`SignBlock.java:103-112`), so use the same live path here.
-                if let Some(server) = args.world.server.upgrade() {
-                    let is_facing_front =
-                        is_facing_front_text(args.world, args.position, args.block, args.player);
-                    execute_click_commands_if_present(sign_entity, is_facing_front, &server).await;
-                }
-                if pumpkin_item
-                    .as_any()
-                    .downcast_ref::<crate::item::items::glowing_ink_sac::GlowingInkSacItem>()
-                    .is_some()
-                {
-                    args.player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::GlowedSign).await;
-                }
-                if !args.player.has_infinite_materials() {
-                    args.item_stack.decrement(1);
-                }
             }
+            if !args.player.has_infinite_materials() {
+                args.item_stack.decrement(1);
+            }
+        }
 
-            result
-        })
+        result
     }
 }
 

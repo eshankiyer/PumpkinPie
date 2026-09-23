@@ -1,6 +1,5 @@
 //! Port of `CatSitOnBlockGoal.java`.
 
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::Block;
@@ -11,7 +10,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle};
+use super::{Controls, Goal, ParentHandle};
 use crate::block::entities::chest::ChestBlockEntity;
 use crate::entity::mob::Mob;
 use crate::entity::passive::cat::CatEntity;
@@ -83,61 +82,49 @@ impl CatSitOnBlockGoal {
 }
 
 impl MoveToTargetPos for CatSitOnBlockGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move { Self::is_valid(&world, block_pos) })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        Self::is_valid(&world, block_pos)
     }
 }
 
 impl Goal for CatSitOnBlockGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            // Vanilla short-circuits before `super.canUse()`, so the goal's start cooldown does
-            // not tick down while the cat is untamed or ordered to sit.
-            self.cat_may_sit() && self.move_to_target_pos_goal.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // Vanilla short-circuits before `super.canUse()`, so the goal's start cooldown does
+        // not tick down while the cat is untamed or ordered to sit.
+        self.cat_may_sit() && self.move_to_target_pos_goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.move_to_target_pos_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.move_to_target_pos_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.start(mob).await;
-            // `start` line 30: `this.cat.setInSittingPose(false)`.
-            if let Some(cat) = self.cat.upgrade() {
-                cat.set_sitting(false);
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob);
+        // `start` line 30: `this.cat.setInSittingPose(false)`.
+        if let Some(cat) = self.cat.upgrade() {
+            cat.set_sitting(false);
+        }
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob);
+        // `stop` line 36: `this.cat.setInSittingPose(false)`.
+        if let Some(cat) = self.cat.upgrade() {
+            cat.set_sitting(false);
+        }
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.tick(mob);
+        // `tick` line 42: `this.cat.setInSittingPose(this.isReachedTarget())`. Vanilla's
+        // `SynchedEntityData` swallows no-op writes; `set_sitting` here always sends a
+        // metadata packet, so the write is guarded on an actual change.
+        if let Some(cat) = self.cat.upgrade() {
+            let reached = self.move_to_target_pos_goal.reached;
+            if cat.is_sitting() != reached {
+                cat.set_sitting(reached);
             }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.stop(mob).await;
-            // `stop` line 36: `this.cat.setInSittingPose(false)`.
-            if let Some(cat) = self.cat.upgrade() {
-                cat.set_sitting(false);
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.tick(mob).await;
-            // `tick` line 42: `this.cat.setInSittingPose(this.isReachedTarget())`. Vanilla's
-            // `SynchedEntityData` swallows no-op writes; `set_sitting` here always sends a
-            // metadata packet, so the write is guarded on an actual change.
-            if let Some(cat) = self.cat.upgrade() {
-                let reached = self.move_to_target_pos_goal.reached;
-                if cat.is_sitting() != reached {
-                    cat.set_sitting(reached);
-                }
-            }
-        })
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

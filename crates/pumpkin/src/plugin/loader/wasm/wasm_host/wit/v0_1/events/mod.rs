@@ -233,7 +233,7 @@ pub(super) fn consume_world(
 impl<E: Payload + ToFromWasmEvent> EventHandler<E> for WasmPluginEventHandler {
     fn handle<'a>(&'a self, server: &'a Arc<Server>, event: &'a E) -> BoxFuture<'a, ()> {
         Box::pin(async {
-            let mut store = self.plugin.store.lock().await;
+            let mut store = self.plugin.store.lock();
             let wasm_event = event.to_wasm_event(store.data_mut());
             match self.plugin.plugin_instance {
                 PluginInstance::V0_1(ref plugin) => {
@@ -271,7 +271,7 @@ impl<E: Payload + ToFromWasmEvent> EventHandler<E> for WasmPluginEventHandler {
         event: &'a mut E,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async {
-            let mut store = self.plugin.store.lock().await;
+            let mut store = self.plugin.store.lock();
             let wasm_event = event.to_wasm_event(store.data_mut());
             match self.plugin.plugin_instance {
                 PluginInstance::V0_1(ref plugin) => {

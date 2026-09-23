@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 
 /// Goal for mobs (wolves, cats) to sit when ordered to do so.
@@ -42,39 +42,35 @@ impl SitGoal {
 }
 
 impl Goal for SitGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            let living = &mob_entity.living_entity;
-            let entity = &living.entity;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        let living = &mob_entity.living_entity;
+        let entity = &living.entity;
 
-            // Must be ordered to sit
-            if !mob_entity.is_ordered_to_sit() {
-                return false;
-            }
+        // Must be ordered to sit
+        if !mob_entity.is_ordered_to_sit() {
+            return false;
+        }
 
-            // Cannot sit in water
-            if entity.touching_water.load(Ordering::SeqCst) {
-                return false;
-            }
+        // Cannot sit in water
+        if entity.touching_water.load(Ordering::SeqCst) {
+            return false;
+        }
 
-            // Must be on ground
-            if !entity.on_ground.load(Ordering::SeqCst) {
-                return false;
-            }
+        // Must be on ground
+        if !entity.on_ground.load(Ordering::SeqCst) {
+            return false;
+        }
 
-            true
-        })
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { mob.get_mob_entity().is_ordered_to_sit() })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        mob.get_mob_entity().is_ordered_to_sit()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
     fn controls(&self) -> Controls {

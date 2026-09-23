@@ -1,7 +1,6 @@
 use pumpkin_data::translation;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::chunk::ChunkHeightmapType;
-use std::pin::Pin;
 
 use crate::command::{
     argument_types::argument_type::{ArgumentType, JavaClientArgumentType},
@@ -82,17 +81,15 @@ impl ArgumentType for HeightmapTypeArgumentType {
     /// Suggests all kept type names, lower-cased, mirroring vanilla
     /// `StringRepresentableArgument.listSuggestions`
     /// (`net/minecraft/commands/arguments/StringRepresentableArgument.java:45-54`).
-    fn list_suggestions<'a>(
-        &'a self,
-        _context: &'a CommandContext,
+    fn list_suggestions(
+        &self,
+        _context: &CommandContext,
         mut builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send + 'a>> {
-        Box::pin(async move {
-            for heightmap_type in KEPT_TYPES {
-                builder = builder.filter_and_suggest_one(heightmap_name(heightmap_type));
-            }
-            builder.build()
-        })
+    ) -> Suggestions {
+        for heightmap_type in KEPT_TYPES {
+            builder = builder.filter_and_suggest_one(heightmap_name(heightmap_type));
+        }
+        builder.build()
     }
 
     /// Vanilla limits examples to the first two kept names, lower-cased

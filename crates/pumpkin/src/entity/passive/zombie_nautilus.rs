@@ -120,7 +120,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, revenge::RevengeGoal, tempt::TemptGoal,
@@ -441,44 +441,40 @@ impl ZombieNautilusEntity {
 }
 
 impl NBTStorage for ZombieNautilusEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            nbt.put_bool("IsTame", self.is_tame.load(Ordering::Relaxed));
-            nbt.put_bool("Saddled", self.is_saddled.load(Ordering::Relaxed));
-            nbt.put_int("DashCooldown", self.dash_cooldown.load(Ordering::Relaxed));
-            nbt.put_string(
-                "variant",
-                variant_name_from_id(self.get_variant()).to_string(),
-            );
-            if let Some(owner) = self.owner.load() {
-                nbt.put_uuid("Owner", owner);
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_bool("IsTame", self.is_tame.load(Ordering::Relaxed));
+        nbt.put_bool("Saddled", self.is_saddled.load(Ordering::Relaxed));
+        nbt.put_int("DashCooldown", self.dash_cooldown.load(Ordering::Relaxed));
+        nbt.put_string(
+            "variant",
+            variant_name_from_id(self.get_variant()).to_string(),
+        );
+        if let Some(owner) = self.owner.load() {
+            nbt.put_uuid("Owner", owner);
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            if let Some(is_tame) = nbt.get_bool("IsTame") {
-                self.is_tame.store(is_tame, Ordering::Relaxed);
-            }
-            if let Some(saddled) = nbt.get_bool("Saddled") {
-                self.is_saddled.store(saddled, Ordering::Relaxed);
-            }
-            if let Some(dash) = nbt.get_int("DashCooldown") {
-                self.dash_cooldown.store(dash, Ordering::Relaxed);
-            }
-            if let Some(variant) = nbt.get_string("variant") {
-                self.variant
-                    .store(variant_id_from_name(variant), Ordering::Relaxed);
-            }
-            if let Some(owner) = nbt.get_uuid("Owner") {
-                self.owner.store(Some(owner));
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(is_tame) = nbt.get_bool("IsTame") {
+            self.is_tame.store(is_tame, Ordering::Relaxed);
+        }
+        if let Some(saddled) = nbt.get_bool("Saddled") {
+            self.is_saddled.store(saddled, Ordering::Relaxed);
+        }
+        if let Some(dash) = nbt.get_int("DashCooldown") {
+            self.dash_cooldown.store(dash, Ordering::Relaxed);
+        }
+        if let Some(variant) = nbt.get_string("variant") {
+            self.variant
+                .store(variant_id_from_name(variant), Ordering::Relaxed);
+        }
+        if let Some(owner) = nbt.get_uuid("Owner") {
+            self.owner.store(Some(owner));
+        }
     }
 }
 
@@ -514,169 +510,164 @@ impl Mob for ZombieNautilusEntity {
             .store(variant_id_from_name(name), Ordering::Relaxed);
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::zombie_nautilus::DASH,
-                    self.is_dashing(),
-                )],
-                None,
-            );
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::zombie_nautilus::DATA_VARIANT_ID,
-                    VarInt(self.get_variant()),
-                )],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::zombie_nautilus::DASH,
+                self.is_dashing(),
+            )],
+            None,
+        );
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::zombie_nautilus::DATA_VARIANT_ID,
+                VarInt(self.get_variant()),
+            )],
+            None,
+        );
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = &self.mob_entity.living_entity.entity;
 
-            // `AbstractNautilus.isAggravated` / `isMobControlled`
-            // (AbstractNautilus.java:524-530), cached for the sync `can_be_leashed`.
-            self.aggravated.store(
-                self.mob_entity.target.lock().await.is_some(),
+        // `AbstractNautilus.isAggravated` / `isMobControlled`
+        // (AbstractNautilus.java:524-530), cached for the sync `can_be_leashed`.
+        self.aggravated.store(
+            self.mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some(),
+            Ordering::Relaxed,
+        );
+
+        // `AbstractNautilus.applyEffects` (AbstractNautilus.java:260-268).
+        {
+            let passengers = entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let first = passengers.first();
+            self.mob_controlled.store(
+                first.is_some_and(|p| p.cast_any().downcast_ref::<Player>().is_none()),
                 Ordering::Relaxed,
             );
-
-            // `AbstractNautilus.applyEffects` (AbstractNautilus.java:260-268).
+            if let Some(passenger) = first
+                && let Some(player) = passenger.cast_any().downcast_ref::<Player>()
             {
-                let passengers = entity.passengers.lock().await;
-                let first = passengers.first();
-                self.mob_controlled.store(
-                    first.is_some_and(|p| p.cast_any().downcast_ref::<Player>().is_none()),
-                    Ordering::Relaxed,
+                let world = entity.world.load();
+                let game_time = world
+                    .level_time
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .world_age;
+                if game_time % EFFECT_REFRESH_RATE == 0 {
+                    player.living_entity.add_effect(Effect {
+                        effect_type: &StatusEffect::BREATH_OF_THE_NAUTILUS,
+                        duration: EFFECT_DURATION,
+                        amplifier: 0,
+                        ambient: true,
+                        show_particles: true,
+                        show_icon: true,
+                        blend: true,
+                    });
+                }
+            }
+        }
+
+        // `AbstractNautilus.tick` (AbstractNautilus.java:301-310).
+        if self.is_dashing()
+            && self.dash_cooldown.load(Ordering::Relaxed) < DASH_MINIMUM_HOLD_THRESHOLD
+        {
+            self.set_dashing(false);
+        }
+
+        let cooldown = self.dash_cooldown.load(Ordering::Relaxed);
+        if cooldown > 0 {
+            let next = cooldown - 1;
+            self.dash_cooldown.store(next, Ordering::Relaxed);
+            if next == 0 {
+                let world = entity.world.load();
+                world.play_sound(
+                    self.get_dash_ready_sound(),
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
                 );
-                if let Some(passenger) = first
-                    && let Some(player) = passenger.cast_any().downcast_ref::<Player>()
-                {
-                    let world = entity.world.load();
-                    let game_time = world.level_time.lock().await.world_age;
-                    if game_time % EFFECT_REFRESH_RATE == 0 {
-                        player
-                            .living_entity
-                            .add_effect(Effect {
-                                effect_type: &StatusEffect::BREATH_OF_THE_NAUTILUS,
-                                duration: EFFECT_DURATION,
-                                amplifier: 0,
-                                ambient: true,
-                                show_particles: true,
-                                show_icon: true,
-                                blend: true,
-                            })
-                            .await;
-                    }
-                }
             }
+        }
 
-            // `AbstractNautilus.tick` (AbstractNautilus.java:301-310).
-            if self.is_dashing()
-                && self.dash_cooldown.load(Ordering::Relaxed) < DASH_MINIMUM_HOLD_THRESHOLD
-            {
-                self.set_dashing(false);
+        // `AbstractNautilus.spawnBubbles` (AbstractNautilus.java:270-292).
+        if entity.touching_water.load(Ordering::Relaxed) {
+            let speed = entity.velocity.load().length();
+            let prob = (speed * 2.0).clamp(0.15, 1.0);
+            if rand::random::<f64>() < prob {
+                let world = entity.world.load();
+                let pos = entity.pos.load();
+                world.spawn_particle(
+                    pos + Vector3::new(0.0, 0.25, 0.0),
+                    Vector3::new(0.4, 0.4, 0.4),
+                    0.5,
+                    2,
+                    Particle::Bubble,
+                );
             }
-
-            let cooldown = self.dash_cooldown.load(Ordering::Relaxed);
-            if cooldown > 0 {
-                let next = cooldown - 1;
-                self.dash_cooldown.store(next, Ordering::Relaxed);
-                if next == 0 {
-                    let world = entity.world.load();
-                    world.play_sound(
-                        self.get_dash_ready_sound(),
-                        SoundCategory::Neutral,
-                        &entity.pos.load(),
-                    );
-                }
-            }
-
-            // `AbstractNautilus.spawnBubbles` (AbstractNautilus.java:270-292).
-            if entity.touching_water.load(Ordering::Relaxed) {
-                let speed = entity.velocity.load().length();
-                let prob = (speed * 2.0).clamp(0.15, 1.0);
-                if rand::random::<f64>() < prob {
-                    let world = entity.world.load();
-                    let pos = entity.pos.load();
-                    world.spawn_particle(
-                        pos + Vector3::new(0.0, 0.25, 0.0),
-                        Vector3::new(0.4, 0.4, 0.4),
-                        0.5,
-                        2,
-                        Particle::Bubble,
-                    );
-                }
-            }
-        })
+        }
     }
 
     /// `AbstractNautilus.mobInteract` (AbstractNautilus.java:396-432) plus `tryToTame`
     /// (AbstractNautilus.java:434-444). The baby branch is dropped (`canBeABaby` is false)
     /// and the inventory-screen branch is not ported — see the module header.
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let entity = &self.mob_entity.living_entity.entity;
 
-            if !self.is_tame() && self.is_food(item_stack) {
+        if !self.is_tame() && self.is_food(item_stack) {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            let world = entity.world.load();
+            if rand::random::<u32>().is_multiple_of(3) {
+                self.set_tame(true, Some(player.gameprofile.id));
+                world.send_entity_status(entity, EntityStatus::TamingSucceeded, None);
+            } else {
+                world.send_entity_status(entity, EntityStatus::TamingFailed, None);
+            }
+            world.play_sound(
+                self.get_eat_sound(),
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+            );
+            return true;
+        }
+
+        if self.is_tame() && !player.get_entity().is_sneaking() {
+            if !self.is_saddled.load(Ordering::Relaxed) && item_stack.item == &Item::SADDLE {
                 item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                self.is_saddled.store(true, Ordering::Relaxed);
                 let world = entity.world.load();
-                if rand::random::<u32>().is_multiple_of(3) {
-                    self.set_tame(true, Some(player.gameprofile.id));
-                    world.send_entity_status(entity, EntityStatus::TamingSucceeded, None);
-                } else {
-                    world.send_entity_status(entity, EntityStatus::TamingFailed, None);
-                }
+                // `AbstractNautilus.getEquipSound` (AbstractNautilus.java:475-482): the
+                // saddle sounds are shared with the living nautilus, not zombie-specific.
                 world.play_sound(
-                    self.get_eat_sound(),
+                    if self.is_underwater() {
+                        Sound::ItemNautilusSaddleUnderwaterEquip
+                    } else {
+                        Sound::ItemNautilusSaddleEquip
+                    },
                     SoundCategory::Neutral,
                     &entity.pos.load(),
                 );
                 return true;
             }
 
-            if self.is_tame() && !player.get_entity().is_sneaking() {
-                if !self.is_saddled.load(Ordering::Relaxed) && item_stack.item == &Item::SADDLE {
-                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                    self.is_saddled.store(true, Ordering::Relaxed);
-                    let world = entity.world.load();
-                    // `AbstractNautilus.getEquipSound` (AbstractNautilus.java:475-482): the
-                    // saddle sounds are shared with the living nautilus, not zombie-specific.
-                    world.play_sound(
-                        if self.is_underwater() {
-                            Sound::ItemNautilusSaddleUnderwaterEquip
-                        } else {
-                            Sound::ItemNautilusSaddleEquip
-                        },
-                        SoundCategory::Neutral,
-                        &entity.pos.load(),
-                    );
-                    return true;
+            if player.get_entity().can_start_riding() {
+                let world = player.world();
+                if let Some(vehicle) = world.get_entity_by_id(entity.entity_id)
+                    && let Some(passenger) = world.get_player_by_id(player.entity_id())
+                {
+                    entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
                 }
-
-                if player.get_entity().can_start_riding().await {
-                    let world = player.world();
-                    if let Some(vehicle) = world.get_entity_by_id(entity.entity_id)
-                        && let Some(passenger) = world.get_player_by_id(player.entity_id())
-                    {
-                        entity
-                            .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                            .await;
-                    }
-                }
-                return true;
             }
+            return true;
+        }
 
-            self.animal_interact(player, item_stack, self.ambient_sound())
-                .await
-        })
+        self.animal_interact(player, item_stack, self.ambient_sound())
     }
 
     fn is_saddled(&self) -> bool {

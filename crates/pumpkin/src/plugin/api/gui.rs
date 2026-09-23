@@ -3,9 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use pumpkin_data::{item_stack::ItemStack, screen::WindowType};
-use pumpkin_inventory::screen_handler::{
-    InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
-};
+use pumpkin_inventory::screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour};
 use pumpkin_inventory::slot::NormalSlot;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
@@ -73,15 +71,13 @@ impl Inventory for PluginInventory {
         })
     }
 
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut slots = self.slots.write().await;
-            if slot < slots.len() && !slots[slot].is_empty() && amount > 0 {
-                slots[slot].split(amount)
-            } else {
-                ItemStack::EMPTY.clone()
-            }
-        })
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
+        let mut slots = self.slots.write().await;
+        if slot < slots.len() && !slots[slot].is_empty() && amount > 0 {
+            slots[slot].split(amount)
+        } else {
+            ItemStack::EMPTY.clone()
+        }
     }
 
     fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
@@ -93,13 +89,9 @@ impl Inventory for PluginInventory {
         })
     }
 
-    fn on_open(&self) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {})
-    }
+    fn on_open(&self) {}
 
-    fn on_close(&self) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {})
-    }
+    fn on_close(&self) {}
 
     fn as_any(&self) -> &dyn Any {
         self
@@ -139,11 +131,9 @@ impl PluginScreenHandler {
 }
 
 impl ScreenHandler for PluginScreenHandler {
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            self.inventory.on_close().await;
-        })
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        self.inventory.on_close();
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -162,11 +152,7 @@ impl ScreenHandler for PluginScreenHandler {
         &mut self.behaviour
     }
 
-    fn quick_move<'a>(
-        &'a mut self,
-        _player: &'a dyn InventoryPlayer,
-        _slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move { ItemStack::EMPTY.clone() })
+    fn quick_move(&mut self, _player: &dyn InventoryPlayer, _slot_index: i32) -> ItemStack {
+        ItemStack::EMPTY.clone()
     }
 }

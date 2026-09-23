@@ -6,19 +6,17 @@ use pumpkin_util::math::position::BlockPos;
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::{
     array::from_fn,
     sync::{Arc, Mutex as StdMutex},
 };
-use tokio::sync::RwLock;
 
 use crate::block::entities::BlockEntity;
-use crate::block::viewer::{
-    ViewerCountListener, ViewerCountTracker, ViewerCountTrackerExt, ViewerFuture,
-};
+use crate::block::viewer::{ViewerCountListener, ViewerCountTracker, ViewerCountTrackerExt};
 use crate::world::World;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
+use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 
 pub struct ShulkerBoxBlockEntity {
     pub position: BlockPos,
@@ -83,36 +81,28 @@ impl BlockEntity for ShulkerBoxBlockEntity {
         shulker_box
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // `ShulkerBoxBlockEntity.saveAdditional` (`ShulkerBoxBlockEntity.java:208-212`)
-            // preserves deferred loot metadata and only writes Items after loot is unpacked.
-            let loot_table = self
-                .loot_table
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
-            if let Some(loot_table) = loot_table {
-                nbt.put_string("LootTable", loot_table);
-                if self.loot_table_seed != 0 {
-                    nbt.put_long("LootTableSeed", self.loot_table_seed);
-                }
-            } else {
-                self.write_inventory_nbt(nbt, true).await;
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        // `ShulkerBoxBlockEntity.saveAdditional` (`ShulkerBoxBlockEntity.java:208-212`)
+        // preserves deferred loot metadata and only writes Items after loot is unpacked.
+        let loot_table = self
+            .loot_table
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(loot_table) = loot_table {
+            nbt.put_string("LootTable", loot_table);
+            if self.loot_table_seed != 0 {
+                nbt.put_long("LootTableSeed", self.loot_table_seed);
             }
-        })
+        } else {
+            self.write_inventory_nbt(nbt, true);
+        }
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.tick_animation();
-            self.viewers
-                .update_viewer_count::<Self>(self, world, &self.position)
-                .await;
-        })
+    fn tick(&self, world: &Arc<World>) {
+        self.tick_animation();
+        self.viewers
+            .update_viewer_count::<Self>(self, world, &self.position);
     }
 
     fn on_block_replaced<'a>(
@@ -165,51 +155,29 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 }
 
 impl ViewerCountListener for ShulkerBoxBlockEntity {
-    fn on_container_open<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        position: &'a BlockPos,
-    ) -> ViewerFuture<'a, ()> {
-        Box::pin(async move {
-            Self::play_sound(world, position, 1);
-            // TODO: this.world.emitGameEvent(player, GameEvent.CONTAINER_OPEN, this.pos);
-        })
+    fn on_container_open(&self, world: &Arc<World>, position: &BlockPos) {
+        Self::play_sound(world, position, 1);
+        // TODO: this.world.emitGameEvent(player, GameEvent.CONTAINER_OPEN, this.pos);
     }
 
-    fn on_container_close<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        position: &'a BlockPos,
-    ) -> ViewerFuture<'a, ()> {
-        Box::pin(async move {
-            Self::play_sound(world, position, 0);
-            // TODO: this.world.emitGameEvent(player, GameEvent.CONTAINER_CLOSE, this.pos);
-        })
+    fn on_container_close(&self, world: &Arc<World>, position: &BlockPos) {
+        Self::play_sound(world, position, 0);
+        // TODO: this.world.emitGameEvent(player, GameEvent.CONTAINER_CLOSE, this.pos);
     }
 
-    fn on_viewer_count_update<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        position: &'a BlockPos,
-        _old: u16,
-        new: u16,
-    ) -> ViewerFuture<'a, ()> {
-        Box::pin(async move {
-            // `ShulkerBoxBlockEntity.triggerEvent` (`ShulkerBoxBlockEntity.java:140-151`) starts
-            // opening at one viewer and closing at zero viewers.
-            self.animation_status.store(
-                if new == 0 {
-                    AnimationStatus::Closing as u8
-                } else {
-                    AnimationStatus::Opening as u8
-                },
-                Ordering::Relaxed,
-            );
-            self.animation_ticks.store(0, Ordering::Relaxed);
-            world
-                .add_synced_block_event(*position, Self::OPEN_ANIMATION_EVENT_TYPE, new as u8)
-                .await;
-        })
+    fn on_viewer_count_update(&self, world: &Arc<World>, position: &BlockPos, _old: u16, new: u16) {
+        // `ShulkerBoxBlockEntity.triggerEvent` (`ShulkerBoxBlockEntity.java:140-151`) starts
+        // opening at one viewer and closing at zero viewers.
+        self.animation_status.store(
+            if new == 0 {
+                AnimationStatus::Closing as u8
+            } else {
+                AnimationStatus::Opening as u8
+            },
+            Ordering::Relaxed,
+        );
+        self.animation_ticks.store(0, Ordering::Relaxed);
+        world.add_synced_block_event(*position, Self::OPEN_ANIMATION_EVENT_TYPE, new as u8);
     }
 }
 
@@ -310,69 +278,70 @@ impl Inventory for ShulkerBoxBlockEntity {
         Self::INVENTORY_SIZE
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move {
-            let items = self.items.read().await;
-            items.iter().all(ItemStack::is_empty)
-        })
+    fn is_empty(&self) -> bool {
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items.iter().all(ItemStack::is_empty)
     }
 
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let items = self.items.read().await;
-            items[slot].clone()
-        })
+    fn get_stack(&self, slot: usize) -> ItemStack {
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot].clone()
     }
 
-    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
-            self.mark_dirty();
-            removed
-        })
+    fn remove_stack(&self, slot: usize) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
+        self.mark_dirty();
+        removed
     }
 
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            let res = if !items[slot].is_empty() && amount > 0 {
-                items[slot].split(amount)
-            } else {
-                ItemStack::EMPTY.clone()
-            };
-            self.mark_dirty();
-            res
-        })
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let res = if !items[slot].is_empty() && amount > 0 {
+            items[slot].split(amount)
+        } else {
+            ItemStack::EMPTY.clone()
+        };
+        self.mark_dirty();
+        res
     }
 
-    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            items[slot] = stack;
-            self.mark_dirty();
-        })
+    fn set_stack(&self, slot: usize, stack: ItemStack) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot] = stack;
+        self.mark_dirty();
     }
 
-    fn on_open(&self) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            self.viewers.open_container();
-        })
+    fn on_open(&self) {
+        self.viewers.open_container();
     }
 
-    fn on_close(&self) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            self.viewers.close_container();
-        })
+    fn on_close(&self) {
+        self.viewers.close_container();
     }
 
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         _slot: usize,
-        stack: &'a ItemStack,
+        stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move { !is_shulker_box(stack) })
+    ) -> bool {
+        !is_shulker_box(stack)
     }
 
     fn mark_dirty(&self) {
@@ -393,12 +362,13 @@ fn is_shulker_box(stack: &ItemStack) -> bool {
 }
 
 impl Clearable for ShulkerBoxBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            items.fill_with(|| ItemStack::EMPTY.clone());
-            self.mark_dirty();
-        })
+    fn clear(&self) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items.fill_with(|| ItemStack::EMPTY.clone());
+        self.mark_dirty();
     }
 }
 
@@ -434,7 +404,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deferred_loot_table_round_trips_without_item_payload() {
+    fn deferred_loot_table_round_trips_without_item_payload() {
         // `ShulkerBoxBlockEntity.loadFromTag`/`saveAdditional`
         // (`ShulkerBoxBlockEntity.java:202-219,208-212`) preserve deferred loot instead of
         // loading or saving an ordinary Items list.
@@ -446,7 +416,7 @@ mod tests {
         assert!(entity.has_pending_loot_table());
 
         let mut saved = NbtCompound::new();
-        entity.write_nbt(&mut saved).await;
+        entity.write_nbt(&mut saved);
         assert_eq!(
             saved.get_string("LootTable"),
             Some("minecraft:chests/simple_dungeon")

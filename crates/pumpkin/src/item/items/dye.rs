@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::block::entities::{
@@ -33,41 +32,34 @@ impl ItemBehaviour for DyeItem {
 
     // Vanilla DyeItem.java#interactLivingEntity: only sheep, only alive, only unsheared,
     // no-op (no consume) if already the target color.
-    fn use_on_entity<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
-        entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let Some(sheep) = entity.cast_any().downcast_ref::<SheepEntity>() else {
-                return;
-            };
-            // DyeItem.java:21 requires `sheep.isAlive()`, which is LivingEntity.isAlive:
-            // not removed AND health above zero. A dying sheep is not dyeable.
-            if entity.get_entity().is_removed()
-                || sheep.mob_entity.living_entity.health.load() <= 0.0
-                || sheep.is_sheared()
-            {
-                return;
-            }
-            let Some(color_name) = item.item.registry_key.strip_suffix("_dye") else {
-                return;
-            };
-            let new_color = DyeColor::from(color_name) as u8;
-            if new_color == sheep.get_color() {
-                return;
-            }
+    fn use_on_entity(&self, item: &mut ItemStack, player: &Player, entity: Arc<dyn EntityBase>) {
+        let Some(sheep) = entity.cast_any().downcast_ref::<SheepEntity>() else {
+            return;
+        };
+        // DyeItem.java:21 requires `sheep.isAlive()`, which is LivingEntity.isAlive:
+        // not removed AND health above zero. A dying sheep is not dyeable.
+        if entity.get_entity().is_removed()
+            || sheep.mob_entity.living_entity.health.load() <= 0.0
+            || sheep.is_sheared()
+        {
+            return;
+        }
+        let Some(color_name) = item.item.registry_key.strip_suffix("_dye") else {
+            return;
+        };
+        let new_color = DyeColor::from(color_name) as u8;
+        if new_color == sheep.get_color() {
+            return;
+        }
 
-            let world = entity.get_entity().world.load();
-            world.play_sound(
-                Sound::ItemDyeUse,
-                SoundCategory::Players,
-                &entity.get_entity().pos.load(),
-            );
-            sheep.set_color(new_color);
-            item.decrement_unless_creative(player.gamemode.load(), 1);
-        })
+        let world = entity.get_entity().world.load();
+        world.play_sound(
+            Sound::ItemDyeUse,
+            SoundCategory::Players,
+            &entity.get_entity().pos.load(),
+        );
+        sheep.set_color(new_color);
+        item.decrement_unless_creative(player.gamemode.load(), 1);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

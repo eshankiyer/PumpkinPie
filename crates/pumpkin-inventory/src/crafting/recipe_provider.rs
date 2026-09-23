@@ -1,8 +1,7 @@
-use crate::slot::BoxFuture;
 use pumpkin_protocol::codec::recipe::DynamicRecipe;
 
 pub trait RecipeProvider: Send + Sync {
-    fn get_dynamic_recipes(&self) -> BoxFuture<'_, Vec<DynamicRecipe>>;
+    fn get_dynamic_recipes(&self) -> Vec<DynamicRecipe>;
 }
 
 pub enum GenericRecipe<'a> {

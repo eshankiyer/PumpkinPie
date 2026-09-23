@@ -9,7 +9,7 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use super::interact_with_door::InteractWithDoorGoal;
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::mob::Mob;
 use crate::world::{BlockBreakingProgress, World};
 
@@ -164,130 +164,112 @@ impl Default for BreakDoorGoal {
 }
 
 impl Goal for BreakDoorGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.only_during_raid {
-                let living = &mob.get_mob_entity().living_entity;
-                if !living.has_active_raid()
-                    || mob.get_random().random_range(0..to_goal_ticks(10)) != 0
-                {
-                    return false;
-                }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.only_during_raid {
+            let living = &mob.get_mob_entity().living_entity;
+            if !living.has_active_raid() || mob.get_random().random_range(0..to_goal_ticks(10)) != 0
+            {
+                return false;
             }
+        }
 
-            let world = mob.get_entity().world.load_full();
-            if !self.find_door(mob, &world) {
-                return false;
-            }
-            let level_info = world.level_info.load();
-            if !level_info.game_rules.mob_griefing {
-                return false;
-            }
-            self.is_valid_difficulty(level_info.difficulty) && !self.is_open(&world)
-        })
+        let world = mob.get_entity().world.load_full();
+        if !self.find_door(mob, &world) {
+            return false;
+        }
+        let level_info = world.level_info.load();
+        if !level_info.game_rules.mob_griefing {
+            return false;
+        }
+        self.is_valid_difficulty(level_info.difficulty) && !self.is_open(&world)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            if self.only_during_raid && !mob_entity.living_entity.has_active_raid() {
-                return false;
-            }
-            let Some(door_pos) = self.door_pos else {
-                return false;
-            };
-            let entity = &mob_entity.living_entity.entity;
-            let world = entity.world.load_full();
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        if self.only_during_raid && !mob_entity.living_entity.has_active_raid() {
+            return false;
+        }
+        let Some(door_pos) = self.door_pos else {
+            return false;
+        };
+        let entity = &mob_entity.living_entity.entity;
+        let world = entity.world.load_full();
 
-            if self.break_time > self.get_door_break_time() || self.is_open(&world) {
-                return false;
-            }
-            // `doorPos.closerToCenterThan(mob.position(), 2.0)`: strict, 3D, block center.
-            let dist_sq = door_pos
-                .to_centered_f64()
-                .squared_distance_to_vec(&entity.pos.load());
-            if dist_sq >= 4.0 {
-                return false;
-            }
-            self.is_valid_difficulty(world.level_info.load().difficulty)
-        })
+        if self.break_time > self.get_door_break_time() || self.is_open(&world) {
+            return false;
+        }
+        // `doorPos.closerToCenterThan(mob.position(), 2.0)`: strict, 3D, block center.
+        let dist_sq = door_pos
+            .to_centered_f64()
+            .squared_distance_to_vec(&entity.pos.load());
+        if dist_sq >= 4.0 {
+            return false;
+        }
+        self.is_valid_difficulty(world.level_info.load().difficulty)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `DoorInteractGoal.start` only seeds the `passed` tracking, which
-            // `BreakDoorGoal.canContinueToUse` never consults.
-            self.break_time = 0;
-            if self.only_during_raid {
-                mob.get_mob_entity().no_action_time.store(0, Relaxed);
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        // `DoorInteractGoal.start` only seeds the `passed` tracking, which
+        // `BreakDoorGoal.canContinueToUse` never consults.
+        self.break_time = 0;
+        if self.only_during_raid {
+            mob.get_mob_entity().no_action_time.store(0, Relaxed);
+        }
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(door_pos) = self.door_pos {
-                let entity = &mob.get_mob_entity().living_entity.entity;
-                let world = entity.world.load_full();
-                world
-                    .set_block_breaking(entity, door_pos, BlockBreakingProgress::Stop)
-                    .await;
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(door_pos) = self.door_pos else {
-                return;
-            };
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(door_pos) = self.door_pos {
             let entity = &mob.get_mob_entity().living_entity.entity;
             let world = entity.world.load_full();
+            world.set_block_breaking(entity, door_pos, BlockBreakingProgress::Stop);
+        }
+    }
 
-            // `BreakDoorGoal.tick` (:62-67): 1-in-20 door-hit sound (level event 1019) plus an
-            // arm swing.
-            if mob.get_random().random_range(0..20) == 0 {
-                world.sync_world_event(WorldEvent::SoundZombieWoodenDoor, door_pos, 0);
-                mob.get_mob_entity().living_entity.swing_hand().await;
-            }
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(door_pos) = self.door_pos else {
+            return;
+        };
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let world = entity.world.load_full();
 
-            self.break_time += 1;
-            let progress =
-                (self.break_time as f32 / self.get_door_break_time() as f32 * 10.0) as i32;
-            if progress != self.last_break_progress {
-                world
-                    .set_block_breaking(
-                        entity,
-                        door_pos,
-                        BlockBreakingProgress::Update {
-                            stage: progress,
-                            speed: None,
-                        },
-                    )
-                    .await;
-                self.last_break_progress = progress;
-            }
+        // `BreakDoorGoal.tick` (:62-67): 1-in-20 door-hit sound (level event 1019) plus an
+        // arm swing.
+        if mob.get_random().random_range(0..20) == 0 {
+            world.sync_world_event(WorldEvent::SoundZombieWoodenDoor, door_pos, 0);
+            mob.get_mob_entity().living_entity.swing_hand();
+        }
 
-            if self.break_time == self.get_door_break_time()
-                && self.is_valid_difficulty(world.level_info.load().difficulty)
-            {
-                mob.break_door(door_pos).await;
-                // `level.removeBlock(doorPos, false)` (:77): a plain `setBlock` to the fluid's
-                // legacy block with flags 3, no drops and no destroy effects of its own. Doors
-                // cannot be waterlogged, so that legacy block is always air.
-                world
-                    .set_block_state(&door_pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
-                    .await;
-                world.sync_world_event(WorldEvent::SoundZombieDoorCrash, door_pos, 0);
-                // Vanilla reads the state *after* `removeBlock` for the 2001 payload (:79).
-                let state_id = world.get_block_state_id(&door_pos);
-                world.sync_world_event(
-                    WorldEvent::ParticlesDestroyBlock,
-                    door_pos,
-                    i32::from(state_id.as_u16()),
-                );
-            }
-        })
+        self.break_time += 1;
+        let progress = (self.break_time as f32 / self.get_door_break_time() as f32 * 10.0) as i32;
+        if progress != self.last_break_progress {
+            world.set_block_breaking(
+                entity,
+                door_pos,
+                BlockBreakingProgress::Update {
+                    stage: progress,
+                    speed: None,
+                },
+            );
+            self.last_break_progress = progress;
+        }
+
+        if self.break_time == self.get_door_break_time()
+            && self.is_valid_difficulty(world.level_info.load().difficulty)
+        {
+            mob.break_door(door_pos);
+            // `level.removeBlock(doorPos, false)` (:77): a plain `setBlock` to the fluid's
+            // legacy block with flags 3, no drops and no destroy effects of its own. Doors
+            // cannot be waterlogged, so that legacy block is always air.
+            world.set_block_state(&door_pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
+            world.sync_world_event(WorldEvent::SoundZombieDoorCrash, door_pos, 0);
+            // Vanilla reads the state *after* `removeBlock` for the 2001 payload (:79).
+            let state_id = world.get_block_state_id(&door_pos);
+            world.sync_world_event(
+                WorldEvent::ParticlesDestroyBlock,
+                door_pos,
+                i32::from(state_id.as_u16()),
+            );
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -1,5 +1,5 @@
 use super::escape_danger::EscapeDangerGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
 
@@ -23,37 +23,35 @@ impl Goal for PandaPanicGoal {
         true
     }
 
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
         self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let sitting = mob
-                .cast_any()
-                .downcast_ref::<PandaEntity>()
-                .is_some_and(PandaEntity::is_sitting_panda);
-            if sitting {
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .stop();
-                return false;
-            }
-            self.inner.should_continue(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let sitting = mob
+            .cast_any()
+            .downcast_ref::<PandaEntity>()
+            .is_some_and(PandaEntity::is_sitting_panda);
+        if sitting {
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
+            return false;
+        }
+        self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

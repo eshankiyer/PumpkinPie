@@ -32,7 +32,7 @@ pub async fn start_query_handler(server: Arc<Server>, query_addr: SocketAddr) {
         let mut interval = time::interval(Duration::from_secs(30));
 
         loop {
-            interval.tick().await;
+            interval.tick();
             valid_challenge_tokens_clone.write().await.clear();
         }
     });

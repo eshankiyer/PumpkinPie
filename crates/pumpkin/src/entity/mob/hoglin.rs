@@ -13,7 +13,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -226,7 +226,7 @@ impl HoglinEntity {
     /// `BehaviorUtils.getNearestTarget` decides. The 200-tick expiry vanilla puts on the
     /// memory (`setAttackTarget`, L208-213) has no equivalent here; the target goals
     /// re-validate their target every tick, which bounds stale targets instead.
-    async fn broadcast_attack_target(&self, target: &Arc<dyn EntityBase>) {
+    fn broadcast_attack_target(&self, target: &Arc<dyn EntityBase>) {
         for hoglin in self.nearby_adult_hoglins() {
             let Some(hoglin_mob) = hoglin.get_mob() else {
                 continue;
@@ -242,7 +242,12 @@ impl HoglinEntity {
 
             let pos = hoglin_mob.get_mob_entity().living_entity.entity.pos.load();
             let new_dist_sq = pos.squared_distance_to_vec(&target.get_entity().pos.load());
-            let current = hoglin_mob.get_mob_entity().target.lock().await.clone();
+            let current = hoglin_mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
             if let Some(current) = current.as_ref() {
                 let current_dist_sq = pos.squared_distance_to_vec(&current.get_entity().pos.load());
                 if current_dist_sq <= new_dist_sq {
@@ -250,7 +255,7 @@ impl HoglinEntity {
                 }
             }
 
-            hoglin_mob.set_mob_target(Some(target.clone())).await;
+            hoglin_mob.set_mob_target(Some(target.clone()));
         }
     }
 
@@ -265,7 +270,7 @@ impl HoglinEntity {
     /// hoglin currently attacking that same piglin, which hands the fight back to the
     /// existing flee-from-piglin goal. Any other gore victim is broadcast as an attack
     /// target for the pack to pile onto.
-    async fn on_hit_target(&self, target: &dyn EntityBase) {
+    fn on_hit_target(&self, target: &dyn EntityBase) {
         if !self.is_adult() {
             return;
         }
@@ -273,7 +278,7 @@ impl HoglinEntity {
         if target.get_entity().entity_type.id == EntityType::PIGLIN.id
             && self.piglins_outnumber_hoglins()
         {
-            self.set_mob_target(None).await;
+            self.set_mob_target(None);
             let target_id = target.get_entity().entity_id;
             for hoglin in self.nearby_adult_hoglins() {
                 let Some(hoglin_mob) = hoglin.get_mob() else {
@@ -283,11 +288,11 @@ impl HoglinEntity {
                     .get_mob_entity()
                     .target
                     .lock()
-                    .await
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .as_ref()
                     .is_some_and(|t| t.get_entity().entity_id == target_id);
                 if same_target {
-                    hoglin_mob.set_mob_target(None).await;
+                    hoglin_mob.set_mob_target(None);
                 }
             }
         } else {
@@ -295,7 +300,7 @@ impl HoglinEntity {
             let Some(target_arc) = world.get_entity_by_id(target.get_entity().entity_id) else {
                 return;
             };
-            self.broadcast_attack_target(&target_arc).await;
+            self.broadcast_attack_target(&target_arc);
         }
     }
 }
@@ -304,26 +309,22 @@ impl NBTStorage for HoglinEntity {
     /// `Hoglin.addAdditionalSaveData` (`Hoglin.java:273-277`). `CannotBeHunted`
     /// (`Hoglin.java:275`) is not persisted: nothing in this codebase sets it, because the
     /// piglin hunting behaviour it gates is not ported (see `PiglinAi.StartHuntingHoglin`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.zombification.write_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.zombification.write_nbt(nbt);
     }
 
     /// `Hoglin.readAdditionalSaveData` (`Hoglin.java:280-285`).
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.zombification.read_nbt(nbt);
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::hoglin::DATA_IMMUNE_TO_ZOMBIFICATION,
-                    self.zombification.is_immune(),
-                )],
-                None,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.zombification.read_nbt(nbt);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::hoglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+                self.zombification.is_immune(),
+            )],
+            None,
+        );
     }
 }
 
@@ -343,61 +344,60 @@ impl Mob for HoglinEntity {
     /// piglin's baby-flee branch was skipped (`PiglinEntity::on_damage`) -- no way to hand
     /// `AvoidEntityGoal` an explicit target -- so they keep the pacification reset but do
     /// not switch behaviour. Adults run `maybeRetaliate` (L195-206).
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(source) = source else {
-                return;
-            };
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        let Some(source) = source else {
+            return;
+        };
 
-            self.pacify_ticks.store(0, Relaxed);
+        self.pacify_ticks.store(0, Relaxed);
 
-            if !self.is_adult() {
-                return;
-            }
+        if !self.is_adult() {
+            return;
+        }
 
-            // maybeRetaliate (L195-206). L196's guard (`!isActive(AVOID)` or the attacker
-            // is not a piglin) has no observable activity to test in the flattened model,
-            // so retaliation can preempt a flee; the remaining guards still apply.
-            if source.get_entity().entity_type.id == EntityType::HOGLIN.id {
-                return; // L197
-            }
+        // maybeRetaliate (L195-206). L196's guard (`!isActive(AVOID)` or the attacker
+        // is not a piglin) has no observable activity to test in the flattened model,
+        // so retaliation can preempt a flee; the remaining guards still apply.
+        if source.get_entity().entity_type.id == EntityType::HOGLIN.id {
+            return; // L197
+        }
 
-            let entity = &self.mob_entity.living_entity.entity;
-            let pos = entity.pos.load();
-            let source_pos = source.get_entity().pos.load();
+        let entity = &self.mob_entity.living_entity.entity;
+        let pos = entity.pos.load();
+        let source_pos = source.get_entity().pos.load();
 
-            // L198: don't switch away from a current target already meaningfully closer
-            // than the attacker.
-            let source_dist_sq = pos.squared_distance_to_vec(&source_pos);
-            let current = self.mob_entity.target.lock().await.clone();
-            if let Some(current) = current.as_ref() {
-                let current_dist = pos
-                    .squared_distance_to_vec(&current.get_entity().pos.load())
-                    .sqrt();
-                if source_dist_sq.sqrt() > current_dist + RETALIATE_DISTANCE_MARGIN {
-                    return;
-                }
-            }
-
-            // L199: `Sensor.isEntityAttackable` ≈ `Mob.can_attack`.
-            if !self.can_attack(source.get_entity()) {
+        // L198: don't switch away from a current target already meaningfully closer
+        // than the attacker.
+        let source_dist_sq = pos.squared_distance_to_vec(&source_pos);
+        let current = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(current) = current.as_ref() {
+            let current_dist = pos
+                .squared_distance_to_vec(&current.get_entity().pos.load())
+                .sqrt();
+            if source_dist_sq.sqrt() > current_dist + RETALIATE_DISTANCE_MARGIN {
                 return;
             }
+        }
 
-            let world = entity.world.load();
-            let Some(source_arc) = world.get_entity_by_id(source.get_entity().entity_id) else {
-                return;
-            };
-            // L200: `setAttackTarget` stores with a 200-tick expiry; Pumpkin targets do
-            // not expire, and the target goals re-validate every tick instead.
-            self.set_mob_target(Some(source_arc.clone())).await;
-            // L201: `broadcastAttackTarget`.
-            self.broadcast_attack_target(&source_arc).await;
-        })
+        // L199: `Sensor.isEntityAttackable` ≈ `Mob.can_attack`.
+        if !self.can_attack(source.get_entity()) {
+            return;
+        }
+
+        let world = entity.world.load();
+        let Some(source_arc) = world.get_entity_by_id(source.get_entity().entity_id) else {
+            return;
+        };
+        // L200: `setAttackTarget` stores with a 200-tick expiry; Pumpkin targets do
+        // not expire, and the target goals re-validate every tick instead.
+        self.set_mob_target(Some(source_arc.clone()));
+        // L201: `broadcastAttackTarget`.
+        self.broadcast_attack_target(&source_arc);
     }
 
     /// `Hoglin.doHurtTarget` (`Hoglin.java:105-115`): the swing-animation event and
@@ -405,17 +405,15 @@ impl Mob for HoglinEntity {
     /// are the `HOGLIN_ATTACK` sound (L108), the `HoglinAi.onHitTarget` coordination hook
     /// (L110), and then the `HoglinBase.hurtAndThrowTarget` damage roll/knockback, which
     /// replaces the generic flat-damage melee path.
-    fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            entity.world.load().play_sound(
-                Sound::EntityHoglinAttack,
-                SoundCategory::Hostile,
-                &entity.pos.load(),
-            );
-            self.on_hit_target(target).await;
-            hoglin_gore::try_gore_attack(self, target).await
-        })
+    fn try_attack(&self, target: &dyn EntityBase) -> bool {
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.world.load().play_sound(
+            Sound::EntityHoglinAttack,
+            SoundCategory::Hostile,
+            &entity.pos.load(),
+        );
+        self.on_hit_target(target);
+        hoglin_gore::try_gore_attack(self, target)
     }
 
     /// `Hoglin.getAmbientSound` (`Hoglin.java:331-333`) delegates straight to
@@ -441,49 +439,52 @@ impl Mob for HoglinEntity {
     /// `HoglinSpecificSensor.findNearestRepellent` + `BecomePassiveIfMemoryPresent`:
     /// re-scans for a nearby repellent block every 20 ticks, refreshing the pacify
     /// timer and clearing the current attack target when one is found.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `Hoglin.customServerAiStep` (`Hoglin.java:149-157`). Unlike `AbstractPiglin`,
-            // the hoglin plays its converted sound unconditionally -- there is no
-            // peaceful-difficulty guard on this branch.
-            if self.zombification.tick(&self.mob_entity) {
-                zombification::play_converted_sound(
-                    &self.mob_entity,
-                    Sound::EntityHoglinConvertedToZombified,
-                );
-                zombification::convert_to(
-                    &self.mob_entity,
-                    &EntityType::ZOGLIN,
-                    true,
-                    ZoglinEntity::new,
-                )
-                .await;
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        // `Hoglin.customServerAiStep` (`Hoglin.java:149-157`). Unlike `AbstractPiglin`,
+        // the hoglin plays its converted sound unconditionally -- there is no
+        // peaceful-difficulty guard on this branch.
+        if self.zombification.tick(&self.mob_entity) {
+            zombification::play_converted_sound(
+                &self.mob_entity,
+                Sound::EntityHoglinConvertedToZombified,
+            );
+            zombification::convert_to(
+                &self.mob_entity,
+                &EntityType::ZOGLIN,
+                true,
+                ZoglinEntity::new,
+            );
+            return;
+        }
 
-            // Sampled once per tick for `get_ambient_sound`'s FIGHT branch; see the
-            // field doc for why the sample is not read inline.
-            self.has_attack_target
-                .store(self.mob_entity.target.lock().await.is_some(), Relaxed);
+        // Sampled once per tick for `get_ambient_sound`'s FIGHT branch; see the
+        // field doc for why the sample is not read inline.
+        self.has_attack_target.store(
+            self.mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some(),
+            Relaxed,
+        );
 
-            let countdown = self.repellent_scan_countdown.fetch_sub(1, Relaxed);
-            if countdown > 0 {
-                if self.pacify_ticks.load(Relaxed) > 0 {
-                    self.pacify_ticks.fetch_sub(1, Relaxed);
-                }
-                return;
-            }
-            self.repellent_scan_countdown
-                .store(REPELLENT_SCAN_INTERVAL_TICKS, Relaxed);
-
-            let pos = self.mob_entity.living_entity.entity.block_pos.load();
-            let world = self.mob_entity.living_entity.entity.world.load();
-            if repellent_nearby(&world, pos) {
-                self.pacify_ticks.store(REPELLENT_PACIFY_TICKS, Relaxed);
-                self.set_mob_target(None).await;
-            } else if self.pacify_ticks.load(Relaxed) > 0 {
+        let countdown = self.repellent_scan_countdown.fetch_sub(1, Relaxed);
+        if countdown > 0 {
+            if self.pacify_ticks.load(Relaxed) > 0 {
                 self.pacify_ticks.fetch_sub(1, Relaxed);
             }
-        })
+            return;
+        }
+        self.repellent_scan_countdown
+            .store(REPELLENT_SCAN_INTERVAL_TICKS, Relaxed);
+
+        let pos = self.mob_entity.living_entity.entity.block_pos.load();
+        let world = self.mob_entity.living_entity.entity.world.load();
+        if repellent_nearby(&world, pos) {
+            self.pacify_ticks.store(REPELLENT_PACIFY_TICKS, Relaxed);
+            self.set_mob_target(None);
+        } else if self.pacify_ticks.load(Relaxed) > 0 {
+            self.pacify_ticks.fetch_sub(1, Relaxed);
+        }
     }
 }

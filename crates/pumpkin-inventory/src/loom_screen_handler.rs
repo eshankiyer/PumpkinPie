@@ -28,10 +28,9 @@ use pumpkin_world::inventory::SimpleInventory;
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
-    InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
-    offer_or_drop_stack,
+    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack,
 };
-use crate::slot::{BoxFuture, Slot};
+use crate::slot::Slot;
 
 // `LoomMenu.java:27-30,64-88,211-245` fixes the four input/result slots and the two
 // player-inventory ranges used by quick-move routing.
@@ -131,105 +130,74 @@ impl ScreenHandler for LoomScreenHandler {
         self
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            for i in 0..3 {
-                let stack = self.input_inventory.remove_stack(i).await;
-                if !stack.is_empty() {
-                    offer_or_drop_stack(player, stack).await;
-                }
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        for i in 0..3 {
+            let stack = self.input_inventory.remove_stack(i);
+            if !stack.is_empty() {
+                offer_or_drop_stack(player, stack);
             }
-        })
+        }
     }
 
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            let mut stack_left = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack_left = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
 
-            let Some(slot) = slot else {
-                return stack_left;
-            };
-            if !slot.has_stack().await {
-                return stack_left;
+        let Some(slot) = slot else {
+            return stack_left;
+        };
+        if !slot.has_stack() {
+            return stack_left;
+        }
+
+        let mut item = slot.get_cloned_stack();
+        stack_left = item.clone();
+
+        if slot_index == RESULT_SLOT {
+            if !self.insert_item(&mut item, INV_SLOT_START, USE_ROW_SLOT_END, true) {
+                return ItemStack::EMPTY.clone();
             }
-
-            let mut item = slot.get_cloned_stack().await;
-            stack_left = item.clone();
-
-            if slot_index == RESULT_SLOT {
-                if !self
-                    .insert_item(&mut item, INV_SLOT_START, USE_ROW_SLOT_END, true)
-                    .await
-                {
+            slot.on_quick_move_crafted(item.clone(), stack_left.clone());
+        } else if slot_index != BANNER_SLOT && slot_index != DYE_SLOT && slot_index != PATTERN_SLOT
+        {
+            if is_banner(&item) {
+                if !self.insert_item(&mut item, BANNER_SLOT, BANNER_SLOT + 1, false) {
                     return ItemStack::EMPTY.clone();
                 }
-                slot.on_quick_move_crafted(item.clone(), stack_left.clone())
-                    .await;
-            } else if slot_index != BANNER_SLOT
-                && slot_index != DYE_SLOT
-                && slot_index != PATTERN_SLOT
-            {
-                if is_banner(&item) {
-                    if !self
-                        .insert_item(&mut item, BANNER_SLOT, BANNER_SLOT + 1, false)
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if is_dye_item(&item) {
-                    if !self
-                        .insert_item(&mut item, DYE_SLOT, DYE_SLOT + 1, false)
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if is_pattern_item(&item) {
-                    if !self
-                        .insert_item(&mut item, PATTERN_SLOT, PATTERN_SLOT + 1, false)
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if (INV_SLOT_START..INV_SLOT_END).contains(&slot_index) {
-                    if !self
-                        .insert_item(&mut item, USE_ROW_SLOT_START, USE_ROW_SLOT_END, false)
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if (USE_ROW_SLOT_START..USE_ROW_SLOT_END).contains(&slot_index)
-                    && !self
-                        .insert_item(&mut item, INV_SLOT_START, INV_SLOT_END, false)
-                        .await
-                {
+            } else if is_dye_item(&item) {
+                if !self.insert_item(&mut item, DYE_SLOT, DYE_SLOT + 1, false) {
                     return ItemStack::EMPTY.clone();
                 }
-            } else if !self
-                .insert_item(&mut item, INV_SLOT_START, USE_ROW_SLOT_END, false)
-                .await
+            } else if is_pattern_item(&item) {
+                if !self.insert_item(&mut item, PATTERN_SLOT, PATTERN_SLOT + 1, false) {
+                    return ItemStack::EMPTY.clone();
+                }
+            } else if (INV_SLOT_START..INV_SLOT_END).contains(&slot_index) {
+                if !self.insert_item(&mut item, USE_ROW_SLOT_START, USE_ROW_SLOT_END, false) {
+                    return ItemStack::EMPTY.clone();
+                }
+            } else if (USE_ROW_SLOT_START..USE_ROW_SLOT_END).contains(&slot_index)
+                && !self.insert_item(&mut item, INV_SLOT_START, INV_SLOT_END, false)
             {
                 return ItemStack::EMPTY.clone();
             }
+        } else if !self.insert_item(&mut item, INV_SLOT_START, USE_ROW_SLOT_END, false) {
+            return ItemStack::EMPTY.clone();
+        }
 
-            if item.is_empty() {
-                slot.set_stack(ItemStack::EMPTY.clone()).await;
-            } else {
-                slot.mark_dirty().await;
-            }
+        if item.is_empty() {
+            slot.set_stack(ItemStack::EMPTY.clone());
+        } else {
+            slot.mark_dirty();
+        }
 
-            if item.item_count == stack_left.item_count {
-                return ItemStack::EMPTY.clone();
-            }
+        if item.item_count == stack_left.item_count {
+            return ItemStack::EMPTY.clone();
+        }
 
-            slot.on_take_item(player, &item).await;
-            stack_left
-        })
+        slot.on_take_item(player, &item);
+        stack_left
     }
 }
 
@@ -266,14 +234,12 @@ impl Slot for LoomInputSlot {
             .store(id as u8, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn can_insert<'a>(&'a self, stack: &'a ItemStack) -> BoxFuture<'a, bool> {
-        Box::pin(async move { (self.predicate)(stack) })
+    fn can_insert(&self, stack: &ItemStack) -> bool {
+        (self.predicate)(stack)
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -309,14 +275,12 @@ impl Slot for LoomResultSlot {
             .store(id as u8, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn can_insert(&self, _stack: &ItemStack) -> BoxFuture<'_, bool> {
-        Box::pin(async move { false })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -325,7 +289,7 @@ mod tests {
     use super::*;
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use pumpkin_data::item::Item;
-    use tokio::sync::Mutex as TokioMutex;
+    use std::sync::Mutex as TokioMutex;
 
     fn handler() -> LoomScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -357,25 +321,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn banner_slot_rejects_non_banner_items() {
+    fn banner_slot_rejects_non_banner_items() {
         let handler = handler();
         let slot = handler.get_behaviour().slots[0].clone();
-        assert!(!slot.can_insert(&ItemStack::new(1, &Item::WHITE_DYE)).await);
-        assert!(
-            slot.can_insert(&ItemStack::new(1, &Item::WHITE_BANNER))
-                .await
-        );
+        assert!(!slot.can_insert(&ItemStack::new(1, &Item::WHITE_DYE)));
+        assert!(slot.can_insert(&ItemStack::new(1, &Item::WHITE_BANNER)));
     }
 
     #[tokio::test]
-    async fn result_slot_never_accepts_items() {
+    fn result_slot_never_accepts_items() {
         let handler = handler();
         let result_slot = handler.get_behaviour().slots[3].clone();
-        assert!(
-            !result_slot
-                .can_insert(&ItemStack::new(1, &Item::WHITE_BANNER))
-                .await
-        );
+        assert!(!result_slot.can_insert(&ItemStack::new(1, &Item::WHITE_BANNER)));
     }
 
     #[test]

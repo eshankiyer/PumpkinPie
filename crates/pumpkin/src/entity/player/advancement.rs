@@ -264,11 +264,11 @@ impl PlayerAdvancement {
         self.progress_changed.clear();
         self.is_first_packet = true;
         self.last_selected_tab = None;
-        self.load().await
+        self.load()
     }
 
     /// Saves the player's advancement progress to disk as JSON.
-    pub async fn save(&self) -> Result<(), AdvancementDataError> {
+    pub fn save(&self) -> Result<(), AdvancementDataError> {
         if !self.is_save_enabled() {
             return Ok(());
         }
@@ -289,7 +289,7 @@ impl PlayerAdvancement {
     }
 
     /// Loads the player's advancement progress from disk.
-    pub async fn load(&mut self) -> Result<(), AdvancementDataError> {
+    pub fn load(&mut self) -> Result<(), AdvancementDataError> {
         if !self.path.exists() || !self.is_save_enabled() {
             return Ok(());
         }
@@ -422,10 +422,10 @@ impl PlayerAdvancement {
     /// still unimplemented.
     pub fn grant_reward(player: Arc<Player>, reward: &'static AdvancementReward) {
         tokio::spawn(async move {
-            player.add_experience_points(reward.experience).await;
+            player.add_experience_points(reward.experience);
             if !reward.recipes.is_empty() {
                 let ids: Vec<String> = reward.recipes.iter().map(|id| (*id).to_string()).collect();
-                player.award_recipes_by_key(&ids).await;
+                player.award_recipes_by_key(&ids);
             }
         });
     }
@@ -452,7 +452,7 @@ impl PlayerAdvancement {
                                 player_c,
                                 adv_id,
                             );
-                        server.plugin_manager.fire(&server, &mut event).await;
+                        server.plugin_manager.fire_blocking(&server, &mut event);
                     }
                 });
                 Self::grant_reward(player.clone(), advancement.reward);
@@ -466,7 +466,7 @@ impl PlayerAdvancement {
                         .show_advancement_messages
                 {
                     tokio::spawn(async move {
-                        let player_name = player.get_display_name().await;
+                        let player_name = player.get_display_name();
                         let je_component = TextComponent::translate(
                             display.frame_type.get_translation(),
                             [player_name.clone(), advancement.name()],
@@ -481,10 +481,7 @@ impl PlayerAdvancement {
                             ],
                         );
 
-                        player
-                            .world()
-                            .broadcast_editioned(&je_packet, &be_packet)
-                            .await;
+                        player.world().broadcast_editioned(&je_packet, &be_packet);
                     });
                 }
             }
@@ -645,7 +642,7 @@ mod tests {
         };
 
         // Save should succeed
-        assert!(pa.save().await.is_ok(), "Save should succeed");
+        assert!(pa.save().is_ok(), "Save should succeed");
 
         // File should exist
         assert!(pa.path.exists(), "Saved file should exist");
@@ -673,7 +670,7 @@ mod tests {
 
         // Save should return Ok but not actually save
         assert!(
-            pa.save().await.is_ok(),
+            pa.save().is_ok(),
             "Save with disabled saving should return Ok"
         );
         assert!(
@@ -691,7 +688,7 @@ mod tests {
 
         // Load from nonexistent file should return Ok (not error)
         assert!(
-            pa.load().await.is_ok(),
+            pa.load().is_ok(),
             "Loading from nonexistent file should return Ok"
         );
         assert!(pa.progress.is_empty(), "Advancements should remain empty");
@@ -713,7 +710,7 @@ mod tests {
         std::fs::write(&pa.path, data.to_string()).unwrap();
 
         // Load the file
-        assert!(pa.load().await.is_ok(), "Load should succeed");
+        assert!(pa.load().is_ok(), "Load should succeed");
 
         // Verify the advancement was loaded
         let loaded_progress = pa.progress.get_mut_or_start_progress(adv);
@@ -738,11 +735,11 @@ mod tests {
             progress_mut.grant_progress("crafting_table");
         };
 
-        assert!(pa.save().await.is_ok(), "Save should succeed");
+        assert!(pa.save().is_ok(), "Save should succeed");
 
         // Load the saved advancements into a new instance
         let mut pa_loaded = PlayerAdvancement::new(manager, id);
-        assert!(pa_loaded.load().await.is_ok(), "Load should succeed");
+        assert!(pa_loaded.load().is_ok(), "Load should succeed");
 
         // Verify the loaded data matches the saved data
         let loaded_progress = pa_loaded.progress.get_mut_or_start_progress(adv);
@@ -782,7 +779,7 @@ mod tests {
         // Load should still succeed but skip the invalid entry
 
         assert!(
-            pa.load().await.is_ok(),
+            pa.load().is_ok(),
             "Load should succeed even with invalid IDs"
         );
         assert!(
@@ -811,7 +808,7 @@ mod tests {
             progress_mut2.grant_progress("entered_nether");
         };
 
-        assert!(pa.save().await.is_ok(), "Save should succeed");
+        assert!(pa.save().is_ok(), "Save should succeed");
 
         // Verify both were saved
         let content = std::fs::read_to_string(&pa.path).unwrap();
@@ -833,7 +830,7 @@ mod tests {
         std::fs::write(&pa.path, data.to_string()).unwrap();
 
         //try load the file
-        assert!(pa.load().await.is_ok(), "Load should succeed");
+        assert!(pa.load().is_ok(), "Load should succeed");
 
         // Verify that the advancement was not loaded
         assert!(

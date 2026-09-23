@@ -8,7 +8,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use super::drowned_util::is_bright_outside;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 
@@ -55,44 +55,38 @@ impl DrownedGoToWaterGoal {
 }
 
 impl Goal for DrownedGoToWaterGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let world = mob.get_entity().world.load();
-            if !is_bright_outside(&world) {
-                return false;
-            }
-            if mob.get_entity().touching_water.load(Relaxed) {
-                return false;
-            }
-            let Some(target) = Self::find_water_pos(mob) else {
-                return false;
-            };
-            self.target = Some(target);
-            true
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let world = mob.get_entity().world.load();
+        if !is_bright_outside(&world) {
+            return false;
+        }
+        if mob.get_entity().touching_water.load(Relaxed) {
+            return false;
+        }
+        let Some(target) = Self::find_water_pos(mob) else {
+            return false;
+        };
+        self.target = Some(target);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { !mob.get_mob_entity().navigator.lock().unwrap().is_idle() })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(target) = self.target {
-                let pos = mob.get_entity().pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap()
-                    .set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(target) = self.target {
+            let pos = mob.get_entity().pos.load();
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap()
+                .set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
     }
 
     fn controls(&self) -> Controls {

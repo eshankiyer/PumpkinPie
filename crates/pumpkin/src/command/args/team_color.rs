@@ -84,12 +84,7 @@ impl ArgumentConsumer for TeamColorArgumentConsumer {
         Box::pin(async move { result })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        input: &'a str,
-    ) -> SuggestResult<'a> {
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, input: &str) -> SuggestResult {
         let suggestions: Vec<CommandSuggestion> = TEAM_COLORS
             .iter()
             .filter(|color| color.starts_with(input))

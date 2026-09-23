@@ -22,7 +22,7 @@ impl JavaClient {
         // Vanilla `SignBlockEntity.updateSignText` only accepts the edit from the player
         // holding the edit lock (`playerWhoMayEdit`); anyone else's packet is dropped with a
         // warning. Without this check any player could rewrite any unwaxed sign's text.
-        let mut currently_editing = sign_entity.editing_player().lock().await;
+        let mut currently_editing = sign_entity.editing_player().lock();
         if *currently_editing != Some(player.gameprofile.id) {
             tracing::warn!(
                 "Player {} just tried to change non-editable sign",

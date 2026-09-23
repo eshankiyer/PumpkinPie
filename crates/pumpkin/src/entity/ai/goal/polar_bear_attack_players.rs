@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::goal::active_target::ActiveTargetGoal;
 use crate::entity::mob::{Mob, MobEntity};
 use crate::world::World;
@@ -39,36 +39,34 @@ impl PolarBearAttackPlayersGoal {
 }
 
 impl Goal for PolarBearAttackPlayersGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if mob.get_entity().age.load(Relaxed) < 0 {
-                return false;
-            }
-            if !self.inner.can_start(mob).await {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if mob.get_entity().age.load(Relaxed) < 0 {
+            return false;
+        }
+        if !self.inner.can_start(mob) {
+            return false;
+        }
 
-            let mob_entity = mob.get_mob_entity();
-            let pos = mob_entity.living_entity.entity.pos.load();
-            let world = mob_entity.living_entity.entity.world.load();
-            world.get_nearby_entities(pos, 8.0).values().any(|nearby| {
-                let other = nearby.get_entity();
-                other.entity_type == &EntityType::POLAR_BEAR
-                    && other.age.load(Relaxed) < 0
-                    && (other.pos.load().y - pos.y).abs() <= 4.0
-            })
+        let mob_entity = mob.get_mob_entity();
+        let pos = mob_entity.living_entity.entity.pos.load();
+        let world = mob_entity.living_entity.entity.world.load();
+        world.get_nearby_entities(pos, 8.0).values().any(|nearby| {
+            let other = nearby.get_entity();
+            other.entity_type == &EntityType::POLAR_BEAR
+                && other.age.load(Relaxed) < 0
+                && (other.pos.load().y - pos.y).abs() <= 4.0
         })
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 

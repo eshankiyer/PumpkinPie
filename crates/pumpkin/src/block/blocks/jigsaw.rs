@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use crate::block::entities::jigsaw_block::JigsawBlockEntity;
 use crate::block::registry::BlockActionResult;
-use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, NormalUseArgs, OnPlaceArgs, PlacedArgs,
-};
+use crate::block::{BlockBehaviour, CanPlaceAtArgs, NormalUseArgs, OnPlaceArgs, PlacedArgs};
 use crate::entity::EntityBase;
 use pumpkin_data::block_properties::{
     BlockProperties, HorizontalFacing, JigsawLikeProperties, Orientation,
@@ -115,42 +113,35 @@ impl BlockBehaviour for JigsawBlock {
         player.can_use_game_master_blocks()
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = JigsawLikeProperties::default(args.block);
-            let front = args.direction;
-            let top = if front == BlockDirection::Up || front == BlockDirection::Down {
-                horizontal_facing_to_dir(args.player.get_entity().get_horizontal_facing())
-                    .opposite()
-            } else {
-                BlockDirection::Up
-            };
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = JigsawLikeProperties::default(args.block);
+        let front = args.direction;
+        let top = if front == BlockDirection::Up || front == BlockDirection::Down {
+            horizontal_facing_to_dir(args.player.get_entity().get_horizontal_facing()).opposite()
+        } else {
+            BlockDirection::Up
+        };
 
-            props.r#orientation = Self::from_front_top(front, top);
-            props.to_state_id(args.block)
-        })
+        props.r#orientation = Self::from_front_top(front, top);
+        props.to_state_id(args.block)
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            // `JigsawBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
-            // (`JigsawBlock.java:72-74`; `Player.java:1863-1865`).
-            if !args.player.can_use_game_master_blocks() {
-                return BlockActionResult::Pass;
-            }
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::Pass;
-            };
-            args.world.update_block_entity(&block_entity);
-            BlockActionResult::SuccessServer
-        })
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        // `JigsawBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
+        // (`JigsawBlock.java:72-74`; `Player.java:1863-1865`).
+        if !args.player.can_use_game_master_blocks() {
+            return BlockActionResult::Pass;
+        }
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return BlockActionResult::Pass;
+        };
+        args.world.update_block_entity(&block_entity);
+        BlockActionResult::SuccessServer
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = JigsawBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(entity));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = JigsawBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(entity));
     }
 
     fn mirror(

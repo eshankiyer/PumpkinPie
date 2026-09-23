@@ -16,7 +16,7 @@ use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, breath_air::BreathAirGoal,
         dolphin_hurt_by_target::DolphinHurtByTargetGoal, dolphin_jump::DolphinJumpGoal,
@@ -165,7 +165,7 @@ impl DolphinEntity {
     /// `Dolphin.tick`: moistness reset in water/rain, otherwise drained by 1/tick, dealing
     /// `dryOut` damage every tick once depleted; while out of water and grounded, dolphins
     /// flop with a random horizontal impulse and upward hop.
-    async fn tick_moistness(&self) {
+    fn tick_moistness(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load();
         let block_pos = entity.block_pos.load();
@@ -175,8 +175,8 @@ impl DolphinEntity {
             f64::from(block_pos.0.z),
         );
         let in_water_or_rain = entity.touching_water.load(Relaxed)
-            || world.is_raining_at(&block_pos).await
-            || world.is_raining_at(&rain_top).await;
+            || world.is_raining_at(&block_pos)
+            || world.is_raining_at(&rain_top);
 
         if in_water_or_rain {
             if self.moistness_level.load(Relaxed) != TOTAL_MOISTNESS_LEVEL {
@@ -194,8 +194,7 @@ impl DolphinEntity {
                     None,
                     None,
                     None,
-                )
-                .await;
+                );
             }
         }
 
@@ -216,24 +215,20 @@ impl DolphinEntity {
 }
 
 impl NBTStorage for DolphinEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_bool("GotFish", self.got_fish());
-            nbt.put_int("Moistness", self.moistness_level.load(Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_bool("GotFish", self.got_fish());
+        nbt.put_int("Moistness", self.moistness_level.load(Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.got_fish
-                .store(nbt.get_bool("GotFish").unwrap_or(false), Relaxed);
-            self.moistness_level.store(
-                nbt.get_int("Moistness").unwrap_or(TOTAL_MOISTNESS_LEVEL),
-                Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.got_fish
+            .store(nbt.get_bool("GotFish").unwrap_or(false), Relaxed);
+        self.moistness_level.store(
+            nbt.get_int("Moistness").unwrap_or(TOTAL_MOISTNESS_LEVEL),
+            Relaxed,
+        );
     }
 }
 
@@ -242,41 +237,37 @@ impl Mob for DolphinEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.send_moistness(self.moistness_level.load(Relaxed));
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    tracked_data::dolphin::GOT_FISH,
-                    self.got_fish(),
-                )],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.send_moistness(self.moistness_level.load(Relaxed));
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::dolphin::GOT_FISH,
+                self.got_fish(),
+            )],
+            None,
+        );
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.mob_entity.living_entity.dead.load(Relaxed) {
-                return;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self.mob_entity.living_entity.dead.load(Relaxed) {
+            return;
+        }
+        // Dolphin.tick restores its air after super.tick and skips the moistness/flopping
+        // branch entirely when NoAI is set.
+        if self.mob_entity.is_no_ai() {
+            let max_air = self.mob_entity.living_entity.max_air_supply();
+            if self
+                .mob_entity
+                .living_entity
+                .air_supply
+                .swap(max_air, Relaxed)
+                != max_air
+            {
+                self.mob_entity.living_entity.send_air_supply();
             }
-            // Dolphin.tick restores its air after super.tick and skips the moistness/flopping
-            // branch entirely when NoAI is set.
-            if self.mob_entity.is_no_ai() {
-                let max_air = self.mob_entity.living_entity.max_air_supply();
-                if self
-                    .mob_entity
-                    .living_entity
-                    .air_supply
-                    .swap(max_air, Relaxed)
-                    != max_air
-                {
-                    self.mob_entity.living_entity.send_air_supply();
-                }
-                return;
-            }
-            self.tick_moistness().await;
-        })
+            return;
+        }
+        self.tick_moistness();
     }
 
     /// `Dolphin.mobInteract`: feeding a tagged fish item plays the eat sound and sets
@@ -284,32 +275,25 @@ impl Mob for DolphinEntity {
     /// `gotFish` in that case; `DolphinEntity` does not implement `AgeableMob` (no baby/age
     /// state is tracked for Dolphin in this pass, see the report), so that branch is not
     /// ported and every feed currently takes the adult path.
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if !item_stack.item.has_tag(&tag::Item::MINECRAFT_FISHES) {
-                return self
-                    .get_mob_entity()
-                    .mob_interact(player, item_stack, self.can_be_leashed())
-                    .await;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if !item_stack.item.has_tag(&tag::Item::MINECRAFT_FISHES) {
+            return self
+                .get_mob_entity()
+                .mob_interact(player, item_stack, self.can_be_leashed());
+        }
 
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            world.play_sound(
-                Sound::EntityDolphinEat,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        world.play_sound(
+            Sound::EntityDolphinEat,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
 
-            self.set_got_fish(true);
-            if player.gamemode.load() != pumpkin_util::GameMode::Creative {
-                item_stack.decrement(1);
-            }
-            true
-        })
+        self.set_got_fish(true);
+        if player.gamemode.load() != pumpkin_util::GameMode::Creative {
+            item_stack.decrement(1);
+        }
+        true
     }
 }

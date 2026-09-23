@@ -20,7 +20,7 @@ use pumpkin_util::random::{RandomGenerator, RandomImpl, get_seed};
 
 use crate::entity::{
     EntityBase,
-    ai::goal::{Controls, Goal, GoalFuture, breeze_util::random_point_behind_target},
+    ai::goal::{Controls, Goal, breeze_util::random_point_behind_target},
     mob::{Mob, breeze::BreezeEntity},
 };
 
@@ -59,7 +59,7 @@ impl BreezeJumpGoal {
         }
     }
 
-    async fn has_line_of_sight(mob: &dyn Mob, target: Vector3<f64>) -> bool {
+    fn has_line_of_sight(mob: &dyn Mob, target: Vector3<f64>) -> bool {
         let entity = mob.get_entity();
         entity
             .world
@@ -67,23 +67,19 @@ impl BreezeJumpGoal {
             .raycast(entity.pos.load(), target, async |block_pos, world| {
                 world.get_block_state(block_pos).is_solid()
             })
-            .await
             .is_none()
     }
 
     /// `LongJump.snapToSurface`: clip down 10 blocks for solid ground, falling back to
     /// clipping up 10 blocks if nothing is found below.
-    async fn snap_to_surface(mob: &dyn Mob, target: Vector3<f64>) -> Option<BlockPos> {
+    fn snap_to_surface(mob: &dyn Mob, target: Vector3<f64>) -> Option<BlockPos> {
         let entity = mob.get_entity();
         let world = entity.world.load_full();
 
         let below = target.sub_raw(0.0, 10.0, 0.0);
-        if let Some((hit, _)) = world
-            .raycast(target, below, async |block_pos, world| {
-                world.get_block_state(block_pos).is_solid()
-            })
-            .await
-        {
+        if let Some((hit, _)) = world.raycast(target, below, async |block_pos, world| {
+            world.get_block_state(block_pos).is_solid()
+        }) {
             return Some(hit.up());
         }
 
@@ -92,7 +88,6 @@ impl BreezeJumpGoal {
             .raycast(target, above, async |block_pos, world| {
                 world.get_block_state(block_pos).is_solid()
             })
-            .await
             .map(|(hit, _)| hit.up())
     }
 
@@ -210,216 +205,218 @@ pub fn calculate_jump_vector_for_angle(
 }
 
 impl Goal for BreezeJumpGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return false;
-            };
-            // Mutual exclusion with BreezeShootGoal, mirroring BREEZE_SHOOT's presence
-            // gating `Shoot` in and `LongJump` out.
-            if breeze.shoot_window_ticks() > 0 || breeze.jump_cooldown_ticks() > 0 {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return false;
+        };
+        // Mutual exclusion with BreezeShootGoal, mirroring BREEZE_SHOOT's presence
+        // gating `Shoot` in and `LongJump` out.
+        if breeze.shoot_window_ticks() > 0 || breeze.jump_cooldown_ticks() > 0 {
+            return false;
+        }
 
-            let entity = mob.get_entity();
-            let on_ground = entity.on_ground.load(Relaxed);
-            let touching_water = entity.touching_water.load(Relaxed);
-            if !on_ground && !touching_water {
-                return false;
-            }
+        let entity = mob.get_entity();
+        let on_ground = entity.on_ground.load(Relaxed);
+        let touching_water = entity.touching_water.load(Relaxed);
+        if !on_ground && !touching_water {
+            return false;
+        }
 
-            let Some(target) = breeze.mob_entity.target.lock().await.clone() else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
+        let Some(target) = breeze
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
 
-            let breeze_pos = entity.pos.load();
-            let target_pos = target.get_entity().pos.load();
-            let follow_range = breeze
+        let breeze_pos = entity.pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let follow_range = breeze
+            .mob_entity
+            .living_entity
+            .get_attribute_value(&Attributes::FOLLOW_RANGE);
+
+        if Self::out_of_aggro_range(breeze_pos, target_pos, follow_range) {
+            *breeze
                 .mob_entity
-                .living_entity
-                .get_attribute_value(&Attributes::FOLLOW_RANGE);
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            return false;
+        }
+        if Self::too_close_for_jump(breeze_pos, target_pos) {
+            return false;
+        }
+        if !Self::can_jump_from_current_position(mob) {
+            return false;
+        }
 
-            if Self::out_of_aggro_range(breeze_pos, target_pos, follow_range) {
-                *breeze.mob_entity.target.lock().await = None;
-                return false;
-            }
-            if Self::too_close_for_jump(breeze_pos, target_pos) {
-                return false;
-            }
-            if !Self::can_jump_from_current_position(mob) {
-                return false;
-            }
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
+        let raw_target = random_point_behind_target(
+            target_pos,
+            target.get_entity().head_yaw.load(),
+            &mut random,
+        );
+        let Some(landing) = Self::snap_to_surface(mob, raw_target) else {
+            return false;
+        };
 
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
-            let raw_target = random_point_behind_target(
-                target_pos,
-                target.get_entity().head_yaw.load(),
-                &mut random,
-            );
-            let Some(landing) = Self::snap_to_surface(mob, raw_target).await else {
-                return false;
-            };
+        let landing_center = landing.to_f64().add_raw(0.5, 0.0, 0.5);
+        let landing_above = landing_center.add_raw(0.0, 4.0, 0.0);
+        if !Self::has_line_of_sight(mob, landing_center)
+            && !Self::has_line_of_sight(mob, landing_above)
+        {
+            return false;
+        }
 
-            let landing_center = landing.to_f64().add_raw(0.5, 0.0, 0.5);
-            let landing_above = landing_center.add_raw(0.0, 4.0, 0.0);
-            if !Self::has_line_of_sight(mob, landing_center).await
-                && !Self::has_line_of_sight(mob, landing_above).await
-            {
-                return false;
-            }
-
-            self.jump_target = Some(landing);
-            true
-        })
+        self.jump_target = Some(landing);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.phase != Phase::Idle })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.phase != Phase::Idle
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.phase = Phase::Inhaling {
-                ticks_left: INHALING_DURATION_TICKS,
-            };
-            self.leaving_water = false;
-            let entity = mob.get_entity();
-            entity.set_pose(EntityPose::Inhaling);
-            let pos = entity.pos.load();
-            entity
-                .world
-                .load()
-                .play_sound(Sound::EntityBreezeCharge, SoundCategory::Hostile, &pos);
+    fn start(&mut self, mob: &dyn Mob) {
+        self.phase = Phase::Inhaling {
+            ticks_left: INHALING_DURATION_TICKS,
+        };
+        self.leaving_water = false;
+        let entity = mob.get_entity();
+        entity.set_pose(EntityPose::Inhaling);
+        let pos = entity.pos.load();
+        entity
+            .world
+            .load()
+            .play_sound(Sound::EntityBreezeCharge, SoundCategory::Hostile, &pos);
 
-            if let Some(target) = self.jump_target {
-                mob.get_mob_entity()
-                    .look_control
-                    .lock()
-                    .unwrap()
-                    .look_at_position(mob, target.to_f64().add_raw(0.5, 0.5, 0.5));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            if entity.pose.load() == EntityPose::LongJumping
-                || entity.pose.load() == EntityPose::Inhaling
-            {
-                entity.set_pose(EntityPose::Standing);
-            }
-            // `LongJump.stop` clears `discardFriction` when the behavior is interrupted
-            // (`LongJump.java:158-164`).
+        if let Some(target) = self.jump_target {
             mob.get_mob_entity()
-                .living_entity
-                .set_discard_friction(false);
-            self.phase = Phase::Idle;
-            self.jump_target = None;
-        })
+                .look_control
+                .lock()
+                .unwrap()
+                .look_at_position(mob, target.to_f64().add_raw(0.5, 0.5, 0.5));
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return;
-            };
-            let entity = mob.get_entity();
-            let in_water = entity.touching_water.load(Relaxed);
-            if !in_water && self.leaving_water {
-                self.leaving_water = false;
+    fn stop(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        if entity.pose.load() == EntityPose::LongJumping
+            || entity.pose.load() == EntityPose::Inhaling
+        {
+            entity.set_pose(EntityPose::Standing);
+        }
+        // `LongJump.stop` clears `discardFriction` when the behavior is interrupted
+        // (`LongJump.java:158-164`).
+        mob.get_mob_entity()
+            .living_entity
+            .set_discard_friction(false);
+        self.phase = Phase::Idle;
+        self.jump_target = None;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return;
+        };
+        let entity = mob.get_entity();
+        let in_water = entity.touching_water.load(Relaxed);
+        if !in_water && self.leaving_water {
+            self.leaving_water = false;
+        }
+
+        match self.phase {
+            Phase::Inhaling { ticks_left } => {
+                if ticks_left > 1 {
+                    self.phase = Phase::Inhaling {
+                        ticks_left: ticks_left - 1,
+                    };
+                    return;
+                }
+
+                let Some(target_block) = self.jump_target else {
+                    entity.set_pose(EntityPose::Standing);
+                    self.phase = Phase::Idle;
+                    return;
+                };
+
+                let breeze_pos = entity.pos.load();
+                // `Vec3.atBottomCenterOf`: block-center X/Z, floor Y - distinct from
+                // the `atCenterOf` point used for the LOS check in `can_start`.
+                let target_pos = target_block.to_f64().add_raw(0.5, 0.0, 0.5);
+                let gravity = breeze.mob_entity.living_entity.get_gravity();
+                let follow_range = breeze
+                    .mob_entity
+                    .living_entity
+                    .get_attribute_value(&Attributes::FOLLOW_RANGE);
+
+                let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
+                let Some(velocity) = Self::calculate_optimal_jump_vector(
+                    breeze_pos,
+                    target_pos,
+                    gravity,
+                    follow_range,
+                    &mut random,
+                ) else {
+                    entity.set_pose(EntityPose::Standing);
+                    self.phase = Phase::Idle;
+                    return;
+                };
+
+                if in_water {
+                    self.leaving_water = true;
+                }
+
+                entity.world.load().play_sound(
+                    Sound::EntityBreezeJump,
+                    SoundCategory::Hostile,
+                    &breeze_pos,
+                );
+                entity.set_pose(EntityPose::LongJumping);
+                entity.yaw.store(entity.head_yaw.load());
+                entity.velocity.store(velocity);
+                // `LongJump.setDiscardFriction(true)` preserves the launch velocity during
+                // the jump (`LongJump.java:159-164`).
+                breeze.mob_entity.living_entity.set_discard_friction(true);
+                self.phase = Phase::Jumping;
             }
-
-            match self.phase {
-                Phase::Inhaling { ticks_left } => {
-                    if ticks_left > 1 {
-                        self.phase = Phase::Inhaling {
-                            ticks_left: ticks_left - 1,
-                        };
-                        return;
-                    }
-
-                    let Some(target_block) = self.jump_target else {
-                        entity.set_pose(EntityPose::Standing);
-                        self.phase = Phase::Idle;
-                        return;
-                    };
-
+            Phase::Jumping => {
+                let landed_on_ground = entity.on_ground.load(Relaxed);
+                let landed_in_water = in_water && !self.leaving_water;
+                if landed_on_ground || landed_in_water {
                     let breeze_pos = entity.pos.load();
-                    // `Vec3.atBottomCenterOf`: block-center X/Z, floor Y - distinct from
-                    // the `atCenterOf` point used for the LOS check in `can_start`.
-                    let target_pos = target_block.to_f64().add_raw(0.5, 0.0, 0.5);
-                    let gravity = breeze.mob_entity.living_entity.get_gravity();
-                    let follow_range = breeze
-                        .mob_entity
-                        .living_entity
-                        .get_attribute_value(&Attributes::FOLLOW_RANGE);
-
-                    let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
-                    let Some(velocity) = Self::calculate_optimal_jump_vector(
-                        breeze_pos,
-                        target_pos,
-                        gravity,
-                        follow_range,
-                        &mut random,
-                    ) else {
-                        entity.set_pose(EntityPose::Standing);
-                        self.phase = Phase::Idle;
-                        return;
-                    };
-
-                    if in_water {
-                        self.leaving_water = true;
-                    }
-
                     entity.world.load().play_sound(
-                        Sound::EntityBreezeJump,
+                        Sound::EntityBreezeLand,
                         SoundCategory::Hostile,
                         &breeze_pos,
                     );
-                    entity.set_pose(EntityPose::LongJumping);
-                    entity.yaw.store(entity.head_yaw.load());
-                    entity.velocity.store(velocity);
-                    // `LongJump.setDiscardFriction(true)` preserves the launch velocity during
-                    // the jump (`LongJump.java:159-164`).
-                    breeze.mob_entity.living_entity.set_discard_friction(true);
-                    self.phase = Phase::Jumping;
-                }
-                Phase::Jumping => {
-                    let landed_on_ground = entity.on_ground.load(Relaxed);
-                    let landed_in_water = in_water && !self.leaving_water;
-                    if landed_on_ground || landed_in_water {
-                        let breeze_pos = entity.pos.load();
-                        entity.world.load().play_sound(
-                            Sound::EntityBreezeLand,
-                            SoundCategory::Hostile,
-                            &breeze_pos,
-                        );
-                        entity.set_pose(EntityPose::Standing);
-                        breeze.mob_entity.living_entity.set_discard_friction(false);
+                    entity.set_pose(EntityPose::Standing);
+                    breeze.mob_entity.living_entity.set_discard_friction(false);
 
-                        let living = &breeze.mob_entity.living_entity;
-                        // `LongJump.setDiscardFriction(false)` restores ordinary travel drag on
-                        // landing (`LongJump.java:159-164`).
-                        living.set_discard_friction(false);
-                        let recently_hurt = living.entity.age.load(Relaxed)
-                            - living.last_attacked_time.load(Relaxed)
-                            < RECENT_HURT_TICKS;
-                        breeze.set_jump_cooldown(if recently_hurt {
-                            JUMP_COOLDOWN_WHEN_HURT_TICKS
-                        } else {
-                            JUMP_COOLDOWN_TICKS
-                        });
-                        breeze.set_shoot_window(100);
-                        self.phase = Phase::Idle;
-                    }
+                    let living = &breeze.mob_entity.living_entity;
+                    // `LongJump.setDiscardFriction(false)` restores ordinary travel drag on
+                    // landing (`LongJump.java:159-164`).
+                    living.set_discard_friction(false);
+                    let recently_hurt = living.entity.age.load(Relaxed)
+                        - living.last_attacked_time.load(Relaxed)
+                        < RECENT_HURT_TICKS;
+                    breeze.set_jump_cooldown(if recently_hurt {
+                        JUMP_COOLDOWN_WHEN_HURT_TICKS
+                    } else {
+                        JUMP_COOLDOWN_TICKS
+                    });
+                    breeze.set_shoot_window(100);
+                    self.phase = Phase::Idle;
                 }
-                Phase::Idle => {}
             }
-        })
+            Phase::Idle => {}
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

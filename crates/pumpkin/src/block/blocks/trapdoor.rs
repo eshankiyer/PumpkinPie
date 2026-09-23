@@ -2,8 +2,7 @@ use crate::block::blocks::copper_weathering;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, ExplodeArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    RandomTickArgs,
+    BlockBehaviour, ExplodeArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, RandomTickArgs,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -22,7 +21,7 @@ use std::sync::Arc;
 
 type TrapDoorProperties = pumpkin_data::block_properties::OakTrapdoorLikeProperties;
 
-async fn toggle_trapdoor(player: Option<&Arc<Player>>, world: &Arc<World>, block_pos: &BlockPos) {
+fn toggle_trapdoor(player: Option<&Arc<Player>>, world: &Arc<World>, block_pos: &BlockPos) {
     let (block, block_state) = world.get_block_and_state_id(block_pos);
     let mut trapdoor_props = TrapDoorProperties::from_state_id(block_state, block);
     trapdoor_props.open = !trapdoor_props.open;
@@ -55,16 +54,13 @@ async fn toggle_trapdoor(player: Option<&Arc<Player>>, world: &Arc<World>, block
         player.map_or(GameEventContext::none(), |player| {
             GameEventContext::of_entity(player.clone())
         }),
-    )
-    .await;
+    );
 
-    world
-        .set_block_state(
-            block_pos,
-            trapdoor_props.to_state_id(block),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
+    world.set_block_state(
+        block_pos,
+        trapdoor_props.to_state_id(block),
+        BlockFlags::NOTIFY_LISTENERS,
+    );
 
     // `TrapDoorBlock.toggle` (`TrapDoorBlock.java:108-114`) schedules the water fluid tick
     // after changing a waterlogged trapdoor, so flowing water observes the new state.
@@ -113,144 +109,130 @@ fn get_sound(block: &Block, open: bool) -> Sound {
 pub struct TrapDoorBlock;
 
 impl BlockBehaviour for TrapDoorBlock {
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if !can_open_trapdoor(args.block) {
-                return BlockActionResult::Pass;
-            }
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        if !can_open_trapdoor(args.block) {
+            return BlockActionResult::Pass;
+        }
 
-            toggle_trapdoor(Some(args.player), args.world, args.position).await;
+        toggle_trapdoor(Some(args.player), args.world, args.position);
 
-            BlockActionResult::Success
-        })
+        BlockActionResult::Success
     }
 
     /// `TrapDoorBlock.onExplosionHit` (`TrapDoorBlock.java:98-106`) toggles an unpowered
     /// hand-openable trapdoor when a trigger-block explosion, such as a wind charge, reaches it.
-    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !args.can_trigger_blocks {
-                return;
-            }
+    fn explode(&self, args: ExplodeArgs<'_>) {
+        if !args.can_trigger_blocks {
+            return;
+        }
 
-            let state = args.world.get_block_state(args.position);
-            let props = TrapDoorProperties::from_state_id(state.id, args.block);
-            if props.powered || !can_open_trapdoor(args.block) {
-                return;
-            }
+        let state = args.world.get_block_state(args.position);
+        let props = TrapDoorProperties::from_state_id(state.id, args.block);
+        if props.powered || !can_open_trapdoor(args.block) {
+            return;
+        }
 
-            toggle_trapdoor(None, args.world, args.position).await;
-        })
+        toggle_trapdoor(None, args.world, args.position);
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut trapdoor_props = TrapDoorProperties::default(args.block);
-            trapdoor_props.waterlogged = args.replacing.water_source();
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut trapdoor_props = TrapDoorProperties::default(args.block);
+        trapdoor_props.waterlogged = args.replacing.water_source();
 
-            let powered = block_receives_redstone_power(args.world, args.position).await;
+        let powered = block_receives_redstone_power(args.world, args.position);
 
-            let player_facing = args.player.get_entity().get_horizontal_facing();
+        let player_facing = args.player.get_entity().get_horizontal_facing();
 
-            // `TrapDoorBlock.getStateForPlacement` (`TrapDoorBlock.java:146-161`) uses the
-            // clicked horizontal face, or the opposite of the player's horizontal direction
-            // for a floor/ceiling placement.
-            let facing = placement_facing(args.direction, player_facing);
+        // `TrapDoorBlock.getStateForPlacement` (`TrapDoorBlock.java:146-161`) uses the
+        // clicked horizontal face, or the opposite of the player's horizontal direction
+        // for a floor/ceiling placement.
+        let facing = placement_facing(args.direction, player_facing);
 
-            trapdoor_props.facing = facing;
+        trapdoor_props.facing = facing;
 
-            trapdoor_props.half = match args.direction {
-                BlockDirection::Up => Half::Top,
-                BlockDirection::Down => Half::Bottom,
-                _ => match args.use_item_on.cursor_pos.y {
-                    0.0..0.5 => Half::Bottom,
-                    _ => Half::Top,
-                },
-            };
+        trapdoor_props.half = match args.direction {
+            BlockDirection::Up => Half::Top,
+            BlockDirection::Down => Half::Bottom,
+            _ => match args.use_item_on.cursor_pos.y {
+                0.0..0.5 => Half::Bottom,
+                _ => Half::Top,
+            },
+        };
 
-            trapdoor_props.powered = powered;
-            trapdoor_props.open = powered;
+        trapdoor_props.powered = powered;
+        trapdoor_props.open = powered;
 
-            trapdoor_props.to_state_id(args.block)
-        })
+        trapdoor_props.to_state_id(args.block)
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let block_state = args.world.get_block_state(args.position);
-            let mut trapdoor_props = TrapDoorProperties::from_state_id(block_state.id, args.block);
-            let powered = block_receives_redstone_power(args.world, args.position).await;
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let block_state = args.world.get_block_state(args.position);
+        let mut trapdoor_props = TrapDoorProperties::from_state_id(block_state.id, args.block);
+        let powered = block_receives_redstone_power(args.world, args.position);
 
-            if powered != trapdoor_props.powered {
-                trapdoor_props.powered = !trapdoor_props.powered;
+        if powered != trapdoor_props.powered {
+            trapdoor_props.powered = !trapdoor_props.powered;
 
-                if powered != trapdoor_props.open {
-                    trapdoor_props.open = trapdoor_props.powered;
+            if powered != trapdoor_props.open {
+                trapdoor_props.open = trapdoor_props.powered;
 
-                    args.world.play_block_sound(
-                        get_sound(args.block, powered),
-                        SoundCategory::Blocks,
-                        *args.position,
-                    );
+                args.world.play_block_sound(
+                    get_sound(args.block, powered),
+                    SoundCategory::Blocks,
+                    *args.position,
+                );
 
-                    // TrapDoorBlock.java's redstone-triggered path also routes through
-                    // `playSound`, so this fires BLOCK_OPEN/BLOCK_CLOSE with no source entity.
-                    emit_game_event(
-                        args.world,
-                        if powered {
-                            GameEvent::BlockOpen
-                        } else {
-                            GameEvent::BlockClose
-                        },
-                        args.position.to_centered_f64(),
-                        GameEventContext::none(),
-                    )
-                    .await;
-                }
+                // TrapDoorBlock.java's redstone-triggered path also routes through
+                // `playSound`, so this fires BLOCK_OPEN/BLOCK_CLOSE with no source entity.
+                emit_game_event(
+                    args.world,
+                    if powered {
+                        GameEvent::BlockOpen
+                    } else {
+                        GameEvent::BlockClose
+                    },
+                    args.position.to_centered_f64(),
+                    GameEventContext::none(),
+                );
             }
+        }
 
-            args.world
-                .set_block_state(
-                    args.position,
-                    trapdoor_props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-        })
+        args.world.set_block_state(
+            args.position,
+            trapdoor_props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // No tag gate needed: the oxidation_stages table below only contains the
-            // copper trapdoor family, so this is a no-op for every other trapdoor type.
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        // No tag gate needed: the oxidation_stages table below only contains the
+        // copper trapdoor family, so this is a no-op for every other trapdoor type.
 
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let trapdoor_props = TrapDoorProperties::from_state_id(current_state_id, args.block);
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let trapdoor_props = TrapDoorProperties::from_state_id(current_state_id, args.block);
 
-            let oxidation_stages = [
-                &Block::COPPER_TRAPDOOR,
-                &Block::EXPOSED_COPPER_TRAPDOOR,
-                &Block::WEATHERED_COPPER_TRAPDOOR,
-                &Block::OXIDIZED_COPPER_TRAPDOOR,
-            ];
+        let oxidation_stages = [
+            &Block::COPPER_TRAPDOOR,
+            &Block::EXPOSED_COPPER_TRAPDOOR,
+            &Block::WEATHERED_COPPER_TRAPDOOR,
+            &Block::OXIDIZED_COPPER_TRAPDOOR,
+        ];
 
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = TrapDoorProperties::default(next_block);
-                    new_props.facing = trapdoor_props.facing;
-                    new_props.half = trapdoor_props.half;
-                    new_props.open = trapdoor_props.open;
-                    new_props.powered = trapdoor_props.powered;
-                    new_props.waterlogged = trapdoor_props.waterlogged;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = TrapDoorProperties::default(next_block);
+                new_props.facing = trapdoor_props.facing;
+                new_props.half = trapdoor_props.half;
+                new_props.open = trapdoor_props.open;
+                new_props.powered = trapdoor_props.powered;
+                new_props.waterlogged = trapdoor_props.waterlogged;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 }
 

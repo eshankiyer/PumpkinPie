@@ -7,7 +7,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
@@ -107,143 +107,133 @@ impl CatRelaxOnOwnerGoal {
 }
 
 impl Goal for CatRelaxOnOwnerGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let Some(cat) = self.cat.upgrade() else {
-                return false;
-            };
-            if !Self::cat_is_relaxable(&cat) {
-                return false;
-            }
-            let Some(owner_uuid) = cat.get_owner() else {
-                return false;
-            };
-            let world = cat.get_entity().world.load_full();
-            let Some(owner) = world.get_player_by_uuid(owner_uuid) else {
-                return false;
-            };
-            // Vanilla assigns `ownerPlayer` before the sleep check (line 541), so a non-sleeping
-            // owner is still remembered for `canContinueToUse`.
-            self.owner = Some(owner.clone());
-            if !Self::owner_is_sleeping(&owner) {
-                return false;
-            }
-            let cat_pos = cat.get_entity().pos.load();
-            let owner_pos = owner.get_entity().pos.load();
-            if cat_pos.squared_distance_to_vec(&owner_pos) > MAX_OWNER_DISTANCE_SQ {
-                return false;
-            }
-            let Some(goal_pos) = Self::bedside_of(&cat, &owner) else {
-                return false;
-            };
-            self.goal_pos = Some(goal_pos);
-            !Self::space_is_occupied(&cat, goal_pos)
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(cat) = self.cat.upgrade() else {
+            return false;
+        };
+        if !Self::cat_is_relaxable(&cat) {
+            return false;
+        }
+        let Some(owner_uuid) = cat.get_owner() else {
+            return false;
+        };
+        let world = cat.get_entity().world.load_full();
+        let Some(owner) = world.get_player_by_uuid(owner_uuid) else {
+            return false;
+        };
+        // Vanilla assigns `ownerPlayer` before the sleep check (line 541), so a non-sleeping
+        // owner is still remembered for `canContinueToUse`.
+        self.owner = Some(owner.clone());
+        if !Self::owner_is_sleeping(&owner) {
+            return false;
+        }
+        let cat_pos = cat.get_entity().pos.load();
+        let owner_pos = owner.get_entity().pos.load();
+        if cat_pos.squared_distance_to_vec(&owner_pos) > MAX_OWNER_DISTANCE_SQ {
+            return false;
+        }
+        let Some(goal_pos) = Self::bedside_of(&cat, &owner) else {
+            return false;
+        };
+        self.goal_pos = Some(goal_pos);
+        !Self::space_is_occupied(&cat, goal_pos)
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            // `canContinueToUse` lines 575-581.
-            let Some(cat) = self.cat.upgrade() else {
-                return false;
-            };
-            let (Some(owner), Some(goal_pos)) = (self.owner.as_ref(), self.goal_pos) else {
-                return false;
-            };
-            Self::cat_is_relaxable(&cat)
-                && Self::owner_is_sleeping(owner)
-                && !Self::space_is_occupied(&cat, goal_pos)
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        // `canContinueToUse` lines 575-581.
+        let Some(cat) = self.cat.upgrade() else {
+            return false;
+        };
+        let (Some(owner), Some(goal_pos)) = (self.owner.as_ref(), self.goal_pos) else {
+            return false;
+        };
+        Self::cat_is_relaxable(&cat)
+            && Self::owner_is_sleeping(owner)
+            && !Self::space_is_occupied(&cat, goal_pos)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // `start` lines 584-589.
-            let Some(goal_pos) = self.goal_pos else {
-                return;
-            };
-            if let Some(cat) = self.cat.upgrade()
-                && cat.is_sitting()
-            {
-                cat.set_sitting(false);
+    fn start(&mut self, mob: &dyn Mob) {
+        // `start` lines 584-589.
+        let Some(goal_pos) = self.goal_pos else {
+            return;
+        };
+        if let Some(cat) = self.cat.upgrade()
+            && cat.is_sitting()
+        {
+            cat.set_sitting(false);
+        }
+        let entity = mob.get_entity();
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_progress(NavigatorGoal::new(
+                entity.pos.load(),
+                goal_pos.to_f64(),
+                APPROACH_SPEED,
+            ));
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        // `stop` lines 592-603, minus the morning gift (see the type-level note).
+        if let Some(cat) = self.cat.upgrade() {
+            if cat.is_lying() {
+                cat.set_lying(false);
             }
-            let entity = mob.get_entity();
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .set_progress(NavigatorGoal::new(
-                    entity.pos.load(),
-                    goal_pos.to_f64(),
-                    APPROACH_SPEED,
-                ));
-        })
+            if cat.is_relax_state_one() {
+                cat.set_relax_state_one(false);
+            }
+        }
+        self.on_bed_ticks = 0;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // `stop` lines 592-603, minus the morning gift (see the type-level note).
-            if let Some(cat) = self.cat.upgrade() {
-                if cat.is_lying() {
-                    cat.set_lying(false);
+    fn tick(&mut self, mob: &dyn Mob) {
+        // `tick` lines 628-644.
+        let (Some(owner), Some(goal_pos)) = (self.owner.clone(), self.goal_pos) else {
+            return;
+        };
+        let Some(cat) = self.cat.upgrade() else {
+            return;
+        };
+        if cat.is_sitting() {
+            cat.set_sitting(false);
+        }
+        let entity = mob.get_entity();
+        let cat_pos = entity.pos.load();
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_progress(NavigatorGoal::new(
+                cat_pos,
+                goal_pos.to_f64(),
+                APPROACH_SPEED,
+            ));
+
+        let owner_pos = owner.get_entity().pos.load();
+        if cat_pos.squared_distance_to_vec(&owner_pos) < ON_BED_DISTANCE_SQ {
+            self.on_bed_ticks += 1;
+            if self.on_bed_ticks > to_goal_ticks(ON_BED_TICKS_BEFORE_LYING) {
+                if !cat.is_lying() {
+                    cat.set_lying(true);
                 }
                 if cat.is_relax_state_one() {
                     cat.set_relax_state_one(false);
                 }
-            }
-            self.on_bed_ticks = 0;
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // `tick` lines 628-644.
-            let (Some(owner), Some(goal_pos)) = (self.owner.clone(), self.goal_pos) else {
-                return;
-            };
-            let Some(cat) = self.cat.upgrade() else {
-                return;
-            };
-            if cat.is_sitting() {
-                cat.set_sitting(false);
-            }
-            let entity = mob.get_entity();
-            let cat_pos = entity.pos.load();
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .set_progress(NavigatorGoal::new(
-                    cat_pos,
-                    goal_pos.to_f64(),
-                    APPROACH_SPEED,
-                ));
-
-            let owner_pos = owner.get_entity().pos.load();
-            if cat_pos.squared_distance_to_vec(&owner_pos) < ON_BED_DISTANCE_SQ {
-                self.on_bed_ticks += 1;
-                if self.on_bed_ticks > to_goal_ticks(ON_BED_TICKS_BEFORE_LYING) {
-                    if !cat.is_lying() {
-                        cat.set_lying(true);
-                    }
-                    if cat.is_relax_state_one() {
-                        cat.set_relax_state_one(false);
-                    }
-                } else {
-                    entity.look_at(owner_pos);
-                    if !cat.is_relax_state_one() {
-                        cat.set_relax_state_one(true);
-                    }
+            } else {
+                entity.look_at(owner_pos);
+                if !cat.is_relax_state_one() {
+                    cat.set_relax_state_one(true);
                 }
-            } else if cat.is_lying() {
-                cat.set_lying(false);
             }
-        })
+        } else if cat.is_lying() {
+            cat.set_lying(false);
+        }
     }
 
     // No `should_run_every_tick` override: `Cat.CatRelaxOnOwnerGoal` does not override

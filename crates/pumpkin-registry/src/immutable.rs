@@ -4,7 +4,7 @@ use pumpkin_util::identifier::Identifier;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    BoxFuture, BoxedRegistry, MutableRegistry, Registry,
+    BoxedRegistry, MutableRegistry, Registry,
     builder::RegistryBuilder,
     value::{ErasedRegistryRef, RegistryRef},
 };
@@ -84,24 +84,22 @@ impl<T: Send + Sync + 'static> Registry for ImmutableRegistry<T> {
         type_name::<T>()
     }
 
-    fn get_id<'a>(&'a self, identifier: &'a Identifier) -> BoxFuture<'a, Option<usize>> {
-        Box::pin(async move { Self::get_id(self, identifier) })
+    fn get_id(&self, identifier: &Identifier) -> Option<usize> {
+        Self::get_id(self, identifier)
     }
 
-    fn get_by_id(&self, id: usize) -> BoxFuture<'_, Option<ErasedRegistryRef<'_>>> {
-        Box::pin(async move {
-            Self::get_by_id(self, id)
-                .map(RegistryRef::Borrowed)
-                .map(ErasedRegistryRef::new)
-        })
+    fn get_by_id(&self, id: usize) -> Option<ErasedRegistryRef<'_>> {
+        Self::get_by_id(self, id)
+            .map(RegistryRef::Borrowed)
+            .map(ErasedRegistryRef::new)
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
         self
     }
 
-    fn into_immutable(self: Box<Self>) -> BoxFuture<'static, BoxedRegistry> {
-        Box::pin(async move { self as BoxedRegistry })
+    fn into_immutable(self: Box<Self>) -> BoxedRegistry {
+        self as BoxedRegistry
     }
 }
 

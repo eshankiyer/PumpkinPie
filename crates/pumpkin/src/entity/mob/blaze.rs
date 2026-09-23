@@ -9,7 +9,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
@@ -102,7 +102,7 @@ impl BlazeEntity {
         mob_arc
     }
 
-    pub async fn set_charged(&self, charged: bool) {
+    pub fn set_charged(&self, charged: bool) {
         self.charged.store(charged, Relaxed);
         self.entity
             .living_entity
@@ -111,7 +111,7 @@ impl BlazeEntity {
         // `BLAZE_FLAGS` is absent from the generated v26.x protocol mapping. Keep the
         // same client-visible fire state on those versions while retaining the vanilla
         // Blaze-specific flag for versions where it is present.
-        self.entity.living_entity.entity.set_on_fire(charged).await;
+        self.entity.living_entity.entity.set_on_fire(charged);
     }
 
     #[must_use]
@@ -152,42 +152,42 @@ impl Mob for BlazeEntity {
         1.0
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.entity.living_entity.entity;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = &self.entity.living_entity.entity;
 
-            // `Blaze.aiStep` (`Blaze.java:95-101`): only damp downward motion while
-            // airborne. This runs before LivingEntity's movement integration below.
-            if !entity.on_ground.load(Relaxed) {
-                let velocity = entity.velocity.load();
-                if velocity.y < 0.0 {
-                    entity.set_velocity(velocity.multiply(1.0, 0.6, 1.0));
-                }
+        // `Blaze.aiStep` (`Blaze.java:95-101`): only damp downward motion while
+        // airborne. This runs before LivingEntity's movement integration below.
+        if !entity.on_ground.load(Relaxed) {
+            let velocity = entity.velocity.load();
+            if velocity.y < 0.0 {
+                entity.set_velocity(velocity.multiply(1.0, 0.6, 1.0));
             }
+        }
 
-            // `Blaze.customServerAiStep` (`Blaze.java:119-136`). The target-height
-            // adjustment is applied before the regular goal/navigation tick, matching
-            // the vanilla call order.
-            self.update_height_offset();
-            let target = self.entity.target.lock().await.clone();
-            if let Some(target) = target
-                && target.get_entity().get_eye_y()
-                    > entity.get_eye_y() + self.allowed_height_offset()
-                && self.can_attack(target.get_entity())
-            {
-                let velocity = entity.velocity.load();
-                entity.add_velocity(Vector3::new(0.0, (0.3 - velocity.y) * 0.3, 0.0));
-            }
-        })
+        // `Blaze.customServerAiStep` (`Blaze.java:119-136`). The target-height
+        // adjustment is applied before the regular goal/navigation tick, matching
+        // the vanilla call order.
+        self.update_height_offset();
+        let target = self
+            .entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = target
+            && target.get_entity().get_eye_y() > entity.get_eye_y() + self.allowed_height_offset()
+            && self.can_attack(target.get_entity())
+        {
+            let velocity = entity.velocity.load();
+            entity.add_velocity(Vector3::new(0.0, (0.3 - velocity.y) * 0.3, 0.0));
+        }
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(blaze::FLAGS_ID, i8::from(self.is_charged()))],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(blaze::FLAGS_ID, i8::from(self.is_charged()))],
+            None,
+        );
     }
 }
 

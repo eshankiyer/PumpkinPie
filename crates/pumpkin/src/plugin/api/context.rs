@@ -183,28 +183,28 @@ impl Context {
             Arc::new(new_dispatcher)
         });
 
-        self.reload_commands_for_everyone().await;
+        self.reload_commands_for_everyone();
     }
 
     /// Asynchronously unregisters a command from the server.
     ///
     /// # Arguments
     /// - `name`: The name of the command to unregister.
-    pub async fn unregister_command(&self, name: &str) {
+    pub fn unregister_command(&self, name: &str) {
         self.server.command_dispatcher.rcu(|dispatcher| {
             let mut new_dispatcher = (**dispatcher).clone();
             new_dispatcher.fallback_dispatcher.unregister(name);
             Arc::new(new_dispatcher)
         });
 
-        self.reload_commands_for_everyone().await;
+        self.reload_commands_for_everyone();
     }
 
     /// Asynchronously reloads (resends) all commands for all currently online players.
-    pub async fn reload_commands_for_everyone(&self) {
+    pub fn reload_commands_for_everyone(&self) {
         for world in self.server.worlds.load().iter() {
             for player in world.players.load().iter() {
-                self.reload_commands_for(player).await;
+                self.reload_commands_for(player);
             }
         }
     }
@@ -213,18 +213,16 @@ impl Context {
     ///
     /// # Arguments
     /// - `player`: The player for which the commands will be reloaded.
-    pub async fn reload_commands_for(&self, player: &Arc<Player>) {
+    pub fn reload_commands_for(&self, player: &Arc<Player>) {
         let command_dispatcher = self.server.command_dispatcher.load();
         if let ClientPlatform::Bedrock(_) = player.client.as_ref() {
             client_suggestions::send_bedrock_commands_packet(
                 player,
                 &self.server,
                 &command_dispatcher,
-            )
-            .await;
+            );
         } else {
-            client_suggestions::send_c_commands_packet(player, &self.server, &command_dispatcher)
-                .await;
+            client_suggestions::send_c_commands_packet(player, &self.server, &command_dispatcher);
         }
     }
 

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use pumpkin_data::effect::StatusEffect;
 
 use crate::entity::{
-    ai::goal::{Controls, Goal, GoalFuture},
+    ai::goal::{Controls, Goal},
     mob::{Mob, breeze::BreezeEntity},
 };
 
@@ -28,14 +28,14 @@ impl BreezeShootWhenStuckGoal {
 
     /// Mirrors `ShootWhenStuck.checkExtraStartConditions` (`ShootWhenStuck.java:29-31`):
     /// a stuck Breeze is a passenger, is in water, or has Levitation.
-    async fn check_extra_start_conditions(&self, mob: &dyn Mob) -> bool {
+    fn check_extra_start_conditions(&self, mob: &dyn Mob) -> bool {
         let entity = mob.get_entity();
-        if entity.has_vehicle().await || entity.touching_water.load(Relaxed) {
+        if entity.has_vehicle() || entity.touching_water.load(Relaxed) {
             return true;
         }
 
         if let Some(living) = mob.get_living_entity() {
-            living.has_effect(&StatusEffect::LEVITATION).await
+            living.has_effect(&StatusEffect::LEVITATION)
         } else {
             false
         }
@@ -45,40 +45,42 @@ impl BreezeShootWhenStuckGoal {
 impl Goal for BreezeShootWhenStuckGoal {
     /// Maps the behavior's memory requirements (`ShootWhenStuck.java:11-27`) and extra-start
     /// condition (`ShootWhenStuck.java:29-31`) onto Pumpkin's goal selector.
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return false;
-            };
-            if breeze.shoot_window_ticks() > 0 {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return false;
+        };
+        if breeze.shoot_window_ticks() > 0 {
+            return false;
+        }
 
-            let Some(target) = breeze.mob_entity.target.lock().await.clone() else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
+        let Some(target) = breeze
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
 
-            self.check_extra_start_conditions(mob).await
-        })
+        self.check_extra_start_conditions(mob)
     }
 
     /// Vanilla `canStillUse` always returns false (`ShootWhenStuck.java:33-35`), so this
     /// one-shot goal ends immediately after opening the shoot window.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
     /// Vanilla `start` sets `BREEZE_SHOOT` with a 60-tick expiry
     /// (`ShootWhenStuck.java:37-39`).
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(breeze) = self.breeze.upgrade() {
-                breeze.set_shoot_window(SHOOT_MEMORY_EXPIRY_TICKS);
-            }
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        if let Some(breeze) = self.breeze.upgrade() {
+            breeze.set_shoot_window(SHOOT_MEMORY_EXPIRY_TICKS);
+        }
     }
 
     /// This behavior owns no movement/look/jump control; vanilla only writes a Brain memory

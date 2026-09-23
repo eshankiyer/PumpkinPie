@@ -8,7 +8,7 @@ use pumpkin_data::tracked_data;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         camel_sit::CamelSitGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
@@ -118,9 +118,14 @@ impl CamelEntity {
 
     /// `AbstractHorse.isSaddled`, which Camel inherits (`AbstractHorse.java:961-962` reads the
     /// same slot to decide who controls the mob).
-    async fn is_saddled(&self) -> bool {
+    fn is_saddled(&self) -> bool {
         let saddle = {
-            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.get(&EquipmentSlot::SADDLE)
         };
         is_valid_saddle_item(&saddle, self.get_entity().entity_type)
@@ -144,92 +149,95 @@ impl Mob for CamelEntity {
 
     /// `AbstractHorse.getControllingPassenger` (`AbstractHorse.java:961-962`), which Camel
     /// inherits unchanged: a saddled camel is controlled by its first player passenger.
-    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move {
-            if !self.is_saddled().await {
-                return Mob::has_controlling_passenger(self).await;
-            }
-            let passenger = self.get_entity().passengers.lock().await.first().cloned();
-            if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
-                return true;
-            }
-            Mob::has_controlling_passenger(self).await
-        })
+    fn has_controlling_passenger(&self) -> bool {
+        if !self.is_saddled() {
+            return Mob::has_controlling_passenger(self);
+        }
+        let passenger = self
+            .get_entity()
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first()
+            .cloned();
+        if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
+            return true;
+        }
+        Mob::has_controlling_passenger(self)
     }
 
     /// `Camel.mobInteract` (`Camel.java:380-401`). Vanilla needs no saddle to mount and seats two
     /// riders. The saddle-equip branch stands in for vanilla's generic
     /// `ItemStack.interactLivingEntity` dispatch, exactly as `abstract_horse_mob_interact` does
     /// (see the equine module header for why that dispatch is inlined here).
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if self
-                .mob_entity
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-            {
-                return true;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if self
+            .mob_entity
+            .mob_interact(player, item_stack, self.can_be_leashed())
+        {
+            return true;
+        }
 
-            // `Camel.java:400`: a baby camel never rides and never equips.
-            if self.is_baby() {
-                return false;
-            }
+        // `Camel.java:400`: a baby camel never rides and never equips.
+        if self.is_baby() {
+            return false;
+        }
 
-            if !item_stack.is_empty()
-                && saddle_equip_on_interact(item_stack, self.get_entity().entity_type)
-                && !self.is_saddled().await
-            {
-                equip_saddle_item(&self.mob_entity, player, item_stack).await;
-                return true;
-            }
+        if !item_stack.is_empty()
+            && saddle_equip_on_interact(item_stack, self.get_entity().entity_type)
+            && !self.is_saddled()
+        {
+            equip_saddle_item(&self.mob_entity, player, item_stack);
+            return true;
+        }
 
-            if self.get_entity().passengers.lock().await.len() < MAX_PASSENGERS {
-                mount_player(&self.mob_entity, player).await;
-                return true;
-            }
+        if self
+            .get_entity()
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+            < MAX_PASSENGERS
+        {
+            mount_player(&self.mob_entity, player);
+            return true;
+        }
 
-            false
-        })
+        false
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            // Re-sends `BABY_ID` (dropped by overriding `mob_init_data_tracker`), matching the
-            // blanket `Mob` `EntityBase` impl's default behavior (`mob/mod.rs`) -- same reason
-            // `CatEntity` re-sends it manually.
-            if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
-                entity.send_meta_data(&[Metadata::new(tracked_data::camel::BABY_ID, true)], None);
-            }
-            entity.send_meta_data(&[Metadata::new(tracked_data::camel::DASH, false)], None);
-        })
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        // Re-sends `BABY_ID` (dropped by overriding `mob_init_data_tracker`), matching the
+        // blanket `Mob` `EntityBase` impl's default behavior (`mob/mod.rs`) -- same reason
+        // `CatEntity` re-sends it manually.
+        if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
+            entity.send_meta_data(&[Metadata::new(tracked_data::camel::BABY_ID, true)], None);
+        }
+        entity.send_meta_data(&[Metadata::new(tracked_data::camel::DASH, false)], None);
     }
 
     /// `Camel.aiStep`'s dash-cooldown handling (`Camel.java:187-193`): once dashing, the flag
     /// clears as soon as the cooldown drops under 50 ticks and the camel is grounded, in liquid,
     /// or carrying a passenger; the cooldown itself always ticks down to zero regardless.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let cooldown = self.dash_cooldown.load(Relaxed);
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = self.get_entity();
+        let cooldown = self.dash_cooldown.load(Relaxed);
 
-            if self.is_dashing() && cooldown < DASH_CLEAR_THRESHOLD {
-                let grounded =
-                    entity.on_ground.load(Relaxed) || entity.touching_water.load(Relaxed);
-                let carrying_passenger = !entity.passengers.lock().await.is_empty();
-                if grounded || carrying_passenger {
-                    self.set_dashing(false);
-                }
+        if self.is_dashing() && cooldown < DASH_CLEAR_THRESHOLD {
+            let grounded = entity.on_ground.load(Relaxed) || entity.touching_water.load(Relaxed);
+            let carrying_passenger = !entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty();
+            if grounded || carrying_passenger {
+                self.set_dashing(false);
             }
+        }
 
-            if cooldown > 0 {
-                self.dash_cooldown.store(cooldown - 1, Relaxed);
-            }
-        })
+        if cooldown > 0 {
+            self.dash_cooldown.store(cooldown - 1, Relaxed);
+        }
     }
 }

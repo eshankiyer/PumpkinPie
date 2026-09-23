@@ -18,7 +18,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use uuid::Uuid;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
@@ -69,7 +69,7 @@ impl FollowPlayerRiddenEntityGoal {
 
     /// The controlling passenger of a nearby vehicle of one of `vehicle_types`, if it is a
     /// player (`FollowPlayerRiddenEntityGoal.java:29-34`).
-    async fn nearby_riding_player(&self, mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    fn nearby_riding_player(&self, mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let entity = mob.get_entity();
         let world = entity.world.load();
         let search_box =
@@ -82,7 +82,11 @@ impl FollowPlayerRiddenEntityGoal {
             if !(self.is_vehicle)(candidate_type) {
                 continue;
             }
-            let passengers = candidate.get_entity().passengers.lock().await;
+            let passengers = candidate
+                .get_entity()
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // `getControllingPassenger` for a boat/nautilus is its first passenger.
             let rider = passengers.first().cloned();
             drop(passengers);
@@ -126,95 +130,88 @@ impl FollowPlayerRiddenEntityGoal {
 }
 
 impl Goal for FollowPlayerRiddenEntityGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if let Some(following) = self.resolve_following(mob)
-                && Self::has_moved_horizontally_recently(following.get_entity())
-            {
-                return true;
-            }
-            self.nearby_riding_player(mob)
-                .await
-                .is_some_and(|rider| Self::has_moved_horizontally_recently(rider.get_entity()))
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if let Some(following) = self.resolve_following(mob)
+            && Self::has_moved_horizontally_recently(following.get_entity())
+        {
+            return true;
+        }
+        self.nearby_riding_player(mob)
+            .is_some_and(|rider| Self::has_moved_horizontally_recently(rider.get_entity()))
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(following) = self.resolve_following(mob) else {
-                return false;
-            };
-            // `following.isPassenger()` (`FollowPlayerRiddenEntityGoal.java:46`).
-            following.get_entity().vehicle.lock().await.is_some()
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(following) = self.resolve_following(mob) else {
+            return false;
+        };
+        // `following.isPassenger()` (`FollowPlayerRiddenEntityGoal.java:46`).
+        following
+            .get_entity()
+            .vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.following = self
-                .nearby_riding_player(mob)
-                .await
-                .map(|rider| rider.get_entity().entity_uuid);
-            self.time_to_recalc_path = 0;
-            self.stage = Stage::GoToEntity;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.following = self
+            .nearby_riding_player(mob)
+            .map(|rider| rider.get_entity().entity_uuid);
+        self.time_to_recalc_path = 0;
+        self.stage = Stage::GoToEntity;
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.following = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.following = None;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.time_to_recalc_path -= 1;
-            if self.time_to_recalc_path > 0 {
-                return;
-            }
-            self.time_to_recalc_path = to_goal_ticks(RECALC_INTERVAL);
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.time_to_recalc_path -= 1;
+        if self.time_to_recalc_path > 0 {
+            return;
+        }
+        self.time_to_recalc_path = to_goal_ticks(RECALC_INTERVAL);
 
-            let Some(following) = self.resolve_following(mob) else {
-                return;
-            };
-            let followed = following.get_entity();
-            let followed_block = followed.block_pos.load();
-            let distance = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&followed.pos.load())
-                .sqrt();
+        let Some(following) = self.resolve_following(mob) else {
+            return;
+        };
+        let followed = following.get_entity();
+        let followed_block = followed.block_pos.load();
+        let distance = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&followed.pos.load())
+            .sqrt();
 
-            match self.stage {
-                Stage::GoToEntity => {
-                    let (dx, dz) = Self::facing_offset(followed.get_horizontal_facing());
-                    let behind = BlockPos::new(
-                        followed_block.0.x - dx,
-                        followed_block.0.y - 1,
-                        followed_block.0.z - dz,
-                    );
-                    Self::move_to(mob, behind.to_f64());
-                    if distance < SWITCH_TO_LEAD_DISTANCE {
-                        self.time_to_recalc_path = 0;
-                        self.stage = Stage::GoInEntityDirection;
-                    }
-                }
-                Stage::GoInEntityDirection => {
-                    let (dx, dz) = Self::facing_offset(followed.get_horizontal_facing());
-                    let ahead = BlockPos::new(
-                        followed_block.0.x + dx * LEAD_AHEAD_BLOCKS,
-                        followed_block.0.y - 1,
-                        followed_block.0.z + dz * LEAD_AHEAD_BLOCKS,
-                    );
-                    Self::move_to(mob, ahead.to_f64());
-                    if distance > SWITCH_TO_CHASE_DISTANCE {
-                        self.time_to_recalc_path = 0;
-                        self.stage = Stage::GoToEntity;
-                    }
+        match self.stage {
+            Stage::GoToEntity => {
+                let (dx, dz) = Self::facing_offset(followed.get_horizontal_facing());
+                let behind = BlockPos::new(
+                    followed_block.0.x - dx,
+                    followed_block.0.y - 1,
+                    followed_block.0.z - dz,
+                );
+                Self::move_to(mob, behind.to_f64());
+                if distance < SWITCH_TO_LEAD_DISTANCE {
+                    self.time_to_recalc_path = 0;
+                    self.stage = Stage::GoInEntityDirection;
                 }
             }
-        })
+            Stage::GoInEntityDirection => {
+                let (dx, dz) = Self::facing_offset(followed.get_horizontal_facing());
+                let ahead = BlockPos::new(
+                    followed_block.0.x + dx * LEAD_AHEAD_BLOCKS,
+                    followed_block.0.y - 1,
+                    followed_block.0.z + dz * LEAD_AHEAD_BLOCKS,
+                );
+                Self::move_to(mob, ahead.to_f64());
+                if distance > SWITCH_TO_CHASE_DISTANCE {
+                    self.time_to_recalc_path = 0;
+                    self.stage = Stage::GoToEntity;
+                }
+            }
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

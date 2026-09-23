@@ -19,7 +19,6 @@ impl PendingConnection {
             let status = server.get_status();
             status
                 .lock()
-                .await
                 .get_status_response(self.version.load().protocol_version())
         };
 

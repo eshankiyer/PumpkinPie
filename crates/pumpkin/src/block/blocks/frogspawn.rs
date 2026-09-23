@@ -10,8 +10,8 @@ use rand::{RngExt, rng};
 use uuid::Uuid;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnEntityCollisionArgs, OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnEntityCollisionArgs,
+    OnScheduledTickArgs, PlacedArgs,
 };
 
 /// `FrogspawnBlock.DEFAULT_MIN_HATCH_TICK_DELAY` (`FrogspawnBlock.java:34`).
@@ -48,70 +48,60 @@ impl BlockBehaviour for FrogspawnBlock {
     }
 
     /// `FrogspawnBlock.onPlace` (`FrogspawnBlock.java:59-62`).
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world.schedule_block_tick_long(
-                args.block,
-                *args.position,
-                hatch_delay(),
-                TickPriority::Normal,
-            );
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        args.world.schedule_block_tick_long(
+            args.block,
+            *args.position,
+            hatch_delay(),
+            TickPriority::Normal,
+        );
     }
 
     /// `FrogspawnBlock.updateShape` (`FrogspawnBlock.java:68-82`): the block pops instantly rather
     /// than scheduling a tick.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if can_survive(args.world, args.position) {
-                args.state_id
-            } else {
-                Block::AIR.default_state.id
-            }
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if can_survive(args.world, args.position) {
+            args.state_id
+        } else {
+            Block::AIR.default_state.id
+        }
     }
 
     /// `FrogspawnBlock.tick` (`FrogspawnBlock.java:84-91`).
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !can_survive(args.world.as_ref(), args.position) {
-                destroy(args.world, args.position).await;
-                return;
-            }
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        if !can_survive(args.world.as_ref(), args.position) {
+            destroy(args.world, args.position);
+            return;
+        }
 
-            // `hatchFrogspawn` (`FrogspawnBlock.java:108-112`).
-            destroy(args.world, args.position).await;
-            args.world.play_sound(
-                Sound::BlockFrogspawnHatch,
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
-            spawn_tadpoles(args.world, args.position).await;
-        })
+        // `hatchFrogspawn` (`FrogspawnBlock.java:108-112`).
+        destroy(args.world, args.position);
+        args.world.play_sound(
+            Sound::BlockFrogspawnHatch,
+            SoundCategory::Blocks,
+            &args.position.to_f64(),
+        );
+        spawn_tadpoles(args.world, args.position);
     }
 
     /// `FrogspawnBlock.entityInside` (`FrogspawnBlock.java:93-100`).
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.entity.get_entity().entity_type == &EntityType::FALLING_BLOCK {
-                destroy(args.world, args.position).await;
-            }
-        })
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        if args.entity.get_entity().entity_type == &EntityType::FALLING_BLOCK {
+            destroy(args.world, args.position);
+        }
     }
 }
 
 /// `FrogspawnBlock.destroyBlock` (`FrogspawnBlock.java:114-116`): `dropBlock` is false.
-async fn destroy(world: &std::sync::Arc<crate::world::World>, position: &BlockPos) {
-    world
-        .break_block(position, None, BlockFlags::SKIP_DROPS)
-        .await;
+fn destroy(world: &std::sync::Arc<crate::world::World>, position: &BlockPos) {
+    world.break_block(position, None, BlockFlags::SKIP_DROPS);
 }
 
 /// `FrogspawnBlock.spawnTadpoles` (`FrogspawnBlock.java:118-132`).
-async fn spawn_tadpoles(world: &std::sync::Arc<crate::world::World>, position: &BlockPos) {
+fn spawn_tadpoles(world: &std::sync::Arc<crate::world::World>, position: &BlockPos) {
     let amount = rng().random_range(2..6);
     for _ in 0..amount {
         let x = f64::from(position.0.x) + random_tadpole_position_offset();
@@ -130,7 +120,7 @@ async fn spawn_tadpoles(world: &std::sync::Arc<crate::world::World>, position: &
             .get_entity()
             .persistence_required
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        world.spawn_entity(tadpole).await;
+        world.spawn_entity(tadpole);
     }
 }
 

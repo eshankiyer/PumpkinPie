@@ -52,11 +52,11 @@ fn execute_as_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         let mut sources = Vec::new();
         for target in targets {
             let mut source = context.source.as_ref().clone();
-            let display_name = target.get_display_name().await;
+            let display_name = target.get_display_name();
             let name = target.get_name().get_text();
             source.entity = Some(target.clone());
             source.name = name;
@@ -71,7 +71,7 @@ fn execute_at_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         let mut sources = Vec::new();
         for target in targets {
             let entity = target.get_entity();
@@ -131,7 +131,7 @@ fn execute_positioned_as_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         let mut sources = Vec::new();
         for target in targets {
             let mut source = context.source.as_ref().clone();
@@ -182,7 +182,7 @@ fn execute_rotated_as_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         let mut sources = Vec::new();
         for target in targets {
             let entity = target.get_entity();
@@ -198,7 +198,7 @@ fn execute_if_entity_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         if targets.is_empty() {
             Ok(vec![])
         } else {
@@ -211,7 +211,7 @@ fn execute_unless_entity_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         if targets.is_empty() {
             Ok(vec![context.source.clone()])
         } else {
@@ -276,7 +276,7 @@ fn execute_facing_entity_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets").await?;
+        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
         let anchor = EntityAnchorArgumentType::get(context, "anchor")?;
         let mut sources = Vec::new();
 
@@ -440,7 +440,6 @@ fn execute_function_modifier<'a>(
             .server()
             .datapack_manager
             .execute_function(context.server(), &context.source, name, None)
-            .await
             .map_err(map_function_condition_error)?;
 
         if function_condition_matches(executed_count, expected) {
@@ -474,7 +473,7 @@ fn execute_summon_modifier<'a>(
             context.source.world(),
             Uuid::new_v4(),
         );
-        context.source.world().spawn_entity(entity.clone()).await;
+        context.source.world().spawn_entity(entity.clone());
         let mut source = context.source.as_ref().clone();
         source.entity = Some(entity);
         Ok(vec![Arc::new(source)])

@@ -7,8 +7,8 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 use uuid::Uuid;
 
+use super::Goal;
 use super::silverfish_util::{host_for_infested, zigzag_range};
-use super::{Goal, GoalFuture};
 use crate::entity::mob::Mob;
 use crate::entity::mob::silverfish::SilverfishEntity;
 use crate::item::items::state_with_properties_of;
@@ -31,76 +31,69 @@ impl SilverfishWakeUpFriendsGoal {
 }
 
 impl Goal for SilverfishWakeUpFriendsGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.silverfish.wake_up_friends_timer.load(Relaxed) > 0 })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        self.silverfish.wake_up_friends_timer.load(Relaxed) > 0
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let remaining = self.silverfish.wake_up_friends_timer.fetch_sub(1, Relaxed) - 1;
-            if remaining > 0 {
-                return;
-            }
-            self.silverfish.wake_up_friends_timer.store(0, Relaxed);
+    fn tick(&mut self, mob: &dyn Mob) {
+        let remaining = self.silverfish.wake_up_friends_timer.fetch_sub(1, Relaxed) - 1;
+        if remaining > 0 {
+            return;
+        }
+        self.silverfish.wake_up_friends_timer.store(0, Relaxed);
 
-            let entity = mob.get_entity();
-            let world = entity.world.load_full();
-            let base_pos = entity.block_pos.load();
-            let mob_griefing = world.level_info.load().game_rules.mob_griefing;
+        let entity = mob.get_entity();
+        let world = entity.world.load_full();
+        let base_pos = entity.block_pos.load();
+        let mob_griefing = world.level_info.load().game_rules.mob_griefing;
 
-            let y_offsets = zigzag_range(5);
-            let xz_offsets = zigzag_range(10);
+        let y_offsets = zigzag_range(5);
+        let xz_offsets = zigzag_range(10);
 
-            for y_off in y_offsets {
-                for &x_off in &xz_offsets {
-                    for &z_off in &xz_offsets {
-                        let test_pos = base_pos.add(x_off, y_off, z_off);
-                        let (block, state) = world.get_block_and_state(&test_pos);
-                        let Some(host_id) = host_for_infested(block.id) else {
-                            continue;
-                        };
+        for y_off in y_offsets {
+            for &x_off in &xz_offsets {
+                for &z_off in &xz_offsets {
+                    let test_pos = base_pos.add(x_off, y_off, z_off);
+                    let (block, state) = world.get_block_and_state(&test_pos);
+                    let Some(host_id) = host_for_infested(block.id) else {
+                        continue;
+                    };
 
-                        if mob_griefing {
-                            world
-                                .break_block(&test_pos, None, BlockFlags::NOTIFY_ALL)
-                                .await;
-                            if world.level_info.load().game_rules.block_drops {
-                                let spawn_pos = Vector3::new(
-                                    f64::from(test_pos.0.x) + 0.5,
-                                    f64::from(test_pos.0.y),
-                                    f64::from(test_pos.0.z) + 0.5,
-                                );
-                                let uuid = Uuid::new_v4();
-                                let new_entity = crate::entity::r#type::from_type(
-                                    &EntityType::SILVERFISH,
-                                    spawn_pos,
-                                    &world,
-                                    uuid,
-                                );
-                                world.spawn_entity(new_entity.clone()).await;
-                                world.send_entity_status(
-                                    new_entity.get_entity(),
-                                    pumpkin_data::entity::EntityStatus::SilverfishMergeAnim,
-                                    None,
-                                );
-                            }
-                        } else {
-                            let host_block = host_id.to_block();
-                            let new_state_id =
-                                state_with_properties_of(block, state.id, host_block);
-                            world
-                                .set_block_state(&test_pos, new_state_id, BlockFlags::NOTIFY_ALL)
-                                .await;
+                    if mob_griefing {
+                        world.break_block(&test_pos, None, BlockFlags::NOTIFY_ALL);
+                        if world.level_info.load().game_rules.block_drops {
+                            let spawn_pos = Vector3::new(
+                                f64::from(test_pos.0.x) + 0.5,
+                                f64::from(test_pos.0.y),
+                                f64::from(test_pos.0.z) + 0.5,
+                            );
+                            let uuid = Uuid::new_v4();
+                            let new_entity = crate::entity::r#type::from_type(
+                                &EntityType::SILVERFISH,
+                                spawn_pos,
+                                &world,
+                                uuid,
+                            );
+                            world.spawn_entity(new_entity.clone());
+                            world.send_entity_status(
+                                new_entity.get_entity(),
+                                pumpkin_data::entity::EntityStatus::SilverfishMergeAnim,
+                                None,
+                            );
                         }
+                    } else {
+                        let host_block = host_id.to_block();
+                        let new_state_id = state_with_properties_of(block, state.id, host_block);
+                        world.set_block_state(&test_pos, new_state_id, BlockFlags::NOTIFY_ALL);
+                    }
 
-                        // Drawn fresh each time (not held across the awaits above) since
-                        // `ThreadRng` is not `Send`.
-                        if mob.get_random().random_bool(0.5) {
-                            return;
-                        }
+                    // Drawn fresh each time (not held across the awaits above) since
+                    // `ThreadRng` is not `Send`.
+                    if mob.get_random().random_bool(0.5) {
+                        return;
                     }
                 }
             }
-        })
+        }
     }
 }

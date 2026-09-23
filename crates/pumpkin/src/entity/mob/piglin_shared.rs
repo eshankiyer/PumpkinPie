@@ -16,7 +16,7 @@ const ALERT_RADIUS: f64 = 16.0;
 /// same-type alerting). Shared by `PiglinEntity` and `PiglinBruteEntity::on_damage`,
 /// matching vanilla's shared `PiglinAi.maybeRetaliate` call from both `PiglinAi.wasHurtBy`
 /// and `PiglinBruteAi.wasHurtBy`.
-pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase) {
+pub fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase) {
     let mob_entity = mob.get_mob_entity();
     let entity = &mob_entity.living_entity.entity;
     let world = entity.world.load();
@@ -26,7 +26,7 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
         return;
     };
 
-    mob.set_mob_target(Some(source_arc.clone())).await;
+    mob.set_mob_target(Some(source_arc.clone()));
 
     let position = entity.pos.load();
     for nearby in world
@@ -41,10 +41,16 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
         let Some(nearby_mob) = nearby.get_mob() else {
             continue;
         };
-        if nearby_mob.get_mob_entity().target.lock().await.is_some() {
+        if nearby_mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
             continue;
         }
-        nearby_mob.set_mob_target(Some(source_arc.clone())).await;
+        nearby_mob.set_mob_target(Some(source_arc.clone()));
     }
 }
 
@@ -54,7 +60,7 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
 /// The goal-based server model has no Brain visibility memories, so it
 /// performs the same 16-block query directly and uses each piglin's sensing raycast
 /// for the `onlyIfTheySeeThePlayer` filter.
-pub async fn anger_nearby_piglins(world: &Arc<crate::world::World>, player: &Arc<Player>) {
+pub fn anger_nearby_piglins(world: &Arc<crate::world::World>, player: &Arc<Player>) {
     let player_entity = player.get_entity();
     let search_box = player_entity.bounding_box.load().expand(16.0, 16.0, 16.0);
     let universal_anger = world.level_info.load().game_rules.universal_anger;
@@ -69,11 +75,15 @@ pub async fn anger_nearby_piglins(world: &Arc<crate::world::World>, player: &Arc
         let Some(nearby_mob) = nearby.get_mob() else {
             continue;
         };
-        if nearby_mob.get_mob_entity().target.lock().await.is_some()
+        if nearby_mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
             || !nearby_mob
                 .get_mob_entity()
                 .has_line_of_sight(player.as_ref())
-                .await
         {
             continue;
         }
@@ -89,11 +99,10 @@ pub async fn anger_nearby_piglins(world: &Arc<crate::world::World>, player: &Arc
                     || candidate_entity.get_living_entity().is_some_and(|living| {
                         living.not_targetable_as_enemy.load(Ordering::Relaxed)
                     })
-                    || super::piglin::is_wearing_safe_armor(&candidate.living_entity).await
+                    || super::piglin::is_wearing_safe_armor(&candidate.living_entity)
                     || !nearby_mob
                         .get_mob_entity()
                         .has_line_of_sight(candidate.as_ref())
-                        .await
                 {
                     continue;
                 }
@@ -114,6 +123,6 @@ pub async fn anger_nearby_piglins(world: &Arc<crate::world::World>, player: &Arc
             player.clone() as Arc<dyn EntityBase>
         };
 
-        nearby_mob.set_mob_target(Some(target)).await;
+        nearby_mob.set_mob_target(Some(target));
     }
 }

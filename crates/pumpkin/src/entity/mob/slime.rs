@@ -16,9 +16,9 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::control::{Control, MoveControlTrait},
-    ai::goal::{Goal, GoalFuture, active_target::ActiveTargetGoal},
+    ai::goal::{Goal, active_target::ActiveTargetGoal},
     mob::{Mob, MobEntity},
 };
 use crate::world::World;
@@ -384,23 +384,19 @@ const fn deals_damage_for(is_magma_cube: bool, is_tiny: bool) -> bool {
 }
 
 impl NBTStorage for SlimeEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("Size", self.get_size() - 1);
-            nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.living_entity.write_nbt(nbt);
+        nbt.put_int("Size", self.get_size() - 1);
+        nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.set_size(nbt.get_int("Size").unwrap_or(0) + 1, false);
-            self.was_on_ground.store(
-                nbt.get_bool("wasOnGround").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.living_entity.read_nbt_non_mut(nbt);
+        self.set_size(nbt.get_int("Size").unwrap_or(0) + 1, false);
+        self.was_on_ground.store(
+            nbt.get_bool("wasOnGround").unwrap_or(false),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -494,7 +490,7 @@ impl Mob for SlimeEntity {
         Box::pin(async move {
             if self.is_deals_damage() {
                 // dealDamage
-                self.entity.try_attack(&**player).await;
+                self.entity.try_attack(&**player);
             }
         })
     }
@@ -545,7 +541,7 @@ impl Mob for SlimeEntity {
                         .entity
                         .yaw
                         .store(rand::random_range(0.0..360.0));
-                    world.spawn_entity(slime_like).await;
+                    world.spawn_entity(slime_like);
                 }
             }
         })
@@ -636,24 +632,20 @@ impl SlimeFloatGoal {
 }
 
 impl Goal for SlimeFloatGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.slime.entity.living_entity.entity;
-            entity.touching_water.load(Ordering::Relaxed)
-                || entity.touching_lava.load(Ordering::Relaxed)
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let entity = &self.slime.entity.living_entity.entity;
+        entity.touching_water.load(Ordering::Relaxed)
+            || entity.touching_lava.load(Ordering::Relaxed)
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if rand::random_range(0.0..1.0) < 0.8 {
-                self.slime
-                    .entity
-                    .jump_requested
-                    .store(true, Ordering::SeqCst);
-            }
-            self.slime.speed_modifier.store(1.2);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        if rand::random_range(0.0..1.0) < 0.8 {
+            self.slime
+                .entity
+                .jump_requested
+                .store(true, Ordering::SeqCst);
+        }
+        self.slime.speed_modifier.store(1.2);
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -680,40 +672,47 @@ impl SlimeAttackGoal {
 }
 
 impl Goal for SlimeAttackGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = self.slime.entity.target.lock().await;
-            target.is_some()
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let target = self
+            .slime
+            .entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        target.is_some()
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.grow_tired_timer = 300;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.grow_tired_timer = 300;
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = self.slime.entity.target.lock().await;
-            target.is_some() && self.grow_tired_timer > 0
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let target = self
+            .slime
+            .entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        target.is_some() && self.grow_tired_timer > 0
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.grow_tired_timer -= 1;
-            let target_guard = self.slime.entity.target.lock().await;
-            if let Some(target) = target_guard.as_ref() {
-                let pos = target.get_entity().pos.load();
-                let my_pos = self.slime.entity.living_entity.entity.pos.load();
-                let dx = pos.x - my_pos.x;
-                let dz = pos.z - my_pos.z;
-                let yaw = dx.atan2(dz).to_degrees() as f32;
-                self.slime.target_yaw.store(yaw);
-            }
-            self.slime.is_aggressive.store(true, Ordering::Relaxed);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.grow_tired_timer -= 1;
+        let target_guard = self
+            .slime
+            .entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(target) = target_guard.as_ref() {
+            let pos = target.get_entity().pos.load();
+            let my_pos = self.slime.entity.living_entity.entity.pos.load();
+            let dx = pos.x - my_pos.x;
+            let dz = pos.z - my_pos.z;
+            let yaw = dx.atan2(dz).to_degrees() as f32;
+            self.slime.target_yaw.store(yaw);
+        }
+        self.slime.is_aggressive.store(true, Ordering::Relaxed);
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -742,44 +741,45 @@ impl SlimeRandomDirectionGoal {
 }
 
 impl Goal for SlimeRandomDirectionGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = self.slime.entity.target.lock().await;
-            target.is_none()
-                && (self
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let target = self
+            .slime
+            .entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        target.is_none()
+            && (self
+                .slime
+                .entity
+                .living_entity
+                .entity
+                .on_ground
+                .load(Ordering::Relaxed)
+                || self
                     .slime
                     .entity
                     .living_entity
                     .entity
-                    .on_ground
+                    .touching_water
                     .load(Ordering::Relaxed)
-                    || self
-                        .slime
-                        .entity
-                        .living_entity
-                        .entity
-                        .touching_water
-                        .load(Ordering::Relaxed)
-                    || self
-                        .slime
-                        .entity
-                        .living_entity
-                        .entity
-                        .touching_lava
-                        .load(Ordering::Relaxed))
-        })
+                || self
+                    .slime
+                    .entity
+                    .living_entity
+                    .entity
+                    .touching_lava
+                    .load(Ordering::Relaxed))
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.next_randomize_time -= 1;
-            if self.next_randomize_time <= 0 {
-                self.next_randomize_time = rand::random_range(40..100);
-                self.chosen_degrees = rand::random_range(0.0..360.0);
-            }
-            self.slime.target_yaw.store(self.chosen_degrees);
-            self.slime.is_aggressive.store(false, Ordering::Relaxed);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.next_randomize_time -= 1;
+        if self.next_randomize_time <= 0 {
+            self.next_randomize_time = rand::random_range(40..100);
+            self.chosen_degrees = rand::random_range(0.0..360.0);
+        }
+        self.slime.target_yaw.store(self.chosen_degrees);
+        self.slime.is_aggressive.store(false, Ordering::Relaxed);
     }
 
     fn controls(&self) -> crate::entity::ai::goal::Controls {
@@ -798,17 +798,20 @@ impl SlimeKeepOnJumpingGoal {
 }
 
 impl Goal for SlimeKeepOnJumpingGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let vehicle = self.slime.entity.living_entity.entity.vehicle.lock().await;
-            vehicle.is_none()
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let vehicle = self
+            .slime
+            .entity
+            .living_entity
+            .entity
+            .vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        vehicle.is_none()
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.slime.speed_modifier.store(1.0);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.slime.speed_modifier.store(1.0);
     }
 
     fn controls(&self) -> crate::entity::ai::goal::Controls {

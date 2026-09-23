@@ -1,6 +1,6 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-    OnScheduledTickArgs, RandomTickArgs,
+    BlockBehaviour, BonemealArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
+    RandomTickArgs,
 };
 use pumpkin_data::block_properties::{
     BlockProperties, MangrovePropaguleLikeProperties, OakLeavesLikeProperties,
@@ -80,88 +80,73 @@ impl BlockBehaviour for LeavesBlock {
     /// `MangroveLeavesBlock.performBonemeal` (`MangroveLeavesBlock.java:41-43`) places
     /// `MangrovePropaguleBlock.createNewHangingPropagule` (`MangrovePropaguleBlock.java:142-144`)
     /// below the leaves.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block != &Block::MANGROVE_LEAVES {
-                return;
-            }
-            let mut props = MangrovePropaguleLikeProperties::default(&Block::MANGROVE_PROPAGULE);
-            props.hanging = true;
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        if args.block != &Block::MANGROVE_LEAVES {
+            return;
+        }
+        let mut props = MangrovePropaguleLikeProperties::default(&Block::MANGROVE_PROPAGULE);
+        props.hanging = true;
+        args.world.set_block_state(
+            &args.position.down(),
+            props.to_state_id(&Block::MANGROVE_PROPAGULE),
+            BlockFlags::NOTIFY_ALL,
+        );
+    }
+
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = LeavesProperties::default(args.block);
+        props.persistent = true;
+        props.distance = compute_distance(args.world, args.position);
+        props.waterlogged = args.replacing.water_source();
+        props.to_state_id(args.block)
+    }
+
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        // `LeavesBlock.updateShape` (`LeavesBlock.java:89-108`) schedules water for
+        // waterlogged leaves and only schedules the leaf tick when its distance changes.
+        let props = LeavesProperties::from_state_id(args.state_id, args.block);
+        if props.waterlogged {
+            args.world.schedule_fluid_tick(
+                &Fluid::WATER,
+                *args.position,
+                Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
+
+        let neighbor_block = Block::from_state_id(args.neighbor_state_id);
+        let neighbor_distance = distance_from_state(neighbor_block, args.neighbor_state_id);
+        if should_schedule_distance_tick(props.distance, neighbor_distance) {
             args.world
-                .set_block_state(
-                    &args.position.down(),
-                    props.to_state_id(&Block::MANGROVE_PROPAGULE),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+        }
+        args.state_id
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = LeavesProperties::default(args.block);
-            props.persistent = true;
-            props.distance = compute_distance(args.world, args.position);
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let mut props = LeavesProperties::from_state_id(state_id, args.block);
+        let distance = compute_distance(args.world, args.position);
+        if props.distance != distance {
+            props.distance = distance;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            // `LeavesBlock.updateShape` (`LeavesBlock.java:89-108`) schedules water for
-            // waterlogged leaves and only schedules the leaf tick when its distance changes.
-            let props = LeavesProperties::from_state_id(args.state_id, args.block);
-            if props.waterlogged {
-                args.world.schedule_fluid_tick(
-                    &Fluid::WATER,
-                    *args.position,
-                    Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
-
-            let neighbor_block = Block::from_state_id(args.neighbor_state_id);
-            let neighbor_distance = distance_from_state(neighbor_block, args.neighbor_state_id);
-            if should_schedule_distance_tick(props.distance, neighbor_distance) {
-                args.world
-                    .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            }
-            args.state_id
-        })
-    }
-
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = LeavesProperties::from_state_id(state_id, args.block);
-            let distance = compute_distance(args.world, args.position);
-            if props.distance != distance {
-                props.distance = distance;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
-    }
-
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let props = LeavesProperties::from_state_id(state_id, args.block);
-            if !props.persistent && props.distance >= MAX_DISTANCE {
-                args.world
-                    .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
-                    .await;
-            }
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let props = LeavesProperties::from_state_id(state_id, args.block);
+        if !props.persistent && props.distance >= MAX_DISTANCE {
+            args.world
+                .break_block(args.position, None, BlockFlags::NOTIFY_ALL);
+        }
     }
 }
 

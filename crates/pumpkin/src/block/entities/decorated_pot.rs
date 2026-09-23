@@ -7,8 +7,8 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::{borrow::Cow, pin::Pin};
-use tokio::sync::Mutex;
 
 /// `DecoratedPotBlockEntity.WobbleStyle` (`DecoratedPotBlockEntity.java:177-186`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,20 +67,25 @@ impl BlockEntity for DecoratedPotBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(sh) = self.sherds.lock().await.as_ref() {
-                nbt.put_list("sherds", sh.clone());
-            }
-            if let Some(it) = self.item.lock().await.as_ref() {
-                let mut it_nbt = NbtCompound::new();
-                it.write_item_stack(&mut it_nbt);
-                nbt.put_compound("item", it_nbt);
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(sh) = self
+            .sherds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_list("sherds", sh.clone());
+        }
+        if let Some(it) = self
+            .item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            let mut it_nbt = NbtCompound::new();
+            it.write_item_stack(&mut it_nbt);
+            nbt.put_compound("item", it_nbt);
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -122,14 +127,15 @@ impl DecoratedPotBlockEntity {
     /// `DecoratedPotBlockEntity.wobble` (`DecoratedPotBlockEntity.java:160-164`): queues a
     /// synced block event so clients play the wobble animation; the client-side
     /// `triggerEvent` (`DecoratedPotBlockEntity.java:167-175`) consumes it.
-    pub async fn wobble(&self, world: &Arc<World>, style: WobbleStyle) {
-        world
-            .add_synced_block_event(self.position, Self::EVENT_POT_WOBBLES, style.to_index())
-            .await;
+    pub fn wobble(&self, world: &Arc<World>, style: WobbleStyle) {
+        world.add_synced_block_event(self.position, Self::EVENT_POT_WOBBLES, style.to_index());
     }
 
-    pub async fn get_item(&self) -> Option<ItemStack> {
-        self.item.lock().await.clone()
+    pub fn get_item(&self) -> Option<ItemStack> {
+        self.item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Returns the four serialized sherd identifiers used by
@@ -152,11 +158,14 @@ impl DecoratedPotBlockEntity {
     /// `DecoratedPotBlockEntity.collectImplicitComponents` writes both components
     /// (`DecoratedPotBlockEntity.java:112-116`), and the live caller is
     /// `JavaClient::handle_pick_item_from_block` (`ServerGamePacketListenerImpl.java:699-709`).
-    pub(crate) async fn collect_implicit_components(
+    pub(crate) fn collect_implicit_components(
         &self,
     ) -> Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)> {
         let decorations = {
-            let sherds = self.sherds.lock().await;
+            let sherds = self
+                .sherds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             sherds.as_ref().and_then(|sherds| {
                 sherds
                     .iter()
@@ -169,7 +178,11 @@ impl DecoratedPotBlockEntity {
                     .ok()
             })
         };
-        let item = self.item.lock().await.clone();
+        let item = self
+            .item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let mut components = Vec::with_capacity(2);
         if let Some(decorations) = decorations {
             components.push((
@@ -191,12 +204,18 @@ impl DecoratedPotBlockEntity {
         components
     }
 
-    pub async fn take_item(&self) -> Option<ItemStack> {
-        self.item.lock().await.take()
+    pub fn take_item(&self) -> Option<ItemStack> {
+        self.item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
-    pub async fn try_insert_item(&self, stack: &mut ItemStack, count: u8) -> bool {
-        let mut item_guard = self.item.lock().await;
+    pub fn try_insert_item(&self, stack: &mut ItemStack, count: u8) -> bool {
+        let mut item_guard = self
+            .item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = item_guard.as_mut() {
             // Vanilla `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:110-115`) only
             // merges equal items/components and compares against that stack's max size.
@@ -226,15 +245,19 @@ impl DecoratedPotBlockEntity {
         }
     }
 
-    pub async fn get_comparator_output(&self) -> u8 {
-        self.item.lock().await.as_ref().map_or(0, |item| {
-            if item.item_count == 0 {
-                0
-            } else {
-                let max_count = 64f32;
-                1 + ((item.item_count as f32 / max_count) * 14.0).floor() as u8
-            }
-        })
+    pub fn get_comparator_output(&self) -> u8 {
+        self.item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map_or(0, |item| {
+                if item.item_count == 0 {
+                    0
+                } else {
+                    let max_count = 64f32;
+                    1 + ((item.item_count as f32 / max_count) * 14.0).floor() as u8
+                }
+            })
     }
 }
 
@@ -248,27 +271,27 @@ mod tests {
     /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:110-115`) rejects mismatched
     /// item components.
     #[tokio::test]
-    async fn insertion_requires_matching_components() {
+    fn insertion_requires_matching_components() {
         let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
         let mut plain = ItemStack::new(1, &Item::COBBLESTONE);
-        assert!(pot.try_insert_item(&mut plain, 1).await);
+        assert!(pot.try_insert_item(&mut plain, 1));
 
         let mut named = ItemStack::new(1, &Item::COBBLESTONE);
         named.set_custom_name("named".into());
-        assert!(!pot.try_insert_item(&mut named, 1).await);
+        assert!(!pot.try_insert_item(&mut named, 1));
     }
 
     /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:111-112`) uses the item's max
     /// stack size when deciding whether another item fits.
     #[tokio::test]
-    async fn insertion_uses_the_item_max_stack_size() {
+    fn insertion_uses_the_item_max_stack_size() {
         let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
         let mut pearls = ItemStack::new(16, &Item::ENDER_PEARL);
-        assert!(pot.try_insert_item(&mut pearls, 16).await);
+        assert!(pot.try_insert_item(&mut pearls, 16));
         assert_eq!(pearls.item_count, 0);
 
         let mut extra = ItemStack::new(1, &Item::ENDER_PEARL);
-        assert!(!pot.try_insert_item(&mut extra, 1).await);
+        assert!(!pot.try_insert_item(&mut extra, 1));
         assert_eq!(extra.item_count, 1);
     }
 }

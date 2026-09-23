@@ -1,4 +1,3 @@
-use crate::block::BlockFuture;
 use crate::block::GetStateForNeighborUpdateArgs;
 use crate::block::OnPlaceArgs;
 use crate::block::RandomTickArgs;
@@ -25,56 +24,49 @@ use crate::world::World;
 pub struct IronBarsBlock;
 
 impl BlockBehaviour for IronBarsBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut bars_props = IronBarsProperties::default(args.block);
-            bars_props.waterlogged = args.replacing.water_source();
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut bars_props = IronBarsProperties::default(args.block);
+        bars_props.waterlogged = args.replacing.water_source();
 
-            compute_bars_state(bars_props, args.world, args.block, args.position)
-        })
+        compute_bars_state(bars_props, args.world, args.block, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let bars_props = IronBarsProperties::from_state_id(args.state_id, args.block);
-            compute_bars_state(bars_props, args.world, args.block, args.position)
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let bars_props = IronBarsProperties::from_state_id(args.state_id, args.block);
+        compute_bars_state(bars_props, args.world, args.block, args.position)
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // No tag gate needed: the oxidation_stages table below only contains the
-            // copper_bars family, so this is a no-op for iron_bars.
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let current_props = IronBarsProperties::from_state_id(current_state_id, args.block);
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        // No tag gate needed: the oxidation_stages table below only contains the
+        // copper_bars family, so this is a no-op for iron_bars.
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let current_props = IronBarsProperties::from_state_id(current_state_id, args.block);
 
-            let oxidation_stages = [
-                &Block::COPPER_BARS,
-                &Block::EXPOSED_COPPER_BARS,
-                &Block::WEATHERED_COPPER_BARS,
-                &Block::OXIDIZED_COPPER_BARS,
-            ];
+        let oxidation_stages = [
+            &Block::COPPER_BARS,
+            &Block::EXPOSED_COPPER_BARS,
+            &Block::WEATHERED_COPPER_BARS,
+            &Block::OXIDIZED_COPPER_BARS,
+        ];
 
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = IronBarsProperties::default(next_block);
-                    new_props.waterlogged = current_props.waterlogged;
-                    new_props.north = current_props.north;
-                    new_props.south = current_props.south;
-                    new_props.east = current_props.east;
-                    new_props.west = current_props.west;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = IronBarsProperties::default(next_block);
+                new_props.waterlogged = current_props.waterlogged;
+                new_props.north = current_props.north;
+                new_props.south = current_props.south;
+                new_props.east = current_props.east;
+                new_props.west = current_props.west;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 }
 

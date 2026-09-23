@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob, passive::dolphin::DolphinEntity};
 use pumpkin_data::Block;
 use pumpkin_util::math::position::BlockPos;
@@ -52,16 +52,14 @@ impl BreathAirGoal {
 }
 
 impl Goal for BreathAirGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(dolphin) = mob.cast_any().downcast_ref::<DolphinEntity>() else {
-                return false;
-            };
-            dolphin.get_air_supply() < LOW_AIR_THRESHOLD
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(dolphin) = mob.cast_any().downcast_ref::<DolphinEntity>() else {
+            return false;
+        };
+        dolphin.get_air_supply() < LOW_AIR_THRESHOLD
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.can_start(mob)
     }
 
@@ -70,39 +68,35 @@ impl Goal for BreathAirGoal {
         false
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-            let target = Self::find_air_position(mob);
-            let mob_pos = mob.get_entity().pos.load();
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-            navigator.set_progress(NavigatorGoal::new(
-                mob_pos,
-                pumpkin_util::math::vector3::Vector3::new(
-                    f64::from(target.0.x) + 0.5,
-                    f64::from(target.0.y) + 1.0,
-                    f64::from(target.0.z) + 0.5,
-                ),
-                1.0,
-            ));
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        let target = Self::find_air_position(mob);
+        let mob_pos = mob.get_entity().pos.load();
+        let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+        navigator.set_progress(NavigatorGoal::new(
+            mob_pos,
+            pumpkin_util::math::vector3::Vector3::new(
+                f64::from(target.0.x) + 0.5,
+                f64::from(target.0.y) + 1.0,
+                f64::from(target.0.z) + 0.5,
+            ),
+            1.0,
+        ));
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let target = Self::find_air_position(mob);
-            let mob_pos = mob.get_entity().pos.load();
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-            navigator.set_progress(NavigatorGoal::new(
-                mob_pos,
-                pumpkin_util::math::vector3::Vector3::new(
-                    f64::from(target.0.x) + 0.5,
-                    f64::from(target.0.y) + 1.0,
-                    f64::from(target.0.z) + 0.5,
-                ),
-                1.0,
-            ));
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        let target = Self::find_air_position(mob);
+        let mob_pos = mob.get_entity().pos.load();
+        let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+        navigator.set_progress(NavigatorGoal::new(
+            mob_pos,
+            pumpkin_util::math::vector3::Vector3::new(
+                f64::from(target.0.x) + 0.5,
+                f64::from(target.0.y) + 1.0,
+                f64::from(target.0.z) + 0.5,
+            ),
+            1.0,
+        ));
     }
 
     fn should_run_every_tick(&self) -> bool {

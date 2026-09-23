@@ -15,8 +15,7 @@ impl JavaClient {
             if client_information.view_distance <= 0 {
                 self.kick(TextComponent::text(
                     "Cannot have zero or negative view distance!",
-                ))
-                .await;
+                ));
                 return;
             }
 
@@ -72,7 +71,7 @@ impl JavaClient {
             };
 
             if update_watched {
-                chunker::update_position(player).await;
+                chunker::update_position(player);
             }
 
             if main_hand_changed {
@@ -97,8 +96,7 @@ impl JavaClient {
                 player.send_client_information();
             }
         } else {
-            self.kick(TextComponent::text("Invalid hand or chat type"))
-                .await;
+            self.kick(TextComponent::text("Invalid hand or chat type"));
         }
     }
 }

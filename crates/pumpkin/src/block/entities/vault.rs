@@ -8,10 +8,9 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use std::collections::HashSet;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::world::{BlockFlags, World};
@@ -101,9 +100,12 @@ impl VaultBlockEntity {
 
     // VaultSharedData.java:67-79, simplified: PlayerDetector::INCLUDING_CREATIVE_PLAYERS
     // (excludes only spectators, VaultConfig.java:45) without the line-of-sight check.
-    async fn update_connected_players_within_range(&self, world: &Arc<World>, range: f64) -> bool {
+    fn update_connected_players_within_range(&self, world: &Arc<World>, range: f64) -> bool {
         let nearby = world.get_nearby_players(self.position.to_f64(), range);
-        let rewarded = self.rewarded_players.lock().await;
+        let rewarded = self
+            .rewarded_players
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let current: HashSet<Uuid> = nearby
             .iter()
             .filter(|p| {
@@ -113,7 +115,10 @@ impl VaultBlockEntity {
             .map(|p| p.gameprofile.id)
             .collect();
         drop(rewarded);
-        let mut connected = self.connected_players.lock().await;
+        let mut connected = self
+            .connected_players
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *connected == current {
             false
         } else {
@@ -122,13 +127,19 @@ impl VaultBlockEntity {
         }
     }
 
-    async fn cycle_display_item_from_loot_table(&self, can_eject: bool) {
+    fn cycle_display_item_from_loot_table(&self, can_eject: bool) {
         if !can_eject {
-            *self.display_item.lock().await = None;
+            *self
+                .display_item
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             return;
         }
         if let Some(item) = self.roll_loot_table_item() {
-            *self.display_item.lock().await = Some(item);
+            *self
+                .display_item
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(item);
         }
     }
 
@@ -159,19 +170,23 @@ impl VaultBlockEntity {
     }
 
     // VaultState.java:82-83, 105-116
-    async fn update_state_for_connected_players(
+    fn update_state_for_connected_players(
         &self,
         world: &Arc<World>,
         range: f64,
         game_time: i64,
     ) -> VaultState {
-        self.update_connected_players_within_range(world, range)
-            .await;
+        self.update_connected_players_within_range(world, range);
         self.state_updating_resumes_at.store(
             game_time + UPDATE_CONNECTED_PLAYERS_TICK_RATE,
             Ordering::Relaxed,
         );
-        if self.connected_players.lock().await.is_empty() {
+        if self
+            .connected_players
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
             VaultState::Inactive
         } else {
             VaultState::Active
@@ -190,52 +205,52 @@ impl VaultBlockEntity {
     }
 
     // VaultState.java:78-103
-    async fn tick_state_machine(
+    fn tick_state_machine(
         &self,
         world: &Arc<World>,
         current: VaultState,
         game_time: i64,
     ) -> VaultState {
         match current {
-            VaultState::Inactive => {
-                self.update_state_for_connected_players(
-                    world,
-                    self.config.activation_range,
-                    game_time,
-                )
-                .await
-            }
-            VaultState::Active => {
-                self.update_state_for_connected_players(
-                    world,
-                    self.config.deactivation_range,
-                    game_time,
-                )
-                .await
-            }
+            VaultState::Inactive => self.update_state_for_connected_players(
+                world,
+                self.config.activation_range,
+                game_time,
+            ),
+            VaultState::Active => self.update_state_for_connected_players(
+                world,
+                self.config.deactivation_range,
+                game_time,
+            ),
             VaultState::Unlocking => {
                 self.state_updating_resumes_at
                     .store(game_time + DELAY_BETWEEN_EJECTIONS_TICKS, Ordering::Relaxed);
                 VaultState::Ejecting
             }
             VaultState::Ejecting => {
-                let next_item = self.items_to_eject.lock().await.pop();
+                let next_item = self
+                    .items_to_eject
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .pop();
                 let Some(item) = next_item else {
                     self.total_ejections_needed.store(0, Ordering::Relaxed);
-                    return self
-                        .update_state_for_connected_players(
-                            world,
-                            self.config.deactivation_range,
-                            game_time,
-                        )
-                        .await;
+                    return self.update_state_for_connected_players(
+                        world,
+                        self.config.deactivation_range,
+                        game_time,
+                    );
                 };
-                let remaining = self.items_to_eject.lock().await.len();
+                let remaining = self
+                    .items_to_eject
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .len();
                 let progress = Self::ejection_progress(
                     self.total_ejections_needed.load(Ordering::Relaxed),
                     remaining + 1,
                 );
-                world.drop_stack(&self.position, item).await;
+                world.drop_stack(&self.position, item);
                 world.sync_world_event(WorldEvent::AnimationVaultEjectItem, self.position, 0);
                 world.play_sound_fine(
                     Sound::BlockVaultEjectItem,
@@ -244,7 +259,15 @@ impl VaultBlockEntity {
                     1.0,
                     0.8 + 0.4 * progress,
                 );
-                *self.display_item.lock().await = self.items_to_eject.lock().await.last().cloned();
+                *self
+                    .display_item
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = self
+                    .items_to_eject
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .last()
+                    .cloned();
                 self.state_updating_resumes_at
                     .store(game_time + DELAY_BETWEEN_EJECTIONS_TICKS, Ordering::Relaxed);
                 VaultState::Ejecting
@@ -252,7 +275,7 @@ impl VaultBlockEntity {
         }
     }
 
-    async fn on_transition(
+    fn on_transition(
         &self,
         world: &Arc<World>,
         from: VaultState,
@@ -268,7 +291,10 @@ impl VaultBlockEntity {
         }
         match to {
             VaultState::Inactive => {
-                *self.display_item.lock().await = None;
+                *self
+                    .display_item
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                 world.sync_world_event(
                     WorldEvent::AnimationVaultDeactivate,
                     self.position,
@@ -276,8 +302,13 @@ impl VaultBlockEntity {
                 );
             }
             VaultState::Active => {
-                if self.display_item.lock().await.is_none() {
-                    self.cycle_display_item_from_loot_table(true).await;
+                if self
+                    .display_item
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_none()
+                {
+                    self.cycle_display_item_from_loot_table(true);
                 }
                 world.sync_world_event(
                     WorldEvent::AnimationVaultActivate,
@@ -302,42 +333,37 @@ impl VaultBlockEntity {
         }
     }
 
-    async fn tick_server(&self, world: &Arc<World>) {
+    fn tick_server(&self, world: &Arc<World>) {
         let state_id = world.get_block_state_id(&self.position);
         let block = Block::from_state_id(state_id);
         if !VaultLikeProperties::handles_block_id(block.id) {
             return;
         }
         let mut props = VaultLikeProperties::from_state_id(state_id, block);
-        let game_time = world.get_world_age().await;
+        let game_time = world.get_world_age();
 
         let can_eject =
             !self.config.key_item.is_empty() && props.vault_state != VaultState::Inactive;
         if game_time % UPDATE_CONNECTED_PLAYERS_TICK_RATE == 0
             && props.vault_state == VaultState::Active
         {
-            self.cycle_display_item_from_loot_table(can_eject).await;
+            self.cycle_display_item_from_loot_table(can_eject);
         }
 
         if game_time >= self.state_updating_resumes_at.load(Ordering::Relaxed) {
-            let next_state = self
-                .tick_state_machine(world, props.vault_state, game_time)
-                .await;
+            let next_state = self.tick_state_machine(world, props.vault_state, game_time);
             if next_state != props.vault_state {
                 let from = props.vault_state;
                 props.vault_state = next_state;
                 let new_state_id = props.to_state_id(block);
-                world
-                    .set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
-                self.on_transition(world, from, next_state, props.ominous)
-                    .await;
+                world.set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL);
+                self.on_transition(world, from, next_state, props.ominous);
             }
         }
     }
 
     // VaultBlockEntity.java:253-280
-    pub async fn try_insert_key(
+    pub fn try_insert_key(
         &self,
         world: &Arc<World>,
         player: &Arc<crate::entity::player::Player>,
@@ -357,7 +383,7 @@ impl VaultBlockEntity {
 
         let is_valid = item_stack.are_items_and_components_equal(&self.config.key_item)
             && item_stack.item_count >= self.config.key_item.item_count;
-        let game_time = world.get_world_age().await;
+        let game_time = world.get_world_age();
 
         if !is_valid {
             self.play_insert_fail_sound(world, Sound::BlockVaultInsertItemFail, game_time);
@@ -367,7 +393,7 @@ impl VaultBlockEntity {
         if self
             .rewarded_players
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains(&player.gameprofile.id)
         {
             self.play_insert_fail_sound(world, Sound::BlockVaultRejectRewardedPlayer, game_time);
@@ -384,42 +410,58 @@ impl VaultBlockEntity {
 
         self.total_ejections_needed
             .store(items.len(), Ordering::Relaxed);
-        *self.items_to_eject.lock().await = items;
-        *self.display_item.lock().await = self.items_to_eject.lock().await.last().cloned();
+        *self
+            .items_to_eject
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = items;
+        *self
+            .display_item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self
+            .items_to_eject
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last()
+            .cloned();
         self.state_updating_resumes_at
             .store(game_time + 14, Ordering::Relaxed);
 
         let from = props.vault_state;
         props.vault_state = VaultState::Unlocking;
         let new_state_id = props.to_state_id(block);
-        world
-            .set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL)
-            .await;
-        self.on_transition(world, from, VaultState::Unlocking, props.ominous)
-            .await;
+        world.set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL);
+        self.on_transition(world, from, VaultState::Unlocking, props.ominous);
 
         {
-            let mut rewarded = self.rewarded_players.lock().await;
+            let mut rewarded = self
+                .rewarded_players
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             rewarded.push(player.gameprofile.id);
             // VaultServerData.java:68-74: FIFO eviction once over the cap.
             if rewarded.len() > MAX_REWARD_PLAYERS {
                 rewarded.remove(0);
             }
         }
-        self.update_connected_players_within_range(world, self.config.deactivation_range)
-            .await;
+        self.update_connected_players_within_range(world, self.config.deactivation_range);
         true
     }
 
     /// Whether `player_id` already claimed this vault's reward
     /// (`VaultServerData.hasRewardedPlayer`).
-    pub async fn has_rewarded(&self, player_id: &Uuid) -> bool {
-        self.rewarded_players.lock().await.contains(player_id)
+    pub fn has_rewarded(&self, player_id: &Uuid) -> bool {
+        self.rewarded_players
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(player_id)
     }
 
     /// `VaultServerData.addToRewardedPlayers`, including the FIFO eviction at the cap.
-    pub async fn mark_rewarded(&self, player_id: Uuid) {
-        let mut rewarded = self.rewarded_players.lock().await;
+    pub fn mark_rewarded(&self, player_id: Uuid) {
+        let mut rewarded = self
+            .rewarded_players
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if rewarded.contains(&player_id) {
             return;
         }
@@ -450,8 +492,8 @@ impl BlockEntity for VaultBlockEntity {
         self.position
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move { self.tick_server(world).await })
+    fn tick(&self, world: &Arc<World>) {
+        self.tick_server(world)
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -517,46 +559,46 @@ impl BlockEntity for VaultBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(cfg) = self.config_nbt.lock().await.as_ref() {
-                nbt.put_compound("config", cfg.clone());
-            }
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(cfg) = self
+            .config_nbt
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_compound("config", cfg.clone());
+        }
 
-            let mut data = NbtCompound::new();
-            let players: Vec<NbtTag> = self
-                .rewarded_players
-                .lock()
-                .await
-                .iter()
-                .map(|u| uuid_to_int_array(*u))
-                .collect();
-            data.put_list("rewarded_players", players);
-            data.put_long(
-                "state_updating_resumes_at",
-                self.state_updating_resumes_at.load(Ordering::Relaxed),
-            );
-            let items: Vec<NbtTag> = self
-                .items_to_eject
-                .lock()
-                .await
-                .iter()
-                .map(|stack| {
-                    let mut item_nbt = NbtCompound::new();
-                    stack.write_item_stack(&mut item_nbt);
-                    NbtTag::Compound(item_nbt)
-                })
-                .collect();
-            data.put_list("items_to_eject", items);
-            data.put_int(
-                "total_ejections_needed",
-                self.total_ejections_needed.load(Ordering::Relaxed) as i32,
-            );
-            nbt.put_compound("server_data", data);
-        })
+        let mut data = NbtCompound::new();
+        let players: Vec<NbtTag> = self
+            .rewarded_players
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|u| uuid_to_int_array(*u))
+            .collect();
+        data.put_list("rewarded_players", players);
+        data.put_long(
+            "state_updating_resumes_at",
+            self.state_updating_resumes_at.load(Ordering::Relaxed),
+        );
+        let items: Vec<NbtTag> = self
+            .items_to_eject
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|stack| {
+                let mut item_nbt = NbtCompound::new();
+                stack.write_item_stack(&mut item_nbt);
+                NbtTag::Compound(item_nbt)
+            })
+            .collect();
+        data.put_list("items_to_eject", items);
+        data.put_int(
+            "total_ejections_needed",
+            self.total_ejections_needed.load(Ordering::Relaxed) as i32,
+        );
+        nbt.put_compound("server_data", data);
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

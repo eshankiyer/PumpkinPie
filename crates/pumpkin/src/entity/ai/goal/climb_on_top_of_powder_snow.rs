@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use pumpkin_data::tag::{self, Taggable};
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 
 /// Makes a mob standing in powder snow jump onto solid-looking powder snow directly above it.
@@ -52,23 +52,20 @@ impl Default for ClimbOnTopOfPowderSnowGoal {
 }
 
 impl Goal for ClimbOnTopOfPowderSnowGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::wants_to_climb(mob) })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::wants_to_climb(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        // Vanilla has no `canContinueToUse` override, so it defaults to re-running `canUse`.
-        Box::pin(async move { Self::wants_to_climb(mob) })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        Self::wants_to_climb(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // Vanilla: `this.mob.getJumpControl().jump()`, which just arms the jump flag for the
-            // next physics tick.
-            mob.get_mob_entity()
-                .jump_requested
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        // Vanilla: `this.mob.getJumpControl().jump()`, which just arms the jump flag for the
+        // next physics tick.
+        mob.get_mob_entity()
+            .jump_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     fn should_run_every_tick(&self) -> bool {

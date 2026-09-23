@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::mob::Mob;
 use pumpkin_data::block_properties::HorizontalFacing;
 use pumpkin_data::fluid::Fluid;
@@ -102,108 +102,98 @@ impl DolphinJumpGoal {
 }
 
 impl Goal for DolphinJumpGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.next_jump_tick = (self.next_jump_tick - 1).max(0);
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.next_jump_tick = (self.next_jump_tick - 1).max(0);
 
-            if self.next_jump_tick > 0 {
+        if self.next_jump_tick > 0 {
+            return false;
+        }
+
+        if mob.get_random().random_range(0..self.interval) != 0 {
+            return false;
+        }
+
+        let facing = mob.get_entity().get_horizontal_facing();
+        let step_x = Self::get_step_x(facing);
+        let step_z = Self::get_step_z(facing);
+
+        // Check the 6 steps defined in vanilla: 0, 1, 4, 5, 6, 7
+        for step in [0, 1, 4, 5, 6, 7] {
+            if !Self::water_is_clear(mob, step_x, step_z, step)
+                || !Self::surface_is_clear(mob, step_x, step_z, step)
+            {
                 return false;
             }
+        }
 
-            if mob.get_random().random_range(0..self.interval) != 0 {
-                return false;
-            }
-
-            let facing = mob.get_entity().get_horizontal_facing();
-            let step_x = Self::get_step_x(facing);
-            let step_z = Self::get_step_z(facing);
-
-            // Check the 6 steps defined in vanilla: 0, 1, 4, 5, 6, 7
-            for step in [0, 1, 4, 5, 6, 7] {
-                if !Self::water_is_clear(mob, step_x, step_z, step)
-                    || !Self::surface_is_clear(mob, step_x, step_z, step)
-                {
-                    return false;
-                }
-            }
-
-            self.next_jump_tick = self.interval;
-            true
-        })
+        self.next_jump_tick = self.interval;
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let velocity = entity.velocity.load();
-            let y_velocity_sq = velocity.y * velocity.y;
-            let x_rot = entity.pitch.load();
-            let is_in_water = entity.touching_water.load(Relaxed);
-            let on_ground = entity.on_ground.load(Relaxed);
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        let velocity = entity.velocity.load();
+        let y_velocity_sq = velocity.y * velocity.y;
+        let x_rot = entity.pitch.load();
+        let is_in_water = entity.touching_water.load(Relaxed);
+        let on_ground = entity.on_ground.load(Relaxed);
 
-            Self::should_continue_jump(y_velocity_sq, x_rot, is_in_water, on_ground)
-        })
+        Self::should_continue_jump(y_velocity_sq, x_rot, is_in_water, on_ground)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let facing = entity.get_horizontal_facing();
-            let step_x = Self::get_step_x(facing) as f64;
-            let step_z = Self::get_step_z(facing) as f64;
+    fn start(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let facing = entity.get_horizontal_facing();
+        let step_x = Self::get_step_x(facing) as f64;
+        let step_z = Self::get_step_z(facing) as f64;
 
-            let velocity = entity.velocity.load();
-            let new_velocity = velocity.add_raw(step_x * 0.6, 0.7, step_z * 0.6);
-            entity.velocity.store(new_velocity);
+        let velocity = entity.velocity.load();
+        let new_velocity = velocity.add_raw(step_x * 0.6, 0.7, step_z * 0.6);
+        entity.velocity.store(new_velocity);
 
-            // Stop navigation
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
+        // Stop navigation
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_entity().pitch.store(0.0);
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.get_entity().pitch.store(0.0);
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let world = entity.world.load();
+    fn tick(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let world = entity.world.load();
 
-            // Detect the false->true transition of being back in water (vanilla: `breached`).
-            let already_breached = self.breached;
-            if !already_breached {
-                let current_pos = entity.block_pos.load();
-                let fluid = world.get_fluid(&current_pos);
-                self.breached = fluid == &Fluid::WATER || fluid == &Fluid::FLOWING_WATER;
-            }
+        // Detect the false->true transition of being back in water (vanilla: `breached`).
+        let already_breached = self.breached;
+        if !already_breached {
+            let current_pos = entity.block_pos.load();
+            let fluid = world.get_fluid(&current_pos);
+            self.breached = fluid == &Fluid::WATER || fluid == &Fluid::FLOWING_WATER;
+        }
 
-            if self.breached && !already_breached {
-                world.play_sound(
-                    Sound::EntityDolphinJump,
-                    SoundCategory::Neutral,
-                    &entity.pos.load(),
-                );
-            }
+        if self.breached && !already_breached {
+            world.play_sound(
+                Sound::EntityDolphinJump,
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+            );
+        }
 
-            // Update pitch based on velocity
-            let velocity = entity.velocity.load();
-            let y_velocity = velocity.y;
-            let y_velocity_sq = y_velocity * y_velocity;
+        // Update pitch based on velocity
+        let velocity = entity.velocity.load();
+        let y_velocity = velocity.y;
+        let y_velocity_sq = y_velocity * y_velocity;
 
-            if y_velocity_sq < 0.03 && entity.pitch.load() != 0.0 {
-                // Apply smooth rotation towards 0
-                let current_pitch = entity.pitch.load();
-                let new_pitch = lerp_rotation(0.2, current_pitch, 0.0);
-                entity.pitch.store(new_pitch);
-            } else if velocity.length() > 1.0e-5 {
-                let horizontal_dist = velocity.x.hypot(velocity.z);
-                let rotation = (-velocity.y).atan2(horizontal_dist) * 180.0 / std::f64::consts::PI;
-                entity.pitch.store(rotation as f32);
-            }
-        })
+        if y_velocity_sq < 0.03 && entity.pitch.load() != 0.0 {
+            // Apply smooth rotation towards 0
+            let current_pitch = entity.pitch.load();
+            let new_pitch = lerp_rotation(0.2, current_pitch, 0.0);
+            entity.pitch.store(new_pitch);
+        } else if velocity.length() > 1.0e-5 {
+            let horizontal_dist = velocity.x.hypot(velocity.z);
+            let rotation = (-velocity.y).atan2(horizontal_dist) * 180.0 / std::f64::consts::PI;
+            entity.pitch.store(rotation as f32);
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

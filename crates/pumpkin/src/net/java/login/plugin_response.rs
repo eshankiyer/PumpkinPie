@@ -21,7 +21,7 @@ impl PendingConnection {
                     self.finish_login(server, &profile).await
                 }
                 Err(error) => {
-                    self.kick(TextComponent::text(error.to_string())).await;
+                    self.kick(TextComponent::text(error.to_string()));
                     Some(PacketHandlerResult::Stop)
                 }
             }

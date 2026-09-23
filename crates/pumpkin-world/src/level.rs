@@ -1338,7 +1338,7 @@ mod tests {
 
         let loaded = tokio::time::timeout(Duration::from_mins(3), async {
             while !level.is_chunk_loaded(&pos) {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(50));
             }
         })
         .await
@@ -1357,7 +1357,7 @@ mod tests {
         // sweep does not take it away.
         assert!(!level.is_chunk_watched(&pos));
         let _ = level.clean_memory();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(500));
         assert!(
             level.is_chunk_loaded(&pos),
             "forceloaded chunk must stay loaded while the ticket is held"
@@ -1368,7 +1368,7 @@ mod tests {
         assert!(level.set_chunk_forced(pos, false));
         let unloaded = tokio::time::timeout(Duration::from_mins(1), async {
             while level.is_chunk_loaded(&pos) {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(50));
             }
         })
         .await

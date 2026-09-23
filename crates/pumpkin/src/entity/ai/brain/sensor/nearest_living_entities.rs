@@ -42,7 +42,7 @@ impl NearestLivingEntitySensor {
     /// is `canBeSeenByAnyone` + the visibility-modified range check + line of sight. The
     /// shared-static range mutation from `Sensor.updateTargetingConditionRanges`
     /// (`sensing/Sensor.java:52-60`) is folded in as the `follow_range` parameter instead.
-    async fn is_targetable(
+    fn is_targetable(
         mob_entity: &MobEntity,
         observer_type: &EntityType,
         follow_range: f64,
@@ -58,7 +58,7 @@ impl NearestLivingEntitySensor {
         // Range check with the invisibility modifier
         // (`TargetingConditions.java:81-89`, modifier from
         // `LivingEntity.getVisibilityPercent`, LivingEntity.java:919-946).
-        let modifier = Self::visibility_percent(observer_type, candidate).await;
+        let modifier = Self::visibility_percent(observer_type, candidate);
         let visibility_distance = (follow_range * modifier).max(2.0);
         if distance_sq > visibility_distance * visibility_distance {
             return false;
@@ -66,7 +66,7 @@ impl NearestLivingEntitySensor {
 
         // `targeter instanceof Mob mob && !mob.getSensing().hasLineOfSight(target)`
         // (`TargetingConditions.java:91-93`); sensors only run on mobs.
-        mob_entity.has_line_of_sight(candidate.as_ref()).await
+        mob_entity.has_line_of_sight(candidate.as_ref())
     }
 
     /// `LivingEntity.getVisibilityPercent` (`LivingEntity.java:919-946`), evaluated on the
@@ -74,7 +74,7 @@ impl NearestLivingEntitySensor {
     ///
     /// DEVIATION: vanilla reads the head slot synchronously; here the equipment map is a
     /// tokio mutex, so the read is awaited inside this helper before any brain lock is taken.
-    async fn visibility_percent(observer_type: &EntityType, target: &Arc<dyn EntityBase>) -> f64 {
+    fn visibility_percent(observer_type: &EntityType, target: &Arc<dyn EntityBase>) -> f64 {
         let mut percent = 1.0;
 
         let entity = target.get_entity();
@@ -88,7 +88,10 @@ impl NearestLivingEntitySensor {
             };
             // `getArmorCoverPercentage` (`LivingEntity.java:2289-2308`): fraction of the four
             // humanoid armor slots that hold an item, floored at 0.1 by the caller above.
-            let equipment = living.entity_equipment.lock().await;
+            let equipment = living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let armor_slots = [
                 EquipmentSlot::FEET,
                 EquipmentSlot::LEGS,
@@ -109,7 +112,7 @@ impl NearestLivingEntitySensor {
             let head_item = living
                 .entity_equipment
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(&EquipmentSlot::HEAD);
             let disguised = (observer_type == &EntityType::SKELETON
                 && head_item.item == &Item::SKELETON_SKULL)
@@ -194,8 +197,7 @@ impl Sensor for NearestLivingEntitySensor {
                     follow_range,
                     distance_sq,
                     &candidate,
-                )
-                .await;
+                );
                 visible.push((Arc::downgrade(&candidate), targetable));
             }
 

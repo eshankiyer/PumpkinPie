@@ -50,27 +50,20 @@ impl ArgumentConsumer for CommandTreeArgumentConsumer {
         })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        server: &'a Server,
-        input: &'a str,
-    ) -> SuggestResult<'a> {
-        Box::pin(async move {
-            let Some(input) = input.split_single_whitespace_including_empty_parts().last() else {
-                return Ok(None);
-            };
+    fn suggest(&self, _sender: &CommandSender, server: &Server, input: &str) -> SuggestResult {
+        let Some(input) = input.split_single_whitespace_including_empty_parts().last() else {
+            return Ok(None);
+        };
 
-            let dispatcher = server.command_dispatcher.load();
-            let suggestions = dispatcher
-                .fallback_dispatcher
-                .commands
-                .keys()
-                .filter(|suggestion| suggestion.starts_with(input))
-                .map(|suggestion| CommandSuggestion::new(suggestion.clone(), None))
-                .collect();
-            Ok(Some(suggestions))
-        })
+        let dispatcher = server.command_dispatcher.load();
+        let suggestions = dispatcher
+            .fallback_dispatcher
+            .commands
+            .keys()
+            .filter(|suggestion| suggestion.starts_with(input))
+            .map(|suggestion| CommandSuggestion::new(suggestion.clone(), None))
+            .collect();
+        Ok(Some(suggestions))
     }
 }
 

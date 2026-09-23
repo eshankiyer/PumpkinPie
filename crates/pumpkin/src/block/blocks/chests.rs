@@ -16,7 +16,7 @@ use pumpkin_inventory::double::DoubleInventory;
 use pumpkin_inventory::generic_container_screen_handler::{create_generic_9x3, create_generic_9x6};
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::{pumpkin_block, pumpkin_block_from_tag};
 use pumpkin_util::GameMode;
@@ -27,11 +27,11 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::block::blocks::copper_weathering;
 use crate::block::{
-    BlockFuture, BrokenArgs, EmitsRedstonePowerArgs, GetComparatorOutputArgs, GetRedstonePowerArgs,
+    BrokenArgs, EmitsRedstonePowerArgs, GetComparatorOutputArgs, GetRedstonePowerArgs,
     GetStateForNeighborUpdateArgs, NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs,
     OnSyncedBlockEventArgs, PlacedArgs, PlayerPlacedArgs, RandomTickArgs,
 };
@@ -47,23 +47,21 @@ use crate::{
 struct ChestScreenFactory(Arc<dyn Inventory>);
 
 impl ScreenHandlerFactory for ChestScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let concrete_handler = if self.0.size() > 27 {
-                create_generic_9x6(sync_id, player_inventory, self.0.clone()).await
-            } else {
-                create_generic_9x3(sync_id, player_inventory, self.0.clone()).await
-            };
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let concrete_handler = if self.0.size() > 27 {
+            create_generic_9x6(sync_id, player_inventory, self.0.clone())
+        } else {
+            create_generic_9x3(sync_id, player_inventory, self.0.clone())
+        };
 
-            let concrete_arc = Arc::new(Mutex::new(concrete_handler));
+        let concrete_arc = Arc::new(Mutex::new(concrete_handler));
 
-            Some(concrete_arc as SharedScreenHandler)
-        })
+        Some(concrete_arc as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {
@@ -205,7 +203,7 @@ fn on_place_chest_impl(args: &OnPlaceArgs<'_>, copper: bool) -> BlockStateId {
     }
 }
 
-async fn placed_chest_impl<E: BlockEntity + 'static>(
+fn placed_chest_impl<E: BlockEntity + 'static>(
     args: PlacedArgs<'_>,
     create_entity: impl FnOnce(BlockPos) -> E,
     copper: bool,
@@ -238,13 +236,11 @@ async fn placed_chest_impl<E: BlockEntity + 'static>(
         let neighbor_pos = args.position.offset(connected_towards.to_offset());
         let neighbor_block = args.world.get_block(&neighbor_pos);
 
-        args.world
-            .set_block_state(
-                &neighbor_pos,
-                neighbor_props.to_state_id(neighbor_block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        args.world.set_block_state(
+            &neighbor_pos,
+            neighbor_props.to_state_id(neighbor_block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 }
 
@@ -261,7 +257,7 @@ fn player_placed_chest_impl(args: &PlayerPlacedArgs<'_>) {
     );
 }
 
-async fn get_chest_comparator_output(args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+fn get_chest_comparator_output(args: GetComparatorOutputArgs<'_>) -> Option<u8> {
     // Vanilla DoubleBlockCombiner.combineWithNeigbour (DoubleBlockCombiner.java:29-30, 47-49):
     // a blocked chest (solid block above / sitting cat) combines to `acceptNone`, so its
     // comparator reads 0 rather than the fill level.
@@ -292,23 +288,27 @@ async fn get_chest_comparator_output(args: GetComparatorOutputArgs<'_>) -> Optio
         } else {
             DoubleInventory::new(second_inventory, first_inventory)
         };
-        Some(crate::block::calculate_comparator_output(double_inventory.as_ref()).await)
+        Some(crate::block::calculate_comparator_output(
+            double_inventory.as_ref(),
+        ))
     } else {
-        Some(crate::block::calculate_comparator_output(first_inventory.as_ref()).await)
+        Some(crate::block::calculate_comparator_output(
+            first_inventory.as_ref(),
+        ))
     }
 }
 
-async fn unpack_chest_loot(entity: &Arc<dyn BlockEntity>) {
+fn unpack_chest_loot(entity: &Arc<dyn BlockEntity>) {
     if let Some((loot_key, seed)) = entity.take_loot_table()
         && let Some(table) = get_chest_loot_table(&loot_key)
         && let Some(inventory) = entity.clone().get_inventory()
     {
-        fill_chest_inventory(&inventory, table, seed).await;
+        fill_chest_inventory(&inventory, table, seed);
         inventory.mark_dirty();
     }
 }
 
-async fn normal_use_chest_impl(
+fn normal_use_chest_impl(
     args: NormalUseArgs<'_>,
     open_stat: pumpkin_data::statistic::CustomStatistic,
 ) -> BlockActionResult {
@@ -362,7 +362,7 @@ async fn normal_use_chest_impl(
 
     // Vanilla's double-chest menu provider unpacks both halves only after both
     // halves are allowed to open (ChestBlock.java:98-102).
-    unpack_chest_loot(&first_chest).await;
+    unpack_chest_loot(&first_chest);
     let Some(first_inventory) = first_chest.clone().get_inventory() else {
         return BlockActionResult::Fail;
     };
@@ -372,7 +372,7 @@ async fn normal_use_chest_impl(
             .get_block_entity(&args.position.offset(direction.to_offset()))
     });
     if let Some(entity) = &second_entity {
-        unpack_chest_loot(entity).await;
+        unpack_chest_loot(entity);
     }
 
     let inventory = if let Some(_direction) = connected_towards
@@ -389,21 +389,18 @@ async fn normal_use_chest_impl(
     };
 
     args.player
-        .open_handled_screen(&ChestScreenFactory(inventory), Some(*args.position))
-        .await;
+        .open_handled_screen(&ChestScreenFactory(inventory), Some(*args.position));
 
     // Vanilla ChestBlock.useWithoutItem (ChestBlock.java:255-268) awards the
     // open statistic and angers nearby piglins after a menu is opened.
     if !player_is_spectator {
-        args.player
-            .increment_stat(
-                pumpkin_data::statistic::StatisticCategory::Custom,
-                open_stat as i32,
-                1,
-            )
-            .await;
+        args.player.increment_stat(
+            pumpkin_data::statistic::StatisticCategory::Custom,
+            open_stat as i32,
+            1,
+        );
     }
-    piglin_shared::anger_nearby_piglins(args.world, args.player).await;
+    piglin_shared::anger_nearby_piglins(args.world, args.player);
 
     BlockActionResult::Success
 }
@@ -474,7 +471,7 @@ fn combined_chest_type(
     .then_some(neighbor_props.r#type.opposite())
 }
 
-async fn broken_chest_impl(args: BrokenArgs<'_>, copper: bool) {
+fn broken_chest_impl(args: BrokenArgs<'_>, copper: bool) {
     let chest_props = ChestLikeProperties::from_state_id(args.state.id, args.block);
     let connected_towards = match chest_props.r#type {
         ChestType::Single => return,
@@ -495,77 +492,67 @@ async fn broken_chest_impl(args: BrokenArgs<'_>, copper: bool) {
         let neighbor_pos = args.position.offset(connected_towards.to_offset());
         let neighbor_block = args.world.get_block(&neighbor_pos);
 
-        args.world
-            .set_block_state(
-                &neighbor_pos,
-                neighbor_props.to_state_id(neighbor_block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        args.world.set_block_state(
+            &neighbor_pos,
+            neighbor_props.to_state_id(neighbor_block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 }
 
-async fn on_state_replaced_chest_impl(args: OnStateReplacedArgs<'_>) {
+fn on_state_replaced_chest_impl(args: OnStateReplacedArgs<'_>) {
     // Vanilla ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253) updates
     // adjacent comparators using the old chest state before the block is removed.
-    args.world
-        .update_comparators(args.position, args.block)
-        .await;
+    args.world.update_comparators(args.position, args.block);
 }
 
 #[pumpkin_block_from_tag("c:chests/wooden")]
 pub struct ChestBlock;
 
 impl BlockBehaviour for ChestBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { on_place_chest_impl(&args, false) })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        on_place_chest_impl(&args, false)
     }
 
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { args.r#type == LID_ANIMATION_EVENT_TYPE })
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        args.r#type == LID_ANIMATION_EVENT_TYPE
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn placed(&self, args: PlacedArgs<'_>) {
         Box::pin(placed_chest_impl(args, ChestBlockEntity::new, false))
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { player_placed_chest_impl(&args) })
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
+        player_placed_chest_impl(&args)
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
         Box::pin(normal_use_chest_impl(
             args,
             pumpkin_data::statistic::CustomStatistic::OpenChest,
         ))
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
         Box::pin(std::future::ready(
             get_state_for_neighbor_update_chest_impl(&args, false),
         ))
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    fn broken(&self, args: BrokenArgs<'_>) {
         Box::pin(broken_chest_impl(args, false))
     }
 
     // ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253) is a live removal hook.
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
         Box::pin(on_state_replaced_chest_impl(args))
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move { get_chest_comparator_output(args).await })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        get_chest_comparator_output(args)
     }
 }
 
@@ -608,82 +595,73 @@ impl
 impl crate::block::blocks::weathering_copper::WeatheringCopper for CopperChestBlock {}
 
 impl BlockBehaviour for CopperChestBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { on_place_chest_impl(&args, true) })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        on_place_chest_impl(&args, true)
     }
 
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { args.r#type == LID_ANIMATION_EVENT_TYPE })
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        args.r#type == LID_ANIMATION_EVENT_TYPE
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn placed(&self, args: PlacedArgs<'_>) {
         Box::pin(placed_chest_impl(args, ChestBlockEntity::new, true))
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { player_placed_chest_impl(&args) })
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
+        player_placed_chest_impl(&args)
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
         Box::pin(normal_use_chest_impl(
             args,
             pumpkin_data::statistic::CustomStatistic::OpenChest,
         ))
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
         Box::pin(std::future::ready(
             get_state_for_neighbor_update_chest_impl(&args, true),
         ))
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    fn broken(&self, args: BrokenArgs<'_>) {
         Box::pin(broken_chest_impl(args, true))
     }
 
     // CopperChestBlock inherits ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253).
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
         Box::pin(on_state_replaced_chest_impl(args))
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let chest_props = ChestLikeProperties::from_state_id(current_state_id, args.block);
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let chest_props = ChestLikeProperties::from_state_id(current_state_id, args.block);
 
-            // Only oxidize LEFT or SINGLE chests (not RIGHT) to prevent double oxidation
-            if chest_props.r#type == ChestType::Right {
-                return;
-            }
+        // Only oxidize LEFT or SINGLE chests (not RIGHT) to prevent double oxidation
+        if chest_props.r#type == ChestType::Right {
+            return;
+        }
 
-            // Only oxidize if no players are viewing the chest
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(chest_entity) = block_entity.as_any().downcast_ref::<ChestBlockEntity>()
-                && chest_entity.get_viewer_count() > 0
-            {
-                return;
-            }
+        // Only oxidize if no players are viewing the chest
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(chest_entity) = block_entity.as_any().downcast_ref::<ChestBlockEntity>()
+            && chest_entity.get_viewer_count() > 0
+        {
+            return;
+        }
 
-            crate::block::blocks::weathering_copper::change_over_time(
-                args.world,
-                args.position,
-                args.block,
-            )
-            .await;
-        })
+        crate::block::blocks::weathering_copper::change_over_time(
+            args.world,
+            args.position,
+            args.block,
+        );
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move { get_chest_comparator_output(args).await })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        get_chest_comparator_output(args)
     }
 }
 
@@ -692,27 +670,24 @@ impl BlockBehaviour for CopperChestBlock {
 pub struct TrappedChestBlock;
 
 impl BlockBehaviour for TrappedChestBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { on_place_chest_impl(&args, false) })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        on_place_chest_impl(&args, false)
     }
 
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { args.r#type == LID_ANIMATION_EVENT_TYPE })
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        args.r#type == LID_ANIMATION_EVENT_TYPE
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn placed(&self, args: PlacedArgs<'_>) {
         use crate::block::entities::trapped_chest::TrappedChestBlockEntity;
         Box::pin(placed_chest_impl(args, TrappedChestBlockEntity::new, false))
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { player_placed_chest_impl(&args) })
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
+        player_placed_chest_impl(&args)
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
         // Vanilla TrappedChestBlock.getOpenChestStat (TrappedChestBlock.java:36-39):
         // trapped chests award TRIGGER_TRAPPED_CHEST, not the regular OPEN_CHEST stat.
         Box::pin(normal_use_chest_impl(
@@ -721,74 +696,57 @@ impl BlockBehaviour for TrappedChestBlock {
         ))
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
         Box::pin(std::future::ready(
             get_state_for_neighbor_update_chest_impl(&args, false),
         ))
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    fn broken(&self, args: BrokenArgs<'_>) {
         Box::pin(broken_chest_impl(args, false))
     }
 
     // TrappedChestBlock inherits ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253).
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
         Box::pin(on_state_replaced_chest_impl(args))
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { true })
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
+        true
     }
 
-    fn get_weak_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            use crate::block::entities::trapped_chest::TrappedChestBlockEntity;
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        use crate::block::entities::trapped_chest::TrappedChestBlockEntity;
 
-            // Get viewer count from this chest
-            let viewer_count = if let Some(block_entity) =
-                args.world.get_block_entity(args.position)
-                && let Some(trapped_chest) = block_entity
-                    .as_any()
-                    .downcast_ref::<TrappedChestBlockEntity>()
-            {
-                trapped_chest.get_viewer_count()
-            } else {
-                0
-            };
+        // Get viewer count from this chest
+        let viewer_count = if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(trapped_chest) = block_entity
+                .as_any()
+                .downcast_ref::<TrappedChestBlockEntity>()
+        {
+            trapped_chest.get_viewer_count()
+        } else {
+            0
+        };
 
-            viewer_count.min(15) as u8
-        })
+        viewer_count.min(15) as u8
     }
 
-    fn get_strong_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            // Strong power emitted to the block beneath the trapped chest
-            // The block below queries with direction Up (from below looking up at the chest)
-            if args.direction == BlockDirection::Up {
-                self.get_weak_redstone_power(args).await
-            } else {
-                0
-            }
-        })
+    fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        // Strong power emitted to the block beneath the trapped chest
+        // The block below queries with direction Up (from below looking up at the chest)
+        if args.direction == BlockDirection::Up {
+            self.get_weak_redstone_power(args)
+        } else {
+            0
+        }
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move { get_chest_comparator_output(args).await })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        get_chest_comparator_output(args)
     }
 }
 

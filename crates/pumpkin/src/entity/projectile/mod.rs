@@ -90,7 +90,7 @@ const BULLSEYE_MIN_HORIZONTAL_DISTANCE: f64 = 30.0;
 
 /// Powers a target block that a projectile just hit and grants the `adventure/bullseye`
 /// advancement to the shooter when the hit was worth a full signal from far enough away.
-pub async fn on_target_block_hit(
+pub fn on_target_block_hit(
     world: &Arc<World>,
     position: &BlockPos,
     face: BlockDirection,
@@ -98,7 +98,7 @@ pub async fn on_target_block_hit(
     owner_id: Option<i32>,
     delay: u8,
 ) {
-    let power = TargetBlock::trigger(world, position, face, hit_pos, delay).await;
+    let power = TargetBlock::trigger(world, position, face, hit_pos, delay);
     if power != TargetBlock::MAX_POWER {
         return;
     }
@@ -113,9 +113,7 @@ pub async fn on_target_block_hit(
         .sub(&hit_pos)
         .horizontal_length();
     if distance >= BULLSEYE_MIN_HORIZONTAL_DISTANCE {
-        player
-            .trigger_advancement(AdvancementTrigger::Bullseye)
-            .await;
+        player.trigger_advancement(AdvancementTrigger::Bullseye);
     }
 }
 
@@ -192,7 +190,7 @@ pub fn projectile_owner_id(source: &dyn EntityBase) -> Option<i32> {
 ///
 /// Player-owned projectiles obey spawn protection and the world border; other owners are governed
 /// by `mobGriefing`, while an unresolved owner has no restriction.
-pub async fn projectile_may_interact(
+pub fn projectile_may_interact(
     projectile: &dyn EntityBase,
     server: &Server,
     world: &Arc<World>,
@@ -205,13 +203,11 @@ pub async fn projectile_may_interact(
         return true;
     };
     if let Some(player) = owner.get_player() {
-        return !player
-            .is_under_spawn_protection(server, world, position)
-            .await
+        return !player.is_under_spawn_protection(server, world, position)
             && world
                 .worldborder
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains_block(position.0.x, position.0.z);
     }
     world.level_info.load().game_rules.mob_griefing
@@ -232,7 +228,7 @@ pub fn projectile_may_break(projectile: &dyn EntityBase, world: &World) -> bool 
 }
 
 /// Calls the block hook from `Projectile.onHitBlock` (`Projectile.java:312-315`).
-pub async fn on_projectile_block_hit(
+pub fn on_projectile_block_hit(
     world: &Arc<World>,
     server: &Server,
     projectile: &Arc<dyn EntityBase>,
@@ -251,18 +247,15 @@ pub async fn on_projectile_block_hit(
     };
     let block = world.get_block(&position);
     let state = world.get_block_state(&position);
-    world
-        .block_registry
-        .on_projectile_hit(
-            block,
-            server,
-            world,
-            projectile.as_ref(),
-            &position,
-            state,
-            &hit,
-        )
-        .await;
+    world.block_registry.on_projectile_hit(
+        block,
+        server,
+        world,
+        projectile.as_ref(),
+        &position,
+        state,
+        &hit,
+    );
 }
 
 /// The impact location vanilla passes to `GameEvent.PROJECTILE_LAND`.
@@ -315,11 +308,7 @@ pub fn try_deflect(hit: &ProjectileHit, projectile: &Arc<dyn EntityBase>) -> boo
 /// Mirrors `Projectile.checkLeftOwner` and `isOutsideOwnerCollisionRange`
 /// (`Projectile.java:105-127`). The movement loops below call this before their hit scan;
 /// the shared entity flag lets arrows and tridents retain the same state as thrown items.
-pub(crate) async fn check_left_owner(
-    entity: &Entity,
-    owner_id: Option<i32>,
-    movement: Vector3<f64>,
-) {
+pub(crate) fn check_left_owner(entity: &Entity, owner_id: Option<i32>, movement: Vector3<f64>) {
     if entity.projectile_left_owner.load(Ordering::Relaxed) {
         return;
     }
@@ -334,7 +323,7 @@ pub(crate) async fn check_left_owner(
         return;
     };
 
-    let root_id = owner.get_entity().root_vehicle_id().await;
+    let root_id = owner.get_entity().root_vehicle_id();
     let root = world
         .get_entity_by_id(root_id)
         .unwrap_or_else(|| owner.clone());
@@ -358,7 +347,7 @@ pub(crate) async fn check_left_owner(
                 .get_entity()
                 .passengers
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .iter()
                 .cloned(),
         );
@@ -384,7 +373,7 @@ pub(crate) fn projectile_target_pick_radius(target: &dyn EntityBase) -> f64 {
 /// `Projectile.onHit`, lines 299-300/304-305: `onHitEntity`/`onHitBlock` runs first,
 /// then `gameEvent(GameEvent.PROJECTILE_LAND, <impact location>, GameEvent.Context.of(this,
 /// ...))` fires for both the entity-hit and block-hit branches.
-pub async fn emit_projectile_land(
+pub fn emit_projectile_land(
     world: &Arc<World>,
     caller: &Arc<dyn EntityBase>,
     land_pos: Vector3<f64>,
@@ -394,8 +383,7 @@ pub async fn emit_projectile_land(
         pumpkin_data::game_event::GameEvent::ProjectileLand,
         land_pos,
         crate::world::game_event::GameEventContext::of_entity(caller.clone()),
-    )
-    .await;
+    );
 }
 
 /// `AbstractWindCharge` overrides both `canHitEntity` and the inertia getters, and
@@ -495,7 +483,7 @@ impl ThrownItemEntity {
 impl ThrownItemEntity {
     /// Process a tick for projectile movement and collisions
     #[expect(clippy::too_many_lines)]
-    pub async fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, server: &'a Server) {
+    pub fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, server: &'a Server) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
@@ -522,7 +510,7 @@ impl ThrownItemEntity {
 
         // `Projectile.checkLeftOwner` runs before the projectile hit scan
         // (`Projectile.java:105-127`).
-        check_left_owner(entity, self.owner_id, velocity).await;
+        check_left_owner(entity, self.owner_id, velocity);
 
         let start_pos = entity.pos.load();
         let delta = velocity;
@@ -559,9 +547,7 @@ impl ThrownItemEntity {
         let mut hit = None;
 
         // Block collisions
-        let (block_cols, block_positions) = world
-            .get_block_collisions(search_box, caller.as_ref())
-            .await;
+        let (block_cols, block_positions) = world.get_block_collisions(search_box, caller.as_ref());
         for (idx, bb) in block_cols.iter().enumerate() {
             if let Some(t) = calculate_ray_intersection(&start_pos, &delta, bb)
                 && t < closest_t
@@ -631,12 +617,12 @@ impl ThrownItemEntity {
                 pos, face, hit_pos, ..
             } = &h
             {
-                on_projectile_block_hit(&world, server, caller, *pos, *face, *hit_pos).await;
+                on_projectile_block_hit(&world, server, caller, *pos, *face, *hit_pos);
             }
-            caller.on_hit(h).await;
-            emit_projectile_land(&world, caller, land_pos).await;
+            caller.on_hit(h);
+            emit_projectile_land(&world, caller, land_pos);
 
-            entity.remove().await;
+            entity.remove();
         }
     }
 

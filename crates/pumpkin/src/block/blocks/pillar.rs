@@ -3,7 +3,7 @@ use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BlockProperties;
 
 use crate::block::OnPlaceArgs;
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata};
+use crate::block::{BlockBehaviour, BlockMetadata};
 
 type PillarProperties = pumpkin_data::block_properties::PaleOakWoodLikeProperties;
 
@@ -35,11 +35,9 @@ impl BlockMetadata for PillarBlock {
 }
 
 impl BlockBehaviour for PillarBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = PillarProperties::default(args.block);
-            props.axis = args.direction.to_axis();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = PillarProperties::default(args.block);
+        props.axis = args.direction.to_axis();
+        props.to_state_id(args.block)
     }
 }

@@ -4,9 +4,7 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
 
-use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-};
+use crate::block::{BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs};
 
 /// `HangingRootsBlock` (`net/minecraft/world/level/block/HangingRootsBlock.java:22`).
 ///
@@ -26,12 +24,10 @@ fn can_survive(world: &dyn BlockAccessor, position: &BlockPos) -> bool {
 
 impl BlockBehaviour for HangingRootsBlock {
     /// `HangingRootsBlock#getStateForPlacement` (HangingRootsBlock.java:47-56).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = MangroveRootsLikeProperties::default(args.block);
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = MangroveRootsLikeProperties::default(args.block);
+        props.waterlogged = args.replacing.water_source();
+        props.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -40,16 +36,14 @@ impl BlockBehaviour for HangingRootsBlock {
 
     /// `HangingRootsBlock#updateShape` (HangingRootsBlock.java:70-90): losing its support breaks
     /// the roots immediately rather than scheduling a tick.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if args.direction == BlockDirection::Up && !can_survive(args.world, args.position) {
-                return BlockStateId::AIR;
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if args.direction == BlockDirection::Up && !can_survive(args.world, args.position) {
+            return BlockStateId::AIR;
+        }
+        args.state_id
     }
 }
 

@@ -10,8 +10,7 @@ impl PendingConnection {
         if !self.version.load().supports_configuration_state() {
             self.kick(TextComponent::text(
                 "Configuration state not supported for this version",
-            ))
-            .await;
+            ));
             return Some(PacketHandlerResult::Stop);
         }
         self.connection_state.store(ConnectionState::Config);

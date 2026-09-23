@@ -1,4 +1,4 @@
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::{BlockPos, BlockPosIterator};
@@ -44,49 +44,45 @@ impl TryFindWaterGoal {
 }
 
 impl Goal for TryFindWaterGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            if !entity.on_ground.load(Ordering::Relaxed) {
-                return false;
-            }
-            let pos = entity.block_pos.load();
-            let world = entity.world.load();
-            let (fluid, _) = world.get_fluid_and_fluid_state(&pos);
-            !fluid.has_tag(&tag::Fluid::MINECRAFT_WATER)
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        if !entity.on_ground.load(Ordering::Relaxed) {
+            return false;
+        }
+        let pos = entity.block_pos.load();
+        let world = entity.world.load();
+        let (fluid, _) = world.get_fluid_and_fluid_state(&pos);
+        !fluid.has_tag(&tag::Fluid::MINECRAFT_WATER)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            let (min, max) = Self::find_water_range(entity.pos.load());
+    fn start(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        let (min, max) = Self::find_water_range(entity.pos.load());
 
-            let mut water_pos: Option<BlockPos> = None;
-            for pos in BlockPosIterator::new(min.0.x, min.0.y, min.0.z, max.0.x, max.0.y, max.0.z) {
-                let (fluid, _) = world.get_fluid_and_fluid_state(&pos);
-                if fluid.has_tag(&tag::Fluid::MINECRAFT_WATER) {
-                    water_pos = Some(pos);
-                    break;
-                }
+        let mut water_pos: Option<BlockPos> = None;
+        for pos in BlockPosIterator::new(min.0.x, min.0.y, min.0.z, max.0.x, max.0.y, max.0.z) {
+            let (fluid, _) = world.get_fluid_and_fluid_state(&pos);
+            if fluid.has_tag(&tag::Fluid::MINECRAFT_WATER) {
+                water_pos = Some(pos);
+                break;
             }
+        }
 
-            // `TryFindLiquidGoal.start` (:39-41) hands the block corner straight to the
-            // `MoveControl`; it does not path there.
-            if let Some(pos) = water_pos {
-                mob.get_mob_entity()
-                    .move_control
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_wanted_position(
-                        f64::from(pos.0.x),
-                        f64::from(pos.0.y),
-                        f64::from(pos.0.z),
-                        1.0,
-                    );
-            }
-        })
+        // `TryFindLiquidGoal.start` (:39-41) hands the block corner straight to the
+        // `MoveControl`; it does not path there.
+        if let Some(pos) = water_pos {
+            mob.get_mob_entity()
+                .move_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .set_wanted_position(
+                    f64::from(pos.0.x),
+                    f64::from(pos.0.y),
+                    f64::from(pos.0.z),
+                    1.0,
+                );
+        }
     }
 
     /// `TryFindLiquidGoal` never calls `setFlags`, so it claims no controls.

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, ExplodeArgs, OnNeighborUpdateArgs, PlacedArgs,
-    PlayerWillDestroyArgs, UseWithItemArgs,
+    BlockBehaviour, ExplodeArgs, OnNeighborUpdateArgs, PlacedArgs, PlayerWillDestroyArgs,
+    UseWithItemArgs,
 };
 use crate::entity::Entity;
 use crate::entity::tnt::TNTEntity;
@@ -29,7 +29,7 @@ use super::redstone::block_receives_redstone_power;
 pub struct TNTBlock;
 
 impl TNTBlock {
-    pub async fn prime(world: &Arc<World>, location: &BlockPos) -> bool {
+    pub fn prime(world: &Arc<World>, location: &BlockPos) -> bool {
         // TntBlock.java:87-96: prime refuses to create PrimedTnt when TNT_EXPLODES is false.
         if !world.level_info.load().game_rules.tnt_explodes {
             return false;
@@ -40,7 +40,7 @@ impl TNTBlock {
             "REDSTONE".to_string(),
         );
         if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire(&server, &mut event).await;
+            server.plugin_manager.fire_blocking(&server, &mut event);
         }
         if event.cancelled {
             return false;
@@ -54,7 +54,9 @@ impl TNTBlock {
                 false,
             );
         if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire(&server, &mut prime_event).await;
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut prime_event);
         }
         if prime_event.cancelled {
             return false;
@@ -62,7 +64,7 @@ impl TNTBlock {
 
         let pos = entity.pos.load();
         let tnt = Arc::new(TNTEntity::new(entity, DEFAULT_POWER, DEFAULT_FUSE));
-        world.spawn_entity(tnt).await;
+        world.spawn_entity(tnt);
         world.play_sound(
             pumpkin_data::sound::Sound::EntityTntPrimed,
             SoundCategory::Blocks,
@@ -72,7 +74,7 @@ impl TNTBlock {
         // priming path pumpkin routes through this function (flint & steel/fire charge,
         // initial redstone power, post-place redstone power, and fire spreading onto the
         // block in fire.rs).
-        emit_game_event(world, GameEvent::PrimeFuse, pos, GameEventContext::none()).await;
+        emit_game_event(world, GameEvent::PrimeFuse, pos, GameEventContext::none());
         true
     }
 }
@@ -81,107 +83,85 @@ const DEFAULT_FUSE: u32 = 80;
 const DEFAULT_POWER: f32 = 4.0;
 
 impl BlockBehaviour for TNTBlock {
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let item = args.item_stack.item;
-            if item != &Item::FLINT_AND_STEEL && item != &Item::FIRE_CHARGE {
-                return BlockActionResult::Pass;
-            }
-            let world = args.player.world();
-            // TntBlock.java:100-128: consume the flint-and-steel durability or fire charge
-            // only after prime succeeds; a disabled TNT gamerule leaves the action unhandled.
-            if !Self::prime(&world, args.position).await {
-                return BlockActionResult::Pass;
-            }
-            // TntBlock.java:113-120: useItemOn removes the block after prime succeeds.
-            world
-                .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
-                .await;
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        let item = args.item_stack.item;
+        if item != &Item::FLINT_AND_STEEL && item != &Item::FIRE_CHARGE {
+            return BlockActionResult::Pass;
+        }
+        let world = args.player.world();
+        // TntBlock.java:100-128: consume the flint-and-steel durability or fire charge
+        // only after prime succeeds; a disabled TNT gamerule leaves the action unhandled.
+        if !Self::prime(&world, args.position) {
+            return BlockActionResult::Pass;
+        }
+        // TntBlock.java:113-120: useItemOn removes the block after prime succeeds.
+        world.set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
 
-            if item == &Item::FLINT_AND_STEEL {
-                args.player
-                    .damage_item_in_slot(args.equipment_slot, 1)
-                    .await;
+        if item == &Item::FLINT_AND_STEEL {
+            args.player.damage_item_in_slot(args.equipment_slot, 1);
+        } else {
+            args.item_stack
+                .decrement_unless_creative(args.player.gamemode.load(), 1);
+            let hand = if args.equipment_slot == &EquipmentSlot::MAIN_HAND {
+                Hand::Right
             } else {
-                args.item_stack
-                    .decrement_unless_creative(args.player.gamemode.load(), 1);
-                let hand = if args.equipment_slot == &EquipmentSlot::MAIN_HAND {
-                    Hand::Right
-                } else {
-                    Hand::Left
-                };
-                let slot = if hand == Hand::Right {
-                    args.player.inventory().get_selected_slot() as usize
-                } else {
-                    pumpkin_inventory::player::player_inventory::PlayerInventory::OFF_HAND_SLOT
-                };
-                args.player
-                    .inventory()
-                    .set_stack_in_hand(hand, args.item_stack.clone())
-                    .await;
-                args.player
-                    .sync_hand_slot(slot, args.item_stack.clone())
-                    .await;
-            }
+                Hand::Left
+            };
+            let slot = if hand == Hand::Right {
+                args.player.inventory().get_selected_slot() as usize
+            } else {
+                pumpkin_inventory::player::player_inventory::PlayerInventory::OFF_HAND_SLOT
+            };
+            args.player
+                .inventory()
+                .set_stack_in_hand(hand, args.item_stack.clone());
+            args.player.sync_hand_slot(slot, args.item_stack.clone());
+        }
 
-            BlockActionResult::Success
-        })
+        BlockActionResult::Success
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if block_receives_redstone_power(args.world, args.position).await
-                && Self::prime(args.world, args.position).await
-            {
-                // TntBlock.java:48-52: onPlace removes the TNT after a successful prime.
-                args.world
-                    .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
-                    .await;
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        if block_receives_redstone_power(args.world, args.position)
+            && Self::prime(args.world, args.position)
+        {
+            // TntBlock.java:48-52: onPlace removes the TNT after a successful prime.
+            args.world
+                .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
+        }
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if block_receives_redstone_power(args.world, args.position).await
-                && Self::prime(args.world, args.position).await
-            {
-                // TntBlock.java:57-63: neighborChanged removes the TNT after a successful prime.
-                args.world
-                    .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
-                    .await;
-            }
-        })
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        if block_receives_redstone_power(args.world, args.position)
+            && Self::prime(args.world, args.position)
+        {
+            // TntBlock.java:57-63: neighborChanged removes the TNT after a successful prime.
+            args.world
+                .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
+        }
     }
 
-    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // TntBlock.java:65-72: playerWillDestroy runs before removal, so unstable TNT can
-            // still be primed from the original block state.
-            let props = TntLikeProperties::from_state_id(args.state.id, args.block);
-            if props.r#unstable && args.player.gamemode.load() != GameMode::Creative {
-                Self::prime(args.world, args.position).await;
-            }
-        })
+    fn player_will_destroy(&self, args: PlayerWillDestroyArgs<'_>) {
+        // TntBlock.java:65-72: playerWillDestroy runs before removal, so unstable TNT can
+        // still be primed from the original block state.
+        let props = TntLikeProperties::from_state_id(args.state.id, args.block);
+        if props.r#unstable && args.player.gamemode.load() != GameMode::Creative {
+            Self::prime(args.world, args.position);
+        }
     }
 
-    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // TntBlock.java:75-83 (`wasExploded`): only spawns the TNT entity when the
-            // `tntExplodes` game rule is enabled.
-            if !args.world.level_info.load().game_rules.tnt_explodes {
-                return;
-            }
-            let entity = Entity::new(args.world.clone(), args.position.to_f64(), &EntityType::TNT);
-            let angle = rand::random::<f64>() * std::f64::consts::TAU;
-            entity.set_velocity(Vector3::new(-angle.sin() * 0.02, 0.2, -angle.cos() * 0.02));
-            let fuse = rand::rng().random_range(0..DEFAULT_FUSE / 4) + DEFAULT_FUSE / 8;
-            let tnt = Arc::new(TNTEntity::new(entity, DEFAULT_POWER, fuse));
-            args.world.spawn_entity(tnt).await;
-        })
+    fn explode(&self, args: ExplodeArgs<'_>) {
+        // TntBlock.java:75-83 (`wasExploded`): only spawns the TNT entity when the
+        // `tntExplodes` game rule is enabled.
+        if !args.world.level_info.load().game_rules.tnt_explodes {
+            return;
+        }
+        let entity = Entity::new(args.world.clone(), args.position.to_f64(), &EntityType::TNT);
+        let angle = rand::random::<f64>() * std::f64::consts::TAU;
+        entity.set_velocity(Vector3::new(-angle.sin() * 0.02, 0.2, -angle.cos() * 0.02));
+        let fuse = rand::rng().random_range(0..DEFAULT_FUSE / 4) + DEFAULT_FUSE / 8;
+        let tnt = Arc::new(TNTEntity::new(entity, DEFAULT_POWER, fuse));
+        args.world.spawn_entity(tnt);
     }
 
     fn should_drop_items_on_explosion(&self) -> bool {

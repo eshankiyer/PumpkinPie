@@ -1,6 +1,6 @@
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+        Entity, EntityBase, NBTStorage,
         projectile::{ProjectileHit, ThrownItemEntity},
     },
     server::Server,
@@ -153,7 +153,7 @@ impl FireworkRocketEntity {
         }
     }
 
-    pub async fn explode_and_remove(&self, world: &Arc<World>) {
+    pub fn explode_and_remove(&self, world: &Arc<World>) {
         let entity = self.get_entity();
         world.send_entity_status(
             entity,
@@ -179,16 +179,14 @@ impl FireworkRocketEntity {
             if let Some(owner_id) = attached_to_entity
                 && let Some(owner) = world.get_entity_by_id(owner_id)
             {
-                owner
-                    .damage_with_context(
-                        owner.as_ref(),
-                        damage,
-                        DamageType::FIREWORKS,
-                        None,
-                        None,
-                        Some(self),
-                    )
-                    .await;
+                owner.damage_with_context(
+                    owner.as_ref(),
+                    damage,
+                    DamageType::FIREWORKS,
+                    None,
+                    None,
+                    Some(self),
+                );
             }
             let targets = world.get_all_at_box(&entity.bounding_box.load().expand(5.0, 5.0, 5.0));
 
@@ -221,7 +219,6 @@ impl FireworkRocketEntity {
                         .raycast(rocket_pos, to, async |block_pos, world| {
                             world.get_block_state(block_pos).is_solid()
                         })
-                        .await
                         .is_none()
                     {
                         can_see = true;
@@ -231,20 +228,18 @@ impl FireworkRocketEntity {
                 if !can_see {
                     continue;
                 }
-                target
-                    .damage_with_context(
-                        target.as_ref(),
-                        amount,
-                        DamageType::FIREWORKS,
-                        None,
-                        None,
-                        Some(self),
-                    )
-                    .await;
+                target.damage_with_context(
+                    target.as_ref(),
+                    amount,
+                    DamageType::FIREWORKS,
+                    None,
+                    None,
+                    Some(self),
+                );
             }
         }
 
-        entity.remove().await;
+        entity.remove();
     }
 }
 
@@ -283,129 +278,116 @@ fn firework_damage(base_damage: f32, distance: f64) -> Option<f32> {
 /// `FireworksItem` is not restored: the stack is held by value here, so there is nothing to
 /// write it back into.
 impl NBTStorage for FireworkRocketEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            nbt.put_int("Life", self.life.load(Ordering::Relaxed));
-            nbt.put_int("LifeTime", self.life_time.load(Ordering::Relaxed));
-            nbt.put_bool("ShotAtAngle", self.shot_at_angle.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int("Life", self.life.load(Ordering::Relaxed));
+        nbt.put_int("LifeTime", self.life_time.load(Ordering::Relaxed));
+        nbt.put_bool("ShotAtAngle", self.shot_at_angle.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.life
-                .store(nbt.get_int("Life").unwrap_or(0), Ordering::Relaxed);
-            self.life_time
-                .store(nbt.get_int("LifeTime").unwrap_or(0), Ordering::Relaxed);
-            self.shot_at_angle.store(
-                nbt.get_bool("ShotAtAngle").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.life
+            .store(nbt.get_int("Life").unwrap_or(0), Ordering::Relaxed);
+        self.life_time
+            .store(nbt.get_int("LifeTime").unwrap_or(0), Ordering::Relaxed);
+        self.shot_at_angle.store(
+            nbt.get_bool("ShotAtAngle").unwrap_or(false),
+            Ordering::Relaxed,
+        );
     }
 }
 
 impl EntityBase for FireworkRocketEntity {
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.get_entity().send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::firework_rocket::ID_FIREWORKS_ITEM,
-                    &ItemStackSerializer::from(self.item_stack.clone()),
-                )],
-                None,
-            );
-        })
+    fn init_data_tracker(&self) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::firework_rocket::ID_FIREWORKS_ITEM,
+                &ItemStackSerializer::from(self.item_stack.clone()),
+            )],
+            None,
+        );
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.process_tick(caller, server).await;
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        self.entity.process_tick(caller, server);
 
-            let entity = self.get_entity();
-            let world = entity.world.load();
-            let mut velocity = entity.velocity.load();
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        let mut velocity = entity.velocity.load();
 
-            let boosting_elytra_owner = self
-                .entity
-                .owner_id
-                .and_then(|shooter_id| world.get_entity_by_id(shooter_id))
-                .filter(|shooter| shooter.get_entity().is_fall_flying());
+        let boosting_elytra_owner = self
+            .entity
+            .owner_id
+            .and_then(|shooter_id| world.get_entity_by_id(shooter_id))
+            .filter(|shooter| shooter.get_entity().is_fall_flying());
 
-            if let Some(shooter) = boosting_elytra_owner {
-                // Logic for boosting Elytra flight
-                let shooter_entity = shooter.get_entity();
-                let rotation = shooter_entity.rotation().to_f64();
-                let shooter_vel = shooter_entity.velocity.load();
+        if let Some(shooter) = boosting_elytra_owner {
+            // Logic for boosting Elytra flight
+            let shooter_entity = shooter.get_entity();
+            let rotation = shooter_entity.rotation().to_f64();
+            let shooter_vel = shooter_entity.velocity.load();
 
-                let new_shooter_vel =
-                    shooter_vel + (rotation * 0.1 + (rotation * 1.5 - shooter_vel) * 0.5);
+            let new_shooter_vel =
+                shooter_vel + (rotation * 0.1 + (rotation * 1.5 - shooter_vel) * 0.5);
 
-                shooter_entity.set_velocity(new_shooter_vel);
+            shooter_entity.set_velocity(new_shooter_vel);
 
-                // Vanilla `FireworkRocketEntity.tick` (`FireworkRocketEntity.java:125-144`)
-                // places an attached rocket at `getHandHoldingItemAngle`, selecting the
-                // off-hand only when it alone holds a matching rocket.
-                let hand_angle = if let Some(player) = shooter.get_player() {
-                    let main_hand = player.inventory().held_item().await;
-                    let off_hand = player.inventory().off_hand_item().await;
-                    let item_only_in_offhand = off_hand.item.id == Item::FIREWORK_ROCKET.id
-                        && main_hand.item.id != Item::FIREWORK_ROCKET.id;
-                    let main_arm_right = matches!(player.config.load().main_hand, Hand::Right);
-                    shooter_entity.get_hand_holding_item_angle(if item_only_in_offhand {
-                        !main_arm_right
-                    } else {
-                        main_arm_right
-                    })
+            // Vanilla `FireworkRocketEntity.tick` (`FireworkRocketEntity.java:125-144`)
+            // places an attached rocket at `getHandHoldingItemAngle`, selecting the
+            // off-hand only when it alone holds a matching rocket.
+            let hand_angle = if let Some(player) = shooter.get_player() {
+                let main_hand = player.inventory().held_item();
+                let off_hand = player.inventory().off_hand_item();
+                let item_only_in_offhand = off_hand.item.id == Item::FIREWORK_ROCKET.id
+                    && main_hand.item.id != Item::FIREWORK_ROCKET.id;
+                let main_arm_right = matches!(player.config.load().main_hand, Hand::Right);
+                shooter_entity.get_hand_holding_item_angle(if item_only_in_offhand {
+                    !main_arm_right
                 } else {
-                    Vector3::default()
-                };
+                    main_arm_right
+                })
+            } else {
+                Vector3::default()
+            };
 
-                entity.set_pos(shooter_entity.pos.load() + hand_angle);
-                entity.set_velocity(new_shooter_vel);
-            } else if !self.shot_at_angle.load(Ordering::Relaxed) {
-                // Standard firework rocket flight logic: not applied to a crossbow- or
-                // dispenser-fired-at-angle rocket (`shot_at_angle`), which instead flies a
-                // normal ballistic arc. Vanilla: `horizontalAcceleration = horizontalCollision
-                // ? 1.0 : 1.15`.
-                let horizontal_acceleration = if entity.horizontal_collision.load(Ordering::Relaxed)
-                {
-                    1.0
-                } else {
-                    1.15
-                };
-                velocity.x *= horizontal_acceleration;
-                velocity.z *= horizontal_acceleration;
-                velocity.y += 0.04;
-                entity.set_velocity(velocity);
-            }
+            entity.set_pos(shooter_entity.pos.load() + hand_angle);
+            entity.set_velocity(new_shooter_vel);
+        } else if !self.shot_at_angle.load(Ordering::Relaxed) {
+            // Standard firework rocket flight logic: not applied to a crossbow- or
+            // dispenser-fired-at-angle rocket (`shot_at_angle`), which instead flies a
+            // normal ballistic arc. Vanilla: `horizontalAcceleration = horizontalCollision
+            // ? 1.0 : 1.15`.
+            let horizontal_acceleration = if entity.horizontal_collision.load(Ordering::Relaxed) {
+                1.0
+            } else {
+                1.15
+            };
+            velocity.x *= horizontal_acceleration;
+            velocity.z *= horizontal_acceleration;
+            velocity.y += 0.04;
+            entity.set_velocity(velocity);
+        }
 
-            // Vanilla: `if (this.life == 0 && !this.isSilent()) { playSound(FIREWORK_ROCKET_LAUNCH...) }`,
-            // called before `this.life++`. Pumpkin entities have no `isSilent` flag yet, so the
-            // silence check is not modelled. The client-side `FIREWORK` particle trail
-            // (`this.level().isClientSide()`-guarded in vanilla) is intentionally not ported: it
-            // is generated by the client itself, and spawning it server-side would double it.
-            if self.life.load(Ordering::Relaxed) == 0 {
-                let pos = entity.pos.load();
-                world.play_sound_raw(
-                    Sound::EntityFireworkRocketLaunch as u16,
-                    SoundCategory::Ambient,
-                    &pos,
-                    3.0,
-                    1.0,
-                );
-            }
+        // Vanilla: `if (this.life == 0 && !this.isSilent()) { playSound(FIREWORK_ROCKET_LAUNCH...) }`,
+        // called before `this.life++`. Pumpkin entities have no `isSilent` flag yet, so the
+        // silence check is not modelled. The client-side `FIREWORK` particle trail
+        // (`this.level().isClientSide()`-guarded in vanilla) is intentionally not ported: it
+        // is generated by the client itself, and spawning it server-side would double it.
+        if self.life.load(Ordering::Relaxed) == 0 {
+            let pos = entity.pos.load();
+            world.play_sound_raw(
+                Sound::EntityFireworkRocketLaunch as u16,
+                SoundCategory::Ambient,
+                &pos,
+                3.0,
+                1.0,
+            );
+        }
 
-            // Increment life and check for explosion
-            let current_life = self.life.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-            if current_life > self.life_time.load(Ordering::Relaxed) {
-                self.explode_and_remove(&world).await;
-            }
-        })
+        // Increment life and check for explosion
+        let current_life = self.life.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        if current_life > self.life_time.load(Ordering::Relaxed) {
+            self.explode_and_remove(&world);
+        }
     }
 
     fn get_entity(&self) -> &crate::entity::Entity {
@@ -433,17 +415,15 @@ impl EntityBase for FireworkRocketEntity {
         (hurt_pos.x - rocket_pos.x, hurt_pos.z - rocket_pos.z)
     }
 
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let should_explode = match hit {
-                ProjectileHit::Entity { .. } => true,
-                ProjectileHit::Block { .. } => has_explosion(&self.item_stack),
-            };
-            if should_explode {
-                let world = self.get_entity().world.load_full();
-                self.explode_and_remove(&world).await;
-            }
-        })
+    fn on_hit(&self, hit: ProjectileHit) {
+        let should_explode = match hit {
+            ProjectileHit::Entity { .. } => true,
+            ProjectileHit::Block { .. } => has_explosion(&self.item_stack),
+        };
+        if should_explode {
+            let world = self.get_entity().world.load_full();
+            self.explode_and_remove(&world);
+        }
     }
 
     fn as_nbt_storage(&self) -> &dyn crate::entity::NBTStorage {

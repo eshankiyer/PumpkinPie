@@ -501,7 +501,7 @@ impl Navigator {
         }
     }
 
-    pub(crate) async fn can_reach_entity_for_mob(
+    pub(crate) fn can_reach_entity_for_mob(
         &mut self,
         mob: &dyn Mob,
         target: &LivingEntity,
@@ -512,10 +512,7 @@ impl Navigator {
             f64::from(target_pos.0.y),
             f64::from(target_pos.0.z),
         );
-        let Some(path) = self
-            .compute_path_with_reach_for_mob(mob, destination, 0)
-            .await
-        else {
+        let Some(path) = self.compute_path_with_reach_for_mob(mob, destination, 0) else {
             return false;
         };
         let Some(last) = path.get_end_node() else {
@@ -527,41 +524,39 @@ impl Navigator {
         dx * dx + dz * dz <= 2
     }
 
-    pub async fn can_reach_within(
+    pub fn can_reach_within(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
         distance: f32,
     ) -> bool {
         self.compute_path(entity, destination)
-            .await
             .is_some_and(|path| path.can_reach() || path.get_dist_to_target() <= distance)
     }
 
-    pub(crate) async fn can_reach_within_for_mob(
+    pub(crate) fn can_reach_within_for_mob(
         &mut self,
         mob: &dyn Mob,
         destination: Vector3<f64>,
         distance: f32,
     ) -> bool {
         self.compute_path_with_reach_for_mob(mob, destination, 0)
-            .await
             .is_some_and(|path| path.can_reach() || path.get_dist_to_target() <= distance)
     }
 
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn compute_path(
+    pub(crate) fn compute_path(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
     ) -> Option<Path> {
-        self.compute_path_with_reach(entity, destination, 0).await
+        self.compute_path_with_reach(entity, destination, 0)
     }
 
     /// Finds a path using the same target reach allowance as vanilla's
     /// `PathNavigation.createPath(target, reachRange)`.
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn compute_path_with_reach(
+    pub(crate) fn compute_path_with_reach(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
@@ -579,7 +574,7 @@ impl Navigator {
             && !entity.entity.on_ground.load(Ordering::Relaxed)
             && !entity.entity.touching_water.load(Ordering::Relaxed)
             && !entity.entity.touching_lava.load(Ordering::Relaxed)
-            && !entity.entity.has_vehicle().await
+            && !entity.entity.has_vehicle()
         {
             return None;
         }
@@ -602,7 +597,7 @@ impl Navigator {
             (entity.get_attribute_value(&Attributes::FOLLOW_RANGE) as f32).max(16.0);
         let max_iterations = (max_path_length * 16.0).floor() as usize;
 
-        let root_vehicle_id = entity.entity.root_vehicle_id().await;
+        let root_vehicle_id = entity.entity.root_vehicle_id();
         let context = PathfindingContext::for_entity(
             mob_position,
             world.clone(),
@@ -623,7 +618,7 @@ impl Navigator {
             || entity
                 .entity_equipment
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .equipment
                 .get(&EquipmentSlot::FEET)
                 .is_some_and(|boots| boots.item == &Item::LEATHER_BOOTS);
@@ -663,7 +658,7 @@ impl Navigator {
 
         self.evaluator.prepare(context, mob_data);
 
-        let mut start_node = self.evaluator.get_start().await?;
+        let mut start_node = self.evaluator.get_start()?;
 
         // Vanilla NodeEvaluator floors navigation coordinates before resolving the target node.
         let mut target_pos = if self.evaluator.is_amphibious() {
@@ -730,8 +725,7 @@ impl Navigator {
 
             self.neighbors_buf.clear();
             self.evaluator
-                .get_neighbors(&current, &mut self.neighbors_buf)
-                .await;
+                .get_neighbors(&current, &mut self.neighbors_buf);
 
             for mut neighbor in self.neighbors_buf.drain(..) {
                 let step_cost = current.distance(&neighbor);
@@ -802,20 +796,18 @@ impl Navigator {
     /// Runs the evaluator lifecycle callbacks around a mob-owned path search. Vanilla invokes
     /// these from `WalkNodeEvaluator.prepare/done` (`WalkNodeEvaluator.java:39-49`), including
     /// searches made by temporary navigation probes.
-    pub(crate) async fn compute_path_with_reach_for_mob(
+    pub(crate) fn compute_path_with_reach_for_mob(
         &mut self,
         mob: &dyn Mob,
         destination: Vector3<f64>,
         reach_range: i32,
     ) -> Option<Path> {
         mob.on_pathfinding_start(self);
-        let path = self
-            .compute_path_with_reach(
-                &mob.get_mob_entity().living_entity,
-                destination,
-                reach_range,
-            )
-            .await;
+        let path = self.compute_path_with_reach(
+            &mob.get_mob_entity().living_entity,
+            destination,
+            reach_range,
+        );
         mob.on_pathfinding_done(self);
         path
     }
@@ -842,7 +834,7 @@ impl Navigator {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub async fn tick(&mut self, entity: &LivingEntity, mob: &dyn Mob) {
+    pub fn tick(&mut self, entity: &LivingEntity, mob: &dyn Mob) {
         let Some(goal) = self.current_goal.take() else {
             // Idle: stop the mob
             self.is_idle.store(true, Ordering::Relaxed);
@@ -884,9 +876,7 @@ impl Navigator {
         }
 
         if !self.wall_climber_direct && self.needs_new_path(&goal) {
-            self.current_path = self
-                .compute_path_with_reach_for_mob(mob, goal.destination, 0)
-                .await;
+            self.current_path = self.compute_path_with_reach_for_mob(mob, goal.destination, 0);
             self.ticks_on_current_node = 0;
             self.last_node_index = 0;
             self.path_start_pos = Some(entity.entity.pos.load());
@@ -1016,7 +1006,6 @@ impl Navigator {
                             f64::from(next.2),
                         ),
                     )
-                    .await
                 } else {
                     false
                 };
@@ -1158,14 +1147,13 @@ impl Navigator {
             || (position.y > f64::from(target.0.y) && center_distance(position.y.floor() as i32))
     }
 
-    async fn can_move_directly(
+    fn can_move_directly(
         world: &std::sync::Arc<crate::world::World>,
         start: Vector3<f64>,
         stop: Vector3<f64>,
     ) -> bool {
         world
             .raycast_collision(start, stop, async |_, _| true)
-            .await
             .is_none()
     }
 

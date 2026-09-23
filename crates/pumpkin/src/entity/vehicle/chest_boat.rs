@@ -24,7 +24,7 @@ use pumpkin_world::inventory::Inventory;
 use crate::entity::player::Player;
 use crate::entity::vehicle::minecart::container::{self, MinecartInventory};
 use crate::entity::vehicle::vehicle::VehicleEntity;
-use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity};
+use crate::entity::{Entity, EntityBase, NBTStorage, living::LivingEntity};
 use crate::server::Server;
 
 /// `AbstractChestBoat.getMaxPassengers` (`AbstractChestBoat.java:47-50`) caps chest boats at a
@@ -80,8 +80,8 @@ impl NBTStorage for ChestBoatEntity {
     /// (27 item slots or a deferred LootTable/LootTableSeed pair).
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
-            self.vehicle.entity.write_nbt(nbt).await;
-            self.inventory.write_nbt(nbt).await;
+            self.vehicle.entity.write_nbt(nbt);
+            self.inventory.write_nbt(nbt);
         })
     }
 
@@ -89,8 +89,8 @@ impl NBTStorage for ChestBoatEntity {
     /// (`AbstractChestBoat.java:58-62`) restores items/LootTable after the base entity reads.
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
-            self.vehicle.entity.read_nbt_non_mut(nbt).await;
-            self.inventory.read_nbt(nbt).await;
+            self.vehicle.entity.read_nbt_non_mut(nbt);
+            self.inventory.read_nbt(nbt);
         })
     }
 }
@@ -108,27 +108,19 @@ impl EntityBase for ChestBoatEntity {
         self.vehicle.entity.is_alive()
     }
 
-    fn tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.vehicle.tick();
+    fn tick(&self, _caller: &Arc<dyn EntityBase>, _server: &Server) {
+        self.vehicle.tick();
 
-            let underwater = self.ticks_underwater.load();
-            if self.vehicle.entity.touching_water.load(Ordering::Relaxed) {
-                self.ticks_underwater.store((underwater + 1.0).min(60.0));
-            } else if underwater > 0.0 {
-                self.ticks_underwater.store((underwater - 1.0).max(0.0));
-            }
-        })
+        let underwater = self.ticks_underwater.load();
+        if self.vehicle.entity.touching_water.load(Ordering::Relaxed) {
+            self.ticks_underwater.store((underwater + 1.0).min(60.0));
+        } else if underwater > 0.0 {
+            self.ticks_underwater.store((underwater - 1.0).max(0.0));
+        }
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.send_wobble_metadata();
-        })
+    fn init_data_tracker(&self) {
+        self.send_wobble_metadata();
     }
 
     fn can_hit(&self) -> bool {
@@ -147,40 +139,36 @@ impl EntityBase for ChestBoatEntity {
     /// `AbstractChestBoat.destroy`, `AbstractChestBoat.java:65-68`; the same spill happens on
     /// any destroy-removal in `remove`, `AbstractChestBoat.java:71-77`) and drops the wooden
     /// chest-boat item for non-creative attackers.
-    fn damage_with_context<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         amount: f32,
         _damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        _cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let creative = source
-                .and_then(EntityBase::get_player)
-                .is_some_and(|player| player.gamemode.load() == GameMode::Creative);
-            let damaged = self.vehicle.damage_with_context(amount, source).await;
+        source: Option<&dyn EntityBase>,
+        _cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        let creative = source
+            .and_then(EntityBase::get_player)
+            .is_some_and(|player| player.gamemode.load() == GameMode::Creative);
+        let damaged = self.vehicle.damage_with_context(amount, source);
 
-            if self.vehicle.entity.is_removed() {
-                let world = self.vehicle.entity.world.load();
-                let position = self.vehicle.entity.block_pos.load();
-                // Contents always spill on destroy, creative hit included
-                // (`AbstractChestBoat.remove`, AbstractChestBoat.java:71-77).
-                if self.inventory.claim_drops() {
-                    self.inventory.unpack_loot().await;
-                    let inventory: Arc<dyn Inventory> = self.inventory.clone();
-                    world.scatter_inventory(&position, &inventory).await;
-                }
-                if !creative && world.level_info.load().game_rules.entity_drops {
-                    world
-                        .drop_stack(&position, ItemStack::new(1, self.drop_item()))
-                        .await;
-                }
+        if self.vehicle.entity.is_removed() {
+            let world = self.vehicle.entity.world.load();
+            let position = self.vehicle.entity.block_pos.load();
+            // Contents always spill on destroy, creative hit included
+            // (`AbstractChestBoat.remove`, AbstractChestBoat.java:71-77).
+            if self.inventory.claim_drops() {
+                self.inventory.unpack_loot();
+                let inventory: Arc<dyn Inventory> = self.inventory.clone();
+                world.scatter_inventory(&position, &inventory);
             }
+            if !creative && world.level_info.load().game_rules.entity_drops {
+                world.drop_stack(&position, ItemStack::new(1, self.drop_item()));
+            }
+        }
 
-            damaged
-        })
+        damaged
     }
 
     /// `AbstractChestBoat.interact` (`AbstractChestBoat.java:80-97`): riding is tried first
@@ -188,69 +176,66 @@ impl EntityBase for ChestBoatEntity {
     /// when that yields PASS -- the player is sneaking or no passenger slot is free --
     /// does the container screen open (`interactWithContainerVehicle` ->
     /// `openCustomInventoryScreen`, AbstractChestBoat.java:100-106).
-    fn interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        _item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let sneaking = player.get_entity().sneaking.load(Ordering::Relaxed);
-            let has_room = self.vehicle.entity.passengers.lock().await.len() < MAX_PASSENGERS;
+    fn interact(&self, player: &Arc<Player>, _item_stack: &mut ItemStack) -> bool {
+        let sneaking = player.get_entity().sneaking.load(Ordering::Relaxed);
+        let has_room = self
+            .vehicle
+            .entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+            < MAX_PASSENGERS;
 
-            if !sneaking && has_room && self.ticks_underwater.load() < 60.0 {
-                let world = self.vehicle.entity.world.load();
-                let Some(vehicle) = world.get_entity_by_id(self.vehicle.entity.entity_id) else {
-                    return false;
-                };
-                let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
-                    return false;
-                };
-                self.vehicle
-                    .entity
-                    .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                    .await;
-                return true;
-            }
+        if !sneaking && has_room && self.ticks_underwater.load() < 60.0 {
+            let world = self.vehicle.entity.world.load();
+            let Some(vehicle) = world.get_entity_by_id(self.vehicle.entity.entity_id) else {
+                return false;
+            };
+            let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
+                return false;
+            };
+            self.vehicle
+                .entity
+                .add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
+            return true;
+        }
 
-            let java_key = format!(
-                "entity.minecraft.{}",
-                self.vehicle
-                    .entity
-                    .entity_type
-                    .resource_name
-                    .strip_prefix("minecraft:")
-                    .unwrap_or(self.vehicle.entity.entity_type.resource_name)
-            );
-            container::open(
-                &self.vehicle.entity,
-                player,
-                &self.inventory,
-                TextComponent::translate(java_key, []),
-                false,
-            )
-            .await
-        })
+        let java_key = format!(
+            "entity.minecraft.{}",
+            self.vehicle
+                .entity
+                .entity_type
+                .resource_name
+                .strip_prefix("minecraft:")
+                .unwrap_or(self.vehicle.entity.entity_type.resource_name)
+        );
+        container::open(
+            &self.vehicle.entity,
+            player,
+            &self.inventory,
+            TextComponent::translate(java_key, []),
+            false,
+        )
     }
 
-    fn set_paddle_state(&self, left: bool, right: bool) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.left_paddle_moving.store(left, Ordering::Relaxed);
-            self.right_paddle_moving.store(right, Ordering::Relaxed);
+    fn set_paddle_state(&self, left: bool, right: bool) {
+        self.left_paddle_moving.store(left, Ordering::Relaxed);
+        self.right_paddle_moving.store(right, Ordering::Relaxed);
 
-            self.vehicle.entity.send_meta_data(
-                &[
-                    pumpkin_protocol::java::client::play::Metadata::new(
-                        pumpkin_data::tracked_data::boat::ID_PADDLE_LEFT,
-                        left,
-                    ),
-                    pumpkin_protocol::java::client::play::Metadata::new(
-                        pumpkin_data::tracked_data::boat::ID_PADDLE_RIGHT,
-                        right,
-                    ),
-                ],
-                None,
-            );
-        })
+        self.vehicle.entity.send_meta_data(
+            &[
+                pumpkin_protocol::java::client::play::Metadata::new(
+                    pumpkin_data::tracked_data::boat::ID_PADDLE_LEFT,
+                    left,
+                ),
+                pumpkin_protocol::java::client::play::Metadata::new(
+                    pumpkin_data::tracked_data::boat::ID_PADDLE_RIGHT,
+                    right,
+                ),
+            ],
+            None,
+        );
     }
 
     fn as_nbt_storage(&self) -> &dyn NBTStorage {

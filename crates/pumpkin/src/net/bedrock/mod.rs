@@ -167,7 +167,7 @@ impl BedrockClient {
     }
 
     pub async fn get_packet(&self) -> Option<RawPacket> {
-        let mut guard = self.incoming_game_packet_recv.lock().await;
+        let mut guard = self.incoming_game_packet_recv.lock();
         let recv = guard.as_mut()?;
         tokio::select! {
             () = self.await_close_interrupt() => None,
@@ -178,12 +178,11 @@ impl BedrockClient {
     pub fn start_outgoing_packet_task(self: &Arc<Self>) {
         let client = self.clone();
         self.spawn_task(async move {
-            let Some(mut packet_receiver) = client.outgoing_packet_queue_recv.lock().await.take()
-            else {
+            let Some(mut packet_receiver) = client.outgoing_packet_queue_recv.lock().take() else {
                 return;
             };
             let Some(mut priority_packet_receiver) =
-                client.outgoing_packet_priority_recv.lock().await.take()
+                client.outgoing_packet_priority_recv.lock().take()
             else {
                 return;
             };
@@ -248,8 +247,7 @@ impl BedrockClient {
                 "Failed to handle NetherNet payload for {}: {error}",
                 self.address
             );
-            self.kick(DisconnectReason::BadPacket, error.to_string())
-                .await;
+            self.kick(DisconnectReason::BadPacket, error.to_string());
         }
     }
 
@@ -260,7 +258,6 @@ impl BedrockClient {
     pub async fn set_compression(&self, compression: CompressionInfo) {
         self.network_reader
             .lock()
-            .await
             .set_compression(compression.threshold as usize);
 
         self.network_writer
@@ -355,7 +352,7 @@ impl BedrockClient {
         }
 
         if !new_blobs.is_empty() {
-            let mut cache = self.blob_cache.lock().await;
+            let mut cache = self.blob_cache.lock();
             for (hash, payload) in new_blobs {
                 cache.insert(hash, payload);
             }
@@ -506,7 +503,7 @@ impl BedrockClient {
         }
         self.close_token.cancel();
         self.session.close().await;
-        self.be_clients.lock().await.remove(&self.address);
+        self.be_clients.lock().remove(&self.address);
     }
 
     pub async fn await_tasks(&self) {
@@ -540,7 +537,6 @@ impl BedrockClient {
             let game_packet = self
                 .network_reader
                 .lock()
-                .await
                 .get_game_packet(&mut cursor)
                 .map_err(|e| Error::other(e.to_string()))?;
 
@@ -559,8 +555,7 @@ impl BedrockClient {
                         .packet_limiter
                         .kick_message
                         .clone(),
-                )
-                .await;
+                );
                 return Err(Error::other("Packet rate limit exceeded"));
             }
 
@@ -605,15 +600,14 @@ impl BedrockClient {
                         Ok(p) => p,
                         Err(err) => {
                             error!("Failed to read SLogin: {err}");
-                            self.kick(DisconnectReason::BadPacket, err.to_string())
-                                .await;
+                            self.kick(DisconnectReason::BadPacket, err.to_string());
                             return PacketHandlerResult::Stop;
                         }
                     };
                     match self.handle_login(packet, server).await {
                         Ok(result) => return result,
                         Err(err) => {
-                            self.kick(DisconnectReason::Unknown, err.to_string()).await;
+                            self.kick(DisconnectReason::Unknown, err.to_string());
                             return PacketHandlerResult::Stop;
                         }
                     }
@@ -722,13 +716,13 @@ impl BedrockClient {
                 self.handle_respawn(player, SRespawn::read(reader)?).await;
             }
             SAnimate::PACKET_ID => {
-                self.handle_animate(player, server, &SAnimate::read(reader)?).await;
+                self.handle_animate(player, server, &SAnimate::read(reader)?);
             }
             SActorEvent::PACKET_ID => {
-                self.handle_actor_event(player, SActorEvent::read(reader)?).await;
+                self.handle_actor_event(player, SActorEvent::read(reader)?);
             }
             SEmote::PACKET_ID => {
-                self.handle_emote(player, server, SEmote::read_slice(reader)?).await;
+                self.handle_emote(player, server, SEmote::read_slice(reader)?);
             }
             SEmoteList::PACKET_ID => {
                 self.handle_emote_list(player, server, &SEmoteList::read(reader)?);
@@ -751,8 +745,7 @@ impl BedrockClient {
                     .await;
             }
             SRequestAbility::PACKET_ID => {
-                self.handle_request_ability(player, SRequestAbility::read(reader)?)
-                    .await;
+                self.handle_request_ability(player, SRequestAbility::read(reader)?);
             }
             SMobEquipment::PACKET_ID => {
                 self.handle_mob_equipment(server, player, SMobEquipment::read(reader)?)
@@ -780,7 +773,7 @@ impl BedrockClient {
             return;
         }
         let missing_blobs = {
-            let cache = self.blob_cache.lock().await;
+            let cache = self.blob_cache.lock();
             let mut missing_blobs = Vec::with_capacity(packet.miss_hashes.len());
             for hash in packet.miss_hashes {
                 if let Some(payload) = cache.get(&hash) {
@@ -805,7 +798,7 @@ impl BedrockClient {
     }
 
     pub async fn get_packet_payload(&self, packet: Vec<u8>) -> Option<Vec<u8>> {
-        let mut network_reader = self.network_reader.lock().await;
+        let mut network_reader = self.network_reader.lock();
         tokio::select! {
             () = self.await_close_interrupt() => {
                 debug!("Canceling player packet processing");
@@ -818,7 +811,7 @@ impl BedrockClient {
                         if !matches!(err, PacketDecodeError::ConnectionClosed) {
                             debug!("Failed to decode packet from client: {err}");
                             let text = format!("Error while reading incoming packet {err}");
-                            self.kick(DisconnectReason::BadPacket, text).await;
+                            self.kick(DisconnectReason::BadPacket, text);
                         }
                         None
                     }

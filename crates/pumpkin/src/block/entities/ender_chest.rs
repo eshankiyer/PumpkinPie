@@ -7,13 +7,10 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::random::xoroshiro128::Xoroshiro;
 use pumpkin_util::random::{RandomImpl, get_seed};
 use std::any::Any;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::block::viewer::{
-    ViewerCountListener, ViewerCountTracker, ViewerCountTrackerExt, ViewerFuture,
-};
+use crate::block::viewer::{ViewerCountListener, ViewerCountTracker, ViewerCountTrackerExt};
 use crate::world::World;
 
 use super::BlockEntity;
@@ -44,23 +41,15 @@ impl BlockEntity for EnderChestBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        _nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn write_nbt(&self, _nbt: &mut NbtCompound) {}
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         Some(NbtCompound::new())
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.viewers
-                .update_viewer_count::<Self>(self, world, &self.position)
-                .await;
-        })
+    fn tick(&self, world: &Arc<World>) {
+        self.viewers
+            .update_viewer_count::<Self>(self, world, &self.position);
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -69,38 +58,16 @@ impl BlockEntity for EnderChestBlockEntity {
 }
 
 impl ViewerCountListener for EnderChestBlockEntity {
-    fn on_container_open<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        _position: &'a BlockPos,
-    ) -> ViewerFuture<'a, ()> {
-        Box::pin(async move {
-            self.play_sound(world, Sound::BlockEnderChestOpen);
-        })
+    fn on_container_open(&self, world: &Arc<World>, _position: &BlockPos) {
+        self.play_sound(world, Sound::BlockEnderChestOpen);
     }
 
-    fn on_container_close<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        _position: &'a BlockPos,
-    ) -> ViewerFuture<'a, ()> {
-        Box::pin(async move {
-            self.play_sound(world, Sound::BlockEnderChestClose);
-        })
+    fn on_container_close(&self, world: &Arc<World>, _position: &BlockPos) {
+        self.play_sound(world, Sound::BlockEnderChestClose);
     }
 
-    fn on_viewer_count_update<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        position: &'a BlockPos,
-        _old: u16,
-        new: u16,
-    ) -> ViewerFuture<'a, ()> {
-        Box::pin(async move {
-            world
-                .add_synced_block_event(*position, Self::LID_ANIMATION_EVENT_TYPE, new as u8)
-                .await;
-        })
+    fn on_viewer_count_update(&self, world: &Arc<World>, position: &BlockPos, _old: u16, new: u16) {
+        world.add_synced_block_event(*position, Self::LID_ANIMATION_EVENT_TYPE, new as u8);
     }
 }
 
@@ -124,7 +91,7 @@ impl EnderChestBlockEntity {
     /// Reconciles explicit inventory callbacks with the players whose menu is still tied to this
     /// block, matching `ContainerOpenersCounter.recheckOpeners` and its five-tick reschedule
     /// (`ContainerOpenersCounter.java:66-102`).
-    pub async fn recheck_open(&self, world: &Arc<World>) {
+    pub fn recheck_open(&self, world: &Arc<World>) {
         let open_count = world
             .players
             .load()
@@ -138,8 +105,7 @@ impl EnderChestBlockEntity {
             .min(usize::from(u16::MAX)) as u16;
         self.viewers.current.store(open_count, Ordering::Relaxed);
         self.viewers
-            .update_viewer_count::<Self>(self, world, &self.position)
-            .await;
+            .update_viewer_count::<Self>(self, world, &self.position);
 
         if open_count > 0 {
             world.schedule_block_tick(

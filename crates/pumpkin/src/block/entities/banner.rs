@@ -2,8 +2,7 @@ use super::BlockEntity;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 pub struct BannerBlockEntity {
     pub position: BlockPos,
@@ -33,18 +32,23 @@ impl BlockEntity for BannerBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(name) = self.custom_name.lock().await.as_ref() {
-                nbt.put_string("CustomName", name.clone());
-            }
-            if let Some(pats) = self.patterns.lock().await.as_ref() {
-                nbt.put_list("patterns", pats.clone());
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(name) = self
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_string("CustomName", name.clone());
+        }
+        if let Some(pats) = self
+            .patterns
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_list("patterns", pats.clone());
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::Entity;
@@ -23,68 +22,67 @@ impl ItemMetadata for EndCrystalItem {
 }
 
 impl ItemBehaviour for EndCrystalItem {
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         _face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
-            let block = world.get_block(&location);
-            if block != &Block::OBSIDIAN && block != &Block::BEDROCK {
-                return;
-            }
+        _block: &Block,
+        _server: &Server,
+    ) {
+        let world = player.world();
+        let block = world.get_block(&location);
+        if block != &Block::OBSIDIAN && block != &Block::BEDROCK {
+            return;
+        }
 
-            let location = location.up();
-            let location_vec = location.0.to_f64();
+        let location = location.up();
+        let location_vec = location.0.to_f64();
 
-            if !world.get_block_state(&location).is_air()
-                || !world
-                    .get_entities_at_box(&BoundingBox::new(
-                        Vector3::new(location_vec.x, location_vec.y, location_vec.z),
-                        Vector3::new(
-                            location_vec.x + 1.0,
-                            location_vec.y + 2.0,
-                            location_vec.z + 1.0,
-                        ),
-                    ))
-                    .is_empty()
-            {
-                return;
-            }
+        if !world.get_block_state(&location).is_air()
+            || !world
+                .get_entities_at_box(&BoundingBox::new(
+                    Vector3::new(location_vec.x, location_vec.y, location_vec.z),
+                    Vector3::new(
+                        location_vec.x + 1.0,
+                        location_vec.y + 2.0,
+                        location_vec.z + 1.0,
+                    ),
+                ))
+                .is_empty()
+        {
+            return;
+        }
 
-            let entity = Entity::new(world.clone(), location.to_f64(), &EntityType::END_CRYSTAL);
-            let end_crystal = Arc::new(EndCrystalEntity::new(entity));
-            world.spawn_entity(end_crystal.clone()).await;
-            end_crystal.set_show_bottom(false);
+        let entity = Entity::new(world.clone(), location.to_f64(), &EntityType::END_CRYSTAL);
+        let end_crystal = Arc::new(EndCrystalEntity::new(entity));
+        world.spawn_entity(end_crystal.clone());
+        end_crystal.set_show_bottom(false);
 
-            // `EndCrystalItem.useOn` (`EndCrystalItem.java:57`): placing a crystal emits
-            // ENTITY_PLACE at the position above the clicked block.
-            if let Some(player_arc) = world.get_player_by_id(player.living_entity.entity.entity_id)
-            {
-                crate::world::game_event::emit_game_event(
-                    &world,
-                    pumpkin_data::game_event::GameEvent::EntityPlace,
-                    location.to_f64(),
-                    crate::world::game_event::GameEventContext::of_entity(player_arc),
-                )
-                .await;
-            }
+        // `EndCrystalItem.useOn` (`EndCrystalItem.java:57`): placing a crystal emits
+        // ENTITY_PLACE at the position above the clicked block.
+        if let Some(player_arc) = world.get_player_by_id(player.living_entity.entity.entity_id) {
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::EntityPlace,
+                location.to_f64(),
+                crate::world::game_event::GameEventContext::of_entity(player_arc),
+            );
+        }
 
-            // `EndCrystalItem.useOn` (`EndCrystalItem.java:58-61`): every placed crystal
-            // retries the dragon respawn ritual, which only fires once the four cardinal
-            // crystals are in place (`EnderDragonFight.tryRespawn`).
-            if let Some(ref fight_mutex) = world.dragon_fight {
-                fight_mutex.lock().await.try_respawn(&world).await;
-            }
+        // `EndCrystalItem.useOn` (`EndCrystalItem.java:58-61`): every placed crystal
+        // retries the dragon respawn ritual, which only fires once the four cardinal
+        // crystals are in place (`EnderDragonFight.tryRespawn`).
+        if let Some(ref fight_mutex) = world.dragon_fight {
+            fight_mutex
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .try_respawn(&world);
+        }
 
-            item.decrement_unless_creative(player.gamemode.load(), 1);
-        })
+        item.decrement_unless_creative(player.gamemode.load(), 1);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

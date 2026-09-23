@@ -10,7 +10,7 @@ impl JavaClient {
         let address = self.address;
 
         if let Some(reason) = can_not_join(&profile, &address, server).await {
-            self.kick(reason).await;
+            self.kick(reason);
             return PacketHandlerResult::Stop;
         }
 

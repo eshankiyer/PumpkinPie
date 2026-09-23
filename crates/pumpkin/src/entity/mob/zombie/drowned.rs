@@ -22,7 +22,7 @@ use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
 use crate::entity::mob::zombie::ZombieEntityBase;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, destroy_egg::DestroyEggGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, revenge::RevengeGoal,
@@ -41,10 +41,7 @@ pub struct DrownedEntity {
 
 /// `Drowned#okTarget` (`Drowned.java:223-225`): a potential player target is only valid while
 /// it's not bright outside, or while the target itself is in water.
-async fn ok_target(
-    target: crate::entity::ai::target_predicate::TargetData,
-    world: Arc<World>,
-) -> bool {
+fn ok_target(target: crate::entity::ai::target_predicate::TargetData, world: Arc<World>) -> bool {
     !is_bright_outside(&world) || target.touching_water
 }
 
@@ -218,10 +215,8 @@ impl DrownedEntity {
 impl NBTStorage for DrownedEntity {
     /// `DrownedEntity` stores no extra NBT of its own; the override exists only to record that
     /// this drowned came off disk, so `ZombieEntityBase` skips the fresh-spawn attribute roll.
-    fn read_nbt_non_mut<'a>(&'a self, _nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.mark_restored_from_nbt();
-        })
+    fn read_nbt_non_mut(&self, _nbt: &NbtCompound) {
+        self.entity.mark_restored_from_nbt();
     }
 }
 
@@ -240,64 +235,55 @@ impl Mob for DrownedEntity {
     /// from the blanket `Mob::init_data_tracker`) instead of after it as in vanilla. That pass
     /// only ever fills a drowned's main hand, so the empty-offhand guard observes the same slot
     /// state vanilla's post-equipment check does.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.entity.mob_init_data_tracker().await;
+    fn mob_init_data_tracker(&self) {
+        self.entity.mob_init_data_tracker();
 
-            // Vanilla reaches `finalizeSpawn` only on a genuine spawn; a mob read back out of
-            // chunk NBT keeps the equipment it was saved with (the same gate the blanket
-            // `init_data_tracker` puts around `equip_mob_on_spawn`).
-            if self.is_restored_from_nbt() {
-                return;
-            }
+        // Vanilla reaches `finalizeSpawn` only on a genuine spawn; a mob read back out of
+        // chunk NBT keeps the equipment it was saved with (the same gate the blanket
+        // `init_data_tracker` puts around `equip_mob_on_spawn`).
+        if self.is_restored_from_nbt() {
+            return;
+        }
 
-            let living = &self.entity.mob_entity.living_entity;
-            // `this.getItemBySlot(EquipmentSlot.OFFHAND).isEmpty()` (`Drowned.java:111`).
-            if !living
-                .entity_equipment
-                .lock()
-                .await
-                .get(&EquipmentSlot::OFF_HAND)
-                .is_empty()
-            {
-                return;
-            }
+        let living = &self.entity.mob_entity.living_entity;
+        // `this.getItemBySlot(EquipmentSlot.OFFHAND).isEmpty()` (`Drowned.java:111`).
+        if !living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&EquipmentSlot::OFF_HAND)
+            .is_empty()
+        {
+            return;
+        }
 
-            // `level.getRandom().nextFloat() < 0.03F` (`Drowned.java:111`).
-            if rand::random::<f32>() >= NAUTILUS_SHELL_CHANCE {
-                return;
-            }
+        // `level.getRandom().nextFloat() < 0.03F` (`Drowned.java:111`).
+        if rand::random::<f32>() >= NAUTILUS_SHELL_CHANCE {
+            return;
+        }
 
-            // `this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.NAUTILUS_SHELL))`
-            // (`Drowned.java:112`).
-            let shell = ItemStack::new(1, &Item::NAUTILUS_SHELL);
-            living
-                .entity_equipment
-                .lock()
-                .await
-                .put(&EquipmentSlot::OFF_HAND, shell.clone());
-            // `this.setGuaranteedDrop(EquipmentSlot.OFFHAND)` (`Drowned.java:113`): a drop
-            // chance of 2.0, the preserved-equipment representation used by
-            // `Mob.setGuaranteedDrop` (`Drowned.java:113`, `DropChances.java:28-29`).
-            living
-                .equipment_drop_chances
-                .lock()
-                .await
-                .insert(EquipmentSlot::OFF_HAND.clone(), 2.0);
-            living.send_equipment_changes(&[(EquipmentSlot::OFF_HAND, shell)]);
-        })
+        // `this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.NAUTILUS_SHELL))`
+        // (`Drowned.java:112`).
+        let shell = ItemStack::new(1, &Item::NAUTILUS_SHELL);
+        living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .put(&EquipmentSlot::OFF_HAND, shell.clone());
+        // `this.setGuaranteedDrop(EquipmentSlot.OFFHAND)` (`Drowned.java:113`): a drop
+        // chance of 2.0, the preserved-equipment representation used by
+        // `Mob.setGuaranteedDrop` (`Drowned.java:113`, `DropChances.java:28-29`).
+        living
+            .equipment_drop_chances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(EquipmentSlot::OFF_HAND.clone(), 2.0);
+        living.send_equipment_changes(&[(EquipmentSlot::OFF_HAND, shell)]);
     }
 
     /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`), inherited by `Drowned`.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            crate::entity::mob::zombie::try_spawn_reinforcements(&self.entity.mob_entity, source)
-                .await;
-        })
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        crate::entity::mob::zombie::try_spawn_reinforcements(&self.entity.mob_entity, source);
     }
 
     fn wants_to_swim(&self) -> bool {
@@ -339,7 +325,7 @@ impl Mob for DrownedEntity {
         _caller: &'a Arc<dyn crate::entity::EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            let target = self.entity.mob_entity.get_target().await;
+            let target = self.entity.mob_entity.get_target();
             let living = &self.entity.mob_entity.living_entity;
             let entity = &living.entity;
             let pos = entity.pos.load();
@@ -361,7 +347,7 @@ impl Mob for DrownedEntity {
     fn update_swimming(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = &self.entity.mob_entity.living_entity.entity;
-            let target = self.entity.mob_entity.get_target().await;
+            let target = self.entity.mob_entity.get_target();
             let position = entity.pos.load();
             self.target_in_water.store(
                 target
@@ -378,32 +364,28 @@ impl Mob for DrownedEntity {
 
             let underwater =
                 entity.touching_water.load(Relaxed) && entity.was_eye_in_water.load(Relaxed);
-            entity
-                .set_swimming(!entity.no_ai.load(Relaxed) && underwater && self.wants_to_swim())
-                .await;
+            entity.set_swimming(!entity.no_ai.load(Relaxed) && underwater && self.wants_to_swim());
         })
     }
 
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let living = &self.entity.mob_entity.living_entity;
-            let entity = &living.entity;
-            if !self.wants_to_swim()
-                || !entity.touching_water.load(Relaxed)
-                || !entity.was_eye_in_water.load(Relaxed)
-            {
-                return false;
-            }
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
+        let living = &self.entity.mob_entity.living_entity;
+        let entity = &living.entity;
+        if !self.wants_to_swim()
+            || !entity.touching_water.load(Relaxed)
+            || !entity.was_eye_in_water.load(Relaxed)
+        {
+            return false;
+        }
 
-            // `Drowned.travelInWater` (`Drowned.java:243-251`) uses a fixed 0.01
-            // movement speed and 0.9 drag while underwater and swimming. It does not
-            // run the generic gravity/0.8-water-drag path.
-            entity.update_velocity_from_input(living.movement_input.load(), 0.01);
-            let velocity = entity.velocity.load();
-            entity.move_entity(caller, velocity).await;
-            entity.velocity.store(entity.velocity.load() * 0.9);
-            true
-        })
+        // `Drowned.travelInWater` (`Drowned.java:243-251`) uses a fixed 0.01
+        // movement speed and 0.9 drag while underwater and swimming. It does not
+        // run the generic gravity/0.8-water-drag path.
+        entity.update_velocity_from_input(living.movement_input.load(), 0.01);
+        let velocity = entity.velocity.load();
+        entity.move_entity(caller, velocity);
+        entity.velocity.store(entity.velocity.load() * 0.9);
+        true
     }
 }
 

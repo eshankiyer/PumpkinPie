@@ -89,7 +89,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
-use tokio::sync::Mutex as AsyncMutex;
+use std::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 /// `Warden.applyDarknessAround` (Warden.java:407-410).
@@ -105,7 +105,7 @@ use uuid::Uuid;
 /// Note `new MobEffectInstance(DARKNESS, 260, 0, false, false)` sets `visible` AND `showIcon`
 /// to false (the 5-argument constructor forwards `visible` as `showIcon`,
 /// MobEffectInstance.java:60-62).
-pub async fn apply_darkness_around(
+pub fn apply_darkness_around(
     world: &Arc<World>,
     position: pumpkin_util::math::vector3::Vector3<f64>,
     darkness_radius: f64,
@@ -123,7 +123,6 @@ pub async fn apply_darkness_around(
         if let Some(current) = player
             .living_entity
             .get_effect(&pumpkin_data::effect::StatusEffect::DARKNESS)
-            .await
             && current.duration > DISPLAY_EFFECT_LIMIT - 1
         {
             continue;
@@ -138,8 +137,8 @@ pub async fn apply_darkness_around(
             show_icon: false,
             blend: true,
         };
-        player.send_effect(darkness.clone()).await;
-        player.living_entity.add_effect(darkness).await;
+        player.send_effect(darkness.clone());
+        player.living_entity.add_effect(darkness);
     }
 }
 
@@ -153,7 +152,7 @@ pub mod warden_spawn_tracker;
 
 use crate::entity::mob::warden_anger::{self, AngerLevel, AngerManagement};
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
@@ -371,19 +370,26 @@ impl WardenEntity {
     }
 
     /// `Warden.increaseAngerAt(entity, amount, playSound)`.
-    async fn increase_anger_at(&self, entity: &Arc<dyn EntityBase>, amount: i32, play_sound: bool) {
+    fn increase_anger_at(&self, entity: &Arc<dyn EntityBase>, amount: i32, play_sound: bool) {
         if self.mob_entity.is_no_ai() || !self.can_target_entity(entity.as_ref()) {
             return;
         }
         let is_player = entity.get_player().is_some();
         let uuid = entity.get_entity().entity_uuid;
         let new_anger = {
-            let mut anger = self.anger.lock().await;
+            let mut anger = self
+                .anger
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             anger.increase_anger(uuid, is_player, amount)
         };
 
         let maybe_switch_target = {
-            let target = self.mob_entity.target.lock().await;
+            let target = self
+                .mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             !matches!(&*target, Some(t) if t.get_player().is_some())
         };
         if is_player && maybe_switch_target && AngerLevel::by_anger(new_anger).is_angry() {
@@ -391,18 +397,18 @@ impl WardenEntity {
             // memory here; it's `Roar.stop()` (Roar.java:58-65) that assigns the roar
             // target as the new attack target once the roar finishes. `start_roar` mirrors
             // that two-step handoff instead of switching target immediately.
-            self.start_roar(entity.clone()).await;
+            self.start_roar(entity.clone());
         }
 
         if play_sound {
-            self.play_listening_sound().await;
+            self.play_listening_sound();
         }
     }
 
     /// `Roar.start` (Roar.java:37-45): enters `Pose::ROARING` for `ROAR_DURATION_TICKS`
     /// and bumps anger at the roar target by `ROAR_ANGER_INCREASE`. No-ops if already
     /// roaring (matches the Brain framework only ever having one `ROAR_TARGET` at a time).
-    async fn start_roar(&self, target: Arc<dyn EntityBase>) {
+    fn start_roar(&self, target: Arc<dyn EntityBase>) {
         let started = {
             let mut state = self.roar_state.lock().unwrap();
             if state.is_some() {
@@ -438,7 +444,7 @@ impl WardenEntity {
     /// `ROAR_SOUND_DELAY_TICKS` have elapsed (`Roar.tick`, Roar.java:51-56), and on
     /// expiry reverts the pose and hands the target off via `set_attack_target`
     /// (`Roar.stop`, Roar.java:58-65).
-    async fn tick_roar(&self) {
+    fn tick_roar(&self) {
         enum Outcome {
             None,
             PlaySound,
@@ -483,17 +489,17 @@ impl WardenEntity {
             }
             Outcome::Complete(target) => {
                 sync_warden_pose(&self.mob_entity.living_entity.entity, EntityPose::Standing);
-                self.set_attack_target(target).await;
+                self.set_attack_target(target);
             }
         }
     }
 
     /// `Warden.playListeningSound` (Warden.java:428-432): suppressed while roaring.
-    async fn play_listening_sound(&self) {
+    fn play_listening_sound(&self) {
         if self.roar_state.lock().unwrap().is_some() {
             return;
         }
-        let anger = self.active_anger().await;
+        let anger = self.active_anger();
         let sound = match AngerLevel::by_anger(anger) {
             AngerLevel::Angry | AngerLevel::Agitated => Sound::EntityWardenListeningAngry,
             AngerLevel::Calm => Sound::EntityWardenListening,
@@ -508,27 +514,34 @@ impl WardenEntity {
     }
 
     /// `Warden.getActiveAnger` against the current attack target, if any.
-    async fn active_anger(&self) -> i32 {
+    fn active_anger(&self) -> i32 {
         let target_uuid = self
             .mob_entity
             .target
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .map(|t| t.get_entity().entity_uuid);
-        self.anger.lock().await.active_anger(target_uuid)
+        self.anger
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active_anger(target_uuid)
     }
 
     #[must_use]
-    pub async fn get_anger_level(&self) -> AngerLevel {
-        AngerLevel::by_anger(self.active_anger().await)
+    pub fn get_anger_level(&self) -> AngerLevel {
+        AngerLevel::by_anger(self.active_anger())
     }
 
     /// `Warden.setAttackTarget`; also resets the sonic-boom cooldown like vanilla does
     /// (`SonicBoom.setCooldown(this, 200)` — vanilla's `TIME_TO_USE_MELEE_UNTIL_SONIC_BOOM`).
-    async fn set_attack_target(&self, target: Arc<dyn EntityBase>) {
+    fn set_attack_target(&self, target: Arc<dyn EntityBase>) {
         self.cancel_roar();
-        *self.mob_entity.target.lock().await = Some(target);
+        *self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(target);
         self.sonic_boom_cooldown.store(
             warden_anger::SONIC_BOOM_NEW_TARGET_COOLDOWN_TICKS,
             Ordering::Relaxed,
@@ -538,36 +551,39 @@ impl WardenEntity {
     /// `WardenAi.setDisturbanceLocation`, redirected onto the existing goal system by
     /// setting the current attack target directly to the disturbance's source entity (see
     /// module doc comment on why the location-only walk phase is skipped).
-    async fn set_disturbance(&self, source: &Arc<dyn EntityBase>) {
-        let already_angry = self.get_anger_level().await.is_angry();
-        let has_target = self.mob_entity.target.lock().await.is_some();
+    fn set_disturbance(&self, source: &Arc<dyn EntityBase>) {
+        let already_angry = self.get_anger_level().is_angry();
+        let has_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some();
         if !already_angry && !has_target {
-            *self.mob_entity.target.lock().await = Some(source.clone());
+            *self
+                .mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(source.clone());
         }
     }
 
     /// Vanilla `Warden.doPush` (`Warden.java:528-537`) records touch anger once per
     /// `TOUCH_COOLDOWN_TICKS`, then delegates the physical displacement to `super.doPush`.
-    pub(crate) fn on_push<'a>(
-        &'a self,
-        entity: &'a Arc<dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.mob_entity.is_no_ai() || self.touch_cooldown.load(Ordering::Relaxed) > 0 {
-                return;
-            }
+    pub(crate) fn on_push(&self, entity: &Arc<dyn EntityBase>) {
+        if self.mob_entity.is_no_ai() || self.touch_cooldown.load(Ordering::Relaxed) > 0 {
+            return;
+        }
 
-            self.touch_cooldown
-                .store(warden_anger::TOUCH_COOLDOWN_TICKS, Ordering::Relaxed);
-            self.increase_anger_at(entity, warden_anger::DEFAULT_ANGER, true)
-                .await;
-            self.set_disturbance(entity).await;
-        })
+        self.touch_cooldown
+            .store(warden_anger::TOUCH_COOLDOWN_TICKS, Ordering::Relaxed);
+        self.increase_anger_at(entity, warden_anger::DEFAULT_ANGER, true);
+        self.set_disturbance(entity);
     }
 
     /// `VibrationSystem.User.onReceiveVibration` (`Warden.VibrationUser`), minus the
     /// projectile-owner branch (see module doc comment).
-    async fn on_vibration(&self, source_entity: Option<Arc<dyn EntityBase>>) {
+    fn on_vibration(&self, source_entity: Option<Arc<dyn EntityBase>>) {
         if self.mob_entity.living_entity.dead.load(Ordering::Relaxed) {
             return;
         }
@@ -588,10 +604,9 @@ impl WardenEntity {
             );
 
         if let Some(source) = source_entity {
-            self.increase_anger_at(&source, warden_anger::DEFAULT_ANGER, false)
-                .await;
-            if !self.get_anger_level().await.is_angry() {
-                self.set_disturbance(&source).await;
+            self.increase_anger_at(&source, warden_anger::DEFAULT_ANGER, false);
+            if !self.get_anger_level().is_angry() {
+                self.set_disturbance(&source);
             }
         }
     }
@@ -607,14 +622,19 @@ impl WardenEntity {
     /// single-tick effect (no `Behavior` start/tick/stop phase, no delayed warm-up sound —
     /// `SonicBoom.TICKS_BEFORE_PLAYING_SOUND` / `DURATION` windows collapse to immediate
     /// execution here).
-    async fn try_sonic_boom(&self) {
-        if !self.get_anger_level().await.is_angry() {
+    fn try_sonic_boom(&self) {
+        if !self.get_anger_level().is_angry() {
             return;
         }
         if self.sonic_boom_cooldown.load(Ordering::Relaxed) > 0 {
             return;
         }
-        let target = self.mob_entity.target.lock().await.clone();
+        let target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let Some(target) = target else {
             return;
         };
@@ -645,16 +665,14 @@ impl WardenEntity {
         );
 
         let self_entity: &dyn EntityBase = self;
-        let damaged = target
-            .damage_with_context(
-                target.as_ref(),
-                warden_anger::SONIC_BOOM_DAMAGE,
-                DamageType::SONIC_BOOM,
-                Some(source),
-                Some(self_entity),
-                Some(self_entity),
-            )
-            .await;
+        let damaged = target.damage_with_context(
+            target.as_ref(),
+            warden_anger::SONIC_BOOM_DAMAGE,
+            DamageType::SONIC_BOOM,
+            Some(source),
+            Some(self_entity),
+            Some(self_entity),
+        );
         if damaged {
             let normalize = if delta.length_squared() > 1.0e-6 {
                 delta.normalize()
@@ -669,7 +687,7 @@ impl WardenEntity {
         }
     }
 
-    async fn register_listener_once(&self) {
+    fn register_listener_once(&self) {
         if self.listener_registered.swap(true, Ordering::Relaxed) {
             return;
         }
@@ -678,7 +696,7 @@ impl WardenEntity {
             return;
         };
         let world = self.mob_entity.living_entity.entity.world.load();
-        world.register_game_event_listener(listener).await;
+        world.register_game_event_listener(listener);
     }
 }
 
@@ -708,103 +726,94 @@ impl Mob for WardenEntity {
     ///
     /// Returning `false` here also skips `on_damage`, which matches vanilla: `hurtServer`'s
     /// anger-on-hit is itself gated on `!isDiggingOrEmerging()` (Warden.java:497).
-    fn pre_damage<'a>(
-        &'a self,
-        damage_type: DamageType,
-        _source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            !self.is_emerging()
-                || damage_type.has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY)
-        })
+    fn pre_damage(&self, damage_type: DamageType, _source: Option<&dyn EntityBase>) -> bool {
+        !self.is_emerging()
+            || damage_type.has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.register_listener_once().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.register_listener_once();
 
-            // `WardenAi` runs only the EMERGE activity while emerging: no anger, no
-            // attacking. The selectors and navigation are frozen for the same 134 ticks by
-            // `suppress_ai_goals` above, which is what routes the tick here and nowhere else.
-            if self.tick_emerging() {
-                return;
-            }
+        // `WardenAi` runs only the EMERGE activity while emerging: no anger, no
+        // attacking. The selectors and navigation are frozen for the same 134 ticks by
+        // `suppress_ai_goals` above, which is what routes the tick here and nowhere else.
+        if self.tick_emerging() {
+            return;
+        }
 
-            if self.vibration_cooldown.load(Ordering::Relaxed) > 0 {
-                self.vibration_cooldown.fetch_sub(1, Ordering::Relaxed);
-            }
-            if self.touch_cooldown.load(Ordering::Relaxed) > 0 {
-                self.touch_cooldown.fetch_sub(1, Ordering::Relaxed);
-            }
-            if self.sonic_boom_cooldown.load(Ordering::Relaxed) > 0 {
-                self.sonic_boom_cooldown.fetch_sub(1, Ordering::Relaxed);
-            }
+        if self.vibration_cooldown.load(Ordering::Relaxed) > 0 {
+            self.vibration_cooldown.fetch_sub(1, Ordering::Relaxed);
+        }
+        if self.touch_cooldown.load(Ordering::Relaxed) > 0 {
+            self.touch_cooldown.fetch_sub(1, Ordering::Relaxed);
+        }
+        if self.sonic_boom_cooldown.load(Ordering::Relaxed) > 0 {
+            self.sonic_boom_cooldown.fetch_sub(1, Ordering::Relaxed);
+        }
 
-            self.tick_roar().await;
+        self.tick_roar();
 
-            let age = self
-                .mob_entity
-                .living_entity
-                .entity
-                .age
-                .load(Ordering::Relaxed);
-            if age % warden_anger::ANGERMANAGEMENT_TICK_DELAY == 0 {
-                let self_uuid = self.mob_entity.living_entity.entity.entity_uuid;
-                let world = self.mob_entity.living_entity.entity.world.load_full();
-                let valid = |uuid: Uuid| {
-                    uuid != self_uuid
-                        && world
-                            .get_entity_by_uuid(uuid)
-                            .is_some_and(|e| self.can_target_entity(e.as_ref()))
-                };
-                self.anger.lock().await.tick(valid);
-            }
-
-            self.try_sonic_boom().await;
-        })
-    }
-
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.mob_entity.is_no_ai() || self.is_emerging() {
-                return;
-            }
-            let Some(source) = source else {
-                return;
+        let age = self
+            .mob_entity
+            .living_entity
+            .entity
+            .age
+            .load(Ordering::Relaxed);
+        if age % warden_anger::ANGERMANAGEMENT_TICK_DELAY == 0 {
+            let self_uuid = self.mob_entity.living_entity.entity.entity_uuid;
+            let world = self.mob_entity.living_entity.entity.world.load_full();
+            let valid = |uuid: Uuid| {
+                uuid != self_uuid
+                    && world
+                        .get_entity_by_uuid(uuid)
+                        .is_some_and(|e| self.can_target_entity(e.as_ref()))
             };
-            let world = self.mob_entity.living_entity.entity.world.load();
-            let Some(attacker) = world.get_entity_by_uuid(source.get_entity().entity_uuid) else {
-                return;
-            };
-            drop(world);
+            self.anger
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .tick(valid);
+        }
 
-            self.increase_anger_at(
-                &attacker,
-                AngerLevel::Angry.minimum_anger() + warden_anger::ON_HURT_ANGER_BOOST,
-                false,
-            )
-            .await;
-
-            let has_target = self.mob_entity.target.lock().await.is_some();
-            if !has_target {
-                let self_pos = self.mob_entity.living_entity.entity.pos.load();
-                let attacker_pos = attacker.get_entity().pos.load();
-                let close = (self_pos - attacker_pos).length_squared() <= 25.0;
-                if close {
-                    self.set_attack_target(attacker).await;
-                }
-            }
-        })
+        self.try_sonic_boom();
     }
 
-    fn on_successful_attack<'a>(&'a self, _target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.on_successful_melee_attack();
-        })
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        if self.mob_entity.is_no_ai() || self.is_emerging() {
+            return;
+        }
+        let Some(source) = source else {
+            return;
+        };
+        let world = self.mob_entity.living_entity.entity.world.load();
+        let Some(attacker) = world.get_entity_by_uuid(source.get_entity().entity_uuid) else {
+            return;
+        };
+        drop(world);
+
+        self.increase_anger_at(
+            &attacker,
+            AngerLevel::Angry.minimum_anger() + warden_anger::ON_HURT_ANGER_BOOST,
+            false,
+        );
+
+        let has_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some();
+        if !has_target {
+            let self_pos = self.mob_entity.living_entity.entity.pos.load();
+            let attacker_pos = attacker.get_entity().pos.load();
+            let close = (self_pos - attacker_pos).length_squared() <= 25.0;
+            if close {
+                self.set_attack_target(attacker);
+            }
+        }
+    }
+
+    fn on_successful_attack(&self, _target: &dyn EntityBase) {
+        self.on_successful_melee_attack();
     }
 }
 
@@ -854,7 +863,7 @@ impl GameEventListener for WardenVibrationListener {
             {
                 return false;
             }
-            warden.on_vibration(context.source_entity.clone()).await;
+            warden.on_vibration(context.source_entity.clone());
             true
         })
     }

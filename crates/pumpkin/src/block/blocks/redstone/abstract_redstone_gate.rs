@@ -14,10 +14,7 @@ use pumpkin_world::{
 };
 
 use crate::{
-    block::{
-        BlockFuture, GetRedstonePowerArgs, OnNeighborUpdateArgs, OnStateReplacedArgs,
-        PlayerPlacedArgs,
-    },
+    block::{GetRedstonePowerArgs, OnNeighborUpdateArgs, OnStateReplacedArgs, PlayerPlacedArgs},
     entity::player::Player,
     world::World,
 };
@@ -49,64 +46,48 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         state.is_side_solid(BlockDirection::Up)
     }
 
-    fn get_weak_redstone_power<'a>(&'a self, args: GetRedstonePowerArgs<'a>) -> BlockFuture<'a, u8>
+    fn get_weak_redstone_power<'a>(&'a self, args: GetRedstonePowerArgs<'a>) -> u8
     where
         Self: Send + Sync,
     {
-        Box::pin(async move {
-            let props = T::from_state_id(args.state.id, args.block);
-            if props.is_powered() && props.get_facing().to_block_direction() == args.direction {
-                self.get_output_level(args.world, *args.position).await
-            } else {
-                0
-            }
-        })
+        let props = T::from_state_id(args.state.id, args.block);
+        if props.is_powered() && props.get_facing().to_block_direction() == args.direction {
+            self.get_output_level(args.world, *args.position)
+        } else {
+            0
+        }
     }
 
-    fn get_strong_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8>
+    fn get_strong_redstone_power<'a>(&'a self, args: GetRedstonePowerArgs<'a>) -> u8
     where
         Self: Send + Sync,
     {
-        Box::pin(async move { self.get_weak_redstone_power(args).await })
+        self.get_weak_redstone_power(args)
     }
 
-    fn get_output_level<'a>(&'a self, world: &'a World, pos: BlockPos) -> BlockFuture<'a, u8>;
+    fn get_output_level(&self, world: &World, pos: BlockPos) -> u8;
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()>
+    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>)
     where
         Self: Send + Sync,
     {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            if RedstoneGateBlock::can_place_at(self, args.world.as_ref(), *args.position) {
-                self.update_powered(args.world, *args.position, state, args.block)
-                    .await;
-                return;
-            }
-            // `DiodeBlock.neighborChanged` (DiodeBlock.java:77-79) calls `dropResources` before
-            // `removeBlock`, so a repeater or comparator whose support is broken drops as an item.
-            // Writing AIR straight into the world skipped the drop and destroyed the gate.
+        let state = args.world.get_block_state(args.position);
+        if RedstoneGateBlock::can_place_at(self, args.world.as_ref(), *args.position) {
+            self.update_powered(args.world, *args.position, state, args.block);
+            return;
+        }
+        // `DiodeBlock.neighborChanged` (DiodeBlock.java:77-79) calls `dropResources` before
+        // `removeBlock`, so a repeater or comparator whose support is broken drops as an item.
+        // Writing AIR straight into the world skipped the drop and destroyed the gate.
+        args.world
+            .break_block(args.position, None, BlockFlags::NOTIFY_ALL);
+        for dir in BlockDirection::all() {
             args.world
-                .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
-                .await;
-            for dir in BlockDirection::all() {
-                args.world
-                    .update_neighbor(&args.position.offset(dir.to_offset()), args.source_block)
-                    .await;
-            }
-        })
+                .update_neighbor(&args.position.offset(dir.to_offset()), args.source_block);
+        }
     }
 
-    fn update_powered<'a>(
-        &'a self,
-        world: &'a World,
-        pos: BlockPos,
-        state: &'a BlockState,
-        block: &'a Block,
-    ) -> BlockFuture<'a, ()>;
+    fn update_powered(&self, world: &World, pos: BlockPos, state: &BlockState, block: &Block);
 
     fn has_power<'a>(
         &'a self,
@@ -114,11 +95,11 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         pos: BlockPos,
         state: &'a BlockState,
         block: &'a Block,
-    ) -> BlockFuture<'a, bool>
+    ) -> bool
     where
         Self: Send + Sync,
     {
-        Box::pin(async move { self.get_power(world, pos, state, block).await > 0 })
+        self.get_power(world, pos, state, block) > 0
     }
 
     fn get_power<'a>(
@@ -127,112 +108,92 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         pos: BlockPos,
         state: &'a BlockState,
         block: &'a Block,
-    ) -> BlockFuture<'a, u8>
+    ) -> u8
     where
         Self: Send + Sync,
     {
-        Box::pin(async move { get_power::<T>(world, pos, state.id, block).await })
+        get_power::<T>(world, pos, state.id, block)
     }
 
-    fn get_max_input_level_sides<'a>(
-        &'a self,
-        world: &'a World,
+    fn get_max_input_level_sides(
+        &self,
+        world: &World,
         pos: BlockPos,
         state_id: BlockStateId,
-        block: &'a Block,
+        block: &Block,
         only_gate: bool,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            let props = T::from_state_id(state_id, block);
-            let facing = props.get_facing();
+    ) -> u8 {
+        let props = T::from_state_id(state_id, block);
+        let facing = props.get_facing();
 
-            let power_left =
-                get_power_on_side(world, &pos, facing.rotate_clockwise(), only_gate).await;
-            let power_right =
-                get_power_on_side(world, &pos, facing.rotate_counter_clockwise(), only_gate).await;
+        let power_left = get_power_on_side(world, &pos, facing.rotate_clockwise(), only_gate);
+        let power_right =
+            get_power_on_side(world, &pos, facing.rotate_counter_clockwise(), only_gate);
 
-            std::cmp::max(power_left, power_right)
-        })
+        std::cmp::max(power_left, power_right)
     }
 
-    fn update_target<'a>(
-        &'a self,
-        world: &'a Arc<World>,
+    fn update_target(
+        &self,
+        world: &Arc<World>,
         pos: BlockPos,
         state_id: BlockStateId,
-        block: &'a Block,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let props = T::from_state_id(state_id, block);
-            let facing = props.get_facing();
-            let front_pos = pos.offset(facing.opposite().to_offset());
-            world.update_neighbor(&front_pos, block).await;
-            world
-                .update_neighbors(&front_pos, Some(facing.to_block_direction()))
-                .await;
-        })
+        block: &Block,
+    ) {
+        let props = T::from_state_id(state_id, block);
+        let facing = props.get_facing();
+        let front_pos = pos.offset(facing.opposite().to_offset());
+        world.update_neighbor(&front_pos, block);
+        world.update_neighbors(&front_pos, Some(facing.to_block_direction()));
     }
 
-    fn on_place<'a>(
-        &'a self,
-        player: &'a Player,
-        block: &'a Block,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async {
-            let mut props = T::default(block);
-            let dir = player
-                .living_entity
-                .entity
-                .get_horizontal_facing()
-                .opposite();
-            props.set_facing(dir);
+    fn on_place(&self, player: &Player, block: &Block) -> BlockStateId {
+        let mut props = T::default(block);
+        let dir = player
+            .living_entity
+            .entity
+            .get_horizontal_facing()
+            .opposite();
+        props.set_facing(dir);
 
-            props.to_state_id(block)
-        })
+        props.to_state_id(block)
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()>
+    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>)
     where
         Self: Send + Sync,
     {
-        Box::pin(async move {
-            if RedstoneGateBlock::has_power(
-                self,
-                args.world,
-                *args.position,
-                BlockState::from_id(args.state_id),
-                args.block,
-            )
-            .await
-            {
-                args.world
-                    .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            }
-        })
+        if RedstoneGateBlock::has_power(
+            self,
+            args.world,
+            *args.position,
+            BlockState::from_id(args.state_id),
+            args.block,
+        ) {
+            args.world
+                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+        }
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()>
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>)
     where
         Self: Send + Sync,
     {
-        Box::pin(async move {
-            // `DiodeBlock.affectNeighborsAfterRemoval` (DiodeBlock.java:174-178) skips the
-            // front-neighbour update only when a piston moved the gate. `args.block` is always
-            // the block the OLD state belongs to, so the extra identity comparison this guard
-            // used to carry was a tautology that made the whole method dead: a broken repeater
-            // or comparator left the block in front of it holding stale power.
-            if args.moved {
-                return;
-            }
-            RedstoneGateBlock::update_target(
-                self,
-                args.world,
-                *args.position,
-                args.old_state_id,
-                args.block,
-            )
-            .await;
-        })
+        // `DiodeBlock.affectNeighborsAfterRemoval` (DiodeBlock.java:174-178) skips the
+        // front-neighbour update only when a piston moved the gate. `args.block` is always
+        // the block the OLD state belongs to, so the extra identity comparison this guard
+        // used to carry was a tautology that made the whole method dead: a broken repeater
+        // or comparator left the block in front of it holding stale power.
+        if args.moved {
+            return;
+        }
+        RedstoneGateBlock::update_target(
+            self,
+            args.world,
+            *args.position,
+            args.old_state_id,
+            args.block,
+        );
     }
 
     fn is_target_not_aligned<'a>(
@@ -260,7 +221,7 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
     fn get_update_delay_internal(&self, state_id: BlockStateId, block: &Block) -> u8;
 }
 
-pub async fn get_power<T: BlockProperties + RedstoneGateBlockProperties + Send>(
+pub fn get_power<T: BlockProperties + RedstoneGateBlockProperties + Send>(
     world: &World,
     pos: BlockPos,
     state_id: BlockStateId,
@@ -276,8 +237,7 @@ pub async fn get_power<T: BlockProperties + RedstoneGateBlockProperties + Send>(
         world,
         &source_pos,
         facing.to_block_direction(),
-    )
-    .await;
+    );
     if source_level >= 15 {
         source_level
     } else {
@@ -290,12 +250,7 @@ pub async fn get_power<T: BlockProperties + RedstoneGateBlockProperties + Send>(
     }
 }
 
-async fn get_power_on_side(
-    world: &World,
-    pos: &BlockPos,
-    side: HorizontalFacing,
-    only_gate: bool,
-) -> u8 {
+fn get_power_on_side(world: &World, pos: &BlockPos, side: HorizontalFacing, only_gate: bool) -> u8 {
     let side_pos = pos.offset(side.to_block_direction().to_offset());
     let (side_block, side_state) = world.get_block_and_state(&side_pos);
 
@@ -313,14 +268,11 @@ async fn get_power_on_side(
         return RedstoneWireLikeProperties::from_state_id(side_state.id, side_block).power;
     }
 
-    world
-        .block_registry
-        .get_strong_redstone_power(
-            side_block,
-            world,
-            &side_pos,
-            side_state,
-            side.to_block_direction(),
-        )
-        .await
+    world.block_registry.get_strong_redstone_power(
+        side_block,
+        world,
+        &side_pos,
+        side_state,
+        side.to_block_direction(),
+    )
 }

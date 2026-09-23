@@ -458,7 +458,7 @@ impl Server {
 
         // TODO: Move worldgen after plugin load to allow plugin registry initialization
 
-        server.registries.lock().await;
+        server.registries.lock();
 
         info!("Starting parallel world load...");
         let mut world_futures = Vec::new();
@@ -498,7 +498,7 @@ impl Server {
                 .iter()
                 .find(|world| world.dimension == Dimension::OVERWORLD)
         {
-            let spawn = crate::world::spawn_finder::find_initial_world_spawn(overworld).await;
+            let spawn = crate::world::spawn_finder::find_initial_world_spawn(overworld);
             let mut level_data = server.level_info.load().as_ref().clone();
             level_data.spawn_x = spawn.0.x;
             level_data.spawn_y = spawn.0.y;
@@ -524,18 +524,17 @@ impl Server {
         let enabled_packs = server.level_info.load().data_packs.enabled.clone();
         server
             .datapack_manager
-            .load_all(&world_path, &enabled_packs, &server.recipe_manager)
-            .await;
+            .load_all(&world_path, &enabled_packs, &server.recipe_manager);
 
         let server_for_load = server.clone();
         tokio::spawn(async move {
-            let source = crate::command::CommandSender::Console
-                .into_source(&server_for_load)
-                .await;
-            let _ = server_for_load
-                .datapack_manager
-                .execute_function(&server_for_load, &source, "#minecraft:load", None)
-                .await;
+            let source = crate::command::CommandSender::Console.into_source(&server_for_load);
+            let _ = server_for_load.datapack_manager.execute_function(
+                &server_for_load,
+                &source,
+                "#minecraft:load",
+                None,
+            );
         });
 
         server
@@ -641,7 +640,7 @@ impl Server {
         }
 
         world_to_unload.shutdown().await;
-        world_to_unload.unload().await;
+        world_to_unload.unload();
 
         self.worlds.rcu(|w_list| {
             let mut new_list = (**w_list).clone();
@@ -658,22 +657,18 @@ impl Server {
             .write_world_info(&level_data, &self.basic_config.get_world_path())
     }
 
-    pub async fn reload_datapacks(&self, server: &Arc<Self>) {
+    pub fn reload_datapacks(&self, server: &Arc<Self>) {
         let enabled_packs = self.level_info.load().data_packs.enabled.clone();
         let world_path = self.basic_config.get_world_path();
         self.datapack_manager
-            .load_all(&world_path, &enabled_packs, &self.recipe_manager)
-            .await;
+            .load_all(&world_path, &enabled_packs, &self.recipe_manager);
 
-        let source = crate::command::CommandSender::Console
-            .into_source(server)
-            .await;
+        let source = crate::command::CommandSender::Console.into_source(server);
         let _ = self
             .datapack_manager
-            .execute_function(server, &source, "#minecraft:load", None)
-            .await;
+            .execute_function(server, &source, "#minecraft:load", None);
 
-        let dynamic_recipes = self.recipe_manager.get_dynamic_recipes_internal().await;
+        let dynamic_recipes = self.recipe_manager.get_dynamic_recipes_internal();
         for player in self.get_all_players() {
             if let crate::net::ClientPlatform::Java(java_client) = player.client.as_ref() {
                 let add_packet = pumpkin_protocol::java::client::play::CRecipeBookAdd::new(
@@ -708,7 +703,7 @@ impl Server {
         }
 
         for world in self.worlds.load().iter() {
-            world.save().await;
+            world.save();
         }
 
         Ok(())
@@ -745,7 +740,7 @@ impl Server {
         profile: GameProfile,
         config: Option<PlayerConfig>,
     ) -> Option<(Arc<Player>, Arc<World>)> {
-        let gamemode = self.defaultgamemode.lock().await.gamemode;
+        let gamemode = self.defaultgamemode.lock().gamemode;
 
         let first_world = self.worlds.load().first().cloned()?;
 
@@ -774,11 +769,10 @@ impl Server {
             config.clone().unwrap_or_default(),
             world.clone(),
             gamemode,
-        )
-        .await;
+        );
 
         if let Some(mut nbt_data) = nbt {
-            player.read_nbt(&mut nbt_data).await;
+            player.read_nbt(&mut nbt_data);
             // The data file itself proves this is a returning player. Older Bedrock
             // sessions could persist HasPlayedBefore as false and mask a valid Pos.
             player.has_played_before.store(true, Ordering::Relaxed);
@@ -787,8 +781,8 @@ impl Server {
         // Wrap in Arc after data is loaded
         let player = Arc::new(player);
         {
-            let mut advancements = player.advancements.lock().await;
-            if let Err(e) = advancements.load().await {
+            let mut advancements = player.advancements.lock();
+            if let Err(e) = advancements.load() {
                 warn!("Error loading player {}: {e}", player.gameprofile.id);
             }
             advancements.player = Arc::downgrade(&player);
@@ -798,7 +792,7 @@ impl Server {
             self;
             &mut PlayerLoginEvent::new(player.clone(), TextComponent::text("You have been kicked from the server"));
             'after: {
-                player.screen_handler_sync_handler.store_player(player.clone()).await;
+                player.screen_handler_sync_handler.store_player(player.clone());
                 if world
                     .add_player(&player)
                     .is_ok() {
@@ -809,7 +803,7 @@ impl Server {
                     if let Some(config) = config {
                         // TODO: Config so we can also just ignore this hehe
                         if config.server_listing {
-                            self.listing.lock().await.add_player(&player);
+                            self.listing.lock().add_player(&player);
                         }
                     }
 
@@ -820,22 +814,20 @@ impl Server {
             }
 
             'cancelled: {
-                player.kick(DisconnectReason::Kicked, event.kick_message).await;
+                player.kick(DisconnectReason::Kicked, event.kick_message);
                 None
             }
         }}
     }
 
     pub async fn remove_player(&self, player: &Player) {
-        player
-            .increment_stat(
-                pumpkin_data::statistic::StatisticCategory::Custom,
-                pumpkin_data::statistic::CustomStatistic::LeaveGame as i32,
-                1,
-            )
-            .await;
+        player.increment_stat(
+            pumpkin_data::statistic::StatisticCategory::Custom,
+            pumpkin_data::statistic::CustomStatistic::LeaveGame as i32,
+            1,
+        );
         // TODO: Config if we want decrease online
-        self.listing.lock().await.remove_player(player);
+        self.listing.lock().remove_player(player);
     }
 
     pub async fn shutdown(&self) {
@@ -851,11 +843,11 @@ impl Server {
             .iter()
             .find(|world| world.dimension == Dimension::OVERWORLD)
         {
-            let day_time = overworld.get_time_of_day().await;
-            let weather = overworld.weather.lock().await.clone();
+            let day_time = overworld.get_time_of_day();
+            let weather = overworld.weather.lock().clone();
             // Vanilla `WorldBorder.Settings(WorldBorder)` (`WorldBorder.java:475-487`);
             // `write_world_info` puts these in `data/minecraft/world_border.dat`.
-            let border = overworld.worldborder.lock().await.to_settings();
+            let border = overworld.worldborder.lock().to_settings();
             self.level_info.rcu(|level_info| {
                 let mut snapshot = (**level_info).clone();
                 snapshot.day_time = day_time;
@@ -882,7 +874,7 @@ impl Server {
 
         // Save scoreboard into the shared LevelData
         let sb_data = {
-            let sb = self.scoreboard.lock().await;
+            let sb = self.scoreboard.lock();
             sb.to_data()
         };
         let mut level_data = self.level_info.load().as_ref().clone();
@@ -922,14 +914,14 @@ impl Server {
         let packet = CTabList::new(header, footer);
         for world in self.worlds.load().iter() {
             for player in world.players.load().iter() {
-                *player.tab_list_header.lock().await = header.clone();
-                *player.tab_list_footer.lock().await = footer.clone();
+                *player.tab_list_header.lock() = header.clone();
+                *player.tab_list_footer.lock() = footer.clone();
             }
             world.broadcast_packet_all(&packet);
         }
     }
 
-    pub async fn broadcast_message(
+    pub fn broadcast_message(
         self: &Arc<Self>,
         message: &TextComponent,
         sender_name: &TextComponent,
@@ -943,8 +935,7 @@ impl Server {
             'after: {
                 for world in self.worlds.load().iter() {
                     world
-                        .broadcast_message(&event.message, &event.sender, chat_type, target_name)
-                        .await;
+                        .broadcast_message(&event.message, &event.sender, chat_type, target_name);
                 }
             }
         }}
@@ -970,7 +961,7 @@ impl Server {
     /// # Note
     ///
     /// This function does not handle the actual mob spawn options update, which is a TODO item for future implementation.
-    pub async fn set_difficulty(&self, difficulty: Difficulty, force_update: bool) {
+    pub fn set_difficulty(&self, difficulty: Difficulty, force_update: bool) {
         let current_info = self.level_info.load();
         if current_info.difficulty_locked && !force_update {
             return;
@@ -990,19 +981,17 @@ impl Server {
 
         for world in self.worlds.load().iter() {
             world.set_difficulty(difficulty);
-            world
-                .broadcast_editioned(
-                    &CChangeDifficulty::new(difficulty as u8, locked),
-                    &pumpkin_protocol::bedrock::client::CSetDifficulty {
-                        difficulty: (difficulty as u32).into(),
-                    },
-                )
-                .await;
+            world.broadcast_editioned(
+                &CChangeDifficulty::new(difficulty as u8, locked),
+                &pumpkin_protocol::bedrock::client::CSetDifficulty {
+                    difficulty: (difficulty as u32).into(),
+                },
+            );
         }
     }
 
     /// Sets the difficulty lock status of the server and broadcasts the update to all players.
-    pub async fn set_difficulty_locked(&self, locked: bool) {
+    pub fn set_difficulty_locked(&self, locked: bool) {
         let current_info = self.level_info.load();
         let mut new_info = (**current_info).clone();
         new_info.difficulty_locked = locked;
@@ -1010,14 +999,12 @@ impl Server {
         self.level_info.store(Arc::new(new_info));
 
         for world in self.worlds.load().iter() {
-            world
-                .broadcast_editioned(
-                    &CChangeDifficulty::new(difficulty as u8, locked),
-                    &pumpkin_protocol::bedrock::client::CSetDifficulty {
-                        difficulty: (difficulty as u32).into(),
-                    },
-                )
-                .await;
+            world.broadcast_editioned(
+                &CChangeDifficulty::new(difficulty as u8, locked),
+                &pumpkin_protocol::bedrock::client::CSetDifficulty {
+                    difficulty: (difficulty as u32).into(),
+                },
+            );
         }
     }
 
@@ -1186,23 +1173,23 @@ impl Server {
 
     /// Main server tick method. This now handles both player/network ticking (which always runs)
     /// and world/game logic ticking (which is affected by freeze state).
-    pub async fn tick(self: &Arc<Self>) {
+    pub fn tick(self: &Arc<Self>) {
         if self.tick_rate_manager.runs_normally() || self.tick_rate_manager.is_sprinting() {
-            self.tick_worlds().await;
+            self.tick_worlds();
             // Always run player and network ticking, even when game is frozen
         } else {
-            self.tick_players_and_network().await;
+            self.tick_players_and_network();
         }
     }
 
     /// Ticks essential server functions that must run even when the game is frozen.
     /// This includes player ticking (network, keep-alives) and flushing world updates to clients.
-    pub async fn tick_players_and_network(self: &Arc<Self>) {
+    pub fn tick_players_and_network(self: &Arc<Self>) {
         let worlds = self.worlds.load();
 
         for world in worlds.iter() {
-            world.flush_block_updates().await;
-            world.flush_synced_block_events().await;
+            world.flush_block_updates();
+            world.flush_synced_block_events();
         }
 
         let mut set = JoinSet::new();
@@ -1212,15 +1199,15 @@ impl Server {
                 let player_clone = player.clone();
                 let server_clone = self.clone();
                 set.spawn(async move {
-                    player_clone.tick(&server_clone).await;
+                    player_clone.tick(&server_clone);
                 });
             }
         }
         set.join_all().await;
     }
     /// Ticks the game logic for all worlds. This is the part that is affected by `/tick freeze`.
-    pub async fn tick_worlds(self: &Arc<Self>) {
-        self.task_scheduler.tick(self).await;
+    pub fn tick_worlds(self: &Arc<Self>) {
+        self.task_scheduler.tick(self);
 
         let mut set = JoinSet::new();
 
@@ -1229,24 +1216,24 @@ impl Server {
             let server = self.clone();
 
             set.spawn(async move {
-                world.tick(server).await;
+                world.tick(server);
             });
         }
 
         set.join_all().await;
 
         // Global tasks
-        if let Err(e) = self.player_data_storage.tick(self).await {
+        if let Err(e) = self.player_data_storage.tick(self) {
             error!("Error ticking player data: {e}");
         }
     }
 
     /// Updates the tick time statistics with the duration of the last tick.
-    pub async fn update_tick_times(&self, tick_duration_nanos: i64) {
+    pub fn update_tick_times(&self, tick_duration_nanos: i64) {
         let tick_count = self.tick_count.fetch_add(1, Ordering::Relaxed);
         let index = (tick_count % 100) as usize;
 
-        let mut tick_times = self.tick_times_nanos.lock().await;
+        let mut tick_times = self.tick_times_nanos.lock();
         let old_time = tick_times[index];
         tick_times[index] = tick_duration_nanos;
         drop(tick_times);
@@ -1307,8 +1294,8 @@ impl Server {
     }
 
     /// Returns a copy of the last 100 tick times.
-    pub async fn get_tick_times_nanos_copy(&self) -> [i64; 100] {
-        *self.tick_times_nanos.lock().await
+    pub fn get_tick_times_nanos_copy(&self) -> [i64; 100] {
+        *self.tick_times_nanos.lock()
     }
 
     #[allow(clippy::too_many_lines, clippy::option_if_let_else)]

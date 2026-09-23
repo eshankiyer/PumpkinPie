@@ -15,7 +15,7 @@ use pumpkin_util::math::position::BlockPos;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         breed::BreedGoal, follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
@@ -314,28 +314,24 @@ impl AgeableMob for SnifferEntity {
 }
 
 impl NBTStorage for SnifferEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            use super::animal::Animal;
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_int("State", self.get_state().id());
-            self.write_explored_positions_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        use super::animal::Animal;
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_int("State", self.get_state().id());
+        self.write_explored_positions_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            use super::animal::Animal;
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            if let Some(state_id) = nbt.get_int("State") {
-                self.state.store(state_id, Ordering::Relaxed);
-            }
-            self.read_explored_positions_nbt(nbt);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        use super::animal::Animal;
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(state_id) = nbt.get_int("State") {
+            self.state.store(state_id, Ordering::Relaxed);
+        }
+        self.read_explored_positions_nbt(nbt);
     }
 }
 
@@ -368,26 +364,24 @@ impl Mob for SnifferEntity {
         navigator.set_pathfinding_malus(PathType::Water, -1.0);
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            if entity.age.load(Ordering::Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::sniffer::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if entity.age.load(Ordering::Relaxed) < 0 {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::sniffer::STATE,
-                    VarInt(self.get_state().id()),
+                    pumpkin_data::tracked_data::sniffer::BABY_ID,
+                    true,
                 )],
                 None,
             );
-        })
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::sniffer::STATE,
+                VarInt(self.get_state().id()),
+            )],
+            None,
+        );
     }
 
     fn can_breed_with(&self, mate: &dyn EntityBase) -> bool {
@@ -404,11 +398,11 @@ impl Mob for SnifferEntity {
                 .is_some_and(|mate| allowed(mate.get_state()))
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<crate::entity::player::Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(
+        &self,
+        player: &Arc<crate::entity::player::Player>,
+        item_stack: &mut ItemStack,
+    ) -> bool {
         use super::animal::Animal;
         self.animal_interact(player, item_stack, Sound::EntitySnifferEat)
     }
@@ -420,36 +414,34 @@ impl Mob for SnifferEntity {
     /// Vanilla `Sniffer.canMate` gates breeding on both sniffers being in
     /// `{IDLING, SCENTING, FEELING_HAPPY}`; the predicate supplied to this sniffer's
     /// `BreedGoal` enforces that state check before selecting a partner.
-    fn create_offspring<'a>(
-        &'a self,
-        _mate: &'a dyn EntityBase,
-        _world: &'a Arc<World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async { None })
+    fn create_offspring(
+        &self,
+        _mate: &dyn EntityBase,
+        _world: &Arc<World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        None
     }
 
-    fn spawn_breeding_result<'a>(
-        &'a self,
+    fn spawn_breeding_result(
+        &self,
         _offspring: Option<Arc<dyn EntityBase>>,
-        world: &'a Arc<World>,
+        world: &Arc<World>,
         parent_pos: pumpkin_util::math::vector3::Vector3<f64>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let item_entity = Arc::new(ItemEntity::new(
-                Entity::new(world.clone(), parent_pos, &EntityType::ITEM),
-                ItemStack::new(1, &Item::SNIFFER_EGG),
-            ));
-            let pitch =
-                (self.get_random().random::<f32>() - self.get_random().random::<f32>()) * 0.2 + 0.5;
-            world.play_sound_fine(
-                Sound::BlockSnifferEggPlop,
-                SoundCategory::Neutral,
-                &parent_pos,
-                1.0,
-                pitch,
-            );
-            world.spawn_entity(item_entity).await;
-        })
+    ) {
+        let item_entity = Arc::new(ItemEntity::new(
+            Entity::new(world.clone(), parent_pos, &EntityType::ITEM),
+            ItemStack::new(1, &Item::SNIFFER_EGG),
+        ));
+        let pitch =
+            (self.get_random().random::<f32>() - self.get_random().random::<f32>()) * 0.2 + 0.5;
+        world.play_sound_fine(
+            Sound::BlockSnifferEggPlop,
+            SoundCategory::Neutral,
+            &parent_pos,
+            1.0,
+            pitch,
+        );
+        world.spawn_entity(item_entity);
     }
 }
 

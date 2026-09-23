@@ -11,7 +11,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ai::control::phantom_move_control::PhantomMoveControl,
     ai::goal::{
         phantom_attack_player_target::PhantomAttackPlayerTargetGoal,
@@ -173,18 +173,14 @@ impl PhantomEntity {
 }
 
 impl NBTStorage for PhantomEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("size", self.size());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_int("size", self.size());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.set_size(nbt.get_int("size").unwrap_or(0));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.set_size(nbt.get_int("size").unwrap_or(0));
     }
 }
 

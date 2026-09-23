@@ -13,11 +13,11 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::block::entities::{BlockEntity, PropertyDelegate};
 use crate::world::World;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
+use pumpkin_world::inventory::{Clearable, Inventory};
 
 pub struct BeaconBlockEntity {
     pub position: BlockPos,
@@ -113,7 +113,7 @@ impl BeaconBlockEntity {
     }
 
     /// Replicates Java's `applyEffects` bounding box mapping and duration mapping
-    async fn apply_effects(&self, world: &Arc<World>, levels: i32) {
+    fn apply_effects(&self, world: &Arc<World>, levels: i32) {
         if levels <= 0 {
             return;
         }
@@ -152,34 +152,30 @@ impl BeaconBlockEntity {
 
         for player in players {
             if let Some(effect) = primary_effect {
-                player
-                    .add_effect(pumpkin_data::potion::Effect {
-                        effect_type: effect,
-                        duration: duration_ticks,
-                        amplifier: base_amp as u8,
-                        ambient: true,
-                        show_particles: true,
-                        show_icon: true,
-                        blend: false,
-                    })
-                    .await;
+                player.add_effect(pumpkin_data::potion::Effect {
+                    effect_type: effect,
+                    duration: duration_ticks,
+                    amplifier: base_amp as u8,
+                    ambient: true,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                });
             }
 
             if levels >= 4
                 && primary_id != secondary_id
                 && let Some(effect) = secondary_effect
             {
-                player
-                    .add_effect(pumpkin_data::potion::Effect {
-                        effect_type: effect,
-                        duration: duration_ticks,
-                        amplifier: 0,
-                        ambient: true,
-                        show_particles: true,
-                        show_icon: true,
-                        blend: false,
-                    })
-                    .await;
+                player.add_effect(pumpkin_data::potion::Effect {
+                    effect_type: effect,
+                    duration: duration_ticks,
+                    amplifier: 0,
+                    ambient: true,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                });
             }
         }
     }
@@ -229,13 +225,16 @@ impl BeaconBlockEntity {
 
     /// Vanilla `BeaconMenu.updateEffects`: validates the requested effects against the
     /// current pyramid tier, then consumes one payment item on success.
-    pub async fn update_effects(
+    pub fn update_effects(
         &self,
         world: &Arc<World>,
         primary: Option<i32>,
         secondary: Option<i32>,
     ) -> bool {
-        let mut payment = self.payment.lock().await;
+        let mut payment = self
+            .payment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if payment.is_empty() {
             return false;
         }
@@ -302,7 +301,7 @@ impl BlockEntity for BeaconBlockEntity {
             );
 
             if let Some(inventory) = self.clone().get_inventory() {
-                world.scatter_inventory(&position, &inventory).await;
+                world.scatter_inventory(&position, &inventory);
             }
         })
     }
@@ -333,42 +332,43 @@ impl BlockEntity for BeaconBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_int(
-                "primary_effect",
-                self.primary_effect.load(Ordering::Relaxed),
-            );
-            nbt.put_int(
-                "secondary_effect",
-                self.secondary_effect.load(Ordering::Relaxed),
-            );
-            nbt.put_int("Levels", self.levels.load(Ordering::Relaxed));
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int(
+            "primary_effect",
+            self.primary_effect.load(Ordering::Relaxed),
+        );
+        nbt.put_int(
+            "secondary_effect",
+            self.secondary_effect.load(Ordering::Relaxed),
+        );
+        nbt.put_int("Levels", self.levels.load(Ordering::Relaxed));
 
-            if let Some(name) = &*self.custom_name.lock().await {
-                nbt.put_string("CustomName", name.clone());
-            }
-            if let Some(lock) = &*self.lock_key.lock().await {
-                nbt.put_string("Lock", lock.clone());
-            }
-        })
+        if let Some(name) = &*self
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            nbt.put_string("CustomName", name.clone());
+        }
+        if let Some(lock) = &*self
+            .lock_key
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            nbt.put_string("Lock", lock.clone());
+        }
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Check properties every 80 ticks matching Java
-            if world.get_time_of_day().await % 80 == 0 {
-                let levels = self.update_base(world);
-                self.levels.store(levels, Ordering::Relaxed);
+    fn tick(&self, world: &Arc<World>) {
+        // Check properties every 80 ticks matching Java
+        if world.get_time_of_day() % 80 == 0 {
+            let levels = self.update_base(world);
+            self.levels.store(levels, Ordering::Relaxed);
 
-                if levels > 0 && self.beam_clear(world) {
-                    self.apply_effects(world, levels).await;
-                }
+            if levels > 0 && self.beam_clear(world) {
+                self.apply_effects(world, levels);
             }
-        })
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -437,57 +437,64 @@ impl Inventory for BeaconBlockEntity {
         1
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move { self.payment.lock().await.is_empty() })
+    fn is_empty(&self) -> bool {
+        self.payment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            if slot == 0 {
-                self.payment.lock().await.clone()
-            } else {
-                ItemStack::EMPTY.clone()
-            }
-        })
+    fn get_stack(&self, slot: usize) -> ItemStack {
+        if slot == 0 {
+            self.payment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        } else {
+            ItemStack::EMPTY.clone()
+        }
     }
 
-    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            if slot == 0 {
-                let mut removed = ItemStack::EMPTY.clone();
-                let mut guard = self.payment.lock().await;
-                std::mem::swap(&mut removed, &mut *guard);
-                self.mark_dirty();
-                removed
-            } else {
-                ItemStack::EMPTY.clone()
-            }
-        })
+    fn remove_stack(&self, slot: usize) -> ItemStack {
+        if slot == 0 {
+            let mut removed = ItemStack::EMPTY.clone();
+            let mut guard = self
+                .payment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::swap(&mut removed, &mut *guard);
+            self.mark_dirty();
+            removed
+        } else {
+            ItemStack::EMPTY.clone()
+        }
     }
 
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            if slot == 0 {
-                let mut stack = self.payment.lock().await;
-                if stack.is_empty() {
-                    return ItemStack::EMPTY.clone();
-                }
-                let res = stack.split(amount);
-                self.mark_dirty();
-                res
-            } else {
-                ItemStack::EMPTY.clone()
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
+        if slot == 0 {
+            let mut stack = self
+                .payment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if stack.is_empty() {
+                return ItemStack::EMPTY.clone();
             }
-        })
+            let res = stack.split(amount);
+            self.mark_dirty();
+            res
+        } else {
+            ItemStack::EMPTY.clone()
+        }
     }
 
-    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            if slot == 0 {
-                *self.payment.lock().await = stack;
-                self.mark_dirty();
-            }
-        })
+    fn set_stack(&self, slot: usize, stack: ItemStack) {
+        if slot == 0 {
+            *self
+                .payment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+            self.mark_dirty();
+        }
     }
 
     fn mark_dirty(&self) {
@@ -500,11 +507,9 @@ impl Inventory for BeaconBlockEntity {
 }
 
 impl Clearable for BeaconBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            if let Ok(mut payment) = self.payment.try_lock() {
-                *payment = ItemStack::EMPTY.clone();
-            }
-        })
+    fn clear(&self) {
+        if let Ok(mut payment) = self.payment.try_lock() {
+            *payment = ItemStack::EMPTY.clone();
+        }
     }
 }

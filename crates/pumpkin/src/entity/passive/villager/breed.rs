@@ -30,7 +30,7 @@ use super::VillagerEntity;
 use crate::entity::{
     EntityBase,
     ai::{
-        goal::{Controls, Goal, GoalFuture, villager_schedule},
+        goal::{Controls, Goal, villager_schedule},
         pathfinder::NavigatorGoal,
     },
     mob::Mob,
@@ -64,7 +64,7 @@ impl VillagerBreedGoal {
         entity.cast_any().downcast_ref::<VillagerEntity>()
     }
 
-    async fn find_partner(villager: &VillagerEntity) -> Option<Arc<dyn EntityBase>> {
+    fn find_partner(villager: &VillagerEntity) -> Option<Arc<dyn EntityBase>> {
         let entity = villager.get_entity();
         let world = entity.world.load();
         let pos = entity.pos.load();
@@ -85,7 +85,7 @@ impl VillagerBreedGoal {
             let Some(other) = Self::as_villager(candidate) else {
                 continue;
             };
-            if !other.can_breed_villager().await {
+            if !other.can_breed_villager() {
                 continue;
             }
             let dist = pos.squared_distance_to_vec(&candidate_entity.pos.load());
@@ -118,118 +118,108 @@ impl VillagerBreedGoal {
 }
 
 impl Goal for VillagerBreedGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() else {
-                return false;
-            };
-            // `BREED_TARGET` is only ever set from `getIdlePackage`; no other villager
-            // activity package contains the `InteractWith` that writes it
-            // (`VillagerGoalPackages.java:175-218`).
-            let world = villager.get_entity().world.load();
-            if villager_schedule::villager_activity_for_time(world.get_time_of_day().await)
-                != villager_schedule::VillagerActivity::Idle
-            {
-                return false;
-            }
-            if !villager.can_breed_villager().await {
-                return false;
-            }
-            let Some(partner) = Self::find_partner(villager).await else {
-                return false;
-            };
-            self.partner = Some(partner);
-            // `VillagerMakeLove.start`: `275 + random.nextInt(50)`.
-            self.birth_countdown = 275 + rand::rng().random_range(0..50);
-            true
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() else {
+            return false;
+        };
+        // `BREED_TARGET` is only ever set from `getIdlePackage`; no other villager
+        // activity package contains the `InteractWith` that writes it
+        // (`VillagerGoalPackages.java:175-218`).
+        let world = villager.get_entity().world.load();
+        if villager_schedule::villager_activity_for_time(world.get_time_of_day())
+            != villager_schedule::VillagerActivity::Idle
+        {
+            return false;
+        }
+        if !villager.can_breed_villager() {
+            return false;
+        }
+        let Some(partner) = Self::find_partner(villager) else {
+            return false;
+        };
+        self.partner = Some(partner);
+        // `VillagerMakeLove.start`: `275 + random.nextInt(50)`.
+        self.birth_countdown = 275 + rand::rng().random_range(0..50);
+        true
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let (Some(villager), Some(partner)) = (
-                mob.cast_any().downcast_ref::<VillagerEntity>(),
-                self.partner.clone(),
-            ) else {
-                return;
-            };
-            self.walk_towards(villager, &partner);
-            // `level.broadcastEntityEvent(body, (byte)18)` - the in-love hearts.
-            villager.send_breeding_event(pumpkin_data::entity::EntityStatus::InLoveHearts);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        let (Some(villager), Some(partner)) = (
+            mob.cast_any().downcast_ref::<VillagerEntity>(),
+            self.partner.clone(),
+        ) else {
+            return;
+        };
+        self.walk_towards(villager, &partner);
+        // `level.broadcastEntityEvent(body, (byte)18)` - the in-love hearts.
+        villager.send_breeding_event(pumpkin_data::entity::EntityStatus::InLoveHearts);
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // `VillagerMakeLove.canStillUse`: the gestation timer must not have elapsed and
-            // breeding must still be possible for both sides. Note this deliberately does not
-            // re-check the activity clock - vanilla's behavior keeps running once started.
-            if self.birth_countdown < 0 {
-                return false;
-            }
-            let (Some(villager), Some(partner)) = (
-                mob.cast_any().downcast_ref::<VillagerEntity>(),
-                self.partner.as_ref(),
-            ) else {
-                return false;
-            };
-            if !partner.get_entity().is_alive() {
-                return false;
-            }
-            let Some(other) = Self::as_villager(partner) else {
-                return false;
-            };
-            villager.can_breed_villager().await && other.can_breed_villager().await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        // `VillagerMakeLove.canStillUse`: the gestation timer must not have elapsed and
+        // breeding must still be possible for both sides. Note this deliberately does not
+        // re-check the activity clock - vanilla's behavior keeps running once started.
+        if self.birth_countdown < 0 {
+            return false;
+        }
+        let (Some(villager), Some(partner)) = (
+            mob.cast_any().downcast_ref::<VillagerEntity>(),
+            self.partner.as_ref(),
+        ) else {
+            return false;
+        };
+        if !partner.get_entity().is_alive() {
+            return false;
+        }
+        let Some(other) = Self::as_villager(partner) else {
+            return false;
+        };
+        villager.can_breed_villager() && other.can_breed_villager()
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let (Some(villager), Some(partner)) = (
-                mob.cast_any().downcast_ref::<VillagerEntity>(),
-                self.partner.clone(),
-            ) else {
-                return;
-            };
-            // Vanilla's `birthTimestamp` is absolute game time, so the behavior always ends
-            // ~325 ticks after it started even if the pair never converges
-            // (`VillagerMakeLove.canStillUse`, `VillagerMakeLove.java:37`). Decrement before
-            // the proximity gate so a pair separated by a fence cannot hold MOVE forever.
-            self.birth_countdown -= 1;
+    fn tick(&mut self, mob: &dyn Mob) {
+        let (Some(villager), Some(partner)) = (
+            mob.cast_any().downcast_ref::<VillagerEntity>(),
+            self.partner.clone(),
+        ) else {
+            return;
+        };
+        // Vanilla's `birthTimestamp` is absolute game time, so the behavior always ends
+        // ~325 ticks after it started even if the pair never converges
+        // (`VillagerMakeLove.canStillUse`, `VillagerMakeLove.java:37`). Decrement before
+        // the proximity gate so a pair separated by a fence cannot hold MOVE forever.
+        self.birth_countdown -= 1;
 
-            let pos = villager.get_entity().pos.load();
-            if pos.squared_distance_to_vec(&partner.get_entity().pos.load()) > INTERACT_DIST_SQR {
-                return;
+        let pos = villager.get_entity().pos.load();
+        if pos.squared_distance_to_vec(&partner.get_entity().pos.load()) > INTERACT_DIST_SQR {
+            return;
+        }
+        self.walk_towards(villager, &partner);
+
+        if self.birth_countdown >= 0 {
+            // `body.getRandom().nextInt(35) == 0` -> event 12 on both sides.
+            if rand::rng().random_range(0..35) == 0 {
+                villager.send_breeding_event(pumpkin_data::entity::EntityStatus::LoveHearts);
             }
-            self.walk_towards(villager, &partner);
+            return;
+        }
 
-            if self.birth_countdown >= 0 {
-                // `body.getRandom().nextInt(35) == 0` -> event 12 on both sides.
-                if rand::rng().random_range(0..35) == 0 {
-                    villager.send_breeding_event(pumpkin_data::entity::EntityStatus::LoveHearts);
-                }
-                return;
-            }
-
-            let Some(other) = Self::as_villager(&partner) else {
-                return;
-            };
-            villager.eat_and_digest_food().await;
-            other.eat_and_digest_food().await;
-            villager.try_to_give_birth(other).await;
-        })
+        let Some(other) = Self::as_villager(&partner) else {
+            return;
+        };
+        villager.eat_and_digest_food();
+        other.eat_and_digest_food();
+        villager.try_to_give_birth(other);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.partner = None;
-            self.birth_countdown = 0;
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.partner = None;
+        self.birth_countdown = 0;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     fn should_run_every_tick(&self) -> bool {

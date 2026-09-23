@@ -10,8 +10,8 @@ use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::blocks::plant::crop::CropBlockBase;
 use crate::block::blocks::plant::crop::ravager_destroy_crop;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
-    GetStateForNeighborUpdateArgs, OnEntityCollisionArgs, RandomTickArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetCloneItemStackArgs, GetStateForNeighborUpdateArgs,
+    OnEntityCollisionArgs, RandomTickArgs,
 };
 
 type BeetrootProperties = NetherWartLikeProperties;
@@ -20,8 +20,8 @@ type BeetrootProperties = NetherWartLikeProperties;
 pub struct BeetrootBlock;
 
 impl BlockBehaviour for BeetrootBlock {
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { ravager_destroy_crop(args.world, args.position, args.entity).await })
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        ravager_destroy_crop(args.world, args.position, args.entity)
     }
 
     /// `BeetrootBlock.getBaseSeedId` (`BeetrootBlock.java:45-47`) supplies beetroot seeds to
@@ -36,37 +36,30 @@ impl BlockBehaviour for BeetrootBlock {
         <Self as CropBlockBase>::is_valid_bonemeal_target(self, args.world, args.position)
     }
 
-    fn perform_bonemeal<'a>(&'a self, args: crate::block::BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            <Self as CropBlockBase>::perform_bonemeal(self, args.world, args.position).await;
-        })
+    fn perform_bonemeal(&self, args: crate::block::BonemealArgs<'_>) {
+        <Self as CropBlockBase>::perform_bonemeal(self, args.world, args.position);
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if rand::rng().random_range(0..3) != 0 {
-                <Self as CropBlockBase>::random_tick(self, args.world, args.position).await;
-            }
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if rand::rng().random_range(0..3) != 0 {
+            <Self as CropBlockBase>::random_tick(self, args.world, args.position);
+        }
     }
 }
 

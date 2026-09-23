@@ -19,7 +19,7 @@ use rand::RngExt;
 
 use crate::block::entities::sign::DyeColor;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, beg::BegGoal,
@@ -162,12 +162,12 @@ impl WolfEntity {
                                 let Some(anger) = mob.persistent_anger() else {
                                     return false;
                                 };
-                                if anger.is_angry_at(target.entity_uuid).await {
+                                if anger.is_angry_at(target.entity_uuid) {
                                     return true;
                                 }
                                 let universal_anger =
                                     world.level_info.load().game_rules.universal_anger;
-                                anger.is_angry_at_all_players(universal_anger).await
+                                anger.is_angry_at_all_players(universal_anger)
                             }
                         },
                     ),
@@ -319,71 +319,67 @@ impl Animal for WolfEntity {
 }
 
 impl NBTStorage for WolfEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            // Vanilla Wolf.java persists collar color as a legacy dye-color id (0-15).
-            nbt.put_byte(
-                "CollarColor",
-                self.collar_color.load(Ordering::Relaxed) as i8,
-            );
-            let variant_str = match self.variant.load(Ordering::Relaxed) {
-                0 => "minecraft:ashen",
-                1 => "minecraft:black",
-                2 => "minecraft:chestnut",
-                4 => "minecraft:rusty",
-                5 => "minecraft:snowy",
-                6 => "minecraft:spotted",
-                7 => "minecraft:striped",
-                8 => "minecraft:woods",
-                _ => "minecraft:pale",
-            };
-            nbt.put_string("variant", variant_str.to_string());
-            nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
-            if let Some(owner) = self.mob_entity.owner.load() {
-                nbt.put_uuid("Owner", owner);
-            }
-            self.persistent_anger.write_nbt(nbt).await;
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        // Vanilla Wolf.java persists collar color as a legacy dye-color id (0-15).
+        nbt.put_byte(
+            "CollarColor",
+            self.collar_color.load(Ordering::Relaxed) as i8,
+        );
+        let variant_str = match self.variant.load(Ordering::Relaxed) {
+            0 => "minecraft:ashen",
+            1 => "minecraft:black",
+            2 => "minecraft:chestnut",
+            4 => "minecraft:rusty",
+            5 => "minecraft:snowy",
+            6 => "minecraft:spotted",
+            7 => "minecraft:striped",
+            8 => "minecraft:woods",
+            _ => "minecraft:pale",
+        };
+        nbt.put_string("variant", variant_str.to_string());
+        nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
+        if let Some(owner) = self.mob_entity.owner.load() {
+            nbt.put_uuid("Owner", owner);
+        }
+        self.persistent_anger.write_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt).await;
-            if let Some(variant_str) = nbt.get_string("variant") {
-                let variant = match variant_str
-                    .strip_prefix("minecraft:")
-                    .unwrap_or(variant_str)
-                {
-                    "ashen" => 0,
-                    "black" => 1,
-                    "chestnut" => 2,
-                    "rusty" => 4,
-                    "snowy" => 5,
-                    "spotted" => 6,
-                    "striped" => 7,
-                    "woods" => 8,
-                    _ => 3,
-                };
-                self.variant.store(variant, Ordering::Relaxed);
-            }
-            if let Some(color) = nbt.get_byte("CollarColor") {
-                self.collar_color.store(color as u8, Ordering::Relaxed);
-            } else if let Some(color) = nbt.get_int("CollarColor") {
-                self.collar_color.store(color as u8, Ordering::Relaxed);
-            }
-            if let Some(sitting) = nbt.get_bool("Sitting") {
-                self.mob_entity.set_ordered_to_sit(sitting);
-            }
-            if let Some(owner) = nbt.get_uuid("Owner") {
-                self.mob_entity.set_owner(owner);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        self.persistent_anger.read_nbt(nbt);
+        if let Some(variant_str) = nbt.get_string("variant") {
+            let variant = match variant_str
+                .strip_prefix("minecraft:")
+                .unwrap_or(variant_str)
+            {
+                "ashen" => 0,
+                "black" => 1,
+                "chestnut" => 2,
+                "rusty" => 4,
+                "snowy" => 5,
+                "spotted" => 6,
+                "striped" => 7,
+                "woods" => 8,
+                _ => 3,
+            };
+            self.variant.store(variant, Ordering::Relaxed);
+        }
+        if let Some(color) = nbt.get_byte("CollarColor") {
+            self.collar_color.store(color as u8, Ordering::Relaxed);
+        } else if let Some(color) = nbt.get_int("CollarColor") {
+            self.collar_color.store(color as u8, Ordering::Relaxed);
+        }
+        if let Some(sitting) = nbt.get_bool("Sitting") {
+            self.mob_entity.set_ordered_to_sit(sitting);
+        }
+        if let Some(owner) = nbt.get_uuid("Owner") {
+            self.mob_entity.set_owner(owner);
+        }
     }
 }
 
@@ -392,101 +388,98 @@ impl Mob for WolfEntity {
         &self.mob_entity
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.persistent_anger.tick().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.persistent_anger.tick();
 
-            // Simplified `NeutralMob::updatePersistentAnger(level, true)`: whenever this wolf
-            // currently has a live target (set by e.g. `RevengeGoal`/`OwnerHurtByTargetGoal`),
-            // adopt it as the anger target and (re)start the timer. Vanilla additionally
-            // re-resolves a persisted target reference across entity reloads and clears anger
-            // early for creative/spectator/peaceful targets; Pumpkin's `PersistentAnger::tick`
-            // already handles timer expiry on its own.
-            let current_target = self.mob_entity.target.lock().await.clone();
-            if let Some(target) = current_target {
-                let target_uuid = target.get_entity().entity_uuid;
-                if !self.persistent_anger.is_angry_at(target_uuid).await {
-                    self.persistent_anger.set_angry_at(Some(target_uuid)).await;
-                    self.persistent_anger.start_timer();
-                }
+        // Simplified `NeutralMob::updatePersistentAnger(level, true)`: whenever this wolf
+        // currently has a live target (set by e.g. `RevengeGoal`/`OwnerHurtByTargetGoal`),
+        // adopt it as the anger target and (re)start the timer. Vanilla additionally
+        // re-resolves a persisted target reference across entity reloads and clears anger
+        // early for creative/spectator/peaceful targets; Pumpkin's `PersistentAnger::tick`
+        // already handles timer expiry on its own.
+        let current_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = current_target {
+            let target_uuid = target.get_entity().entity_uuid;
+            if !self.persistent_anger.is_angry_at(target_uuid) {
+                self.persistent_anger.set_angry_at(Some(target_uuid));
+                self.persistent_anger.start_timer();
             }
+        }
 
-            self.tick_shake_animation();
-        })
+        self.tick_shake_animation();
     }
 
     fn persistent_anger(&self) -> Option<&PersistentAnger> {
         Some(&self.persistent_anger)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla Wolf.java#mobInteract: a tamed wolf, held item in the collar-dye tag,
-            // and owned by the interacting player recolors the collar instead of anything else.
-            if self.mob_entity.is_tamed() {
-                if self.is_food(item_stack)
-                    && self.mob_entity.living_entity.health.load()
-                        < self.mob_entity.living_entity.get_max_health()
-                {
-                    // TamableAnimal.feed (TamableAnimal.java:135-140) is the first tamed-wolf
-                    // interaction branch (Wolf.java:453-459), before collar or sitting logic.
-                    crate::entity::passive::tamable::feed(
-                        player,
-                        item_stack,
-                        &self.mob_entity.living_entity,
-                        2.0,
-                        2.0,
-                        None,
-                    );
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        // Vanilla Wolf.java#mobInteract: a tamed wolf, held item in the collar-dye tag,
+        // and owned by the interacting player recolors the collar instead of anything else.
+        if self.mob_entity.is_tamed() {
+            if self.is_food(item_stack)
+                && self.mob_entity.living_entity.health.load()
+                    < self.mob_entity.living_entity.get_max_health()
+            {
+                // TamableAnimal.feed (TamableAnimal.java:135-140) is the first tamed-wolf
+                // interaction branch (Wolf.java:453-459), before collar or sitting logic.
+                crate::entity::passive::tamable::feed(
+                    player,
+                    item_stack,
+                    &self.mob_entity.living_entity,
+                    2.0,
+                    2.0,
+                    None,
+                );
+                return true;
+            }
+
+            if tag::Item::MINECRAFT_WOLF_COLLAR_DYES
+                .1
+                .contains(&item_stack.item.id)
+                && self.mob_entity.owner.load() == Some(player.gameprofile.id)
+                && let Some(color_name) = item_stack.item.registry_key.strip_suffix("_dye")
+            {
+                let new_color = DyeColor::from(color_name) as u8;
+                if new_color != self.collar_color.load(Ordering::Relaxed) {
+                    self.set_collar_color(new_color);
+                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
                     return true;
                 }
-
-                if tag::Item::MINECRAFT_WOLF_COLLAR_DYES
-                    .1
-                    .contains(&item_stack.item.id)
-                    && self.mob_entity.owner.load() == Some(player.gameprofile.id)
-                    && let Some(color_name) = item_stack.item.registry_key.strip_suffix("_dye")
-                {
-                    let new_color = DyeColor::from(color_name) as u8;
-                    if new_color != self.collar_color.load(Ordering::Relaxed) {
-                        self.set_collar_color(new_color);
-                        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                        return true;
-                    }
-                }
-                return false;
             }
+            return false;
+        }
 
-            if item_stack.item.id != Item::BONE.id {
-                return false;
-            }
+        if item_stack.item.id != Item::BONE.id {
+            return false;
+        }
 
-            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            let pos = entity.pos.load() + Vector3::new(0.0, f64::from(entity.height()), 0.0);
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let pos = entity.pos.load() + Vector3::new(0.0, f64::from(entity.height()), 0.0);
 
-            if self.get_random().random_range(0..3) == 0 {
-                self.mob_entity.set_owner(player.gameprofile.id);
-                // TamableAnimal.setTame invokes Wolf.applyTamingSideEffects
-                // (TamableAnimal.java:119-133; Wolf.java:432-440): a tamed wolf has a
-                // 40-health maximum and is healed to that value.
-                self.mob_entity.living_entity.set_max_health(40.0).await;
-                self.mob_entity
-                    .living_entity
-                    .set_health(self.mob_entity.living_entity.get_max_health());
-                world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Heart);
-            } else {
-                world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Smoke);
-            }
+        if self.get_random().random_range(0..3) == 0 {
+            self.mob_entity.set_owner(player.gameprofile.id);
+            // TamableAnimal.setTame invokes Wolf.applyTamingSideEffects
+            // (TamableAnimal.java:119-133; Wolf.java:432-440): a tamed wolf has a
+            // 40-health maximum and is healed to that value.
+            self.mob_entity.living_entity.set_max_health(40.0);
+            self.mob_entity
+                .living_entity
+                .set_health(self.mob_entity.living_entity.get_max_health());
+            world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Heart);
+        } else {
+            world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Smoke);
+        }
 
-            true
-        })
+        true
     }
 
     /// Vanilla `Wolf.wantsToAttack` (Wolf.java:641-651). The player/pvp branch checks the `pvp`
@@ -547,50 +540,48 @@ impl Mob for WolfEntity {
         self.variant.store(variant, Ordering::Relaxed);
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::wolf::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::wolf::WOLF_VARIANT_ID,
-                    VarInt(self.variant.load(Ordering::Relaxed) as i32),
+                    pumpkin_data::tracked_data::wolf::BABY_ID,
+                    true,
                 )],
                 None,
             );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::wolf::COLLAR_COLOR,
-                    VarInt(i32::from(self.collar_color.load(Ordering::Relaxed))),
-                )],
-                None,
-            );
-            // Vanilla syncs the tameable flag byte and owner so a sitting/tamed wolf renders
-            // as such; `SitGoal` alone never pushed this to clients.
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::wolf::TAMEABLE_FLAGS,
-                    self.get_tame_flags(),
-                )],
-                None,
-            );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::wolf::OWNER_UUID,
-                    self.mob_entity.owner.load(),
-                )],
-                None,
-            );
-        })
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::wolf::WOLF_VARIANT_ID,
+                VarInt(self.variant.load(Ordering::Relaxed) as i32),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::wolf::COLLAR_COLOR,
+                VarInt(i32::from(self.collar_color.load(Ordering::Relaxed))),
+            )],
+            None,
+        );
+        // Vanilla syncs the tameable flag byte and owner so a sitting/tamed wolf renders
+        // as such; `SitGoal` alone never pushed this to clients.
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::wolf::TAMEABLE_FLAGS,
+                self.get_tame_flags(),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::wolf::OWNER_UUID,
+                self.mob_entity.owner.load(),
+            )],
+            None,
+        );
     }
 }
 

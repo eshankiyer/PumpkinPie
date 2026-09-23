@@ -52,12 +52,8 @@ pub trait CookingBlockEntityBase:
     fn set_lit_total_time(&self, total_time: u16);
 
     fn is_burning(&self) -> bool;
-    fn can_accept_recipe_output(
-        &self,
-        recipe: Option<&CookingRecipe>,
-        max_count: u8,
-    ) -> impl Future<Output = bool>;
-    fn craft_recipe(&self, recipe: Option<&CookingRecipe>) -> impl Future<Output = bool>;
+    fn can_accept_recipe_output(&self, recipe: Option<&CookingRecipe>, max_count: u8) -> bool;
+    fn craft_recipe(&self, recipe: Option<&CookingRecipe>) -> bool;
 }
 
 #[macro_export]
@@ -82,21 +78,21 @@ macro_rules! impl_cooking_block_entity_base {
 
             fn get_input_item(&self) -> impl std::future::Future<Output = ItemStack> {
                 async move {
-                    let items = self.items.read().await;
+                    let items = self.items.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     items[0].clone()
                 }
             }
 
             fn get_fuel_item(&self) -> impl std::future::Future<Output = ItemStack> {
                 async move {
-                    let items = self.items.read().await;
+                    let items = self.items.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     items[1].clone()
                 }
             }
 
             fn get_output_item(&self) -> impl std::future::Future<Output = ItemStack> {
                 async move {
-                    let items = self.items.read().await;
+                    let items = self.items.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     items[2].clone()
                 }
             }
@@ -153,13 +149,13 @@ macro_rules! impl_cooking_block_entity_base {
                 total_xp
             }
 
-            async fn can_accept_recipe_output(
+            fn can_accept_recipe_output(
                 &self,
                 recipe: Option<&pumpkin_data::recipes::CookingRecipe>,
                 max_count: u8,
             ) -> bool {
                 let Some(recipe) = recipe else { return false };
-                let items = self.items.read().await;
+                let items = self.items.read().unwrap_or_else(std::sync::PoisonError::into_inner);
 
                 let is_top_items_empty = items[0].is_empty();
                 let side_item_stack = &items[2];
@@ -183,16 +179,15 @@ macro_rules! impl_cooking_block_entity_base {
                 }
                 false
             }
-            async fn craft_recipe(
+            fn craft_recipe(
                 &self,
                 recipe: Option<&pumpkin_data::recipes::CookingRecipe>,
             ) -> bool {
                 let can_accept_output = self
-                    .can_accept_recipe_output(recipe, self.get_max_count_per_stack())
-                    .await;
+                    .can_accept_recipe_output(recipe, self.get_max_count_per_stack());
                 if let Some(recipe) = recipe {
                     if can_accept_output {
-                        let mut items = self.items.write().await;
+                        let mut items = self.items.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                         let Some(output_item) = pumpkin_data::item::Item::from_registry_key(
                             recipe
                                 .result
@@ -214,7 +209,7 @@ macro_rules! impl_cooking_block_entity_base {
                         self.add_recipe_used(recipe);
                     }
 
-                    let mut items = self.items.write().await;
+                    let mut items = self.items.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if items[0].item.id == pumpkin_data::item::Item::WET_SPONGE.id
                         && !items[1].is_empty()
                         && items[1].item.id == pumpkin_data::item::Item::BUCKET.id
@@ -270,7 +265,10 @@ macro_rules! impl_clearable_for_cooking {
         impl pumpkin_world::inventory::Clearable for $struct_name {
             fn clear(&self) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + '_>> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items.fill_with(|| ItemStack::EMPTY.clone());
                     self.mark_dirty();
                 })
@@ -329,7 +327,12 @@ macro_rules! impl_inventory_for_cooking {
                     }
                     pumpkin_data::fuels::get_item_burn_ticks(stack.item.id).is_some()
                         || (stack.item.id == pumpkin_data::item::Item::BUCKET.id
-                            && self.items.read().await[1].item.id
+                            && self
+                                .items
+                                .read()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)[1]
+                                .item
+                                .id
                                 != pumpkin_data::item::Item::BUCKET.id)
                 })
             }
@@ -354,7 +357,10 @@ macro_rules! impl_inventory_for_cooking {
 
             fn is_empty(&self) -> pumpkin_world::inventory::InventoryFuture<'_, bool> {
                 Box::pin(async move {
-                    let items = self.items.read().await;
+                    let items = self
+                        .items
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items.iter().all(|s| s.is_empty())
                 })
             }
@@ -364,7 +370,10 @@ macro_rules! impl_inventory_for_cooking {
                 slot: usize,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
                 Box::pin(async move {
-                    let items = self.items.read().await;
+                    let items = self
+                        .items
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items[slot].clone()
                 })
             }
@@ -374,7 +383,10 @@ macro_rules! impl_inventory_for_cooking {
                 slot: usize,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
                     self.mark_dirty();
                     removed
@@ -387,7 +399,10 @@ macro_rules! impl_inventory_for_cooking {
                 amount: u8,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let res = if !items[slot].is_empty() && amount > 0 {
                         items[slot].split(amount)
                     } else {
@@ -404,7 +419,10 @@ macro_rules! impl_inventory_for_cooking {
                 stack: ItemStack,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ()> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let is_same_item = !stack.is_empty()
                         && ItemStack::are_items_and_components_equal(&items[slot], &stack);
 
@@ -452,7 +470,7 @@ macro_rules! impl_block_entity_for_cooking {
                         self.lit_time_remaining.fetch_sub(1, Ordering::Relaxed);
                     }
 
-                    let items_guard = self.items.read().await;
+                    let items_guard = self.items.read().unwrap_or_else(std::sync::PoisonError::into_inner);
                     let top_item = items_guard[0].clone();
                     let bottom_item = items_guard[1].clone();
                     drop(items_guard);
@@ -465,8 +483,7 @@ macro_rules! impl_block_entity_for_cooking {
                     );
 
                     let can_accept_output = self
-                        .can_accept_recipe_output(furnace_recipe, self.get_max_count_per_stack())
-                        .await;
+                        .can_accept_recipe_output(furnace_recipe, self.get_max_count_per_stack());
 
                     let bottom_items_is_empty = bottom_item.is_empty();
                     if self.is_burning() || !bottom_items_is_empty && !is_top_items_empty {
@@ -490,7 +507,7 @@ macro_rules! impl_block_entity_for_cooking {
                                  adjusted_fuel_ticks as u32,
                              );
                              if let Some(server) = world.server.upgrade() {
-                                 server.plugin_manager.fire(&server, &mut burn_event).await;
+                                 server.plugin_manager.fire_blocking(&server, &mut burn_event);
                              }
                              if burn_event.cancelled {
                                  self.set_lit_time_remaining(0);
@@ -501,7 +518,7 @@ macro_rules! impl_block_entity_for_cooking {
 
                              if self.is_burning() {
                                  is_dirty = true;
-                                 let mut items_guard = self.items.write().await;
+                                 let mut items_guard = self.items.write().unwrap_or_else(std::sync::PoisonError::into_inner);
                                  if !items_guard[1].is_empty() {
                                      items_guard[1].decrement(1);
                                      if let Some(remainder_id) =
@@ -526,7 +543,7 @@ macro_rules! impl_block_entity_for_cooking {
                                      self.get_cooking_total_time() as u32,
                                  );
                                  if let Some(server) = world.server.upgrade() {
-                                     server.plugin_manager.fire(&server, &mut start_event).await;
+                                     server.plugin_manager.fire_blocking(&server, &mut start_event);
                                  }
                              }
                              self.cooking_time_spent.fetch_add(1, Ordering::Relaxed);
@@ -543,10 +560,10 @@ macro_rules! impl_block_entity_for_cooking {
                                          cooking_recipe.result.id.to_string(),
                                      );
                                      if let Some(server) = world.server.upgrade() {
-                                         server.plugin_manager.fire(&server, &mut smelt_event).await;
+                                         server.plugin_manager.fire_blocking(&server, &mut smelt_event);
                                      }
                                      if !smelt_event.cancelled {
-                                         self.craft_recipe(Some(cooking_recipe)).await;
+                                         self.craft_recipe(Some(cooking_recipe));
                                          is_dirty = true;
                                      }
                                  }
@@ -586,8 +603,7 @@ macro_rules! impl_block_entity_for_cooking {
                                     &self.position,
                                     props.to_state_id(furnace_block),
                                     $crate::world::BlockFlags::NOTIFY_ALL,
-                                )
-                                .await;
+                                );
                         } else {
                             props.lit = false;
                             world
@@ -595,8 +611,7 @@ macro_rules! impl_block_entity_for_cooking {
                                     &self.position,
                                     props.to_state_id(furnace_block),
                                     $crate::world::BlockFlags::NOTIFY_ALL,
-                                )
-                                .await;
+                                );
                         }
                     }
 
@@ -647,7 +662,7 @@ macro_rules! impl_block_entity_for_cooking {
                 let mut furnace = Self {
                     position,
                     dirty: AtomicBool::new(false),
-                    items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+                    items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
                     cooking_total_time,
                     cooking_time_spent,
                     lit_total_time,
@@ -691,7 +706,7 @@ macro_rules! impl_block_entity_for_cooking {
                         }
                     }
 
-                    self.write_inventory_nbt(nbt, true).await;
+                    self.write_inventory_nbt(nbt, true);
                 })
             }
 

@@ -9,8 +9,8 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnPlaceArgs, RandomTickArgs,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    RandomTickArgs,
 };
 
 /// `CocoaBlock` (`net/minecraft/world/level/block/CocoaBlock.java:28`).
@@ -45,15 +45,13 @@ impl BlockBehaviour for CocoaBlock {
     /// `CocoaBlock#getStateForPlacement` (CocoaBlock.java:72-88). Pumpkin hands `on_place` the
     /// direction from the pod toward the block it was placed against, which is exactly the
     /// `FACING` vanilla stores.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = CocoaLikeProperties::default(args.block);
-            let Some(facing) = args.direction.to_horizontal_facing() else {
-                return BlockStateId::AIR;
-            };
-            props.facing = facing;
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = CocoaLikeProperties::default(args.block);
+        let Some(facing) = args.direction.to_horizontal_facing() else {
+            return BlockStateId::AIR;
+        };
+        props.facing = facing;
+        props.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -66,40 +64,34 @@ impl BlockBehaviour for CocoaBlock {
 
     /// `CocoaBlock#randomTick` (CocoaBlock.java:51-59). `isRandomlyTicking` stops at age 2
     /// (CocoaBlock.java:46-49), which the age check below reproduces.
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if rand::rng().random_range(0..GROWTH_CHANCE) != 0 {
-                return;
-            }
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = CocoaLikeProperties::from_state_id(state_id, args.block);
-            if props.age >= MAX_AGE {
-                return;
-            }
-            props.age += 1;
-            args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if rand::rng().random_range(0..GROWTH_CHANCE) != 0 {
+            return;
+        }
+        let state_id = args.world.get_block_state_id(args.position);
+        let mut props = CocoaLikeProperties::from_state_id(state_id, args.block);
+        if props.age >= MAX_AGE {
+            return;
+        }
+        props.age += 1;
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
     /// `CocoaBlock#updateShape` (CocoaBlock.java:90-104): only the neighbour the pod faces can
     /// break it, and it breaks immediately rather than scheduling a tick.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let facing = facing_of(args.state_id);
-            if args.direction == facing && !can_survive(args.world, args.position, facing) {
-                return BlockStateId::AIR;
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let facing = facing_of(args.state_id);
+        if args.direction == facing && !can_survive(args.world, args.position, facing) {
+            return BlockStateId::AIR;
+        }
+        args.state_id
     }
 
     /// `CocoaBlock#isValidBonemealTarget` (CocoaBlock.java:106-109).
@@ -114,21 +106,17 @@ impl BlockBehaviour for CocoaBlock {
 
     /// `CocoaBlock#performBonemeal` (CocoaBlock.java:116-119) advances one age step, with no
     /// feature placement, so it is fully portable.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let mut props = CocoaLikeProperties::from_state_id(args.state_id, args.block);
-            if props.age >= MAX_AGE {
-                return;
-            }
-            props.age += 1;
-            args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let mut props = CocoaLikeProperties::from_state_id(args.state_id, args.block);
+        if props.age >= MAX_AGE {
+            return;
+        }
+        props.age += 1;
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 }
 

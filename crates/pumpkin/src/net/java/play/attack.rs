@@ -16,8 +16,7 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
 
@@ -31,11 +30,10 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
                 [],
-            ))
-            .await;
+            ));
             return;
         };
-        let main_hand = player.inventory().held_item().await;
+        let main_hand = player.inventory().held_item();
         // `ServerGamePacketListenerImpl.handleAttack` passes the held weapon and a 3.0 buffer
         // to `Player.isWithinAttackRange` (`ServerGamePacketListenerImpl.java:1807-1819`).
         if !player.is_within_attack_range(

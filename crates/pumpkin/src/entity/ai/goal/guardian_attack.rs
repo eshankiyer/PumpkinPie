@@ -8,7 +8,7 @@ use pumpkin_util::Difficulty;
 
 use crate::entity::{
     EntityBase,
-    ai::goal::{Controls, Goal, GoalFuture},
+    ai::goal::{Controls, Goal},
     mob::Mob,
 };
 
@@ -78,8 +78,8 @@ impl GuardianAttackGoal {
         );
     }
 
-    async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-        mob.get_mob_entity().has_line_of_sight(target).await
+    fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+        mob.get_mob_entity().has_line_of_sight(target)
     }
 
     fn distance_sq(mob: &dyn Mob, target: &dyn EntityBase) -> f64 {
@@ -91,104 +91,120 @@ impl GuardianAttackGoal {
 }
 
 impl Goal for GuardianAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            target.is_some_and(|target| target.get_entity().is_alive())
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        target.is_some_and(|target| target.get_entity().is_alive())
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
-            // Elder guardians keep firing at point-blank range; regular ones break off.
-            Self::is_elder(mob) || Self::distance_sq(mob, target.as_ref()) > MIN_ATTACK_DISTANCE_SQ
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
+        // Elder guardians keep firing at point-blank range; regular ones break off.
+        Self::is_elder(mob) || Self::distance_sq(mob, target.as_ref()) > MIN_ATTACK_DISTANCE_SQ
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.attack_time = START_DELAY;
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
+    fn start(&mut self, mob: &dyn Mob) {
+        self.attack_time = START_DELAY;
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
 
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            if let Some(target) = target {
-                mob.get_mob_entity()
-                    .look_control
-                    .lock()
-                    .unwrap()
-                    .look_at_entity_with_range(&target, 90.0, 90.0);
-            }
-        })
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = target {
+            mob.get_mob_entity()
+                .look_control
+                .lock()
+                .unwrap()
+                .look_at_entity_with_range(&target, 90.0, 90.0);
+        }
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            Self::set_active_attack_target(mob, 0);
-            *mob.get_mob_entity().target.lock().await = None;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        Self::set_active_attack_target(mob, 0);
+        *mob.get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     fn should_run_every_tick(&self) -> bool {
         true
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            let target = mob_entity.target.lock().await.clone();
-            let Some(target) = target else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let mob_entity = mob.get_mob_entity();
+        let target = mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            return;
+        };
 
-            mob_entity.navigator.lock().unwrap().stop();
-            mob_entity
-                .look_control
+        mob_entity.navigator.lock().unwrap().stop();
+        mob_entity
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 90.0, 90.0);
+
+        if !Self::has_line_of_sight(mob, target.as_ref()) {
+            *mob_entity
+                .target
                 .lock()
-                .unwrap()
-                .look_at_entity_with_range(&target, 90.0, 90.0);
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            return;
+        }
 
-            if !Self::has_line_of_sight(mob, target.as_ref()).await {
-                *mob_entity.target.lock().await = None;
-                return;
-            }
+        let elder = Self::is_elder(mob);
+        self.attack_time += 1;
 
-            let elder = Self::is_elder(mob);
-            self.attack_time += 1;
+        if self.attack_time == 0 {
+            Self::set_active_attack_target(mob, target.get_entity().entity_id);
+            mob.get_entity().world.load().send_entity_status(
+                mob.get_entity(),
+                EntityStatus::GuardianAttackSound,
+                None,
+            );
+        } else if self.attack_time >= Self::attack_duration(elder) {
+            let world = mob.get_entity().world.load();
+            let damage = Self::magic_damage(world.level_info.load().difficulty, elder);
+            let attacker = world.get_entity_by_id(mob.get_entity().entity_id);
 
-            if self.attack_time == 0 {
-                Self::set_active_attack_target(mob, target.get_entity().entity_id);
-                mob.get_entity().world.load().send_entity_status(
-                    mob.get_entity(),
-                    EntityStatus::GuardianAttackSound,
-                    None,
-                );
-            } else if self.attack_time >= Self::attack_duration(elder) {
-                let world = mob.get_entity().world.load();
-                let damage = Self::magic_damage(world.level_info.load().difficulty, elder);
-                let attacker = world.get_entity_by_id(mob.get_entity().entity_id);
+            target.damage_with_context(
+                target.as_ref(),
+                damage,
+                pumpkin_data::damage::DamageType::INDIRECT_MAGIC,
+                None,
+                attacker.as_deref(),
+                attacker.as_deref(),
+            );
+            mob.try_attack(target.as_ref());
 
-                target
-                    .damage_with_context(
-                        target.as_ref(),
-                        damage,
-                        pumpkin_data::damage::DamageType::INDIRECT_MAGIC,
-                        None,
-                        attacker.as_deref(),
-                        attacker.as_deref(),
-                    )
-                    .await;
-                mob.try_attack(target.as_ref()).await;
-
-                *mob_entity.target.lock().await = None;
-            }
-        })
+            *mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
     }
 
     fn controls(&self) -> Controls {

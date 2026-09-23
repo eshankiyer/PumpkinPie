@@ -11,7 +11,7 @@ use rand::RngExt;
 
 use crate::block::entities::sign::DyeColor;
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         follow_flock_leader::FollowFlockLeaderGoal, look_around::RandomLookAroundGoal,
@@ -305,20 +305,16 @@ impl TropicalFishEntity {
 }
 
 impl NBTStorage for TropicalFishEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            // `Variant.CODEC` is `Codec.INT.xmap(...)`: the raw packed int, not a compound.
-            nbt.put_int("Variant", self.packed_variant.load(Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        // `Variant.CODEC` is `Codec.INT.xmap(...)`: the raw packed int, not a compound.
+        nbt.put_int("Variant", self.packed_variant.load(Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            let packed = nbt.get_int("Variant").unwrap_or(DEFAULT_PACKED_VARIANT);
-            self.packed_variant.store(packed, Relaxed);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        let packed = nbt.get_int("Variant").unwrap_or(DEFAULT_PACKED_VARIANT);
+        self.packed_variant.store(packed, Relaxed);
     }
 }
 
@@ -337,10 +333,8 @@ impl Mob for TropicalFishEntity {
         self.is_max_group_size_reached()
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.send_packed_variant(self.packed_variant.load(Relaxed));
-        })
+    fn mob_init_data_tracker(&self) {
+        self.send_packed_variant(self.packed_variant.load(Relaxed));
     }
 }
 

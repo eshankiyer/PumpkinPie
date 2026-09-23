@@ -36,20 +36,19 @@ impl JavaClient {
             if let Some(block_entity) = world.get_block_entity(&pick_item.pos) {
                 let components = crate::block::entities::collect_components_from_block_entity(
                     block_entity.as_ref(),
-                )
-                .await;
+                );
                 stack.patch.extend(components);
                 // Preserve the custom portion of `saveCustomOnly` after removing fields already
                 // represented by implicit components (`ServerGamePacketListenerImpl.java:715-724`).
                 if let Some(component) =
-                    crate::block::entities::block_entity_data_component(block_entity.as_ref()).await
+                    crate::block::entities::block_entity_data_component(block_entity.as_ref())
                 {
                     stack.patch.push(component);
                 }
             }
         }
 
-        let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;
+        let slot_with_stack = player.inventory().get_slot_with_stack(&stack);
 
         if slot_with_stack != -1 {
             if PlayerInventory::is_valid_hotbar_index(slot_with_stack as usize) {
@@ -57,11 +56,10 @@ impl JavaClient {
             } else {
                 player
                     .inventory
-                    .swap_slot_with_hotbar(slot_with_stack as usize)
-                    .await;
+                    .swap_slot_with_hotbar(slot_with_stack as usize);
             }
         } else if player.gamemode.load() == GameMode::Creative {
-            player.inventory.swap_stack_with_hotbar(stack).await;
+            player.inventory.swap_stack_with_hotbar(stack);
         }
 
         player
@@ -69,12 +67,7 @@ impl JavaClient {
                 player.inventory.get_selected_slot() as i8
             ))
             .await;
-        player
-            .player_screen_handler
-            .lock()
-            .await
-            .send_content_updates()
-            .await;
+        player.player_screen_handler.lock().send_content_updates();
     }
 
     pub async fn handle_pick_item_from_entity(
@@ -99,8 +92,8 @@ impl JavaClient {
             return;
         }
 
-        if let Some(stack) = target.get_pick_result().await {
-            let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;
+        if let Some(stack) = target.get_pick_result() {
+            let slot_with_stack = player.inventory().get_slot_with_stack(&stack);
 
             if slot_with_stack != -1 {
                 if PlayerInventory::is_valid_hotbar_index(slot_with_stack as usize) {
@@ -108,11 +101,10 @@ impl JavaClient {
                 } else {
                     player
                         .inventory
-                        .swap_slot_with_hotbar(slot_with_stack as usize)
-                        .await;
+                        .swap_slot_with_hotbar(slot_with_stack as usize);
                 }
             } else if player.gamemode.load() == GameMode::Creative {
-                player.inventory.swap_stack_with_hotbar(stack).await;
+                player.inventory.swap_stack_with_hotbar(stack);
             }
 
             player
@@ -120,12 +112,7 @@ impl JavaClient {
                     player.inventory.get_selected_slot() as i8
                 ))
                 .await;
-            player
-                .player_screen_handler
-                .lock()
-                .await
-                .send_content_updates()
-                .await;
+            player.player_screen_handler.lock().send_content_updates();
             return;
         }
 
@@ -143,7 +130,7 @@ impl JavaClient {
         if let Some(item) = found_egg.and_then(Item::from_id) {
             let stack = ItemStack::new(1, item);
 
-            let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;
+            let slot_with_stack = player.inventory().get_slot_with_stack(&stack);
 
             if slot_with_stack != -1 {
                 if PlayerInventory::is_valid_hotbar_index(slot_with_stack as usize) {
@@ -151,11 +138,10 @@ impl JavaClient {
                 } else {
                     player
                         .inventory
-                        .swap_slot_with_hotbar(slot_with_stack as usize)
-                        .await;
+                        .swap_slot_with_hotbar(slot_with_stack as usize);
                 }
             } else if player.gamemode.load() == GameMode::Creative {
-                player.inventory.swap_stack_with_hotbar(stack).await;
+                player.inventory.swap_stack_with_hotbar(stack);
             }
 
             player
@@ -163,12 +149,7 @@ impl JavaClient {
                     player.inventory.get_selected_slot() as i8
                 ))
                 .await;
-            player
-                .player_screen_handler
-                .lock()
-                .await
-                .send_content_updates()
-                .await;
+            player.player_screen_handler.lock().send_content_updates();
         }
     }
 }

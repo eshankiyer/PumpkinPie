@@ -8,7 +8,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
 use crate::entity::mob::{Mob, MobEntity};
@@ -20,10 +20,7 @@ const DEFAULT_RECIPROCAL_CHANCE: i32 = 10;
 pub(crate) const TURTLE_TYPES: &[&EntityType] = &[&EntityType::TURTLE];
 
 /// Vanilla `Turtle.BABY_ON_LAND_SELECTOR`: `target.isBaby() && !target.isInWater()`.
-pub(crate) async fn baby_turtle_on_land(
-    target: TargetData,
-    _world: Arc<crate::world::World>,
-) -> bool {
+pub(crate) fn baby_turtle_on_land(target: TargetData, _world: Arc<crate::world::World>) -> bool {
     target.age < 0 && !target.touching_water
 }
 
@@ -85,14 +82,14 @@ impl NonTameRandomTargetGoal {
         target_types: &'static [&'static EntityType],
         check_visibility: bool,
     ) -> Box<Self> {
-        async fn always_true(_target: TargetData, _world: Arc<crate::world::World>) -> bool {
+        fn always_true(_target: TargetData, _world: Arc<crate::world::World>) -> bool {
             true
         }
 
         Self::new(mob, target_types, check_visibility, Some(always_true))
     }
 
-    async fn find_closest_target(&mut self, mob: &dyn Mob) {
+    fn find_closest_target(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let follow_range = mob_entity
             .living_entity
@@ -125,15 +122,11 @@ impl NonTameRandomTargetGoal {
 
             let mut result = None;
             for player in candidates {
-                if self
-                    .target_predicate
-                    .test(
-                        &world,
-                        Some(&mob_entity.living_entity),
-                        &player.living_entity,
-                    )
-                    .await
-                    && !TrackTargetGoal::is_allied(mob, player.as_ref()).await
+                if self.target_predicate.test(
+                    &world,
+                    Some(&mob_entity.living_entity),
+                    &player.living_entity,
+                ) && !TrackTargetGoal::is_allied(mob, player.as_ref())
                     && mob.can_attack(player.get_entity())
                 {
                     result = Some(player as Arc<dyn EntityBase>);
@@ -163,8 +156,7 @@ impl NonTameRandomTargetGoal {
                     && self
                         .target_predicate
                         .test(&world, Some(&mob_entity.living_entity), living)
-                        .await
-                    && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
+                    && !TrackTargetGoal::is_allied(mob, entity.as_ref())
                     && mob.can_attack(entity.get_entity())
                 {
                     result = Some(entity);
@@ -177,39 +169,33 @@ impl NonTameRandomTargetGoal {
 }
 
 impl Goal for NonTameRandomTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            // Vanilla: `NonTameRandomTargetGoal.canUse` -- `!tamableMob.isTame() && super.canUse()`.
-            if mob.get_mob_entity().is_tamed() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // Vanilla: `NonTameRandomTargetGoal.canUse` -- `!tamableMob.isTame() && super.canUse()`.
+        if mob.get_mob_entity().is_tamed() {
+            return false;
+        }
 
-            if self.reciprocal_chance > 0
-                && mob.get_random().random_range(0..self.reciprocal_chance) != 0
-            {
-                return false;
-            }
+        if self.reciprocal_chance > 0
+            && mob.get_random().random_range(0..self.reciprocal_chance) != 0
+        {
+            return false;
+        }
 
-            self.find_closest_target(mob).await;
-            self.target.is_some()
-        })
+        self.find_closest_target(mob);
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

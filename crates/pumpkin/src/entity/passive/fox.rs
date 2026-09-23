@@ -17,7 +17,7 @@ use rand::{RngExt, rng};
 use uuid::Uuid;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, breed::BreedGoal,
@@ -518,9 +518,12 @@ impl FoxEntity {
 
     /// `Fox.setItemSlot(EquipmentSlot.MAINHAND, ...)` plus the `holding_item` mirror the
     /// synchronous pickup gate reads.
-    pub async fn set_held_item(&self, stack: ItemStack) {
+    pub fn set_held_item(&self, stack: ItemStack) {
         let living = &self.mob_entity.living_entity;
-        let mut equipment = living.entity_equipment.lock().await;
+        let mut equipment = living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         equipment.put(&EquipmentSlot::MAIN_HAND, stack.clone());
         drop(equipment);
         self.holding_item.store(!stack.is_empty(), Relaxed);
@@ -553,56 +556,57 @@ impl Animal for FoxEntity {
 }
 
 impl NBTStorage for FoxEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_bool("Sleeping", self.is_sleeping());
-            nbt.put_string("Type", self.variant().name().to_string());
-            nbt.put_bool("Sitting", self.is_sitting());
-            nbt.put_bool("Crouching", self.is_crouching());
-            // `Fox.addAdditionalSaveData`'s `Trusted` is a list of `EntityReference`s; simplified
-            // here to up to two flat optional UUID keys since this fox's trust list is already
-            // capped at two slots.
-            let trusted = *self.trusted.lock().unwrap();
-            if let Some(uuid) = trusted[0] {
-                nbt.put_uuid("TrustedUuid0", uuid);
-            }
-            if let Some(uuid) = trusted[1] {
-                nbt.put_uuid("TrustedUuid1", uuid);
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_bool("Sleeping", self.is_sleeping());
+        nbt.put_string("Type", self.variant().name().to_string());
+        nbt.put_bool("Sitting", self.is_sitting());
+        nbt.put_bool("Crouching", self.is_crouching());
+        // `Fox.addAdditionalSaveData`'s `Trusted` is a list of `EntityReference`s; simplified
+        // here to up to two flat optional UUID keys since this fox's trust list is already
+        // capped at two slots.
+        let trusted = *self.trusted.lock().unwrap();
+        if let Some(uuid) = trusted[0] {
+            nbt.put_uuid("TrustedUuid0", uuid);
+        }
+        if let Some(uuid) = trusted[1] {
+            nbt.put_uuid("TrustedUuid1", uuid);
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            // `living_entity.read_nbt_non_mut` restores `HandItems`, so resync the
-            // `holding_item` mirror or a reloaded fox would think its mouth is empty and
-            // pick up a second item.
-            let holding_item = {
-                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
-                !equipment.get(&EquipmentSlot::MAIN_HAND).is_empty()
-            };
-            self.holding_item.store(holding_item, Relaxed);
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            self.set_sleeping(nbt.get_bool("Sleeping").unwrap_or(false));
-            let variant = nbt
-                .get_string("Type")
-                .map_or(FoxVariant::Red, FoxVariant::from_name);
-            self.set_variant(variant);
-            self.set_sitting(nbt.get_bool("Sitting").unwrap_or(false));
-            self.set_is_crouching(nbt.get_bool("Crouching").unwrap_or(false));
-            self.clear_trusted();
-            if let Some(uuid) = nbt.get_uuid("TrustedUuid0") {
-                self.add_trusted_entity(uuid);
-            }
-            if let Some(uuid) = nbt.get_uuid("TrustedUuid1") {
-                self.add_trusted_entity(uuid);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        // `living_entity.read_nbt_non_mut` restores `HandItems`, so resync the
+        // `holding_item` mirror or a reloaded fox would think its mouth is empty and
+        // pick up a second item.
+        let holding_item = {
+            let equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            !equipment.get(&EquipmentSlot::MAIN_HAND).is_empty()
+        };
+        self.holding_item.store(holding_item, Relaxed);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        self.set_sleeping(nbt.get_bool("Sleeping").unwrap_or(false));
+        let variant = nbt
+            .get_string("Type")
+            .map_or(FoxVariant::Red, FoxVariant::from_name);
+        self.set_variant(variant);
+        self.set_sitting(nbt.get_bool("Sitting").unwrap_or(false));
+        self.set_is_crouching(nbt.get_bool("Crouching").unwrap_or(false));
+        self.clear_trusted();
+        if let Some(uuid) = nbt.get_uuid("TrustedUuid0") {
+            self.add_trusted_entity(uuid);
+        }
+        if let Some(uuid) = nbt.get_uuid("TrustedUuid1") {
+            self.add_trusted_entity(uuid);
+        }
     }
 }
 
@@ -649,110 +653,107 @@ impl Mob for FoxEntity {
         self.set_variant(FoxVariant::from_name(name));
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            if self.variant.load(Relaxed) == VARIANT_UNSET {
-                let entity = &self.mob_entity.living_entity.entity;
-                let world = entity.world.load();
-                let pos = entity.block_pos.load();
-                // Positive membership test over a fixed tag, so an unresolvable biome is
-                // not in it and the fox is Red. A default is unavoidable here rather than
-                // preferred: `init_data_tracker` runs exactly once at spawn and is never
-                // retried, so leaving `VARIANT_UNSET` in place would persist the 0xFF
-                // sentinel as the entity's tracked variant instead of deferring the roll.
-                let variant = if world.get_biome(&pos).is_some_and(|biome| {
-                    biome.has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_SNOW_FOXES)
-                }) {
-                    FoxVariant::Snow
-                } else {
-                    FoxVariant::Red
-                };
-                self.set_variant(variant);
-            } else {
-                // NBT restore already rolled/loaded a valid variant; just resend it so the
-                // client has the up-to-date tracked value.
-                self.set_variant(self.variant());
-            }
+    fn mob_init_data_tracker(&self) {
+        if self.variant.load(Relaxed) == VARIANT_UNSET {
             let entity = &self.mob_entity.living_entity.entity;
-            if entity.age.load(Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::fox::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+            let world = entity.world.load();
+            let pos = entity.block_pos.load();
+            // Positive membership test over a fixed tag, so an unresolvable biome is
+            // not in it and the fox is Red. A default is unavoidable here rather than
+            // preferred: `init_data_tracker` runs exactly once at spawn and is never
+            // retried, so leaving `VARIANT_UNSET` in place would persist the 0xFF
+            // sentinel as the entity's tracked variant instead of deferring the roll.
+            let variant = if world.get_biome(&pos).is_some_and(|biome| {
+                biome.has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_SNOW_FOXES)
+            }) {
+                FoxVariant::Snow
+            } else {
+                FoxVariant::Red
+            };
+            self.set_variant(variant);
+        } else {
+            // NBT restore already rolled/loaded a valid variant; just resend it so the
+            // client has the up-to-date tracked value.
+            self.set_variant(self.variant());
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        if entity.age.load(Relaxed) < 0 {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::fox::FLAGS_ID,
-                    self.flags.load(Relaxed) as i8,
+                    pumpkin_data::tracked_data::fox::BABY_ID,
+                    true,
                 )],
                 None,
             );
-            // `Fox.setTargetGoals`, called once the variant is known either way (freshly rolled
-            // above, or already restored from NBT before this ran).
-            if !self.target_goals_registered.swap(true, Relaxed) {
-                self.register_target_goals(self.variant());
-            }
-        })
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::fox::FLAGS_ID,
+                self.flags.load(Relaxed) as i8,
+            )],
+            None,
+        );
+        // `Fox.setTargetGoals`, called once the variant is known either way (freshly rolled
+        // above, or already restored from NBT before this ran).
+        if !self.target_goals_registered.swap(true, Relaxed) {
+            self.register_target_goals(self.variant());
+        }
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
 
-            let target = self.mob_entity.target.lock().await.clone();
-            let target_alive = target.as_ref().is_some_and(|t| t.get_entity().is_alive());
-            if !target_alive {
-                self.set_is_crouching(false);
-                self.set_is_interested(false);
-                // `Fox.setTarget`: clearing the target also clears `isDefending` -- without this,
-                // one `DefendTrustedTargetGoal` trigger would permanently suppress all three
-                // `AvoidEntityGoal`s (they all gate on `!isDefending()`).
-                if self.is_defending() {
-                    self.set_defending(false);
-                }
+        let target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let target_alive = target.as_ref().is_some_and(|t| t.get_entity().is_alive());
+        if !target_alive {
+            self.set_is_crouching(false);
+            self.set_is_interested(false);
+            // `Fox.setTarget`: clearing the target also clears `isDefending` -- without this,
+            // one `DefendTrustedTargetGoal` trigger would permanently suppress all three
+            // `AvoidEntityGoal`s (they all gate on `!isDefending()`).
+            if self.is_defending() {
+                self.set_defending(false);
             }
+        }
 
-            let in_water = self.mob_entity.living_entity.is_in_water();
-            if in_water || target.is_some() || world.is_thundering().await {
-                self.wake_up();
-            }
-            if in_water || self.is_sleeping() {
-                self.set_sitting(false);
-            }
+        let in_water = self.mob_entity.living_entity.is_in_water();
+        if in_water || target.is_some() || world.is_thundering() {
+            self.wake_up();
+        }
+        if in_water || self.is_sleeping() {
+            self.set_sitting(false);
+        }
 
-            // Move anything `on_item_pickup` accepted this tick into the real main-hand slot;
-            // that hook is synchronous and cannot await the equipment lock.
-            let pending = {
-                let mut slot = self
-                    .pending_pickup
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                slot.take()
-            };
-            if let Some(stack) = pending {
-                self.set_held_item(stack).await;
-            }
+        // Move anything `on_item_pickup` accepted this tick into the real main-hand slot;
+        // that hook is synchronous and cannot await the equipment lock.
+        let pending = {
+            let mut slot = self
+                .pending_pickup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            slot.take()
+        };
+        if let Some(stack) = pending {
+            self.set_held_item(stack);
+        }
 
-            if self.is_crouching() {
-                let ticks = self.crouch_ticks.load(Relaxed);
-                if ticks < FULLY_CROUCHED_TICKS {
-                    self.crouch_ticks.store(ticks + 1, Relaxed);
-                }
-            } else {
-                self.crouch_ticks.store(0, Relaxed);
+        if self.is_crouching() {
+            let ticks = self.crouch_ticks.load(Relaxed);
+            if ticks < FULLY_CROUCHED_TICKS {
+                self.crouch_ticks.store(ticks + 1, Relaxed);
             }
-        })
+        } else {
+            self.crouch_ticks.store(0, Relaxed);
+        }
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.animal_interact(player, item_stack, Sound::EntityFoxAmbient)
     }
 
@@ -765,46 +766,44 @@ impl Mob for FoxEntity {
     /// `Fox.getBreedOffspring` + `FoxBreedGoal.breed`'s trust-inheritance: the kit's variant is a
     /// coin flip between the two parents', and it trusts whichever parent(s) have a recorded
     /// love-cause player (the player(s) that fed them to start breeding).
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            Uuid::new_v4(),
+        );
 
-            if let Some(kit) = baby.cast_any().downcast_ref::<Self>() {
-                let mate_variant = mate.cast_any().downcast_ref::<Self>().map(Self::variant);
-                let variant = if rng().random_bool(0.5) {
-                    self.variant()
-                } else {
-                    mate_variant.unwrap_or_else(|| self.variant())
-                };
-                kit.set_variant(variant);
+        if let Some(kit) = baby.cast_any().downcast_ref::<Self>() {
+            let mate_variant = mate.cast_any().downcast_ref::<Self>().map(Self::variant);
+            let variant = if rng().random_bool(0.5) {
+                self.variant()
+            } else {
+                mate_variant.unwrap_or_else(|| self.variant())
+            };
+            kit.set_variant(variant);
 
-                let self_love_cause = self.mob_entity.breeder.load();
-                let mate_love_cause = mate
-                    .get_mob()
-                    .and_then(|m| m.get_mob_entity().breeder.load());
+            let self_love_cause = self.mob_entity.breeder.load();
+            let mate_love_cause = mate
+                .get_mob()
+                .and_then(|m| m.get_mob_entity().breeder.load());
 
-                if let Some(uuid) = self_love_cause {
-                    kit.add_trusted_entity(uuid);
-                }
-                if let Some(uuid) = mate_love_cause
-                    && Some(uuid) != self_love_cause
-                {
-                    kit.add_trusted_entity(uuid);
-                }
+            if let Some(uuid) = self_love_cause {
+                kit.add_trusted_entity(uuid);
             }
+            if let Some(uuid) = mate_love_cause
+                && Some(uuid) != self_love_cause
+            {
+                kit.add_trusted_entity(uuid);
+            }
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 }
 

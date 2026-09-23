@@ -1,5 +1,5 @@
 use crate::{
-    BoxFuture, BoxedRegistry, ImmutableRegistry, Registry,
+    BoxedRegistry, ImmutableRegistry, Registry,
     builder::RegistryBuilder,
     error::{RegistryInitError, RegistryInsertError},
     value::{ErasedRegistryRef, LockedIterator, RegistryRef},
@@ -20,56 +20,81 @@ impl<T: Send + Sync + 'static> MutableRegistry<T> {
         )?)))
     }
 
-    pub async fn register(
-        &self,
-        identifier: Identifier,
-        value: T,
-    ) -> Result<(), RegistryInsertError> {
-        self.0.write().await.register(identifier, value)
+    pub fn register(&self, identifier: Identifier, value: T) -> Result<(), RegistryInsertError> {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .register(identifier, value)
     }
 
     #[must_use]
-    pub async fn get(&self, identifier: &Identifier) -> Option<RegistryRef<'_, T>> {
-        RwLockReadGuard::try_map(self.0.read().await, |registry| registry.get(identifier))
-            .map(RegistryRef::Locked)
-            .ok()
+    pub fn get(&self, identifier: &Identifier) -> Option<RegistryRef<'_, T>> {
+        RwLockReadGuard::try_map(
+            self.0
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            |registry| registry.get(identifier),
+        )
+        .map(RegistryRef::Locked)
+        .ok()
     }
 
     #[must_use]
-    pub async fn get_by_id(&self, id: usize) -> Option<RegistryRef<'_, T>> {
-        RwLockReadGuard::try_map(self.0.read().await, |registry| registry.get_by_id(id))
-            .map(RegistryRef::Locked)
-            .ok()
+    pub fn get_by_id(&self, id: usize) -> Option<RegistryRef<'_, T>> {
+        RwLockReadGuard::try_map(
+            self.0
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            |registry| registry.get_by_id(id),
+        )
+        .map(RegistryRef::Locked)
+        .ok()
     }
 
     #[must_use]
-    pub async fn get_id(&self, identifier: &Identifier) -> Option<usize> {
-        self.0.read().await.get_id(identifier)
+    pub fn get_id(&self, identifier: &Identifier) -> Option<usize> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_id(identifier)
     }
 
     #[must_use]
-    pub async fn contains(&self, identifier: &Identifier) -> bool {
-        self.0.read().await.contains(identifier)
+    pub fn contains(&self, identifier: &Identifier) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(identifier)
     }
 
     #[must_use]
-    pub async fn len(&self) -> usize {
-        self.0.read().await.len()
+    pub fn len(&self) -> usize {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     #[must_use]
-    pub async fn is_empty(&self) -> bool {
-        self.0.read().await.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
     #[allow(clippy::iter_not_returning_iterator)] // does clippy know how async works?
-    pub async fn iter(&self) -> impl Iterator<Item = (&Identifier, &T)> {
-        LockedIterator::new(self.0.read().await)
+    pub fn iter(&self) -> impl Iterator<Item = (&Identifier, &T)> {
+        LockedIterator::new(
+            self.0
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 }
 
 impl MutableRegistry<BoxedRegistry> {
-    async fn into_nested_immutable(self) -> ImmutableRegistry<BoxedRegistry> {
+    fn into_nested_immutable(self) -> ImmutableRegistry<BoxedRegistry> {
         let RegistryBuilder {
             static_entries,
             entries,
@@ -79,7 +104,7 @@ impl MutableRegistry<BoxedRegistry> {
         let mut immutable_entries = Vec::with_capacity(entries.len());
 
         for entry in entries {
-            immutable_entries.push(entry.into_immutable().await);
+            immutable_entries.push(entry.into_immutable());
         }
 
         ImmutableRegistry::new(
@@ -99,12 +124,12 @@ impl<T: Send + Sync + 'static> Registry for MutableRegistry<T> {
         type_name::<T>()
     }
 
-    fn get_id<'a>(&'a self, identifier: &'a Identifier) -> BoxFuture<'a, Option<usize>> {
-        Box::pin(async move { Self::get_id(self, identifier).await })
+    fn get_id(&self, identifier: &Identifier) -> Option<usize> {
+        Self::get_id(self, identifier)
     }
 
-    fn get_by_id(&self, id: usize) -> BoxFuture<'_, Option<ErasedRegistryRef<'_>>> {
-        Box::pin(async move { Self::get_by_id(self, id).await.map(ErasedRegistryRef::new) })
+    fn get_by_id(&self, id: usize) -> Option<ErasedRegistryRef<'_>> {
+        Self::get_by_id(self, id).map(ErasedRegistryRef::new)
     }
 
     fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
@@ -112,20 +137,18 @@ impl<T: Send + Sync + 'static> Registry for MutableRegistry<T> {
     }
 
     #[allow(clippy::expect_used)]
-    fn into_immutable(self: Box<Self>) -> BoxFuture<'static, BoxedRegistry> {
-        Box::pin(async move {
-            let erased: Box<dyn Any + Send> = self;
+    fn into_immutable(self: Box<Self>) -> BoxedRegistry {
+        let erased: Box<dyn Any + Send> = self;
 
-            match erased.downcast::<MutableRegistry<BoxedRegistry>>() {
-                Ok(registry) => Box::new(registry.into_nested_immutable().await) as BoxedRegistry,
-                Err(erased) => {
-                    let registry = erased
-                        .downcast::<Self>()
-                        .expect("downcast back to MutableRegistry<T> must succeed");
+        match erased.downcast::<MutableRegistry<BoxedRegistry>>() {
+            Ok(registry) => Box::new(registry.into_nested_immutable()) as BoxedRegistry,
+            Err(erased) => {
+                let registry = erased
+                    .downcast::<Self>()
+                    .expect("downcast back to MutableRegistry<T> must succeed");
 
-                    Box::new(ImmutableRegistry::from(*registry)) as BoxedRegistry
-                }
+                Box::new(ImmutableRegistry::from(*registry)) as BoxedRegistry
             }
-        })
+        }
     }
 }

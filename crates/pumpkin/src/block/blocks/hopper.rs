@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::{
-    BlockFuture, GetComparatorOutputArgs, OnEntityCollisionArgs, OnNeighborUpdateArgs, OnPlaceArgs,
+    GetComparatorOutputArgs, OnEntityCollisionArgs, OnNeighborUpdateArgs, OnPlaceArgs,
     OnStateReplacedArgs, PlacedArgs,
 };
 use crate::block::{
@@ -18,7 +18,7 @@ use pumpkin_data::{Block, BlockDirection, translation};
 use pumpkin_inventory::generic_container_screen_handler::create_hopper;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::boundingbox::BoundingBox;
@@ -26,24 +26,22 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::world::BlockFlags;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 struct HopperBlockScreenFactory(Arc<dyn Inventory>);
 
 impl ScreenHandlerFactory for HopperBlockScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let concrete_handler = create_hopper(sync_id, player_inventory, self.0.clone()).await;
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let concrete_handler = create_hopper(sync_id, player_inventory, self.0.clone());
 
-            let concrete_arc = Arc::new(Mutex::new(concrete_handler));
+        let concrete_arc = Arc::new(Mutex::new(concrete_handler));
 
-            Some(concrete_arc as SharedScreenHandler)
-        })
+        Some(concrete_arc as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {
@@ -101,110 +99,82 @@ pub(crate) fn interaction_shapes_at(
 impl BlockBehaviour for HopperBlock {
     /// `HopperBlock.entityInside` (`HopperBlock.java:163-169`) delegates item pickup to the
     /// block entity's `entityInside` transfer path.
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            HopperBlockEntity::entity_inside(args.world, args.position, args.entity).await;
-        })
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        HopperBlockEntity::entity_inside(args.world, args.position, args.entity);
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(inventory) = block_entity.get_inventory()
-            {
-                args.player
-                    .increment_interaction_stat(
-                        pumpkin_data::statistic::StatisticCategory::Custom,
-                        pumpkin_data::statistic::CustomStatistic::InspectHopper as i32,
-                        1,
-                    )
-                    .await;
-                args.player
-                    .open_handled_screen(&HopperBlockScreenFactory(inventory), Some(*args.position))
-                    .await;
-            }
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(inventory) = block_entity.get_inventory()
+        {
+            args.player.increment_interaction_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                pumpkin_data::statistic::CustomStatistic::InspectHopper as i32,
+                1,
+            );
+            args.player
+                .open_handled_screen(&HopperBlockScreenFactory(inventory), Some(*args.position));
+        }
 
-            BlockActionResult::Success
-        })
+        BlockActionResult::Success
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = HopperLikeProperties::default(args.block);
-            props.facing = match args.direction {
-                BlockDirection::North => FacingHopper::North,
-                BlockDirection::East => FacingHopper::East,
-                BlockDirection::South => FacingHopper::South,
-                BlockDirection::West => FacingHopper::West,
-                BlockDirection::Up | BlockDirection::Down => FacingHopper::Down,
-            };
-            props.enabled = true;
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = HopperLikeProperties::default(args.block);
+        props.facing = match args.direction {
+            BlockDirection::North => FacingHopper::North,
+            BlockDirection::East => FacingHopper::East,
+            BlockDirection::South => FacingHopper::South,
+            BlockDirection::West => FacingHopper::West,
+            BlockDirection::Up | BlockDirection::Down => FacingHopper::Down,
+        };
+        props.enabled = true;
+        props.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let props = HopperLikeProperties::from_state_id(args.state_id, args.block);
-            let hopper_block_entity = HopperBlockEntity::new(*args.position, props.facing);
-            args.world.add_block_entity(Arc::new(hopper_block_entity));
-            if Block::from_state_id(args.old_state_id) != Block::from_state_id(args.state_id) {
-                check_powered_state(args.world, args.position, args.state_id, args.block).await;
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let props = HopperLikeProperties::from_state_id(args.state_id, args.block);
+        let hopper_block_entity = HopperBlockEntity::new(*args.position, props.facing);
+        args.world.add_block_entity(Arc::new(hopper_block_entity));
+        if Block::from_state_id(args.old_state_id) != Block::from_state_id(args.state_id) {
+            check_powered_state(args.world, args.position, args.state_id, args.block);
+        }
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `HopperBlock.affectNeighborsAfterRemoval` (`HopperBlock.java:133-136`)
-            // refreshes comparator inputs after a hopper is removed.
-            args.world
-                .update_comparators(args.position, args.block)
-                .await;
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        // `HopperBlock.affectNeighborsAfterRemoval` (`HopperBlock.java:133-136`)
+        // refreshes comparator inputs after a hopper is removed.
+        args.world.update_comparators(args.position, args.block);
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            check_powered_state(
-                args.world,
-                args.position,
-                args.world.get_block_state_id(args.position),
-                args.block,
-            )
-            .await;
-        })
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        check_powered_state(
+            args.world,
+            args.position,
+            args.world.get_block_state_id(args.position),
+            args.block,
+        );
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(inventory) = block_entity.get_inventory()
-            {
-                Some(crate::block::calculate_comparator_output(inventory.as_ref()).await)
-            } else {
-                None
-            }
-        })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(inventory) = block_entity.get_inventory()
+        {
+            Some(crate::block::calculate_comparator_output(
+                inventory.as_ref(),
+            ))
+        } else {
+            None
+        }
     }
 }
 
-async fn check_powered_state(
-    world: &Arc<World>,
-    pos: &BlockPos,
-    state_id: BlockStateId,
-    block: &Block,
-) {
-    let signal = !block_receives_redstone_power(world, pos).await;
+fn check_powered_state(world: &Arc<World>, pos: &BlockPos, state_id: BlockStateId, block: &Block) {
+    let signal = !block_receives_redstone_power(world, pos);
     let mut state = HopperLikeProperties::from_state_id(state_id, block);
     if signal != state.enabled {
         state.enabled = signal;
-        world
-            .set_block_state(pos, state.to_state_id(block), BlockFlags::NOTIFY_LISTENERS)
-            .await;
+        world.set_block_state(pos, state.to_state_id(block), BlockFlags::NOTIFY_LISTENERS);
     }
 }
 

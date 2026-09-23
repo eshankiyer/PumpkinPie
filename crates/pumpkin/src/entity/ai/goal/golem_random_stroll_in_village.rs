@@ -7,7 +7,7 @@ use super::move_back_to_village::{
     VillageSectionScan, at_bottom_center_of, section_center, section_cube, section_of,
 };
 use super::random_pos::{land_get_pos, land_get_pos_towards};
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::passive::villager::VillagerEntity;
@@ -68,10 +68,10 @@ impl GolemRandomStrollInVillageGoal {
     }
 
     /// `getPositionTowardsVillagerWhoWantsGolem` (`GolemRandomStrollInVillageGoal.java:55-65`).
-    async fn position_towards_villager_who_wants_golem(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    fn position_towards_villager_who_wants_golem(mob: &dyn Mob) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
         let world = entity.world.load();
-        let world_age = world.get_world_age().await;
+        let world_age = world.get_world_age();
         let box_ = entity.bounding_box.load().expand(
             Self::VILLAGER_SCAN_RADIUS,
             Self::VILLAGER_SCAN_RADIUS,
@@ -107,13 +107,13 @@ impl GolemRandomStrollInVillageGoal {
 
     /// `getRandomVillageSection` (`GolemRandomStrollInVillageGoal.java:77-83`) plus
     /// `getRandomPoiWithinSection` (lines 85-92) plus `getPositionTowardsPoi` (lines 67-75).
-    async fn position_towards_poi(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    fn position_towards_poi(mob: &dyn Mob) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
         let world = entity.world.load();
         let pos = entity.block_pos.load();
         let here = section_of(pos);
 
-        let scan = VillageSectionScan::around(&world, pos, Self::POI_SECTION_SCAN_RADIUS).await;
+        let scan = VillageSectionScan::around(&world, pos, Self::POI_SECTION_SCAN_RADIUS);
         let village_sections: Vec<Vector3<i32>> = section_cube(here, Self::POI_SECTION_SCAN_RADIUS)
             .into_iter()
             .filter(|section| scan.sections_to_village(*section) == 0)
@@ -129,7 +129,10 @@ impl GolemRandomStrollInVillageGoal {
         // `freeTickets != maxTickets` can never hold for them.
         let center = section_center(section);
         let candidates: Vec<BlockPos> = {
-            let mut storage = world.portal_poi.lock().await;
+            let mut storage = world
+                .portal_poi
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             storage
                 .get_in_square_with_tickets(center, Self::POI_SEARCH_RADIUS, None)
                 .into_iter()
@@ -154,20 +157,20 @@ impl GolemRandomStrollInVillageGoal {
     }
 
     /// `GolemRandomStrollInVillageGoal.getPosition` (`GolemRandomStrollInVillageGoal.java:28-49`).
-    async fn get_position(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    fn get_position(mob: &dyn Mob) -> Option<Vector3<f64>> {
         if mob.get_random().random::<f32>() < 0.3 {
             return Self::position_towards_anywhere(mob);
         }
 
         let target = if mob.get_random().random::<f32>() < 0.7 {
-            match Self::position_towards_villager_who_wants_golem(mob).await {
+            match Self::position_towards_villager_who_wants_golem(mob) {
                 Some(target) => Some(target),
-                None => Self::position_towards_poi(mob).await,
+                None => Self::position_towards_poi(mob),
             }
         } else {
-            match Self::position_towards_poi(mob).await {
+            match Self::position_towards_poi(mob) {
                 Some(target) => Some(target),
-                None => Self::position_towards_villager_who_wants_golem(mob).await,
+                None => Self::position_towards_villager_who_wants_golem(mob),
             }
         };
 
@@ -176,60 +179,52 @@ impl GolemRandomStrollInVillageGoal {
 }
 
 impl Goal for GolemRandomStrollInVillageGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // `RandomStrollGoal.canUse` (`RandomStrollGoal.java:36-62`), with
-            // `checkNoActionTime = false` so the `no_action_time` branch never applies.
-            if mob.has_controlling_passenger().await {
-                return false;
-            }
-            if !self.force_trigger && mob.get_random().random_range(0..self.chance) != 0 {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // `RandomStrollGoal.canUse` (`RandomStrollGoal.java:36-62`), with
+        // `checkNoActionTime = false` so the `no_action_time` branch never applies.
+        if mob.has_controlling_passenger() {
+            return false;
+        }
+        if !self.force_trigger && mob.get_random().random_range(0..self.chance) != 0 {
+            return false;
+        }
 
-            self.wanted = Self::get_position(mob).await;
-            if self.wanted.is_none() {
-                return false;
-            }
-            self.force_trigger = false;
-            true
-        })
+        self.wanted = Self::get_position(mob);
+        if self.wanted.is_none() {
+            return false;
+        }
+        self.force_trigger = false;
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let navigator_idle = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            !navigator_idle && !mob.has_controlling_passenger().await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let navigator_idle = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        !navigator_idle && !mob.has_controlling_passenger()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(wanted) = self.wanted {
-                let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.wanted = None;
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(wanted) = self.wanted {
+            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
             mob.get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+                .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
+        }
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.wanted = None;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     fn controls(&self) -> Controls {

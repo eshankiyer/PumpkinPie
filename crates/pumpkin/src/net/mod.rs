@@ -318,8 +318,8 @@ impl ClientPlatform {
 
     pub async fn kick(&self, reason: DisconnectReason, message: TextComponent) {
         match self {
-            Self::Java(java) => java.kick(message).await,
-            Self::Bedrock(bedrock) => bedrock.kick(reason, message.get_text()).await,
+            Self::Java(java) => java.kick(message),
+            Self::Bedrock(bedrock) => bedrock.kick(reason, message.get_text()),
         }
     }
 }

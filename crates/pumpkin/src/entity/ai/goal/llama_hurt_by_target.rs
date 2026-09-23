@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::ai::goal::revenge::RevengeGoal;
 use crate::entity::mob::Mob;
@@ -25,26 +25,24 @@ impl LlamaHurtByTargetGoal {
 }
 
 impl Goal for LlamaHurtByTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
         self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if let Some(data) = llama_data_of(mob as &dyn EntityBase)
-                && data.did_spit.swap(false, Relaxed)
-            {
-                return false;
-            }
-            self.inner.should_continue(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        if let Some(data) = llama_data_of(mob as &dyn EntityBase)
+            && data.did_spit.swap(false, Relaxed)
+        {
+            return false;
+        }
+        self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 

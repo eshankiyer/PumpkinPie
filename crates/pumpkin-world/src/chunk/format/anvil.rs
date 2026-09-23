@@ -367,8 +367,7 @@ impl<S: SingleChunkDataSerializer> AnvilChunkFile<S> {
             .create(true)
             .truncate(false)
             .append(false)
-            .open(path)
-            .await?;
+            .open(path)?;
 
         let mut write = BufWriter::new(file);
         // The first two sectors are reserved for the location table
@@ -450,7 +449,7 @@ impl<S: SingleChunkDataSerializer> AnvilChunkFile<S> {
         let temp_path = path.with_extension("tmp");
         trace!("Writing tmp file to disk: {temp_path:?}");
 
-        let file = tokio::fs::File::create(&temp_path).await?;
+        let file = tokio::fs::File::create(&temp_path)?;
         let mut write = BufWriter::new(file);
 
         // Build the 8 KiB header in memory
@@ -528,7 +527,7 @@ impl<S: SingleChunkDataSerializer + 'static> ChunkSerializer for AnvilChunkFile<
     }
 
     async fn write(&self, path: &PathBuf) -> Result<(), std::io::Error> {
-        let mut write_action = self.write_action.lock().await;
+        let mut write_action = self.write_action.lock();
         match &*write_action {
             WriteAction::Pass => {
                 debug!(
@@ -630,7 +629,7 @@ impl<S: SingleChunkDataSerializer + 'static> ChunkSerializer for AnvilChunkFile<
         let new_chunk_data =
             AnvilChunkData::from_chunk(chunk, compression_type, chunk_config).await?;
 
-        let mut write_action = self.write_action.lock().await;
+        let mut write_action = self.write_action.lock();
         if !chunk_config.write_in_place {
             *write_action = WriteAction::All;
         }

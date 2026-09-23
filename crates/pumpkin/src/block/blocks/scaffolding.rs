@@ -11,7 +11,7 @@ use pumpkin_world::world::BlockAccessor;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
     OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::falling::FallingEntity;
@@ -102,14 +102,12 @@ impl ScaffoldingBlock {
 
 impl BlockBehaviour for ScaffoldingBlock {
     /// `ScaffoldingBlock.getStateForPlacement`.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = ScaffoldingLikeProperties::default(args.block);
-            props.r#waterlogged = args.replacing.water_source();
-            props.r#distance = Self::get_distance(args.world, args.position);
-            props.r#bottom = Self::is_bottom(args.world, args.position, props.r#distance);
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = ScaffoldingLikeProperties::default(args.block);
+        props.r#waterlogged = args.replacing.water_source();
+        props.r#distance = Self::get_distance(args.world, args.position);
+        props.r#bottom = Self::is_bottom(args.world, args.position, props.r#distance);
+        props.to_state_id(args.block)
     }
 
     /// `ScaffoldingBlockItem.mustSurvive` is false (`ScaffoldingBlockItem.java:66-69`),
@@ -122,64 +120,56 @@ impl BlockBehaviour for ScaffoldingBlock {
         true
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        args.world
+            .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
     }
 
     /// `ScaffoldingBlock.updateShape`: schedules the same tick-delay-1 on every neighbor update,
     /// plus a water tick if waterlogged. Does not itself recompute distance/bottom - that only
     /// happens in the scheduled tick.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = ScaffoldingLikeProperties::from_state_id(args.state_id, args.block);
-            if props.r#waterlogged {
-                args.world.schedule_fluid_tick(
-                    &Fluid::WATER,
-                    *args.position,
-                    Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
-            args.world
-                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let props = ScaffoldingLikeProperties::from_state_id(args.state_id, args.block);
+        if props.r#waterlogged {
+            args.world.schedule_fluid_tick(
+                &Fluid::WATER,
+                *args.position,
+                Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
+        args.world
+            .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+        args.state_id
     }
 
     /// `ScaffoldingBlock.tick` (`ScaffoldingBlock.java:116-129`). See the doc's gap review for
     /// why this three-way branch must be transcribed literally rather than re-derived: the
     /// destroy-no-entity and fall-as-entity paths have different drop semantics.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let old_state_id = args.world.get_block_state_id(args.position);
-            let old_props = ScaffoldingLikeProperties::from_state_id(old_state_id, args.block);
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let old_state_id = args.world.get_block_state_id(args.position);
+        let old_props = ScaffoldingLikeProperties::from_state_id(old_state_id, args.block);
 
-            let new_distance = Self::get_distance(args.world.as_ref(), args.position);
-            let mut new_props = old_props;
-            new_props.r#distance = new_distance;
-            new_props.r#bottom = Self::is_bottom(args.world.as_ref(), args.position, new_distance);
-            let new_state_id = new_props.to_state_id(args.block);
+        let new_distance = Self::get_distance(args.world.as_ref(), args.position);
+        let mut new_props = old_props;
+        new_props.r#distance = new_distance;
+        new_props.r#bottom = Self::is_bottom(args.world.as_ref(), args.position, new_distance);
+        let new_state_id = new_props.to_state_id(args.block);
 
-            if new_distance == MAX_DISTANCE {
-                if old_props.r#distance == MAX_DISTANCE {
-                    FallingEntity::replace_spawn(args.world, *args.position, new_state_id).await;
-                } else {
-                    args.world
-                        .break_block(args.position, None, BlockFlags::empty())
-                        .await;
-                }
-            } else if new_state_id != old_state_id {
+        if new_distance == MAX_DISTANCE {
+            if old_props.r#distance == MAX_DISTANCE {
+                FallingEntity::replace_spawn(args.world, *args.position, new_state_id);
+            } else {
                 args.world
-                    .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
+                    .break_block(args.position, None, BlockFlags::empty());
             }
-        })
+        } else if new_state_id != old_state_id {
+            args.world
+                .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_ALL);
+        }
     }
 }
 

@@ -12,8 +12,8 @@ use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockIsReplacing, EmitsRedstonePowerArgs, GetRedstonePowerArgs,
-    OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, BlockIsReplacing, EmitsRedstonePowerArgs, GetRedstonePowerArgs, OnPlaceArgs,
+    OnScheduledTickArgs, PlacedArgs,
 };
 use crate::world::World;
 
@@ -37,7 +37,7 @@ impl TargetBlock {
     /// Returns the signal strength the hit is worth. As in vanilla, the power is only
     /// applied when no reset is queued for this position yet, so a target that is already
     /// lit up keeps its original signal until the reset runs.
-    pub async fn trigger(
+    pub fn trigger(
         world: &Arc<World>,
         position: &BlockPos,
         face: BlockDirection,
@@ -52,9 +52,7 @@ impl TargetBlock {
 
         let mut props = TargetProperties::from_state_id(state_id, block);
         props.power = power;
-        world
-            .set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
         world.schedule_block_tick(block, *position, delay, TickPriority::Normal);
         power
     }
@@ -78,78 +76,62 @@ impl TargetBlock {
 }
 
 impl BlockBehaviour for TargetBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            // Vanilla resets a carried-over nonzero OUTPUT_POWER when the block
-            // identity at this position changes (TargetBlock.onPlace).
-            let mut props = if let BlockIsReplacing::Itself(old_state_id) = args.replacing {
-                TargetProperties::from_state_id(old_state_id, args.block)
-            } else {
-                TargetProperties::default(args.block)
-            };
-            props.power = 0;
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        // Vanilla resets a carried-over nonzero OUTPUT_POWER when the block
+        // identity at this position changes (TargetBlock.onPlace).
+        let mut props = if let BlockIsReplacing::Itself(old_state_id) = args.replacing {
+            TargetProperties::from_state_id(old_state_id, args.block)
+        } else {
+            TargetProperties::default(args.block)
+        };
+        props.power = 0;
+        props.to_state_id(args.block)
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { true })
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
+        true
     }
 
-    fn get_weak_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move { TargetProperties::from_state_id(args.state.id, args.block).power })
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        TargetProperties::from_state_id(args.state.id, args.block).power
     }
 
     // Vanilla only overrides `getWeakRedstonePower` for the target block, so strong power
     // stays at the default of 0 and a target never powers the block it is next to.
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `TargetBlock.onPlace` (TargetBlock.java:107-113): a target that ARRIVES already lit
-            // with no reset queued - pushed by a piston, written by /setblock, restored from a
-            // structure - would emit its carried power forever, because nothing is left to run the
-            // scheduled tick that clears it.
-            if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block {
-                return;
-            }
-            let mut props = TargetProperties::from_state_id(args.state_id, args.block);
-            if props.power > 0
-                && !args
-                    .world
-                    .is_block_tick_scheduled(args.position, args.block)
-            {
-                props.power = 0;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        // `TargetBlock.onPlace` (TargetBlock.java:107-113): a target that ARRIVES already lit
+        // with no reset queued - pushed by a piston, written by /setblock, restored from a
+        // structure - would emit its carried power forever, because nothing is left to run the
+        // scheduled tick that clears it.
+        if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block {
+            return;
+        }
+        let mut props = TargetProperties::from_state_id(args.state_id, args.block);
+        if props.power > 0
+            && !args
+                .world
+                .is_block_tick_scheduled(args.position, args.block)
+        {
+            props.power = 0;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
+        }
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut props = TargetProperties::from_state_id(state.id, args.block);
-            if props.power != 0 {
-                props.power = 0;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let mut props = TargetProperties::from_state_id(state.id, args.block);
+        if props.power != 0 {
+            props.power = 0;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 }

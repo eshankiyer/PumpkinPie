@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
-use tokio::sync::Mutex;
 
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
@@ -16,7 +16,7 @@ use rand::RngExt;
 
 use crate::block::blocks::fire::FireBlockBase;
 use crate::entity::player::Player;
-use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage};
+use crate::entity::{Entity, EntityBase, NBTStorage};
 use crate::server::Server;
 use crate::world::World;
 
@@ -55,12 +55,18 @@ impl LightningBoltEntity {
         self.visual_only.load(Ordering::Relaxed)
     }
 
-    pub async fn set_cause(&self, cause: Option<Arc<Player>>) {
-        *self.cause.lock().await = cause;
+    pub fn set_cause(&self, cause: Option<Arc<Player>>) {
+        *self
+            .cause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = cause;
     }
 
-    pub async fn get_cause(&self) -> Option<Arc<Player>> {
-        self.cause.lock().await.clone()
+    pub fn get_cause(&self) -> Option<Arc<Player>> {
+        self.cause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn get_blocks_set_on_fire(&self) -> i32 {
@@ -80,7 +86,7 @@ impl LightningBoltEntity {
         Vector3::new(pos.x, pos.y - 1.0e-6, pos.z).to_block_pos()
     }
 
-    async fn power_lightning_rod(&self, world: &Arc<World>) {
+    fn power_lightning_rod(&self, world: &Arc<World>) {
         let strike_pos = self.get_strike_position();
         let block = world.get_block(&strike_pos);
         // `LightningBolt.java:70` dispatches on `instanceof LightningRodBlock`, which every
@@ -89,12 +95,11 @@ impl LightningBoltEntity {
             crate::block::blocks::redstone::lightning_rod::LightningRodBlock::trigger(
                 world,
                 &strike_pos,
-            )
-            .await;
+            );
         }
     }
 
-    async fn spawn_fire(&self, world: &Arc<World>, additional_sources: i32) {
+    fn spawn_fire(&self, world: &Arc<World>, additional_sources: i32) {
         if self.visual_only.load(Ordering::Relaxed) {
             return;
         }
@@ -104,9 +109,7 @@ impl LightningBoltEntity {
         let try_place = |p: BlockPos| async move {
             if world.get_block_state(&p).is_air() && FireBlockBase::can_place_at(world, &p) {
                 let fire_block = FireBlockBase::get_fire_type(world, &p);
-                world
-                    .set_block_state(&p, fire_block.default_state.id, BlockFlags::NOTIFY_ALL)
-                    .await;
+                world.set_block_state(&p, fire_block.default_state.id, BlockFlags::NOTIFY_ALL);
                 self.blocks_set_on_fire.fetch_add(1, Ordering::Relaxed);
             }
         };
@@ -122,7 +125,7 @@ impl LightningBoltEntity {
         }
     }
 
-    async fn clear_copper_on_lightning_strike(&self, world: &Arc<World>) {
+    fn clear_copper_on_lightning_strike(&self, world: &Arc<World>) {
         let strike_pos = self.get_strike_position();
         let struck_state = world.get_block_state(&strike_pos);
         let struck_block = struck_state.id.to_block();
@@ -140,22 +143,19 @@ impl LightningBoltEntity {
                 let new_state_id =
                     BlockStateId::new(first_block.default_state.id.as_u16() + offset)
                         .unwrap_or(first_block.default_state.id);
-                world
-                    .set_block_state(&strike_pos, new_state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
+                world.set_block_state(&strike_pos, new_state_id, BlockFlags::NOTIFY_ALL);
             }
 
             let strikes_count = rand::rng().random_range(3..=5);
 
             for _ in 0..strikes_count {
                 let step_count = rand::rng().random_range(1..=8);
-                self.random_walk_cleaning_copper(world, &strike_pos, step_count)
-                    .await;
+                self.random_walk_cleaning_copper(world, &strike_pos, step_count);
             }
         }
     }
 
-    async fn random_walk_cleaning_copper(
+    fn random_walk_cleaning_copper(
         &self,
         world: &Arc<World>,
         original_strike_pos: &BlockPos,
@@ -164,7 +164,7 @@ impl LightningBoltEntity {
         let mut work_pos = *original_strike_pos;
 
         for _ in 0..step_count {
-            if let Some(next_pos) = self.random_step_cleaning_copper(world, &work_pos).await {
+            if let Some(next_pos) = self.random_step_cleaning_copper(world, &work_pos) {
                 work_pos = next_pos;
             } else {
                 break;
@@ -172,11 +172,7 @@ impl LightningBoltEntity {
         }
     }
 
-    async fn random_step_cleaning_copper(
-        &self,
-        world: &Arc<World>,
-        pos: &BlockPos,
-    ) -> Option<BlockPos> {
+    fn random_step_cleaning_copper(&self, world: &Arc<World>, pos: &BlockPos) -> Option<BlockPos> {
         let candidates = random_in_cube(10, pos, 1);
         for candidate in candidates {
             let state = world.get_block_state(&candidate);
@@ -192,9 +188,7 @@ impl LightningBoltEntity {
                     .saturating_sub(block.default_state.id.as_u16());
                 let new_state_id = BlockStateId::new(prev_block.default_state.id.as_u16() + offset)
                     .unwrap_or(prev_block.default_state.id);
-                world
-                    .set_block_state(&candidate, new_state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
+                world.set_block_state(&candidate, new_state_id, BlockFlags::NOTIFY_ALL);
                 world.sync_world_event(WorldEvent::ParticlesElectricSpark, candidate, -1);
                 return Some(candidate);
             }
@@ -206,92 +200,85 @@ impl LightningBoltEntity {
 impl NBTStorage for LightningBoltEntity {}
 
 impl EntityBase for LightningBoltEntity {
-    fn tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.entity;
-            let life = self.life.load(Ordering::Relaxed);
+    fn tick(&self, _caller: &Arc<dyn EntityBase>, _server: &Server) {
+        let entity = &self.entity;
+        let life = self.life.load(Ordering::Relaxed);
 
-            if life == 2 {
+        if life == 2 {
+            let world = entity.world.load();
+            let pos = entity.pos.load();
+
+            let pitch_thunder = 0.8 + rand::rng().random::<f32>() * 0.2;
+            world.play_sound_fine(
+                Sound::EntityLightningBoltThunder,
+                SoundCategory::Weather,
+                &pos,
+                10000.0,
+                pitch_thunder,
+            );
+            let pitch_impact = 0.5 + rand::rng().random::<f32>() * 0.2;
+            world.play_sound_fine(
+                Sound::EntityLightningBoltImpact,
+                SoundCategory::Weather,
+                &pos,
+                2.0,
+                pitch_impact,
+            );
+
+            let difficulty = world.level_info.load().difficulty;
+            if difficulty == Difficulty::Normal || difficulty == Difficulty::Hard {
+                self.spawn_fire(&world, 4);
+            }
+
+            self.power_lightning_rod(&world);
+            self.clear_copper_on_lightning_strike(&world);
+        }
+
+        let new_life = life - 1;
+        self.life.store(new_life, Ordering::Relaxed);
+
+        if new_life < 0 {
+            let flashes = self.flashes.load(Ordering::Relaxed);
+            if flashes == 0 {
+                entity.remove();
+                return;
+            } else if new_life < -rand::rng().random_range(0..10) {
+                self.flashes.store(flashes - 1, Ordering::Relaxed);
+                self.life.store(1, Ordering::Relaxed);
+                self.seed.store(rand::random::<i64>(), Ordering::Relaxed);
                 let world = entity.world.load();
-                let pos = entity.pos.load();
-
-                let pitch_thunder = 0.8 + rand::rng().random::<f32>() * 0.2;
-                world.play_sound_fine(
-                    Sound::EntityLightningBoltThunder,
-                    SoundCategory::Weather,
-                    &pos,
-                    10000.0,
-                    pitch_thunder,
-                );
-                let pitch_impact = 0.5 + rand::rng().random::<f32>() * 0.2;
-                world.play_sound_fine(
-                    Sound::EntityLightningBoltImpact,
-                    SoundCategory::Weather,
-                    &pos,
-                    2.0,
-                    pitch_impact,
-                );
-
-                let difficulty = world.level_info.load().difficulty;
-                if difficulty == Difficulty::Normal || difficulty == Difficulty::Hard {
-                    self.spawn_fire(&world, 4).await;
-                }
-
-                self.power_lightning_rod(&world).await;
-                self.clear_copper_on_lightning_strike(&world).await;
+                self.spawn_fire(&world, 0);
             }
+        }
 
-            let new_life = life - 1;
-            self.life.store(new_life, Ordering::Relaxed);
+        let current_life = self.life.load(Ordering::Relaxed);
+        if current_life >= 0 && !self.visual_only.load(Ordering::Relaxed) {
+            let world = entity.world.load();
+            let pos = entity.pos.load();
 
-            if new_life < 0 {
-                let flashes = self.flashes.load(Ordering::Relaxed);
-                if flashes == 0 {
-                    entity.remove().await;
-                    return;
-                } else if new_life < -rand::rng().random_range(0..10) {
-                    self.flashes.store(flashes - 1, Ordering::Relaxed);
-                    self.life.store(1, Ordering::Relaxed);
-                    self.seed.store(rand::random::<i64>(), Ordering::Relaxed);
-                    let world = entity.world.load();
-                    self.spawn_fire(&world, 0).await;
+            let damage_box = BoundingBox::new(
+                Vector3::new(pos.x - 3.0, pos.y - 3.0, pos.z - 3.0),
+                Vector3::new(pos.x + 3.0, pos.y + 9.0, pos.z + 3.0),
+            );
+
+            let entities = world.get_all_at_box(&damage_box);
+            let mut hit_guard = self
+                .hit_entities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+            for hit_entity in entities {
+                if hit_entity.get_entity().entity_id == entity.entity_id {
+                    continue;
                 }
+                let hit_id = hit_entity.get_entity().entity_id;
+                hit_entity.on_lightning_strike(hit_entity.as_ref(), self);
+                hit_guard.insert(hit_id);
             }
-
-            let current_life = self.life.load(Ordering::Relaxed);
-            if current_life >= 0 && !self.visual_only.load(Ordering::Relaxed) {
-                let world = entity.world.load();
-                let pos = entity.pos.load();
-
-                let damage_box = BoundingBox::new(
-                    Vector3::new(pos.x - 3.0, pos.y - 3.0, pos.z - 3.0),
-                    Vector3::new(pos.x + 3.0, pos.y + 9.0, pos.z + 3.0),
-                );
-
-                let entities = world.get_all_at_box(&damage_box);
-                let mut hit_guard = self.hit_entities.lock().await;
-
-                for hit_entity in entities {
-                    if hit_entity.get_entity().entity_id == entity.entity_id {
-                        continue;
-                    }
-                    let hit_id = hit_entity.get_entity().entity_id;
-                    hit_entity
-                        .on_lightning_strike(hit_entity.as_ref(), self)
-                        .await;
-                    hit_guard.insert(hit_id);
-                }
-            }
-        })
+        }
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {})
-    }
+    fn init_data_tracker(&self) {}
 
     fn get_entity(&self) -> &Entity {
         &self.entity

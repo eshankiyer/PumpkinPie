@@ -1,5 +1,5 @@
 use crate::block::blocks::copper_weathering;
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, OnPlaceArgs, RandomTickArgs};
+use crate::block::{BlockBehaviour, BlockMetadata, OnPlaceArgs, RandomTickArgs};
 use pumpkin_data::Block;
 use pumpkin_data::BlockId;
 use pumpkin_data::BlockStateId;
@@ -30,39 +30,34 @@ impl BlockMetadata for CopperGrateBlock {
 }
 
 impl BlockBehaviour for CopperGrateBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = CopperGrateProperties::default(args.block);
-            props.r#waterlogged = args.replacing.water_source();
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = CopperGrateProperties::default(args.block);
+        props.r#waterlogged = args.replacing.water_source();
 
-            props.to_state_id(args.block)
-        })
+        props.to_state_id(args.block)
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let current_props = CopperGrateProperties::from_state_id(current_state_id, args.block);
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let current_props = CopperGrateProperties::from_state_id(current_state_id, args.block);
 
-            let oxidation_stages = [
-                &Block::COPPER_GRATE,
-                &Block::EXPOSED_COPPER_GRATE,
-                &Block::WEATHERED_COPPER_GRATE,
-                &Block::OXIDIZED_COPPER_GRATE,
-            ];
+        let oxidation_stages = [
+            &Block::COPPER_GRATE,
+            &Block::EXPOSED_COPPER_GRATE,
+            &Block::WEATHERED_COPPER_GRATE,
+            &Block::OXIDIZED_COPPER_GRATE,
+        ];
 
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = CopperGrateProperties::default(next_block);
-                    new_props.r#waterlogged = current_props.r#waterlogged;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = CopperGrateProperties::default(next_block);
+                new_props.r#waterlogged = current_props.r#waterlogged;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 }

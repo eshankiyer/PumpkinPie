@@ -27,8 +27,8 @@ impl JavaClient {
             return;
         }
 
-        let screen_handler = player.current_screen_handler.lock().await.clone();
-        let screen_handler = screen_handler.lock().await;
+        let screen_handler = player.current_screen_handler.lock().clone();
+        let screen_handler = screen_handler.lock();
 
         if i32::from(screen_handler.sync_id()) != packet.container_id.0 {
             return;
@@ -50,7 +50,7 @@ impl JavaClient {
             .as_any()
             .downcast_ref::<CrafterBlockEntity>()
         {
-            crafter.set_slot_state(slot, packet.new_state).await;
+            crafter.set_slot_state(slot, packet.new_state);
         }
     }
 }

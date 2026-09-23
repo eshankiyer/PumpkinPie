@@ -1,4 +1,4 @@
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use pumpkin_data::Block;
 use pumpkin_data::tag::{self, Taggable};
@@ -78,106 +78,94 @@ impl EatGrassGoal {
 }
 
 impl Goal for EatGrassGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let bound = if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
-                50
-            } else {
-                1000
-            };
-            if mob.get_random().random_range(0..bound) != 0 {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let bound = if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
+            50
+        } else {
+            1000
+        };
+        if mob.get_random().random_range(0..bound) != 0 {
+            return false;
+        }
 
+        let block_pos = entity.block_pos.load();
+        let world = entity.world.load();
+
+        let block_at_pos = world.get_block(&block_pos);
+        if block_at_pos.has_tag(&tag::Block::MINECRAFT_EDIBLE_FOR_SHEEP) {
+            return true;
+        }
+
+        let block_below = world.get_block(&block_pos.down());
+        block_below.id == Block::GRASS_BLOCK.id
+    }
+
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.timer > 0
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        self.timer = MAX_TIMER;
+        // Vanilla EatBlockGoal.start(): broadcasts entity-event byte 10, which drives the
+        // client-side head-eating animation (Sheep.handleEntityEvent / getHeadEatAngleScale).
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let world = entity.world.load();
+        world.send_entity_status(entity, pumpkin_data::entity::EntityStatus::EatGrass, None);
+        let mut navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        navigator.stop();
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.timer -= 1;
+
+        if self.timer == 4 {
+            let entity = &mob.get_mob_entity().living_entity.entity;
             let block_pos = entity.block_pos.load();
-            let world = entity.world.load();
+            let world = entity.world.load_full();
 
-            let block_at_pos = world.get_block(&block_pos);
-            if block_at_pos.has_tag(&tag::Block::MINECRAFT_EDIBLE_FOR_SHEEP) {
-                return true;
+            let below_pos = block_pos.down();
+            let outcome = eat_outcome(
+                world.level_info.load().game_rules.mob_griefing,
+                world
+                    .get_block(&block_pos)
+                    .has_tag(&tag::Block::MINECRAFT_EDIBLE_FOR_SHEEP),
+                world.get_block(&below_pos).id == Block::GRASS_BLOCK.id,
+            );
+
+            match outcome.destroy {
+                Some(Destroy::EdibleBlock) => {
+                    world.set_block_state(
+                        &block_pos,
+                        Block::AIR.default_state.id,
+                        BlockFlags::NOTIFY_ALL,
+                    );
+                }
+                Some(Destroy::GrassBlockBelow) => {
+                    world.set_block_state(
+                        &below_pos,
+                        Block::DIRT.default_state.id,
+                        BlockFlags::NOTIFY_ALL,
+                    );
+                }
+                None => {}
             }
 
-            let block_below = world.get_block(&block_pos.down());
-            block_below.id == Block::GRASS_BLOCK.id
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.timer > 0 })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.timer = MAX_TIMER;
-            // Vanilla EatBlockGoal.start(): broadcasts entity-event byte 10, which drives the
-            // client-side head-eating animation (Sheep.handleEntityEvent / getHeadEatAngleScale).
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let world = entity.world.load();
-            world.send_entity_status(entity, pumpkin_data::entity::EntityStatus::EatGrass, None);
-            let mut navigator = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            navigator.stop();
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.timer -= 1;
-
-            if self.timer == 4 {
-                let entity = &mob.get_mob_entity().living_entity.entity;
-                let block_pos = entity.block_pos.load();
-                let world = entity.world.load_full();
-
-                let below_pos = block_pos.down();
-                let outcome = eat_outcome(
-                    world.level_info.load().game_rules.mob_griefing,
-                    world
-                        .get_block(&block_pos)
-                        .has_tag(&tag::Block::MINECRAFT_EDIBLE_FOR_SHEEP),
-                    world.get_block(&below_pos).id == Block::GRASS_BLOCK.id,
-                );
-
-                match outcome.destroy {
-                    Some(Destroy::EdibleBlock) => {
-                        world
-                            .set_block_state(
-                                &block_pos,
-                                Block::AIR.default_state.id,
-                                BlockFlags::NOTIFY_ALL,
-                            )
-                            .await;
-                    }
-                    Some(Destroy::GrassBlockBelow) => {
-                        world
-                            .set_block_state(
-                                &below_pos,
-                                Block::DIRT.default_state.id,
-                                BlockFlags::NOTIFY_ALL,
-                            )
-                            .await;
-                    }
-                    None => {}
-                }
-
-                if outcome.ate {
-                    mob.on_eating_grass().await;
-                    // `EatBlockGoal.tick` calls `Mob.ate()` after either branch
-                    // (`EatBlockGoal.java:59-78`), including when mob griefing is disabled.
-                    mob.get_mob_entity().ate().await;
-                }
+            if outcome.ate {
+                mob.on_eating_grass();
+                // `EatBlockGoal.tick` calls `Mob.ate()` after either branch
+                // (`EatBlockGoal.java:59-78`), including when mob griefing is disabled.
+                mob.get_mob_entity().ate();
             }
-        })
+        }
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.timer = 0;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.timer = 0;
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -24,7 +24,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use super::avoid_entity::AvoidEntityGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::world::World;
@@ -99,56 +99,47 @@ impl Default for PiglinAvoidRepellentGoal {
 }
 
 impl Goal for PiglinAvoidRepellentGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.scan_countdown > 0 {
-                self.scan_countdown -= 1;
-                return false;
-            }
-            self.scan_countdown = SCAN_INTERVAL_TICKS;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.scan_countdown > 0 {
+            self.scan_countdown -= 1;
+            return false;
+        }
+        self.scan_countdown = SCAN_INTERVAL_TICKS;
 
-            let Some(repellent) = Self::find_nearest_repellent(mob) else {
-                return false;
-            };
-            let Some(flee_pos) =
-                AvoidEntityGoal::find_flee_position(mob, &repellent.to_centered_f64())
-            else {
-                return false;
-            };
-            self.flee_pos = Some(flee_pos);
-            true
-        })
+        let Some(repellent) = Self::find_nearest_repellent(mob) else {
+            return false;
+        };
+        let Some(flee_pos) = AvoidEntityGoal::find_flee_position(mob, &repellent.to_centered_f64())
+        else {
+            return false;
+        };
+        self.flee_pos = Some(flee_pos);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let navigator = mob
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !navigator.is_idle()
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(flee_pos) = self.flee_pos {
+            let mob_pos = mob.get_entity().pos.load();
+            let mut navigator = mob
                 .get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            !navigator.is_idle()
-        })
+            navigator.set_progress(NavigatorGoal::new(mob_pos, flee_pos, FLEE_SPEED));
+        }
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(flee_pos) = self.flee_pos {
-                let mob_pos = mob.get_entity().pos.load();
-                let mut navigator = mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal::new(mob_pos, flee_pos, FLEE_SPEED));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.flee_pos = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.flee_pos = None;
     }
 
     fn should_run_every_tick(&self) -> bool {

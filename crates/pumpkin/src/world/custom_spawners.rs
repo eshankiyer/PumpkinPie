@@ -53,7 +53,7 @@ fn entities_of_type_near(
 /// the dimension has no sky light), gated per-player by `TIME_SINCE_REST >=
 /// 72000` (sampled via `nextInt`) and by
 /// `DifficultyInstance.isHarderThan(random.nextFloat() * 3.0F)`.
-pub async fn tick_phantom_spawner(world: &Arc<World>) {
+pub fn tick_phantom_spawner(world: &Arc<World>) {
     if !world.level_info.load().game_rules.spawn_phantoms {
         return;
     }
@@ -88,7 +88,10 @@ pub async fn tick_phantom_spawner(world: &Arc<World>) {
         }
 
         let time_since_rest = {
-            let stats = player.stats.lock().await;
+            let stats = player
+                .stats
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             stats.get(
                 StatisticCategory::Custom,
                 CustomStatistic::TimeSinceRest as i32,
@@ -119,7 +122,7 @@ pub async fn tick_phantom_spawner(world: &Arc<World>) {
         for _ in 0..group_size {
             let phantom = from_type(&EntityType::PHANTOM, spawn_pos_f64, world, Uuid::new_v4());
             phantom.get_entity().set_rotation(0.0, 0.0);
-            world.spawn_entity(phantom).await;
+            world.spawn_entity(phantom);
         }
     }
 }
@@ -138,7 +141,7 @@ pub async fn tick_phantom_spawner(world: &Arc<World>) {
 /// Scope reduction: vanilla's other spawn path, inside a swamp-hut structure
 /// (`CATS_SPAWN_IN` structure tag), is dropped entirely - Pumpkin has no
 /// structure-piece lookup by tag.
-pub async fn tick_cat_spawner(world: &Arc<World>) {
+pub fn tick_cat_spawner(world: &Arc<World>) {
     if world.cat_spawn_tick.fetch_sub(1, Relaxed) - 1 > 0 {
         return;
     }
@@ -164,18 +167,16 @@ pub async fn tick_cat_spawner(world: &Arc<World>) {
         return;
     }
 
-    if !world.is_close_to_village(spawn_pos, 2).await {
+    if !world.is_close_to_village(spawn_pos, 2) {
         return;
     }
 
-    let homes_nearby = world
-        .poi_count_in_range(
-            crate::world::village_poi::POI_TYPE_HOME,
-            spawn_pos,
-            48,
-            crate::world::village_poi::Occupancy::IsOccupied,
-        )
-        .await;
+    let homes_nearby = world.poi_count_in_range(
+        crate::world::village_poi::POI_TYPE_HOME,
+        spawn_pos,
+        48,
+        crate::world::village_poi::Occupancy::IsOccupied,
+    );
     if homes_nearby <= 4 {
         return;
     }
@@ -185,7 +186,7 @@ pub async fn tick_cat_spawner(world: &Arc<World>) {
         return;
     }
 
-    let time_of_day = world.get_time_of_day().await;
+    let time_of_day = world.get_time_of_day();
     let spawn_pos_f64 = Vector3::new(
         f64::from(spawn_pos.0.x) + 0.5,
         f64::from(spawn_pos.0.y),
@@ -194,7 +195,7 @@ pub async fn tick_cat_spawner(world: &Arc<World>) {
     let cat = from_type(&EntityType::CAT, spawn_pos_f64, world, Uuid::new_v4());
     cat.set_variant_name(select_natural_cat_variant(time_of_day));
     cat.get_entity().set_rotation(0.0, 0.0);
-    world.spawn_entity(cat).await;
+    world.spawn_entity(cat);
 }
 
 fn find_spawn_position_near(
@@ -227,7 +228,7 @@ fn has_enough_space(world: &Arc<World>, pos: &BlockPos) -> bool {
     true
 }
 
-async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
+fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
     let players = world.players.load();
     if players.is_empty() {
         return true;
@@ -271,7 +272,7 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
         world,
         Uuid::new_v4(),
     );
-    world.spawn_entity(trader.clone()).await;
+    world.spawn_entity(trader.clone());
 
     for _ in 0..2 {
         if let Some(llama_pos) =
@@ -288,8 +289,8 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
                 world,
                 Uuid::new_v4(),
             );
-            world.spawn_entity(llama.clone()).await;
-            llama.get_entity().leash_to(trader.clone()).await;
+            world.spawn_entity(llama.clone());
+            llama.get_entity().leash_to(trader.clone());
         }
     }
 
@@ -314,7 +315,7 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
 /// (`World::trader_spawn_delay` / `trader_spawn_chance`), not in a persisted
 /// `WanderingTraderData` saved-data file, so they reset to vanilla defaults (24000 / 25) on
 /// server restart.
-pub async fn tick_wandering_trader_spawner(world: &Arc<World>) {
+pub fn tick_wandering_trader_spawner(world: &Arc<World>) {
     if !world.level_info.load().game_rules.spawn_wandering_traders {
         return;
     }
@@ -337,7 +338,7 @@ pub async fn tick_wandering_trader_spawner(world: &Arc<World>) {
         return;
     }
 
-    if try_spawn_wandering_trader(world).await {
+    if try_spawn_wandering_trader(world) {
         world.trader_spawn_chance.store(25, Relaxed);
     }
 }
@@ -403,7 +404,7 @@ const OVERWORLD_DAY_LENGTH: i64 = 24_000;
 /// (`VillageSiege.java:100-106`) to give siege zombies difficulty-scaled equipment and
 /// jockey rolls; Pumpkin has no finalize-spawn hook and the other custom spawners here
 /// (`tick_phantom_spawner`, `tick_cat_spawner`) likewise spawn bare mobs.
-pub async fn tick_village_siege(world: &Arc<World>, spawn_enemies: bool) {
+pub fn tick_village_siege(world: &Arc<World>, spawn_enemies: bool) {
     let siege = &world.village_siege;
     // Vanilla `Level.isBrightOutside` (`Level.java:385-387`): fixed-time dimensions never
     // count as bright. They also contain no villages, so their sieges would die out in
@@ -413,14 +414,14 @@ pub async fn tick_village_siege(world: &Arc<World>, spawn_enemies: bool) {
         world.dimension.fixed_time.is_none() && world.sky_darken.load(Relaxed) < 4;
 
     if !is_bright_outside && spawn_enemies {
-        if world.get_time_of_day().await % OVERWORLD_DAY_LENGTH == ROLL_VILLAGE_SIEGE_TIME_OF_DAY {
+        if world.get_time_of_day() % OVERWORLD_DAY_LENGTH == ROLL_VILLAGE_SIEGE_TIME_OF_DAY {
             let tonight = rand::random_range(0..10) == 0;
             siege.siege_tonight.store(tonight, Relaxed);
         }
 
         if siege.siege_tonight.load(Relaxed) {
             if !siege.has_setup_siege.load(Relaxed) {
-                if !try_to_setup_siege(world).await {
+                if !try_to_setup_siege(world) {
                     return;
                 }
                 siege.has_setup_siege.store(true, Relaxed);
@@ -440,7 +441,7 @@ pub async fn tick_village_siege(world: &Arc<World>, spawn_enemies: bool) {
                         f64::from(siege.spawn_y.load(Relaxed)),
                         f64::from(siege.spawn_z.load(Relaxed)) + 0.5,
                     );
-                    try_spawn_zombie(world, pos).await;
+                    try_spawn_zombie(world, pos);
                 } else {
                     siege.siege_tonight.store(false, Relaxed);
                 }
@@ -459,7 +460,7 @@ pub async fn tick_village_siege(world: &Arc<World>, spawn_enemies: bool) {
 /// Note the vanilla quirk kept here: once a qualifying player is found the method returns
 /// `true` even if none of the ten points worked (L88), so a failed setup still consumes this
 /// night's attempt and the state machine waits for the next dark period to retry.
-async fn try_to_setup_siege(world: &Arc<World>) -> bool {
+fn try_to_setup_siege(world: &Arc<World>) -> bool {
     let players = world.players.load();
     for player in players.iter() {
         if player.gamemode.load() == GameMode::Spectator {
@@ -469,7 +470,7 @@ async fn try_to_setup_siege(world: &Arc<World>) -> bool {
         let center = player.get_entity().block_pos.load();
         // Vanilla `level.isVillage(center)` is `isCloseToVillage(center, 1)`
         // (`ServerLevel.java:1542-1544`).
-        if !world.is_close_to_village(center, 1).await {
+        if !world.is_close_to_village(center, 1) {
             continue;
         }
         if world
@@ -489,7 +490,7 @@ async fn try_to_setup_siege(world: &Arc<World>) -> bool {
             siege.spawn_y.store(y, Relaxed);
             siege.spawn_z.store(z, Relaxed);
             let anchor = BlockPos::new(x, y, z);
-            if find_random_spawn_pos(world, anchor).await.is_some() {
+            if find_random_spawn_pos(world, anchor).is_some() {
                 siege.next_spawn_time.store(0, Relaxed);
                 siege.zombies_to_spawn.store(20, Relaxed);
                 break;
@@ -505,11 +506,11 @@ async fn try_to_setup_siege(world: &Arc<World>) -> bool {
 /// `VillageSiege.trySpawn` (`VillageSiege.java:96-111`) minus the dropped
 /// `finalizeSpawn` pass (see the scope note on [`tick_village_siege`]): place one zombie at
 /// the bottom-center of a valid spot with a uniformly random yaw.
-async fn try_spawn_zombie(world: &Arc<World>, spawn_pos: Vector3<f64>) {
+fn try_spawn_zombie(world: &Arc<World>, spawn_pos: Vector3<f64>) {
     let yaw = rand::random::<f32>() * 360.0;
     let zombie = from_type(&EntityType::ZOMBIE, spawn_pos, world, Uuid::new_v4());
     zombie.get_entity().set_rotation(yaw, 0.0);
-    world.spawn_entity(zombie).await;
+    world.spawn_entity(zombie);
 }
 
 /// `VillageSiege.findRandomSpawnPos` (`VillageSiege.java:113-127`): jitter the anchor by
@@ -520,8 +521,12 @@ async fn try_spawn_zombie(world: &Arc<World>, spawn_pos: Vector3<f64>) {
 /// requirements because only `TRIAL_SPAWNER` ignores them
 /// (`EntitySpawnReason.java:28-30`), and its trailing `checkMobSpawnRules` block-placement
 /// predicate is covered by `is_spawn_position_ok`.
-async fn find_random_spawn_pos(world: &Arc<World>, pos: BlockPos) -> Option<Vector3<f64>> {
-    let is_thundering = world.weather.lock().await.thundering;
+fn find_random_spawn_pos(world: &Arc<World>, pos: BlockPos) -> Option<Vector3<f64>> {
+    let is_thundering = world
+        .weather
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .thundering;
     for _ in 0..10 {
         let x = pos.0.x + rand::random_range(0..16) - 8;
         let z = pos.0.z + rand::random_range(0..16) - 8;
@@ -529,7 +534,7 @@ async fn find_random_spawn_pos(world: &Arc<World>, pos: BlockPos) -> Option<Vect
         // read the wandering-trader path uses via `get_top_block`.
         let y = world.get_top_block(Vector2::new(x, z));
         let offset = BlockPos::new(x, y, z);
-        if world.is_close_to_village(offset, 1).await
+        if world.is_close_to_village(offset, 1)
             && MobEntity::check_monster_spawn_rules(world, &offset, is_thundering)
             && is_spawn_position_ok(world, &offset, &EntityType::ZOMBIE)
         {

@@ -10,7 +10,7 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+        Entity, EntityBase, NBTStorage,
         area_effect_cloud::AreaEffectCloudEntity,
         projectile::{
             ProjectileHit, ThrownItemEntity,
@@ -146,18 +146,14 @@ impl DragonFireballEntity {
 }
 
 impl NBTStorage for DragonFireballEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            nbt.put_double("acceleration_power", self.get_acceleration_power());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_double("acceleration_power", self.get_acceleration_power());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(accel) = nbt.get_double("acceleration_power") {
-                self.set_acceleration_power(accel);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        if let Some(accel) = nbt.get_double("acceleration_power") {
+            self.set_acceleration_power(accel);
+        }
     }
 }
 
@@ -166,49 +162,43 @@ impl EntityBase for DragonFireballEntity {
         true
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `AbstractHurtingProjectile.applyInertia` (AbstractHurtingProjectile.java:102-127).
-            let entity = self.get_entity();
-            let mut velocity = entity.velocity.load();
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        // `AbstractHurtingProjectile.applyInertia` (AbstractHurtingProjectile.java:102-127).
+        let entity = self.get_entity();
+        let mut velocity = entity.velocity.load();
 
-            let inertia = if entity.touching_water.load(Ordering::Relaxed) {
-                WATER_INERTIA
-            } else {
-                AIR_INERTIA
-            };
+        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+            WATER_INERTIA
+        } else {
+            AIR_INERTIA
+        };
 
-            let accel = self.get_acceleration_power();
-            let speed = velocity.length();
-            if speed > 1e-6 {
-                let norm = velocity.normalize();
-                velocity = norm
-                    .multiply(accel, accel, accel)
-                    .add(&velocity)
-                    .multiply(inertia, inertia, inertia);
-                entity.velocity.store(velocity);
-            }
+        let accel = self.get_acceleration_power();
+        let speed = velocity.length();
+        if speed > 1e-6 {
+            let norm = velocity.normalize();
+            velocity = norm
+                .multiply(accel, accel, accel)
+                .add(&velocity)
+                .multiply(inertia, inertia, inertia);
+            entity.velocity.store(velocity);
+        }
 
-            self.thrown.process_tick(caller, server).await;
+        self.thrown.process_tick(caller, server);
 
-            // `AbstractHurtingProjectile.tick` creates the trail after hit handling
-            // (`AbstractHurtingProjectile.java:92-96`), including on the server's particle path.
-            let (particle, data) = get_trail_particle();
-            let position = entity.pos.load();
-            let world = entity.world.load();
-            world.spawn_particle_with_data(
-                Vector3::new(position.x, position.y + 0.5, position.z),
-                Vector3::default(),
-                0.0,
-                1,
-                particle,
-                &data,
-            );
-        })
+        // `AbstractHurtingProjectile.tick` creates the trail after hit handling
+        // (`AbstractHurtingProjectile.java:92-96`), including on the server's particle path.
+        let (particle, data) = get_trail_particle();
+        let position = entity.pos.load();
+        let world = entity.world.load();
+        world.spawn_particle_with_data(
+            Vector3::new(position.x, position.y + 0.5, position.z),
+            Vector3::default(),
+            0.0,
+            1,
+            particle,
+            &data,
+        );
     }
 
     fn get_entity(&self) -> &Entity {
@@ -232,79 +222,73 @@ impl EntityBase for DragonFireballEntity {
     /// Deviation: vanilla only `discard()`s inside the guarded branch, so a fireball that
     /// lands on its own shooter keeps flying. `ThrownItemEntity::process_tick` removes the
     /// projectile after every hit, so here the owner hit merely produces no cloud.
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let world = entity.world.load();
+    fn on_hit(&self, hit: ProjectileHit) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
 
-            let hit_entity_id = match &hit {
-                ProjectileHit::Entity { entity, .. } => Some(entity.get_entity().entity_id),
-                ProjectileHit::Block { .. } => None,
-            };
-            if !should_splash(hit_entity_id, self.thrown.owner_id) {
-                return;
-            }
+        let hit_entity_id = match &hit {
+            ProjectileHit::Entity { entity, .. } => Some(entity.get_entity().entity_id),
+            ProjectileHit::Block { .. } => None,
+        };
+        if !should_splash(hit_entity_id, self.thrown.owner_id) {
+            return;
+        }
 
-            let impact = hit.hit_pos();
-            let dimension = entity.entity_dimension.load();
-            let splash_box = BoundingBox::new_from_pos(impact.x, impact.y, impact.z, &dimension)
-                .expand(
-                    f64::from(SPLASH_RANGE),
-                    SPLASH_VERTICAL_RANGE,
-                    f64::from(SPLASH_RANGE),
-                );
-            // `getEntitiesOfClass(LivingEntity.class, ...)`: ender dragon parts report no
-            // living entity, so they drop out here the way they do in vanilla.
-            let nearby: Vec<Vector3<f64>> = world
-                .get_all_at_box(&splash_box)
-                .into_iter()
-                .filter(|other| other.get_living_entity().is_some())
-                .map(|other| other.get_entity().pos.load())
-                .collect();
-            let cloud_pos = cloud_position(impact, &nearby);
-
-            // `level().levelEvent(2006, blockPosition(), isSilent() ? -1 : 1)` (DragonFireball.java:55).
-            world.sync_world_event(
-                WorldEvent::ParticlesDragonFireballSplash,
-                BlockPos::floored_v(impact),
-                i32::from(if entity.is_silent() { -1i8 } else { 1i8 }),
+        let impact = hit.hit_pos();
+        let dimension = entity.entity_dimension.load();
+        let splash_box = BoundingBox::new_from_pos(impact.x, impact.y, impact.z, &dimension)
+            .expand(
+                f64::from(SPLASH_RANGE),
+                SPLASH_VERTICAL_RANGE,
+                f64::from(SPLASH_RANGE),
             );
+        // `getEntitiesOfClass(LivingEntity.class, ...)`: ender dragon parts report no
+        // living entity, so they drop out here the way they do in vanilla.
+        let nearby: Vec<Vector3<f64>> = world
+            .get_all_at_box(&splash_box)
+            .into_iter()
+            .filter(|other| other.get_living_entity().is_some())
+            .map(|other| other.get_entity().pos.load())
+            .collect();
+        let cloud_pos = cloud_position(impact, &nearby);
 
-            let cloud_entity =
-                Entity::new(world.clone(), cloud_pos, &EntityType::AREA_EFFECT_CLOUD);
-            // DragonFireball.java:40-45 uses DragonBreath with power 1 and a 0.25 potion
-            // duration scale for the spawned area-effect cloud.
-            let cloud = AreaEffectCloudEntity::create_with_options(
-                cloud_entity,
-                pumpkin_data::item_stack::ItemStack::new(
-                    0,
-                    &pumpkin_data::item::Item::DRAGON_BREATH,
+        // `level().levelEvent(2006, blockPosition(), isSilent() ? -1 : 1)` (DragonFireball.java:55).
+        world.sync_world_event(
+            WorldEvent::ParticlesDragonFireballSplash,
+            BlockPos::floored_v(impact),
+            i32::from(if entity.is_silent() { -1i8 } else { 1i8 }),
+        );
+
+        let cloud_entity = Entity::new(world.clone(), cloud_pos, &EntityType::AREA_EFFECT_CLOUD);
+        // DragonFireball.java:40-45 uses DragonBreath with power 1 and a 0.25 potion
+        // duration scale for the spawned area-effect cloud.
+        let cloud = AreaEffectCloudEntity::create_with_options(
+            cloud_entity,
+            pumpkin_data::item_stack::ItemStack::new(0, &pumpkin_data::item::Item::DRAGON_BREATH),
+            vec![(
+                &pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE,
+                CLOUD_EFFECT_DURATION,
+                CLOUD_EFFECT_AMPLIFIER,
+                false,
+                true,
+                true,
+            )],
+            CLOUD_DURATION,
+            CLOUD_RADIUS,
+            CLOUD_REAPPLICATION_DELAY,
+            CLOUD_WAIT_TIME,
+            0.0,
+            0,
+            cloud_radius_per_tick(),
+            Some((
+                pumpkin_protocol::codec::var_int::VarInt(
+                    pumpkin_data::particle::Particle::DragonBreath as i32,
                 ),
-                vec![(
-                    &pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE,
-                    CLOUD_EFFECT_DURATION,
-                    CLOUD_EFFECT_AMPLIFIER,
-                    false,
-                    true,
-                    true,
-                )],
-                CLOUD_DURATION,
-                CLOUD_RADIUS,
-                CLOUD_REAPPLICATION_DELAY,
-                CLOUD_WAIT_TIME,
-                0.0,
-                0,
-                cloud_radius_per_tick(),
-                Some((
-                    pumpkin_protocol::codec::var_int::VarInt(
-                        pumpkin_data::particle::Particle::DragonBreath as i32,
-                    ),
-                    1.0f32.to_be_bytes().to_vec(),
-                )),
-                0.25,
-            );
-            world.spawn_entity(cloud).await;
-        })
+                1.0f32.to_be_bytes().to_vec(),
+            )),
+            0.25,
+        );
+        world.spawn_entity(cloud);
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::entity::EntityType;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage,
+    Entity, NBTStorage,
     ai::goal::active_target::ActiveTargetGoal,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
 };
@@ -41,7 +41,7 @@ impl Mob for WitherSkeletonEntity {
         &self.entity.mob_entity
     }
 
-    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move { self.entity.reassess_weapon_goal(self).await })
+    fn pre_ai_tick(&self) {
+        self.entity.reassess_weapon_goal(self)
     }
 }

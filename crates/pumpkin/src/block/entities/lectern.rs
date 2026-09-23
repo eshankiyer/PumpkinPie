@@ -3,19 +3,18 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
+use std::sync::Mutex;
 use std::{
     any::Any,
     future::Future,
-    pin::Pin,
-    sync::{
+    pin::sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
-use tokio::sync::Mutex;
 
 use crate::block::entities::BlockEntity;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
+use pumpkin_world::inventory::{Clearable, Inventory};
 
 pub struct LecternBlockEntity {
     pub position: BlockPos,
@@ -64,19 +63,17 @@ impl BlockEntity for LecternBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let book = self.book.lock().await;
-            if !book.is_empty() {
-                let mut book_nbt = NbtCompound::default();
-                book.write_item_stack(&mut book_nbt);
-                nbt.put_compound("Book", book_nbt);
-            }
-            nbt.put_int("Page", self.page.load(Ordering::Relaxed) as i32);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let book = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !book.is_empty() {
+            let mut book_nbt = NbtCompound::default();
+            book.write_item_stack(&mut book_nbt);
+            nbt.put_compound("Book", book_nbt);
+        }
+        nbt.put_int("Page", self.page.load(Ordering::Relaxed) as i32);
     }
 
     fn get_inventory(self: Arc<Self>) -> Option<Arc<dyn Inventory>> {
@@ -157,14 +154,22 @@ impl LecternBlockEntity {
         self.has_book.load(Ordering::Relaxed)
     }
 
-    pub async fn page_count(&self) -> i32 {
-        Self::page_count_of(&*self.book.lock().await)
+    pub fn page_count(&self) -> i32 {
+        Self::page_count_of(
+            &*self
+                .book
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     /// Vanilla comparator output (`LecternBlockEntity.java:172-175`): books with
     /// at most one page use full progress, while multi-page books scale by page.
-    pub async fn comparator_output(&self) -> u8 {
-        let book = self.book.lock().await;
+    pub fn comparator_output(&self) -> u8 {
+        let book = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !Self::stack_has_book(&book) {
             return 0;
         }
@@ -185,61 +190,70 @@ impl Inventory for LecternBlockEntity {
         1
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move { self.book.lock().await.is_empty() })
+    fn is_empty(&self) -> bool {
+        self.book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
-    fn get_stack(&self, _slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move { self.book.lock().await.clone() })
+    fn get_stack(&self, _slot: usize) -> ItemStack {
+        self.book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    fn remove_stack(&self, _slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut removed = ItemStack::EMPTY.clone();
-            let mut guard = self.book.lock().await;
-            std::mem::swap(&mut removed, &mut *guard);
-            // `removeItemNoUpdate` calls `onBookItemRemove` after clearing slot 0
-            // (`LecternBlockEntity.java:69-74`).
+    fn remove_stack(&self, _slot: usize) -> ItemStack {
+        let mut removed = ItemStack::EMPTY.clone();
+        let mut guard = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::mem::swap(&mut removed, &mut *guard);
+        // `removeItemNoUpdate` calls `onBookItemRemove` after clearing slot 0
+        // (`LecternBlockEntity.java:69-74`).
+        self.has_book.store(false, Ordering::Relaxed);
+        self.page.store(0, Ordering::Relaxed);
+        self.mark_dirty();
+        removed
+    }
+
+    fn remove_stack_specific(&self, _slot: usize, amount: u8) -> ItemStack {
+        let mut stack = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if stack.is_empty() {
+            return ItemStack::EMPTY.clone();
+        }
+        let res = stack.split(amount);
+        if stack.is_empty() {
+            // Vanilla `bookAccess.removeItem` calls `onBookItemRemove` when the
+            // split empties the slot (`LecternBlockEntity.java:55-60`). The block
+            // callback is handled by the screen controller; keep the entity's
+            // page state in sync here as well.
+            self.page.store(0, Ordering::Relaxed);
+            // `removeItem` clears the book state when the split empties slot 0
+            // (`LecternBlockEntity.java:55-60`).
             self.has_book.store(false, Ordering::Relaxed);
-            self.page.store(0, Ordering::Relaxed);
-            self.mark_dirty();
-            removed
-        })
+        }
+        self.mark_dirty();
+        res
     }
 
-    fn remove_stack_specific(&self, _slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut stack = self.book.lock().await;
-            if stack.is_empty() {
-                return ItemStack::EMPTY.clone();
-            }
-            let res = stack.split(amount);
-            if stack.is_empty() {
-                // Vanilla `bookAccess.removeItem` calls `onBookItemRemove` when the
-                // split empties the slot (`LecternBlockEntity.java:55-60`). The block
-                // callback is handled by the screen controller; keep the entity's
-                // page state in sync here as well.
-                self.page.store(0, Ordering::Relaxed);
-                // `removeItem` clears the book state when the split empties slot 0
-                // (`LecternBlockEntity.java:55-60`).
-                self.has_book.store(false, Ordering::Relaxed);
-            }
-            self.mark_dirty();
-            res
-        })
-    }
-
-    fn set_stack(&self, _slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            let has_book = Self::stack_has_book(&stack);
-            // `setBook` replaces the stack and recomputes its book state
-            // (`LecternBlockEntity.java:152-156`).
-            *self.book.lock().await = stack;
-            self.has_book.store(has_book, Ordering::Relaxed);
-            // A freshly placed book always opens on its first page.
-            self.page.store(0, Ordering::Relaxed);
-            self.mark_dirty();
-        })
+    fn set_stack(&self, _slot: usize, stack: ItemStack) {
+        let has_book = Self::stack_has_book(&stack);
+        // `setBook` replaces the stack and recomputes its book state
+        // (`LecternBlockEntity.java:152-156`).
+        *self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+        self.has_book.store(has_book, Ordering::Relaxed);
+        // A freshly placed book always opens on its first page.
+        self.page.store(0, Ordering::Relaxed);
+        self.mark_dirty();
     }
 
     fn mark_dirty(&self) {
@@ -250,13 +264,13 @@ impl Inventory for LecternBlockEntity {
     /// book slot never accepts an item through this container interface - a book only ever
     /// gets in via `LecternBlock.tryPlaceBook`. Without this a hopper facing a lectern could
     /// insert (or overwrite) whatever item it is holding into slot 0.
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         _slot: usize,
-        _stack: &'a ItemStack,
+        _stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async { false })
+    ) -> bool {
+        false
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -265,18 +279,19 @@ impl Inventory for LecternBlockEntity {
 }
 
 impl Clearable for LecternBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            *self.book.lock().await = ItemStack::EMPTY.clone();
-            // `clearContent` delegates to `setBook(ItemStack.EMPTY)`
-            // (`LecternBlockEntity.java:220-223,152-156`).
-            self.has_book.store(false, Ordering::Relaxed);
-            // Vanilla `setBook(ItemStack.EMPTY)` resets both page and page count
-            // (`LecternBlockEntity.java:152-156`), which is the outer Clearable
-            // behavior behind `clearContent` (`:220-223`).
-            self.page.store(0, Ordering::Relaxed);
-            self.mark_dirty();
-        })
+    fn clear(&self) {
+        *self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ItemStack::EMPTY.clone();
+        // `clearContent` delegates to `setBook(ItemStack.EMPTY)`
+        // (`LecternBlockEntity.java:220-223,152-156`).
+        self.has_book.store(false, Ordering::Relaxed);
+        // Vanilla `setBook(ItemStack.EMPTY)` resets both page and page count
+        // (`LecternBlockEntity.java:152-156`), which is the outer Clearable
+        // behavior behind `clearContent` (`:220-223`).
+        self.page.store(0, Ordering::Relaxed);
+        self.mark_dirty();
     }
 }
 

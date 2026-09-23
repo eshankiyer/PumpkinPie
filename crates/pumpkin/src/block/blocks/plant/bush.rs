@@ -4,8 +4,8 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs, blocks::plant::PlantBlockBase,
+    BlockBehaviour, BlockMetadata, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    blocks::plant::PlantBlockBase,
 };
 
 pub struct BushBlock;
@@ -34,39 +34,32 @@ impl BlockBehaviour for BushBlock {
     /// `BushBlock.performBonemeal` (`BushBlock.java:43-46`) places this block's default state at
     /// the shuffled horizontal spread position selected by
     /// `BonemealableBlock.findSpreadableNeighbourPos` (`BonemealableBlock.java:17-20`).
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(position) = find_spreadable_neighbour(self, args.world, args.position, true)
-            else {
-                return;
-            };
-            args.world
-                .set_block_state(
-                    &position,
-                    args.block.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let Some(position) = find_spreadable_neighbour(self, args.world, args.position, true)
+        else {
+            return;
+        };
+        args.world.set_block_state(
+            &position,
+            args.block.default_state.id,
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 }
 

@@ -1,4 +1,4 @@
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::{Block, BlockDirection, tag::Taggable};
 use pumpkin_util::math::position::BlockPos;
@@ -59,46 +59,42 @@ impl TryFindLandGoal {
 impl Goal for TryFindLandGoal {
     /// `TryFindLand`'s water gate (`TryFindLand.java:25-26`) and its 60-tick cooldown
     /// (`TryFindLand.java:16,29-32,54`).
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            if !entity
-                .world
-                .load()
-                .get_fluid(&entity.block_pos.load())
-                .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER)
-            {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        if !entity
+            .world
+            .load()
+            .get_fluid(&entity.block_pos.load())
+            .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER)
+        {
+            return false;
+        }
 
-            let game_time = entity.world.load().get_world_age().await;
-            game_time >= self.next_ok_start_time
-        })
+        let game_time = entity.world.load().get_world_age();
+        game_time >= self.next_ok_start_time
     }
 
     /// The declarative vanilla behavior is a one-shot (`TryFindLand.java:20-58`); after installing
     /// a destination, let the Goal selector retry only after the behavior's cooldown.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
     /// `TryFindLand`'s destination writes (`TryFindLand.java:46-49`) and cooldown update
     /// (`TryFindLand.java:54`).
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let game_time = entity.world.load().get_world_age().await;
-            self.next_ok_start_time = game_time + 60;
+    fn start(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let game_time = entity.world.load().get_world_age();
+        self.next_ok_start_time = game_time + 60;
 
-            if let Some(target) = Self::find_land(mob, self.range) {
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(
-                    entity.pos.load(),
-                    target.to_f64(),
-                    self.speed,
-                ));
-            }
-        })
+        if let Some(target) = Self::find_land(mob, self.range) {
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            navigator.set_progress(NavigatorGoal::new(
+                entity.pos.load(),
+                target.to_f64(),
+                self.speed,
+            ));
+        }
     }
 
     /// `TryFindLand` writes a `WALK_TARGET` (`TryFindLand.java:48`), so it owns movement.

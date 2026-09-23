@@ -13,7 +13,7 @@
 //! codebase already approximates with the villager's `AvoidEntityGoal` set. This goal
 //! therefore claims no `Controls` and runs alongside those goals.
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::living::LivingEntity;
 use crate::entity::mob::Mob;
 use crate::entity::passive::villager::VillagerEntity;
@@ -74,7 +74,7 @@ impl VillagerPanicGoal {
 
     /// `isHurt` (`VillagerPanicTrigger.java:45-47`): vanilla checks `HURT_BY` memory
     /// presence; see `RECENT_DAMAGE_TICKS` for the documented stand-in used here.
-    async fn is_hurt(mob: &dyn Mob) -> bool {
+    fn is_hurt(mob: &dyn Mob) -> bool {
         let living = &mob.get_mob_entity().living_entity;
         // `(sequence, damage tick, causes panic)`; the sequence only orders concurrent
         // writers, so read the tick and the flag like `escape_danger.rs` does.
@@ -83,7 +83,11 @@ impl VillagerPanicGoal {
             return false;
         }
         let world = living.entity.world.load();
-        let game_time = world.level_time.lock().await.world_age;
+        let game_time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
         last_damage >= 0 && game_time - last_damage <= RECENT_DAMAGE_TICKS
     }
 
@@ -120,13 +124,13 @@ impl Default for VillagerPanicGoal {
 
 impl Goal for VillagerPanicGoal {
     /// `start`'s own gate (`VillagerPanicTrigger.java:21`): hurt or hostile present.
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::is_hurt(mob).await || Self::has_hostile(mob) })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::is_hurt(mob) || Self::has_hostile(mob)
     }
 
     /// `canStillUse` (`VillagerPanicTrigger.java:16-18`): identical condition.
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::is_hurt(mob).await || Self::has_hostile(mob) })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        Self::is_hurt(mob) || Self::has_hostile(mob)
     }
 
     /// `start` (`VillagerPanicTrigger.java:20-33`): entering panic erases the `PATH` and
@@ -135,34 +139,32 @@ impl Goal for VillagerPanicGoal {
     /// erases have nothing to clear in the goal world (breed/interact targets live inside
     /// their goals' own fields); `setActiveActivityIfPossible(Activity.PANIC)` maps onto the
     /// goal-selector state machine itself.
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     /// `tick` (`VillagerPanicTrigger.java:35-39`): while panicking, every 100 ticks attempt
     /// `spawnGolemIfNeeded(level, timestamp, 3)`. The gating logic inside
     /// `spawn_golem_if_needed` (`LAST_SLEPT` recency + `GOLEM_DETECTED_RECENTLY`, checked
     /// again per nearby voter) is `Villager.java:834-852` and is reused verbatim.
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() else {
-                return;
-            };
-            let world = mob.get_entity().world.load();
-            let game_time = world.level_time.lock().await.world_age;
-            if game_time % GOLEM_CHECK_INTERVAL != 0 {
-                return;
-            }
-            villager
-                .spawn_golem_if_needed(&world, game_time, GOLEM_VILLAGERS_NEEDED_TO_AGREE)
-                .await;
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() else {
+            return;
+        };
+        let world = mob.get_entity().world.load();
+        let game_time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
+        if game_time % GOLEM_CHECK_INTERVAL != 0 {
+            return;
+        }
+        villager.spawn_golem_if_needed(&world, game_time, GOLEM_VILLAGERS_NEEDED_TO_AGREE);
     }
 
     fn should_run_every_tick(&self) -> bool {

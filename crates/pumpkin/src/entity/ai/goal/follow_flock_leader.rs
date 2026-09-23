@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::{EntityBase, mob::Mob};
 
@@ -103,112 +103,102 @@ impl Default for FollowFlockLeaderGoal {
 }
 
 impl Goal for FollowFlockLeaderGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if mob.get_mob_entity().has_schooling_followers() {
-                return false;
-            }
-            if mob.get_mob_entity().is_schooling_follower() {
-                return true;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if mob.get_mob_entity().has_schooling_followers() {
+            return false;
+        }
+        if mob.get_mob_entity().is_schooling_follower() {
+            return true;
+        }
 
-            let remaining = self.next_start_tick.load(Ordering::Relaxed);
-            if remaining < 0 {
-                self.next_start_tick
-                    .store(Self::roll_next_start_tick(mob) - 1, Ordering::Relaxed);
-                return false;
-            }
-            if remaining > 0 {
-                self.next_start_tick.fetch_sub(1, Ordering::Relaxed);
-                return false;
-            }
+        let remaining = self.next_start_tick.load(Ordering::Relaxed);
+        if remaining < 0 {
             self.next_start_tick
-                .store(Self::roll_next_start_tick(mob), Ordering::Relaxed);
+                .store(Self::roll_next_start_tick(mob) - 1, Ordering::Relaxed);
+            return false;
+        }
+        if remaining > 0 {
+            self.next_start_tick.fetch_sub(1, Ordering::Relaxed);
+            return false;
+        }
+        self.next_start_tick
+            .store(Self::roll_next_start_tick(mob), Ordering::Relaxed);
 
-            let Some((leader, candidates)) = Self::find_school(mob) else {
-                return false;
-            };
+        let Some((leader, candidates)) = Self::find_school(mob) else {
+            return false;
+        };
 
-            let Some(leader_mob) = leader.get_mob() else {
-                return false;
-            };
-            let remaining = leader_mob.get_mob_entity().schooling_followers_remaining();
+        let Some(leader_mob) = leader.get_mob() else {
+            return false;
+        };
+        let remaining = leader_mob.get_mob_entity().schooling_followers_remaining();
 
-            // Vanilla applies the capacity limit before filtering out the leader itself. Keep
-            // that order, and preserve the query order instead of imposing an entity-id sort.
-            for candidate in candidates.into_iter().take(remaining) {
-                if candidate.get_entity().entity_id == leader.get_entity().entity_id {
-                    continue;
-                }
-                let Some(candidate_mob) = candidate.get_mob() else {
-                    continue;
-                };
-                if candidate_mob.get_mob_entity().is_schooling_follower() {
-                    continue;
-                }
-                let _ = candidate_mob
-                    .get_mob_entity()
-                    .start_schooling_following(&leader);
+        // Vanilla applies the capacity limit before filtering out the leader itself. Keep
+        // that order, and preserve the query order instead of imposing an entity-id sort.
+        for candidate in candidates.into_iter().take(remaining) {
+            if candidate.get_entity().entity_id == leader.get_entity().entity_id {
+                continue;
             }
-
-            mob.get_mob_entity().is_schooling_follower()
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !mob.get_mob_entity().is_schooling_follower() {
-                return false;
+            let Some(candidate_mob) = candidate.get_mob() else {
+                continue;
+            };
+            if candidate_mob.get_mob_entity().is_schooling_follower() {
+                continue;
             }
-            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
-                return false;
-            };
+            let _ = candidate_mob
+                .get_mob_entity()
+                .start_schooling_following(&leader);
+        }
 
-            let dist_sq = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&leader.get_entity().pos.load());
-            dist_sq <= IN_RANGE_OF_LEADER_SQ
-        })
+        mob.get_mob_entity().is_schooling_follower()
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.time_to_recalc_path.store(0, Ordering::Relaxed);
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        if !mob.get_mob_entity().is_schooling_follower() {
+            return false;
+        }
+        let Some(leader) = mob.get_mob_entity().schooling_leader() else {
+            return false;
+        };
+
+        let dist_sq = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&leader.get_entity().pos.load());
+        dist_sq <= IN_RANGE_OF_LEADER_SQ
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
-                return;
-            };
-            mob.get_mob_entity().stop_schooling_following_if(&leader);
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.time_to_recalc_path.store(0, Ordering::Relaxed);
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let remaining = self.time_to_recalc_path.fetch_sub(1, Ordering::Relaxed) - 1;
-            if remaining > 0 {
-                return;
-            }
-            self.time_to_recalc_path
-                .store(to_goal_ticks(10), Ordering::Relaxed);
+    fn stop(&mut self, mob: &dyn Mob) {
+        let Some(leader) = mob.get_mob_entity().schooling_leader() else {
+            return;
+        };
+        mob.get_mob_entity().stop_schooling_following_if(&leader);
+    }
 
-            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let remaining = self.time_to_recalc_path.fetch_sub(1, Ordering::Relaxed) - 1;
+        if remaining > 0 {
+            return;
+        }
+        self.time_to_recalc_path
+            .store(to_goal_ticks(10), Ordering::Relaxed);
 
-            let pos = mob.get_entity().pos.load();
-            let target: Vector3<f64> = leader.get_entity().pos.load();
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap()
-                .set_progress(NavigatorGoal::new(pos, target, 1.0));
-        })
+        let Some(leader) = mob.get_mob_entity().schooling_leader() else {
+            return;
+        };
+
+        let pos = mob.get_entity().pos.load();
+        let target: Vector3<f64> = leader.get_entity().pos.load();
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress(NavigatorGoal::new(pos, target, 1.0));
     }
 
     fn controls(&self) -> Controls {

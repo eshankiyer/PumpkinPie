@@ -3,9 +3,7 @@ use pumpkin_data::{Block, BlockId, BlockStateId, tag};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
 
-use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-};
+use crate::block::{BlockBehaviour, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs};
 
 pub struct RootsBlock;
 
@@ -31,16 +29,14 @@ impl BlockBehaviour for RootsBlock {
         has_support(args.block_accessor, args.block, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if has_support(args.world, args.block, args.position) {
-                args.state_id
-            } else {
-                Block::AIR.default_state.id
-            }
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if has_support(args.world, args.block, args.position) {
+            args.state_id
+        } else {
+            Block::AIR.default_state.id
+        }
     }
 }

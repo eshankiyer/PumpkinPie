@@ -4,7 +4,7 @@ use pumpkin_util::random::RandomGenerator;
 use pumpkin_util::random::xoroshiro128::Xoroshiro;
 use rand::RngExt;
 
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs};
+use crate::block::{BlockBehaviour, BlockMetadata, BonemealArgs};
 use crate::world::feature_placer::place_configured_feature;
 
 /// Moss and pale moss: bone meal places a configured feature, not blocks.
@@ -34,15 +34,13 @@ impl BlockBehaviour for MossBlock {
 
     /// `BonemealableFeaturePlacerBlock.performBonemeal`
     /// (`BonemealableFeaturePlacerBlock.java:43-49`): place the configured feature at `pos.above()`.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let feature = if args.block == &Block::PALE_MOSS_BLOCK {
-                ConfiguredFeature::PaleMossPatchBonemeal
-            } else {
-                ConfiguredFeature::MossPatchBonemeal
-            };
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
-            place_configured_feature(args.world, feature, args.position.up(), &mut random).await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let feature = if args.block == &Block::PALE_MOSS_BLOCK {
+            ConfiguredFeature::PaleMossPatchBonemeal
+        } else {
+            ConfiguredFeature::MossPatchBonemeal
+        };
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
+        place_configured_feature(args.world, feature, args.position.up(), &mut random);
     }
 }

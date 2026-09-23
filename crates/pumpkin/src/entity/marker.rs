@@ -1,8 +1,8 @@
+use std::sync::Mutex;
 use std::sync::{Arc, atomic::Ordering};
-use tokio::sync::Mutex;
 
 use crate::{
-    entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity},
+    entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity},
     net::{bedrock::BedrockClient, java::JavaClient},
     server::Server,
 };
@@ -36,47 +36,42 @@ impl MarkerEntity {
 }
 
 impl NBTStorage for MarkerEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.write_nbt(nbt).await;
-            let data = self.data.lock().await;
-            if !data.is_empty() {
-                nbt.put("data", NbtTag::Compound(data.clone()));
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.write_nbt(nbt);
+        let data = self
+            .data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !data.is_empty() {
+            nbt.put("data", NbtTag::Compound(data.clone()));
+        }
     }
 
-    fn read_nbt<'a>(&'a mut self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.read_nbt(nbt).await;
-            if let Some(data) = nbt.get_compound("data") {
-                *self.data.lock().await = data.clone();
-            }
-        })
+    fn read_nbt(&mut self, nbt: &mut NbtCompound) {
+        self.entity.read_nbt(nbt);
+        if let Some(data) = nbt.get_compound("data") {
+            *self
+                .data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = data.clone();
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.read_nbt_non_mut(nbt).await;
-            if let Some(data) = nbt.get_compound("data") {
-                *self.data.lock().await = data.clone();
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.read_nbt_non_mut(nbt);
+        if let Some(data) = nbt.get_compound("data") {
+            *self
+                .data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = data.clone();
+        }
     }
 }
 
 impl EntityBase for MarkerEntity {
-    fn tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {})
-    }
+    fn tick(&self, _caller: &Arc<dyn EntityBase>, _server: &Server) {}
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {})
-    }
+    fn init_data_tracker(&self) {}
 
     fn get_entity(&self) -> &Entity {
         &self.entity
@@ -111,16 +106,16 @@ impl EntityBase for MarkerEntity {
     }
 
     /// Mirrors vanilla's `final hurtServer` (`Marker.java:67-69`): always rejects damage.
-    fn damage_with_context<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         _amount: f32,
         _damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        _source: Option<&'a dyn EntityBase>,
-        _cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move { false })
+        _source: Option<&dyn EntityBase>,
+        _cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        false
     }
 
     fn send_java_spawn_packet<'a>(&'a self, _client: &'a JavaClient) -> EntityBaseFuture<'a, ()> {

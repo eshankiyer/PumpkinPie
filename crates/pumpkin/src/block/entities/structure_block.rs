@@ -9,10 +9,9 @@ use pumpkin_world::generation::structure::template::{
     CapturedBlock, PaletteEntry, StructureProcessor, StructureTemplate, TemplateEntity,
     get_template, global_cache, place_template_with_seed,
 };
-use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
 
 use crate::entity::NBTStorage;
 use crate::world::World;
@@ -97,31 +96,140 @@ impl BlockEntity for StructureBlockBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_string("name", self.name.lock().await.clone());
-            nbt.put_string("author", self.author.lock().await.clone());
-            nbt.put_string("metadata", self.metadata.lock().await.clone());
-            nbt.put_int("posX", *self.pos_x.lock().await);
-            nbt.put_int("posY", *self.pos_y.lock().await);
-            nbt.put_int("posZ", *self.pos_z.lock().await);
-            nbt.put_int("sizeX", *self.size_x.lock().await);
-            nbt.put_int("sizeY", *self.size_y.lock().await);
-            nbt.put_int("sizeZ", *self.size_z.lock().await);
-            nbt.put_string("rotation", self.rotation.lock().await.clone());
-            nbt.put_string("mirror", self.mirror.lock().await.clone());
-            nbt.put_string("mode", self.mode.lock().await.clone());
-            nbt.put_bool("ignoreEntities", *self.ignore_entities.lock().await);
-            nbt.put_bool("strict", *self.strict.lock().await);
-            nbt.put_bool("powered", *self.powered.lock().await);
-            nbt.put_bool("showair", *self.show_air.lock().await);
-            nbt.put_bool("showboundingbox", *self.show_bounding_box.lock().await);
-            nbt.put_float("integrity", *self.integrity.lock().await);
-            nbt.put_long("seed", *self.seed.lock().await);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_string(
+            "name",
+            self.name
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            "author",
+            self.author
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            "metadata",
+            self.metadata
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_int(
+            "posX",
+            *self
+                .pos_x
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_int(
+            "posY",
+            *self
+                .pos_y
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_int(
+            "posZ",
+            *self
+                .pos_z
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_int(
+            "sizeX",
+            *self
+                .size_x
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_int(
+            "sizeY",
+            *self
+                .size_y
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_int(
+            "sizeZ",
+            *self
+                .size_z
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_string(
+            "rotation",
+            self.rotation
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            "mirror",
+            self.mirror
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            "mode",
+            self.mode
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_bool(
+            "ignoreEntities",
+            *self
+                .ignore_entities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_bool(
+            "strict",
+            *self
+                .strict
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_bool(
+            "powered",
+            *self
+                .powered
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_bool(
+            "showair",
+            *self
+                .show_air
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_bool(
+            "showboundingbox",
+            *self
+                .show_bounding_box
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_float(
+            "integrity",
+            *self
+                .integrity
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_long(
+            "seed",
+            *self
+                .seed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -185,59 +293,112 @@ impl StructureBlockBlockEntity {
     /// (`StructureBlockEntity.java:160-193, 212-254, 463-477`) are backed by the
     /// corresponding persisted fields here. The packet handler is the live caller for
     /// the mutators.
-    pub async fn get_structure_name(&self) -> String {
-        self.name.lock().await.clone()
+    pub fn get_structure_name(&self) -> String {
+        self.name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    pub async fn has_structure_name(&self) -> bool {
-        !self.name.lock().await.is_empty()
+    pub fn has_structure_name(&self) -> bool {
+        !self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
-    pub async fn set_structure_name(&self, name: &str) {
-        *self.name.lock().await = name.to_string();
+    pub fn set_structure_name(&self, name: &str) {
+        *self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = name.to_string();
     }
 
-    pub async fn set_structure_pos(&self, pos: BlockPos) {
-        *self.pos_x.lock().await = pos.0.x;
-        *self.pos_y.lock().await = pos.0.y;
-        *self.pos_z.lock().await = pos.0.z;
+    pub fn set_structure_pos(&self, pos: BlockPos) {
+        *self
+            .pos_x
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = pos.0.x;
+        *self
+            .pos_y
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = pos.0.y;
+        *self
+            .pos_z
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = pos.0.z;
     }
 
-    pub async fn set_structure_size(&self, size: Vector3<i32>) {
-        *self.size_x.lock().await = size.x;
-        *self.size_y.lock().await = size.y;
-        *self.size_z.lock().await = size.z;
+    pub fn set_structure_size(&self, size: Vector3<i32>) {
+        *self
+            .size_x
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = size.x;
+        *self
+            .size_y
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = size.y;
+        *self
+            .size_z
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = size.z;
     }
 
-    pub async fn set_meta_data(&self, metadata: &str) {
-        *self.metadata.lock().await = metadata.to_string();
+    pub fn set_meta_data(&self, metadata: &str) {
+        *self
+            .metadata
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = metadata.to_string();
     }
 
-    pub async fn set_strict(&self, strict: bool) {
-        *self.strict.lock().await = strict;
+    pub fn set_strict(&self, strict: bool) {
+        *self
+            .strict
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = strict;
     }
 
-    pub async fn set_integrity(&self, integrity: f32) {
-        *self.integrity.lock().await = integrity;
+    pub fn set_integrity(&self, integrity: f32) {
+        *self
+            .integrity
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = integrity;
     }
 
-    pub async fn set_show_air(&self, show_air: bool) {
-        *self.show_air.lock().await = show_air;
+    pub fn set_show_air(&self, show_air: bool) {
+        *self
+            .show_air
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = show_air;
     }
 
-    pub async fn set_show_bounding_box(&self, show_bounding_box: bool) {
-        *self.show_bounding_box.lock().await = show_bounding_box;
+    pub fn set_show_bounding_box(&self, show_bounding_box: bool) {
+        *self
+            .show_bounding_box
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = show_bounding_box;
     }
 
     /// Vanilla `StructureBlockEntity.detectSize` (`StructureBlockEntity.java:264-288`)
     /// searches nearby CORNER blocks with the same structure name and derives the inclusive
     /// capture box. Only loaded positions can be inspected by this server-side world API.
-    pub async fn detect_size(&self, world: &Arc<World>) -> bool {
-        if self.mode.lock().await.as_str() != "SAVE" {
+    pub fn detect_size(&self, world: &Arc<World>) -> bool {
+        if self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_str()
+            != "SAVE"
+        {
             return false;
         }
 
-        let name = self.name.lock().await.clone();
+        let name = self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let x = self.position.0.x;
         let z = self.position.0.z;
         let mut corners = Vec::new();
@@ -257,8 +418,17 @@ impl StructureBlockBlockEntity {
                     let Some(corner) = block_entity.as_any().downcast_ref::<Self>() else {
                         continue;
                     };
-                    if corner.mode.lock().await.as_str() == "CORNER"
-                        && *corner.name.lock().await == name
+                    if corner
+                        .mode
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .as_str()
+                        == "CORNER"
+                        && *corner
+                            .name
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            == name
                     {
                         corners.push(candidate);
                     }
@@ -296,10 +466,8 @@ impl StructureBlockBlockEntity {
             min_x - x + 1,
             min_y - self.position.0.y + 1,
             min_z - z + 1,
-        ))
-        .await;
-        self.set_structure_size(Vector3::new(delta_x - 1, delta_y - 1, delta_z - 1))
-            .await;
+        ));
+        self.set_structure_size(Vector3::new(delta_x - 1, delta_y - 1, delta_z - 1));
         true
     }
 
@@ -317,8 +485,12 @@ impl StructureBlockBlockEntity {
     ///   entities at all currently).
     /// - This only covers the `TemplateCache`'s embedded/worldgen template set; player-saved
     ///   templates are available after the `SAVE_AREA` packet path writes them in this server.
-    pub async fn place_structure(&self, world: &Arc<World>) -> bool {
-        let name = self.name.lock().await.clone();
+    pub fn place_structure(&self, world: &Arc<World>) -> bool {
+        let name = self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if name.is_empty() {
             return false;
         }
@@ -327,9 +499,15 @@ impl StructureBlockBlockEntity {
             return false;
         };
 
-        self.load_structure_info(&template).await;
-        let integrity = *self.integrity.lock().await;
-        let seed = *self.seed.lock().await;
+        self.load_structure_info(&template);
+        let integrity = *self
+            .integrity
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let seed = *self
+            .seed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Vanilla adds BlockRotProcessor when integrity is below 1.0
         // (`StructureBlockEntity.java:420-422`; `BlockRotProcessor.java:40-53`).
         let processors = if integrity < 1.0 {
@@ -341,7 +519,12 @@ impl StructureBlockBlockEntity {
             Vec::new()
         };
 
-        let rotation = match self.rotation.lock().await.as_str() {
+        let rotation = match self
+            .rotation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_str()
+        {
             "CLOCKWISE_90" => Rotation::Clockwise90,
             "CLOCKWISE_180" => Rotation::Rotate180,
             "COUNTERCLOCKWISE_90" => Rotation::CounterClockwise90,
@@ -349,9 +532,21 @@ impl StructureBlockBlockEntity {
         };
 
         let origin = Vector3::new(
-            self.position.0.x + *self.pos_x.lock().await,
-            self.position.0.y + *self.pos_y.lock().await,
-            self.position.0.z + *self.pos_z.lock().await,
+            self.position.0.x
+                + *self
+                    .pos_x
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            self.position.0.y
+                + *self
+                    .pos_y
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            self.position.0.z
+                + *self
+                    .pos_z
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
 
         let mut placer = WorldBlockPlacer::new(world);
@@ -367,9 +562,9 @@ impl StructureBlockBlockEntity {
             None,
             Self::create_random(seed),
         );
-        placer.finalize().await;
-        world.queue_block_updates(&placer.changed_positions).await;
-        world.flush_block_updates().await;
+        placer.finalize();
+        world.queue_block_updates(&placer.changed_positions);
+        world.flush_block_updates();
         true
     }
 
@@ -382,19 +577,43 @@ impl StructureBlockBlockEntity {
     /// any position in the box is in an unloaded chunk - unlike vanilla, which has no such
     /// concept here since `Level.getBlockState` always returns a real (possibly generated)
     /// state; silently capturing air for an unloaded region would produce a corrupt save.
-    async fn capture_structure(&self, world: &Arc<World>) -> Option<StructureTemplate> {
-        let size_x = (*self.size_x.lock().await).clamp(0, MAX_SIZE_PER_AXIS);
-        let size_y = (*self.size_y.lock().await).clamp(0, MAX_SIZE_PER_AXIS);
-        let size_z = (*self.size_z.lock().await).clamp(0, MAX_SIZE_PER_AXIS);
+    fn capture_structure(&self, world: &Arc<World>) -> Option<StructureTemplate> {
+        let size_x = (*self
+            .size_x
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+        .clamp(0, MAX_SIZE_PER_AXIS);
+        let size_y = (*self
+            .size_y
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+        .clamp(0, MAX_SIZE_PER_AXIS);
+        let size_z = (*self
+            .size_z
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+        .clamp(0, MAX_SIZE_PER_AXIS);
         if size_x < 1 || size_y < 1 || size_z < 1 {
             return None;
         }
         let size = Vector3::new(size_x, size_y, size_z);
 
         let corner1 = Vector3::new(
-            self.position.0.x + *self.pos_x.lock().await,
-            self.position.0.y + *self.pos_y.lock().await,
-            self.position.0.z + *self.pos_z.lock().await,
+            self.position.0.x
+                + *self
+                    .pos_x
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            self.position.0.y
+                + *self
+                    .pos_y
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            self.position.0.z
+                + *self
+                    .pos_z
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
         let corner2 = Vector3::new(
             corner1.x + size_x - 1,
@@ -423,7 +642,7 @@ impl StructureBlockBlockEntity {
                         continue;
                     }
 
-                    let nbt = block_entity_nbt(world, &pos).await;
+                    let nbt = block_entity_nbt(world, &pos);
                     let full_cube = BlockState::from_id(state_id).is_full_cube();
                     blocks.push(CapturedBlock {
                         pos: Vector3::new(x - min.x, y - min.y, z - min.z),
@@ -435,10 +654,14 @@ impl StructureBlockBlockEntity {
             }
         }
 
-        let entities = if *self.ignore_entities.lock().await {
+        let entities = if *self
+            .ignore_entities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
             Vec::new()
         } else {
-            capture_entities(world, min, max).await
+            capture_entities(world, min, max)
         };
 
         Some(StructureTemplate::from_captured(size, blocks, entities))
@@ -455,13 +678,23 @@ impl StructureBlockBlockEntity {
     /// (`ServerGamePacketListenerImpl.java:853`), gated on the client's structure-block editor
     /// GUI - the same `ServerboundSetStructureBlockPacket` path now invokes it for `SAVE_AREA`.
     /// `save_to_disk: true` exercises the writer path used by that packet action.
-    pub async fn save_structure(&self, world: &Arc<World>, save_to_disk: bool) -> bool {
+    pub fn save_structure(&self, world: &Arc<World>, save_to_disk: bool) -> bool {
         // Vanilla `saveStructure(boolean)` rejects every mode except SAVE
         // (`StructureBlockEntity.java:318-327`).
-        if self.mode.lock().await.as_str() != "SAVE" {
+        if self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_str()
+            != "SAVE"
+        {
             return false;
         }
-        let name = self.name.lock().await.clone();
+        let name = self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if name.is_empty() {
             return false;
         }
@@ -469,10 +702,15 @@ impl StructureBlockBlockEntity {
             return false;
         };
 
-        let Some(mut template) = self.capture_structure(world).await else {
+        let Some(mut template) = self.capture_structure(world) else {
             return false;
         };
-        template.author.clone_from(&*self.author.lock().await);
+        template.author.clone_from(
+            &*self
+                .author
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         let template = Arc::new(template);
 
         global_cache().insert(&format!("{namespace}:{path}"), Arc::clone(&template));
@@ -504,21 +742,43 @@ impl StructureBlockBlockEntity {
 
     /// Mirrors `StructureBlockEntity.loadStructureInfo` (`StructureBlockEntity.java:396-400`)
     /// for the template already resolved by `place_structure`.
-    async fn load_structure_info(&self, template: &StructureTemplate) {
-        *self.author.lock().await = template.author.clone();
-        *self.size_x.lock().await = template.size.x;
-        *self.size_y.lock().await = template.size.y;
-        *self.size_z.lock().await = template.size.z;
+    fn load_structure_info(&self, template: &StructureTemplate) {
+        *self
+            .author
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = template.author.clone();
+        *self
+            .size_x
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = template.size.x;
+        *self
+            .size_y
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = template.size.y;
+        *self
+            .size_z
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = template.size.z;
     }
 
     /// Vanilla `StructureBlockEntity.placeStructureIfSameSize`
     /// (`StructureBlockEntity.java:369-383`) only places a LOAD template when its dimensions
     /// already match; otherwise it refreshes the editor dimensions.
-    pub async fn place_structure_if_same_size(&self, world: &Arc<World>) -> bool {
-        if self.mode.lock().await.as_str() != "LOAD" {
+    pub fn place_structure_if_same_size(&self, world: &Arc<World>) -> bool {
+        if self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_str()
+            != "LOAD"
+        {
             return false;
         }
-        let name = self.name.lock().await.clone();
+        let name = self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if name.is_empty() {
             return false;
         }
@@ -527,14 +787,23 @@ impl StructureBlockBlockEntity {
             return false;
         };
         let requested_size = Vector3::new(
-            *self.size_x.lock().await,
-            *self.size_y.lock().await,
-            *self.size_z.lock().await,
+            *self
+                .size_x
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            *self
+                .size_y
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            *self
+                .size_z
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
         if template.size == requested_size {
-            self.place_structure(world).await
+            self.place_structure(world)
         } else {
-            self.load_structure_info(&template).await;
+            self.load_structure_info(&template);
             false
         }
     }
@@ -542,17 +811,31 @@ impl StructureBlockBlockEntity {
     /// Vanilla `StructureBlockEntity.isStructureLoadable`
     /// (`StructureBlockEntity.java:440-452`) requires LOAD mode, a name, and a resolvable
     /// structure template.
-    pub async fn is_structure_loadable(&self) -> bool {
-        if self.mode.lock().await.as_str() != "LOAD" {
+    pub fn is_structure_loadable(&self) -> bool {
+        if self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_str()
+            != "LOAD"
+        {
             return false;
         }
-        let name = self.name.lock().await.clone();
+        let name = self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         !name.is_empty() && get_template(name.strip_prefix("minecraft:").unwrap_or(&name)).is_some()
     }
 
     /// Mirrors `StructureBlockEntity.unloadStructure` (`StructureBlockEntity.java:432-437`).
-    pub async fn unload_structure(&self) {
-        let name = self.name.lock().await.clone();
+    pub fn unload_structure(&self) {
+        let name = self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if !name.is_empty() {
             global_cache().remove(&name);
         }
@@ -576,10 +859,10 @@ fn palette_entry_from_state_id(state_id: BlockStateId) -> PaletteEntry {
 /// Captures a loaded position's block entity as `id` + its fields, with no position - the
 /// shape of vanilla's `BlockEntity.saveWithId` (`saveAdditional` + `saveId`, no `x`/`y`/`z`;
 /// those are added back by the position-carrying caller, e.g. `place_template`).
-async fn block_entity_nbt(world: &Arc<World>, pos: &BlockPos) -> Option<NbtCompound> {
+fn block_entity_nbt(world: &Arc<World>, pos: &BlockPos) -> Option<NbtCompound> {
     let block_entity = world.get_block_entity(pos)?;
     let mut nbt = NbtCompound::new();
-    block_entity.write_nbt(&mut nbt).await;
+    block_entity.write_nbt(&mut nbt);
     nbt.put_string("id", block_entity.resource_location().to_string());
     Some(nbt)
 }
@@ -587,7 +870,7 @@ async fn block_entity_nbt(world: &Arc<World>, pos: &BlockPos) -> Option<NbtCompo
 /// Mirrors `StructureTemplate.fillEntityList` (`StructureTemplate.java:174-190`): every entity
 /// (except players) whose position falls inside the capture box, saved with position relative
 /// to the box's minimum corner.
-async fn capture_entities(
+fn capture_entities(
     world: &Arc<World>,
     min: Vector3<i32>,
     max: Vector3<i32>,
@@ -611,11 +894,11 @@ async fn capture_entities(
 
         let mut nbt = NbtCompound::new();
         if let Some(living) = entity.get_living_entity() {
-            living.write_nbt(&mut nbt).await;
+            living.write_nbt(&mut nbt);
         } else {
-            entity.get_entity().write_nbt(&mut nbt).await;
+            entity.get_entity().write_nbt(&mut nbt);
         }
-        entity.write_nbt(&mut nbt).await;
+        entity.write_nbt(&mut nbt);
 
         let rel_pos = Vector3::new(
             pos.x - f64::from(min.x),
@@ -705,28 +988,91 @@ mod tests {
         // the action (`ServerGamePacketListenerImpl.java:830-844`).
         let entity = StructureBlockBlockEntity::new(BlockPos::new(3, 64, -2));
         futures::executor::block_on(async {
-            entity.set_structure_name("minecraft:test").await;
-            entity.set_structure_pos(BlockPos::new(-4, 5, 6)).await;
-            entity.set_structure_size(Vector3::new(7, 8, 9)).await;
-            entity.set_meta_data("marker").await;
-            entity.set_integrity(0.25).await;
-            entity.set_strict(true).await;
-            entity.set_show_air(true).await;
-            entity.set_show_bounding_box(false).await;
+            entity.set_structure_name("minecraft:test");
+            entity.set_structure_pos(BlockPos::new(-4, 5, 6));
+            entity.set_structure_size(Vector3::new(7, 8, 9));
+            entity.set_meta_data("marker");
+            entity.set_integrity(0.25);
+            entity.set_strict(true);
+            entity.set_show_air(true);
+            entity.set_show_bounding_box(false);
 
-            assert_eq!(entity.get_structure_name().await, "minecraft:test");
-            assert!(entity.has_structure_name().await);
-            assert_eq!(*entity.pos_x.lock().await, -4);
-            assert_eq!(*entity.pos_y.lock().await, 5);
-            assert_eq!(*entity.pos_z.lock().await, 6);
-            assert_eq!(*entity.size_x.lock().await, 7);
-            assert_eq!(*entity.size_y.lock().await, 8);
-            assert_eq!(*entity.size_z.lock().await, 9);
-            assert_eq!(*entity.metadata.lock().await, "marker");
-            assert_eq!(*entity.integrity.lock().await, 0.25);
-            assert!(*entity.strict.lock().await);
-            assert!(*entity.show_air.lock().await);
-            assert!(!*entity.show_bounding_box.lock().await);
+            assert_eq!(entity.get_structure_name(), "minecraft:test");
+            assert!(entity.has_structure_name());
+            assert_eq!(
+                *entity
+                    .pos_x
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                -4
+            );
+            assert_eq!(
+                *entity
+                    .pos_y
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                5
+            );
+            assert_eq!(
+                *entity
+                    .pos_z
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                6
+            );
+            assert_eq!(
+                *entity
+                    .size_x
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                7
+            );
+            assert_eq!(
+                *entity
+                    .size_y
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                8
+            );
+            assert_eq!(
+                *entity
+                    .size_z
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                9
+            );
+            assert_eq!(
+                *entity
+                    .metadata
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                "marker"
+            );
+            assert_eq!(
+                *entity
+                    .integrity
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                0.25
+            );
+            assert!(
+                *entity
+                    .strict
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            );
+            assert!(
+                *entity
+                    .show_air
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            );
+            assert!(
+                !*entity
+                    .show_bounding_box
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            );
         });
     }
 

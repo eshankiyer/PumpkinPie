@@ -7,7 +7,7 @@ use rand::RngExt;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
     ai::goal::{
-        Controls, Goal, GoalFuture, active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
+        Controls, Goal, active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
@@ -28,35 +28,31 @@ impl SpiderAttackGoal {
 }
 
 impl Goal for SpiderAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(
-            async move { self.melee.can_start(mob).await && !mob.get_entity().is_vehicle().await },
-        )
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Box::pin(async move { self.melee.can_start(mob) && !mob.get_entity().is_vehicle() })
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            let brightness =
-                world.get_sky_light_level(&entity.get_eye_pos().to_block_pos()) as f32 / 15.0;
-            if brightness >= 0.5 && mob.get_random().random_range(0..100) == 0 {
-                mob.set_mob_target(None).await;
-                return false;
-            }
-            self.melee.should_continue(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        let brightness =
+            world.get_sky_light_level(&entity.get_eye_pos().to_block_pos()) as f32 / 15.0;
+        if brightness >= 0.5 && mob.get_random().random_range(0..100) == 0 {
+            mob.set_mob_target(None);
+            return false;
+        }
+        self.melee.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.melee.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.melee.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.melee.tick(mob)
     }
 
@@ -84,25 +80,23 @@ impl SpiderTargetGoal {
 }
 
 impl Goal for SpiderTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !Self::is_dark(mob) {
-                self.inner.set_target(None);
-                return false;
-            }
-            self.inner.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !Self::is_dark(mob) {
+            self.inner.set_target(None);
+            return false;
+        }
+        self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::is_dark(mob) && self.inner.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        Self::is_dark(mob) && self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
@@ -114,50 +108,56 @@ impl Goal for SpiderTargetGoal {
 struct SpiderLeapGoal;
 
 impl Goal for SpiderLeapGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            if !entity.on_ground.load(std::sync::atomic::Ordering::Relaxed)
-                || mob.get_random().random_range(0..5) != 0
-            {
-                return false;
-            }
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return false;
-            };
-            let distance = entity
-                .pos
-                .load()
-                .squared_distance_to_vec(&target.get_entity().pos.load());
-            (4.0..=16.0).contains(&distance)
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        if !entity.on_ground.load(std::sync::atomic::Ordering::Relaxed)
+            || mob.get_random().random_range(0..5) != 0
+        {
+            return false;
+        }
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        let distance = entity
+            .pos
+            .load()
+            .squared_distance_to_vec(&target.get_entity().pos.load());
+        (4.0..=16.0).contains(&distance)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            !mob.get_mob_entity()
-                .living_entity
-                .entity
-                .on_ground
-                .load(std::sync::atomic::Ordering::Relaxed)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        !mob.get_mob_entity()
+            .living_entity
+            .entity
+            .on_ground
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return;
-            };
-            let target_pos = target.get_entity().pos.load();
-            let pos = entity.pos.load();
-            let delta = Vector3::new(target_pos.x - pos.x, 0.0, target_pos.z - pos.z);
-            if delta.length_squared() <= 1.0e-7 {
-                return;
-            }
-            let movement = delta.normalize() * 0.4 + entity.velocity.load() * 0.2;
-            entity.set_velocity(Vector3::new(movement.x, 0.4, movement.z));
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let target_pos = target.get_entity().pos.load();
+        let pos = entity.pos.load();
+        let delta = Vector3::new(target_pos.x - pos.x, 0.0, target_pos.z - pos.z);
+        if delta.length_squared() <= 1.0e-7 {
+            return;
+        }
+        let movement = delta.normalize() * 0.4 + entity.velocity.load() * 0.2;
+        entity.set_velocity(Vector3::new(movement.x, 0.4, movement.z));
     }
 
     fn controls(&self) -> Controls {

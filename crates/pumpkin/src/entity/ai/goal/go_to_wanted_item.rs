@@ -32,7 +32,7 @@ use std::sync::{Arc, PoisonError};
 
 use pumpkin_util::math::vector3::Vector3;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::item::ItemEntity;
 use crate::entity::mob::Mob;
@@ -68,7 +68,7 @@ impl GoToWantedItemGoal {
     }
 
     /// The scan half of `NearestItemSensor.doTick`, narrowed to `maxDistToWalk`.
-    async fn find_wanted_item(&self, mob: &dyn Mob) -> Option<Arc<ItemEntity>> {
+    fn find_wanted_item(&self, mob: &dyn Mob) -> Option<Arc<ItemEntity>> {
         let entity = mob.get_entity();
         let world = entity.world.load();
         let mob_pos = entity.pos.load();
@@ -101,7 +101,11 @@ impl GoToWantedItemGoal {
         for (_, item_entity) in candidates {
             // The stack guard is a tokio mutex; clone the stack out and drop it before
             // anything else, the way `ai/brain/sensor/nearest_item.rs` does.
-            let stack = item_entity.get_item_stack().lock().await.clone();
+            let stack = item_entity
+                .get_item_stack()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
             if stack.is_empty() {
                 continue;
             }
@@ -118,14 +122,18 @@ impl GoToWantedItemGoal {
     /// goal system has no activities, so the activity gate becomes this refusal to run while
     /// the mob has a target -- without it a piglin at priority 3 would break off a fight to
     /// fetch gold, which vanilla never does.
-    async fn has_attack_target(mob: &dyn Mob) -> bool {
-        mob.get_mob_entity().target.lock().await.is_some()
+    fn has_attack_target(mob: &dyn Mob) -> bool {
+        mob.get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
     /// Whether the remembered item is still there and still wanted -- vanilla re-derives this
     /// every sensor tick by rewriting the memory, and `Brain` erases the memory when the item
     /// entity dies.
-    async fn wanted_still_valid(&self, mob: &dyn Mob) -> bool {
+    fn wanted_still_valid(&self, mob: &dyn Mob) -> bool {
         let Some(item_entity) = self.wanted.as_ref() else {
             return false;
         };
@@ -142,87 +150,79 @@ impl GoToWantedItemGoal {
             return false;
         }
         let world = entity.world.load();
-        let stack = item_entity.get_item_stack().lock().await.clone();
+        let stack = item_entity
+            .get_item_stack()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         !stack.is_empty() && mob.wants_to_pick_up_item(&world, &stack)
     }
 }
 
 impl Goal for GoToWantedItemGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !mob.can_pick_up_loot() {
-                return false;
-            }
-            if self.scan_countdown > 0 {
-                self.scan_countdown -= 1;
-                return false;
-            }
-            self.scan_countdown = SCAN_INTERVAL_TICKS;
-            if Self::has_attack_target(mob).await {
-                return false;
-            }
-            self.wanted = self.find_wanted_item(mob).await;
-            self.wanted.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !mob.can_pick_up_loot() {
+            return false;
+        }
+        if self.scan_countdown > 0 {
+            self.scan_countdown -= 1;
+            return false;
+        }
+        self.scan_countdown = SCAN_INTERVAL_TICKS;
+        if Self::has_attack_target(mob) {
+            return false;
+        }
+        self.wanted = self.find_wanted_item(mob);
+        self.wanted.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            mob.can_pick_up_loot()
-                && !Self::has_attack_target(mob).await
-                && self.wanted_still_valid(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        mob.can_pick_up_loot() && !Self::has_attack_target(mob) && self.wanted_still_valid(mob)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.time_to_recalc_path = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.time_to_recalc_path = 0;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.wanted = None;
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .stop();
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.wanted = None;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stop();
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            let Some(item_entity) = self.wanted.clone() else {
-                return;
-            };
-            let mob_entity = mob.get_mob_entity();
-            let item_pos = item_entity.get_entity().pos.load();
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(item_entity) = self.wanted.clone() else {
+            return;
+        };
+        let mob_entity = mob.get_mob_entity();
+        let item_pos = item_entity.get_entity().pos.load();
 
-            // `lookTarget.set(new EntityTracker(item, true))` (`GoToWantedItem.java:42`).
-            mob_entity
-                .look_control
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .look_at(mob, item_pos.x, item_pos.y, item_pos.z);
+        // `lookTarget.set(new EntityTracker(item, true))` (`GoToWantedItem.java:42`).
+        mob_entity
+            .look_control
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .look_at(mob, item_pos.x, item_pos.y, item_pos.z);
 
-            self.time_to_recalc_path -= 1;
-            if self.time_to_recalc_path > 0 {
-                return;
-            }
-            self.time_to_recalc_path = to_goal_ticks(RECALC_PATH_INTERVAL);
+        self.time_to_recalc_path -= 1;
+        if self.time_to_recalc_path > 0 {
+            return;
+        }
+        self.time_to_recalc_path = to_goal_ticks(RECALC_PATH_INTERVAL);
 
-            // `walkTarget.set(new WalkTarget(new EntityTracker(item, false), speed, 0))`
-            // (`GoToWantedItem.java:41`): the acceptable radius is 0, so the mob walks all the
-            // way onto the item and `Mob.aiStep`'s looting box does the rest.
-            let self_pos = mob.get_entity().pos.load();
-            let dest = Vector3::new(item_pos.x, item_pos.y, item_pos.z);
-            mob_entity
-                .navigator
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .set_progress(NavigatorGoal::new(self_pos, dest, self.speed_modifier));
-        })
+        // `walkTarget.set(new WalkTarget(new EntityTracker(item, false), speed, 0))`
+        // (`GoToWantedItem.java:41`): the acceptable radius is 0, so the mob walks all the
+        // way onto the item and `Mob.aiStep`'s looting box does the rest.
+        let self_pos = mob.get_entity().pos.load();
+        let dest = Vector3::new(item_pos.x, item_pos.y, item_pos.z);
+        mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_progress(NavigatorGoal::new(self_pos, dest, self.speed_modifier));
     }
 
     fn should_run_every_tick(&self) -> bool {

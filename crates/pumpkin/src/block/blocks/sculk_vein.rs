@@ -54,7 +54,7 @@ use crate::block::sculk_behaviour::{
     ChargeCursor, SculkBehaviour, SculkSpreaderConfig, SculkWorld,
 };
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockIsReplacing, CanPlaceAtArgs, CanUpdateAtArgs,
+    BlockBehaviour, BlockIsReplacing, CanPlaceAtArgs, CanUpdateAtArgs,
     GetStateForNeighborUpdateArgs, OnPlaceArgs,
 };
 use crate::entity::EntityBase;
@@ -221,48 +221,46 @@ fn state_can_be_replaced(
 }
 
 impl BlockBehaviour for SculkVeinBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let existing_faces = match args.replacing {
-                BlockIsReplacing::Itself(state_id) => {
-                    Some(GlowLichenLikeProperties::from_state_id(state_id, args.block).faces())
-                }
-                _ => None,
-            };
-
-            let mut candidates: Vec<BlockDirection> = args
-                .player
-                .get_entity()
-                .get_entity_facing_order()
-                .into_iter()
-                .map(|f| f.to_block_direction())
-                .collect();
-            if let Some(idx) = candidates.iter().position(|&d| d == args.direction) {
-                candidates.remove(idx);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let existing_faces = match args.replacing {
+            BlockIsReplacing::Itself(state_id) => {
+                Some(GlowLichenLikeProperties::from_state_id(state_id, args.block).faces())
             }
-            candidates.insert(0, args.direction);
+            _ => None,
+        };
 
-            for direction in candidates {
-                if let Some(new_faces) =
-                    self.faces_for_placement(args.world, existing_faces, args.position, direction)
-                {
-                    let mut props = if existing_faces.is_some() {
-                        GlowLichenLikeProperties::from_state_id(
-                            args.world.get_block_state_id(args.position),
-                            args.block,
-                        )
-                    } else {
-                        let mut default_props = GlowLichenLikeProperties::default(args.block);
-                        default_props.r#waterlogged = args.replacing.water_source();
-                        default_props
-                    };
-                    props.set_faces(new_faces);
-                    return props.to_state_id(args.block);
-                }
+        let mut candidates: Vec<BlockDirection> = args
+            .player
+            .get_entity()
+            .get_entity_facing_order()
+            .into_iter()
+            .map(|f| f.to_block_direction())
+            .collect();
+        if let Some(idx) = candidates.iter().position(|&d| d == args.direction) {
+            candidates.remove(idx);
+        }
+        candidates.insert(0, args.direction);
+
+        for direction in candidates {
+            if let Some(new_faces) =
+                self.faces_for_placement(args.world, existing_faces, args.position, direction)
+            {
+                let mut props = if existing_faces.is_some() {
+                    GlowLichenLikeProperties::from_state_id(
+                        args.world.get_block_state_id(args.position),
+                        args.block,
+                    )
+                } else {
+                    let mut default_props = GlowLichenLikeProperties::default(args.block);
+                    default_props.r#waterlogged = args.replacing.water_source();
+                    default_props
+                };
+                props.set_faces(new_faces);
+                return props.to_state_id(args.block);
             }
+        }
 
-            Block::AIR.default_state.id
-        })
+        Block::AIR.default_state.id
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -297,29 +295,27 @@ impl BlockBehaviour for SculkVeinBlock {
         has_any_vacant_face(existing_faces)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = GlowLichenLikeProperties::from_state_id(args.state_id, args.block);
-            if props.r#waterlogged {
-                args.world.schedule_fluid_tick(
-                    &pumpkin_data::fluid::Fluid::WATER,
-                    *args.position,
-                    pumpkin_data::fluid::Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let mut props = GlowLichenLikeProperties::from_state_id(args.state_id, args.block);
+        if props.r#waterlogged {
+            args.world.schedule_fluid_tick(
+                &pumpkin_data::fluid::Fluid::WATER,
+                *args.position,
+                pumpkin_data::fluid::Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
 
-            let faces = props.faces();
-            let neighbor_state = args.neighbor_state_id.to_state();
-            self.update_faces_for_neighbor(faces, neighbor_state, args.direction)
-                .map_or(Block::AIR.default_state.id, |new_faces| {
-                    props.set_faces(new_faces);
-                    props.to_state_id(args.block)
-                })
-        })
+        let faces = props.faces();
+        let neighbor_state = args.neighbor_state_id.to_state();
+        self.update_faces_for_neighbor(faces, neighbor_state, args.direction)
+            .map_or(Block::AIR.default_state.id, |new_faces| {
+                props.set_faces(new_faces);
+                props.to_state_id(args.block)
+            })
     }
 }
 
@@ -330,12 +326,9 @@ pub struct WorldSpreadTarget<'a> {
 }
 
 impl SculkWorld for WorldSpreadTarget<'_> {
-    fn set_block(&self, pos: BlockPos, state_id: BlockStateId) -> BlockFuture<'_, ()> {
-        Box::pin(async move {
-            self.world
-                .set_block_state(&pos, state_id, BlockFlags::NOTIFY_ALL)
-                .await;
-        })
+    fn set_block(&self, pos: BlockPos, state_id: BlockStateId) {
+        self.world
+            .set_block_state(&pos, state_id, BlockFlags::NOTIFY_ALL);
     }
 
     fn play_block_sound(&self, pos: BlockPos, sound: Sound) {
@@ -371,20 +364,17 @@ impl SpreadTarget for WorldSpreadTarget<'_> {
         self.world.as_ref()
     }
 
-    fn place(&self, spread_pos: SpreadPos) -> BlockFuture<'_, bool> {
-        Box::pin(async move {
-            let existing_state = self.world.get_block_state(&spread_pos.pos);
-            let Some(new_state_id) =
-                compute_spread_placement_state(self.world.as_ref(), existing_state, spread_pos)
-            else {
-                return false;
-            };
+    fn place(&self, spread_pos: SpreadPos) -> bool {
+        let existing_state = self.world.get_block_state(&spread_pos.pos);
+        let Some(new_state_id) =
+            compute_spread_placement_state(self.world.as_ref(), existing_state, spread_pos)
+        else {
+            return false;
+        };
 
-            self.world
-                .set_block_state(&spread_pos.pos, new_state_id, BlockFlags::NOTIFY_LISTENERS)
-                .await;
-            true
-        })
+        self.world
+            .set_block_state(&spread_pos.pos, new_state_id, BlockFlags::NOTIFY_LISTENERS);
+        true
     }
 }
 
@@ -394,7 +384,7 @@ impl SpreadTarget for WorldSpreadTarget<'_> {
 /// and existing faces (vanilla starts from a fresh `defaultBlockState()` and only sets
 /// `WATERLOGGED` from `existing.getFluidState()`, which this matches since a plain
 /// vein's default state carries no other faces to begin with).
-pub(crate) async fn regrow(world: &dyn SculkWorld, pos: BlockPos, faces: FaceSet) -> bool {
+pub(crate) fn regrow(world: &dyn SculkWorld, pos: BlockPos, faces: FaceSet) -> bool {
     let mut new_faces = FaceSet::EMPTY;
     for direction in faces.iter() {
         if can_attach_to_pos(world.accessor(), &pos, direction) {
@@ -409,9 +399,7 @@ pub(crate) async fn regrow(world: &dyn SculkWorld, pos: BlockPos, faces: FaceSet
     props.set_faces(new_faces);
     // `!existing.getFluidState().isEmpty()`: any fluid, not source-only.
     props.r#waterlogged = world.accessor().get_fluid(&pos) != pumpkin_data::fluid::Fluid::EMPTY;
-    world
-        .set_block(pos, props.to_state_id(&Block::SCULK_VEIN))
-        .await;
+    world.set_block(pos, props.to_state_id(&Block::SCULK_VEIN));
     true
 }
 
@@ -432,7 +420,7 @@ pub fn has_substrate_access(accessor: &dyn BlockAccessor, pos: BlockPos) -> bool
 }
 
 /// `SculkVeinBlock.attemptPlaceSculk` (lines 105-137).
-async fn attempt_place_sculk(
+fn attempt_place_sculk(
     world: &dyn SculkWorld,
     spreader: &SculkSpreaderConfig,
     pos: BlockPos,
@@ -453,14 +441,12 @@ async fn attempt_place_sculk(
             continue;
         }
 
-        world
-            .set_block(support_pos, Block::SCULK.default_state.id)
-            .await;
+        world.set_block(support_pos, Block::SCULK.default_state.id);
         world.push_entities_up(support_pos);
         world.play_block_sound(support_pos, Sound::BlockSculkSpread);
 
         let vein_config = SculkVeinSpreaderConfig::vein(false);
-        multiface_spreader::spread_all(&vein_config, world, FaceSet::EMPTY, support_pos).await;
+        multiface_spreader::spread_all(&vein_config, world, FaceSet::EMPTY, support_pos);
 
         let skip = support.opposite();
         for direction in BlockDirection::all() {
@@ -470,7 +456,7 @@ async fn attempt_place_sculk(
             let vein_pos = support_pos.offset(direction.to_offset());
             let vein_state = world.accessor().get_block_state(&vein_pos);
             if Block::from_state_id(vein_state.id) == &Block::SCULK_VEIN {
-                SculkVeinBlock.on_discharged(world, vein_pos, random).await;
+                SculkVeinBlock.on_discharged(world, vein_pos, random);
             }
         }
 
@@ -483,64 +469,55 @@ async fn attempt_place_sculk(
 impl SculkBehaviour for SculkVeinBlock {
     /// `SculkVeinBlock.onDischarged` (lines 69-87): strip any face pointing at a now-
     /// `SCULK` neighbour; revert to air/water if no faces remain.
-    fn on_discharged<'a>(
-        &'a self,
-        world: &'a dyn SculkWorld,
-        pos: BlockPos,
-        _random: &'a mut RandomGenerator,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let existing_state = world.accessor().get_block_state(&pos);
-            let Some(mut faces) = existing_vein_faces(existing_state) else {
-                return;
-            };
+    fn on_discharged(&self, world: &dyn SculkWorld, pos: BlockPos, _random: &mut RandomGenerator) {
+        let existing_state = world.accessor().get_block_state(&pos);
+        let Some(mut faces) = existing_vein_faces(existing_state) else {
+            return;
+        };
 
-            for direction in BlockDirection::all() {
-                if faces.contains(direction) {
-                    let neighbour = pos.offset(direction.to_offset());
-                    if world.accessor().get_block(&neighbour) == &Block::SCULK {
-                        faces = faces.without(direction);
-                    }
+        for direction in BlockDirection::all() {
+            if faces.contains(direction) {
+                let neighbour = pos.offset(direction.to_offset());
+                if world.accessor().get_block(&neighbour) == &Block::SCULK {
+                    faces = faces.without(direction);
                 }
             }
+        }
 
-            let new_state_id = if faces.is_empty() {
-                if world.accessor().get_fluid(&pos) == pumpkin_data::fluid::Fluid::EMPTY {
-                    Block::AIR.default_state.id
-                } else {
-                    Block::WATER.default_state.id
-                }
+        let new_state_id = if faces.is_empty() {
+            if world.accessor().get_fluid(&pos) == pumpkin_data::fluid::Fluid::EMPTY {
+                Block::AIR.default_state.id
             } else {
-                let mut props =
-                    GlowLichenLikeProperties::from_state_id(existing_state.id, &Block::SCULK_VEIN);
-                props.set_faces(faces);
-                props.to_state_id(&Block::SCULK_VEIN)
-            };
-            world.set_block(pos, new_state_id).await;
-        })
+                Block::WATER.default_state.id
+            }
+        } else {
+            let mut props =
+                GlowLichenLikeProperties::from_state_id(existing_state.id, &Block::SCULK_VEIN);
+            props.set_faces(faces);
+            props.to_state_id(&Block::SCULK_VEIN)
+        };
+        world.set_block(pos, new_state_id);
     }
 
     /// `SculkVeinBlock.attemptUseCharge` (lines 90-103).
-    fn attempt_use_charge<'a>(
-        &'a self,
-        cursor: &'a ChargeCursor,
-        world: &'a dyn SculkWorld,
+    fn attempt_use_charge(
+        &self,
+        cursor: &ChargeCursor,
+        world: &dyn SculkWorld,
         _origin_pos: BlockPos,
-        random: &'a mut RandomGenerator,
-        spreader: &'a SculkSpreaderConfig,
+        random: &mut RandomGenerator,
+        spreader: &SculkSpreaderConfig,
         spread_veins: bool,
-    ) -> BlockFuture<'a, i32> {
-        Box::pin(async move {
-            if spread_veins && attempt_place_sculk(world, spreader, cursor.pos(), random).await {
-                cursor.charge() - 1
-            } else if random.next_bounded_i32(spreader.charge_decay_rate()) == 0 {
-                // `Mth.floor(cursor.getCharge() * 0.5F)`: exact via integer division since
-                // charge is never negative here.
-                cursor.charge() / 2
-            } else {
-                cursor.charge()
-            }
-        })
+    ) -> i32 {
+        if spread_veins && attempt_place_sculk(world, spreader, cursor.pos(), random) {
+            cursor.charge() - 1
+        } else if random.next_bounded_i32(spreader.charge_decay_rate()) == 0 {
+            // `Mth.floor(cursor.getCharge() * 0.5F)`: exact via integer division since
+            // charge is never negative here.
+            cursor.charge() / 2
+        } else {
+            cursor.charge()
+        }
     }
 }
 
@@ -561,19 +538,19 @@ impl SculkVeinBlock {
     /// `MultifaceSpreader.spreadAll` driven by this block's `veinSpreader`, against a
     /// live world. Real, callable spreading — not wired to any automatic driver yet
     /// (Step 3/4). Returns 0 if `pos` does not currently hold `sculk_vein`.
-    pub async fn spread_all(world: &Arc<World>, pos: BlockPos) -> u64 {
+    pub fn spread_all(world: &Arc<World>, pos: BlockPos) -> u64 {
         let state = world.get_block_state(&pos);
         let Some(faces) = existing_vein_faces(state) else {
             return 0;
         };
         let config = Self::vein_spreader();
         let target = WorldSpreadTarget { world };
-        multiface_spreader::spread_all(&config, &target, faces, pos).await
+        multiface_spreader::spread_all(&config, &target, faces, pos)
     }
 
     /// `MultifaceSpreader.spreadFromRandomFaceTowardRandomDirection` driven by this
     /// block's `sameSpaceSpreader`.
-    pub async fn same_space_spread_from_random_face(
+    pub fn same_space_spread_from_random_face(
         world: &Arc<World>,
         pos: BlockPos,
         random: &mut RandomGenerator,
@@ -585,7 +562,6 @@ impl SculkVeinBlock {
         multiface_spreader::spread_from_random_face_toward_random_direction(
             &config, &target, faces, pos, random,
         )
-        .await
     }
 }
 
@@ -721,27 +697,23 @@ mod tests {
             self
         }
 
-        fn place(&self, spread_pos: SpreadPos) -> BlockFuture<'_, bool> {
-            Box::pin(async move {
-                let existing = self.state_at(spread_pos.pos);
-                let Some(new_state_id) = compute_spread_placement_state(self, existing, spread_pos)
-                else {
-                    return false;
-                };
-                self.states
-                    .lock()
-                    .unwrap()
-                    .insert(spread_pos.pos, new_state_id.to_state());
-                true
-            })
+        fn place(&self, spread_pos: SpreadPos) -> bool {
+            let existing = self.state_at(spread_pos.pos);
+            let Some(new_state_id) = compute_spread_placement_state(self, existing, spread_pos)
+            else {
+                return false;
+            };
+            self.states
+                .lock()
+                .unwrap()
+                .insert(spread_pos.pos, new_state_id.to_state());
+            true
         }
     }
 
     impl SculkWorld for RecordingTarget {
-        fn set_block(&self, pos: BlockPos, state_id: BlockStateId) -> BlockFuture<'_, ()> {
-            Box::pin(async move {
-                self.states.lock().unwrap().insert(pos, state_id.to_state());
-            })
+        fn set_block(&self, pos: BlockPos, state_id: BlockStateId) {
+            self.states.lock().unwrap().insert(pos, state_id.to_state());
         }
 
         fn play_block_sound(&self, pos: BlockPos, sound: Sound) {
@@ -883,7 +855,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spread_all_actually_grows_a_placed_vein_onto_a_neighbour() {
+    fn spread_all_actually_grows_a_placed_vein_onto_a_neighbour() {
         // The core "genuinely spreads once placed" check: a vein occupying the North
         // face of the origin, with a sturdy stone block to the East of the origin,
         // should grow a new East-facing vein face at the same position via SAME_POSITION
@@ -902,8 +874,7 @@ mod tests {
             &target,
             existing_vein_faces(origin_vein).unwrap(),
             pos,
-        )
-        .await;
+        );
 
         assert!(count > 0);
         let new_faces = existing_vein_faces(target.state_at(pos)).unwrap();
@@ -912,7 +883,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spread_all_does_nothing_when_no_neighbour_can_support_a_new_face() {
+    fn spread_all_does_nothing_when_no_neighbour_can_support_a_new_face() {
         let pos = BlockPos::new(0, 0, 0);
         let origin_vein = vein_state(&[BlockDirection::North]);
         let target = RecordingTarget::new(Block::AIR.default_state).with(pos, origin_vein);
@@ -923,8 +894,7 @@ mod tests {
             &target,
             existing_vein_faces(origin_vein).unwrap(),
             pos,
-        )
-        .await;
+        );
 
         assert_eq!(count, 0);
         assert_eq!(target.state_at(pos), origin_vein);
@@ -974,7 +944,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regrow_keeps_only_faces_that_still_attach() {
+    fn regrow_keeps_only_faces_that_still_attach() {
         let pos = BlockPos::new(0, 0, 0);
         let north = pos.offset(BlockDirection::North.to_offset());
         let up = pos.offset(BlockDirection::Up.to_offset());
@@ -984,7 +954,7 @@ mod tests {
             .with(up, Block::AIR.default_state);
 
         let faces = FaceSet::from_directions([BlockDirection::North, BlockDirection::Up]);
-        let regrew = regrow(&target, pos, faces).await;
+        let regrew = regrow(&target, pos, faces);
         assert!(regrew);
 
         let new_faces = existing_vein_faces(target.state_at(pos)).unwrap();
@@ -993,17 +963,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regrow_fails_when_no_face_can_reattach() {
+    fn regrow_fails_when_no_face_can_reattach() {
         let pos = BlockPos::new(0, 0, 0);
         let target = RecordingTarget::new(Block::AIR.default_state);
         let faces = FaceSet::from_directions([BlockDirection::North]);
-        assert!(!regrow(&target, pos, faces).await);
+        assert!(!regrow(&target, pos, faces));
         // No write happened.
         assert_eq!(target.state_at(pos), Block::AIR.default_state);
     }
 
     #[tokio::test]
-    async fn on_discharged_strips_faces_pointing_at_sculk_neighbours() {
+    fn on_discharged_strips_faces_pointing_at_sculk_neighbours() {
         let pos = BlockPos::new(0, 0, 0);
         let north = pos.offset(BlockDirection::North.to_offset());
         let up = pos.offset(BlockDirection::Up.to_offset());
@@ -1014,9 +984,7 @@ mod tests {
             .with(up, Block::STONE.default_state);
 
         let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(0));
-        SculkVeinBlock
-            .on_discharged(&target, pos, &mut random)
-            .await;
+        SculkVeinBlock.on_discharged(&target, pos, &mut random);
 
         let remaining = existing_vein_faces(target.state_at(pos)).unwrap();
         assert!(!remaining.contains(BlockDirection::North));
@@ -1024,7 +992,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn on_discharged_reverts_to_air_when_no_faces_remain() {
+    fn on_discharged_reverts_to_air_when_no_faces_remain() {
         let pos = BlockPos::new(0, 0, 0);
         let north = pos.offset(BlockDirection::North.to_offset());
         let vein = vein_state(&[BlockDirection::North]);
@@ -1033,15 +1001,13 @@ mod tests {
             .with(north, Block::SCULK.default_state);
 
         let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(0));
-        SculkVeinBlock
-            .on_discharged(&target, pos, &mut random)
-            .await;
+        SculkVeinBlock.on_discharged(&target, pos, &mut random);
 
         assert_eq!(target.state_at(pos), Block::AIR.default_state);
     }
 
     #[tokio::test]
-    async fn on_discharged_reverts_to_water_when_waterlogged_and_no_faces_remain() {
+    fn on_discharged_reverts_to_water_when_waterlogged_and_no_faces_remain() {
         let pos = BlockPos::new(0, 0, 0);
         let north = pos.offset(BlockDirection::North.to_offset());
         let vein = vein_state(&[BlockDirection::North]);
@@ -1051,16 +1017,13 @@ mod tests {
             .with_fluid(pos, Fluid::WATER);
 
         let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(0));
-        SculkVeinBlock
-            .on_discharged(&target, pos, &mut random)
-            .await;
+        SculkVeinBlock.on_discharged(&target, pos, &mut random);
 
         assert_eq!(target.state_at(pos), Block::WATER.default_state);
     }
 
     #[tokio::test]
-    async fn attempt_use_charge_places_sculk_and_spends_one_charge_when_a_replaceable_face_exists()
-    {
+    fn attempt_use_charge_places_sculk_and_spends_one_charge_when_a_replaceable_face_exists() {
         let pos = BlockPos::new(0, 0, 0);
         let north = pos.offset(BlockDirection::North.to_offset());
         let vein = vein_state(&[BlockDirection::North]);
@@ -1074,16 +1037,14 @@ mod tests {
         let spreader = SculkSpreaderConfig::level_spreader();
         let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(0));
 
-        let new_charge = SculkVeinBlock
-            .attempt_use_charge(
-                &cursor,
-                &target,
-                BlockPos::new(0, 0, 0),
-                &mut random,
-                &spreader,
-                true,
-            )
-            .await;
+        let new_charge = SculkVeinBlock.attempt_use_charge(
+            &cursor,
+            &target,
+            BlockPos::new(0, 0, 0),
+            &mut random,
+            &spreader,
+            true,
+        );
 
         assert_eq!(new_charge, 99);
         assert_eq!(
@@ -1101,7 +1062,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attempt_use_charge_holds_or_halves_charge_when_spread_veins_is_false() {
+    fn attempt_use_charge_holds_or_halves_charge_when_spread_veins_is_false() {
         let pos = BlockPos::new(0, 0, 0);
         let vein = vein_state(&[BlockDirection::North]);
         let target = RecordingTarget::new(Block::AIR.default_state).with(pos, vein);
@@ -1113,22 +1074,20 @@ mod tests {
         for seed in 0..32u64 {
             let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
             let cursor = ChargeCursor::new(pos, 100, 1);
-            let new_charge = SculkVeinBlock
-                .attempt_use_charge(
-                    &cursor,
-                    &target,
-                    BlockPos::new(0, 0, 0),
-                    &mut random,
-                    &spreader,
-                    false,
-                )
-                .await;
+            let new_charge = SculkVeinBlock.attempt_use_charge(
+                &cursor,
+                &target,
+                BlockPos::new(0, 0, 0),
+                &mut random,
+                &spreader,
+                false,
+            );
             assert!(new_charge == 100 || new_charge == 50);
         }
     }
 
     #[tokio::test]
-    async fn attempt_use_charge_does_nothing_without_a_replaceable_face() {
+    fn attempt_use_charge_does_nothing_without_a_replaceable_face() {
         let pos = BlockPos::new(0, 0, 0);
         let north = pos.offset(BlockDirection::North.to_offset());
         let vein = vein_state(&[BlockDirection::North]);
@@ -1142,22 +1101,20 @@ mod tests {
         for seed in 0..32u64 {
             let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
             let cursor = ChargeCursor::new(pos, 100, 1);
-            let new_charge = SculkVeinBlock
-                .attempt_use_charge(
-                    &cursor,
-                    &target,
-                    BlockPos::new(0, 0, 0),
-                    &mut random,
-                    &spreader,
-                    true,
-                )
-                .await;
+            let new_charge = SculkVeinBlock.attempt_use_charge(
+                &cursor,
+                &target,
+                BlockPos::new(0, 0, 0),
+                &mut random,
+                &spreader,
+                true,
+            );
             assert!(new_charge == 100 || new_charge == 50);
         }
     }
 
     #[tokio::test]
-    async fn default_behaviour_regrow_branch_requires_air_or_water() {
+    fn default_behaviour_regrow_branch_requires_air_or_water() {
         use crate::block::sculk_behaviour::DefaultSculkBehaviour;
 
         let pos = BlockPos::new(0, 0, 0);
@@ -1170,25 +1127,33 @@ mod tests {
         let blocked = RecordingTarget::new(Block::AIR.default_state)
             .with(pos, Block::STONE.default_state)
             .with(north, Block::STONE.default_state);
-        let result = DefaultSculkBehaviour
-            .attempt_spread_vein(&blocked, pos, FaceSet::EMPTY, false, Some(facings))
-            .await;
+        let result = DefaultSculkBehaviour.attempt_spread_vein(
+            &blocked,
+            pos,
+            FaceSet::EMPTY,
+            false,
+            Some(facings),
+        );
         assert!(!result);
         assert_eq!(blocked.state_at(pos), Block::STONE.default_state);
 
         // Position is air with a sturdy neighbour: regrow succeeds and writes a vein.
         let open =
             RecordingTarget::new(Block::AIR.default_state).with(north, Block::STONE.default_state);
-        let result = DefaultSculkBehaviour
-            .attempt_spread_vein(&open, pos, FaceSet::EMPTY, false, Some(facings))
-            .await;
+        let result = DefaultSculkBehaviour.attempt_spread_vein(
+            &open,
+            pos,
+            FaceSet::EMPTY,
+            false,
+            Some(facings),
+        );
         assert!(result);
         let regrown = existing_vein_faces(open.state_at(pos)).unwrap();
         assert!(regrown.contains(BlockDirection::North));
     }
 
     #[tokio::test]
-    async fn default_behaviour_null_facings_uses_same_space_spreader_only() {
+    fn default_behaviour_null_facings_uses_same_space_spreader_only() {
         use crate::block::sculk_behaviour::DefaultSculkBehaviour;
 
         // A vein occupying North at `pos`. Directly above `pos` is air (SAME_POSITION
@@ -1224,16 +1189,12 @@ mod tests {
         let faces = existing_vein_faces(vein).unwrap();
 
         let same_space_target = build();
-        DefaultSculkBehaviour
-            .attempt_spread_vein(&same_space_target, pos, faces, true, None)
-            .await;
+        DefaultSculkBehaviour.attempt_spread_vein(&same_space_target, pos, faces, true, None);
         // Same-space spreader never places anything at `up` (no SAME_PLANE fallback).
         assert_eq!(same_space_target.state_at(up), Block::AIR.default_state);
 
         let interface_default_target = build();
-        SculkVeinBlock
-            .attempt_spread_vein(&interface_default_target, pos, faces, true, None)
-            .await;
+        SculkVeinBlock.attempt_spread_vein(&interface_default_target, pos, faces, true, None);
         // The normal spreader's SAME_PLANE fallback places a new vein at `up`.
         let new_vein = existing_vein_faces(interface_default_target.state_at(up)).unwrap();
         assert!(new_vein.contains(BlockDirection::North));

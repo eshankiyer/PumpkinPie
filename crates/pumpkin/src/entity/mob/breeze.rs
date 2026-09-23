@@ -5,7 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, breeze_jump::BreezeJumpGoal,
         breeze_shoot::BreezeShootGoal, breeze_shoot_when_stuck::BreezeShootWhenStuckGoal,
@@ -158,11 +158,9 @@ impl Mob for BreezeEntity {
         }
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            Self::decrement(&self.shoot_window_ticks);
-            Self::decrement(&self.shoot_cooldown_ticks);
-            Self::decrement(&self.jump_cooldown_ticks);
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        Self::decrement(&self.shoot_window_ticks);
+        Self::decrement(&self.shoot_cooldown_ticks);
+        Self::decrement(&self.jump_cooldown_ticks);
     }
 }

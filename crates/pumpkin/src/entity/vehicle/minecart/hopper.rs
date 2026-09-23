@@ -38,7 +38,7 @@ impl HopperMinecart {
         self.enabled.store(enabled, Ordering::Relaxed);
     }
 
-    pub(super) async fn tick(&self, entity: &Entity) {
+    pub(super) fn tick(&self, entity: &Entity) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
@@ -50,30 +50,27 @@ impl HopperMinecart {
             && let Some(source) = block_entity.get_inventory()
         {
             for slot in 0..source.size() {
-                let stack = source.get_stack(slot).await;
+                let stack = source.get_stack(slot);
                 if stack.is_empty()
                     || !source.can_transfer_to(self.inventory.as_ref(), slot, &stack)
                     // Vanilla `Container.canTakeItem` is a source-to-destination gate
                     // (`JukeboxBlockEntity.java:147-150`).
                     || !source
                         .can_take_item(self.inventory.as_ref(), slot, &stack)
-                        .await
                 {
                     continue;
                 }
                 let backup = stack.clone();
-                let one = source.remove_stack_specific(slot, 1).await;
+                let one = source.remove_stack_specific(slot, 1);
                 if HopperBlockEntity::add_one_item(
                     source.as_ref(),
                     self.inventory.as_ref(),
                     one,
                     &HOPPER_MINECART_SLOTS,
-                )
-                .await
-                {
+                ) {
                     return;
                 }
-                source.set_stack(slot, backup).await;
+                source.set_stack(slot, backup);
             }
             return;
         }
@@ -82,20 +79,23 @@ impl HopperMinecart {
             Vector3::new(pos.x - 0.5, pos.y + 0.6875, pos.z - 0.5),
             Vector3::new(pos.x + 0.5, pos.y + 2.0, pos.z + 0.5),
         );
-        if self.pick_up_item(entity, &suction_box).await {
+        if self.pick_up_item(entity, &suction_box) {
             return;
         }
         let cart_box = entity.bounding_box.load().expand(0.25, 0.0, 0.25);
-        self.pick_up_item(entity, &cart_box).await;
+        self.pick_up_item(entity, &cart_box);
     }
 
-    async fn pick_up_item(&self, entity: &Entity, search_box: &BoundingBox) -> bool {
+    fn pick_up_item(&self, entity: &Entity, search_box: &BoundingBox) -> bool {
         let world = entity.world.load();
         for entity in world.get_entities_at_box(search_box) {
             let Some(item) = entity.get_item_entity() else {
                 continue;
             };
-            let mut stack = item.get_item_stack().lock().await;
+            let mut stack = item
+                .get_item_stack()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if stack.is_empty() {
                 continue;
             }
@@ -106,11 +106,9 @@ impl HopperMinecart {
                 self.inventory.as_ref(),
                 one,
                 &HOPPER_MINECART_SLOTS,
-            )
-            .await
-            {
+            ) {
                 if stack.is_empty() {
-                    item.get_entity().remove().await;
+                    item.get_entity().remove();
                 }
                 return true;
             }
@@ -119,7 +117,7 @@ impl HopperMinecart {
         false
     }
 
-    pub(super) async fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
+    pub(super) fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
         container::open(
             entity,
             player,
@@ -131,16 +129,15 @@ impl HopperMinecart {
             ),
             true,
         )
-        .await
     }
 
-    pub(super) async fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.inventory.write_nbt(nbt).await;
+    pub(super) fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.inventory.write_nbt(nbt);
         nbt.put_bool("Enabled", self.enabled.load(Ordering::Relaxed));
     }
 
-    pub(super) async fn read_nbt(&self, nbt: &NbtCompound) {
-        self.inventory.read_nbt(nbt).await;
+    pub(super) fn read_nbt(&self, nbt: &NbtCompound) {
+        self.inventory.read_nbt(nbt);
         self.enabled
             .store(nbt.get_bool("Enabled").unwrap_or(true), Ordering::Relaxed);
     }

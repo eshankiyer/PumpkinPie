@@ -24,7 +24,7 @@ use pumpkin_data::{
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{Entity, EntityBase, item::ItemEntity, mob::Mob};
 
 /// `PiglinAi.ADMIRE_DURATION` (PiglinAi.java:85), used both for the direct-gift path
@@ -230,7 +230,7 @@ fn roll_barter_loot() -> ItemStack {
 /// throw toward the nearest visible player if any, else a nearby position; we throw
 /// toward the piglin's own position (i.e. just up) when no player is around, which is
 /// a simplification of vanilla's `getRandomNearbyPos`.
-async fn throw_barter_item(mob: &dyn Mob, stack: ItemStack) {
+fn throw_barter_item(mob: &dyn Mob, stack: ItemStack) {
     let entity = &mob.get_mob_entity().living_entity.entity;
     let world = entity.world.load_full();
     let pos = entity.pos.load();
@@ -249,9 +249,9 @@ async fn throw_barter_item(mob: &dyn Mob, stack: ItemStack) {
     let spawn_pos = Vector3::new(pos.x, entity.get_eye_y() - 0.3, pos.z);
     let item_entity = Entity::new(world.clone(), spawn_pos, &EntityType::ITEM);
     let item_entity = ItemEntity::new_with_velocity(item_entity, stack, velocity, 10);
-    world.spawn_entity(Arc::new(item_entity)).await;
+    world.spawn_entity(Arc::new(item_entity));
 
-    mob.get_mob_entity().living_entity.swing_hand().await;
+    mob.get_mob_entity().living_entity.swing_hand();
 }
 
 /// Runs while a piglin is staring at a gold ingot in its offhand.
@@ -272,46 +272,44 @@ impl PiglinAdmireGoal {
 }
 
 impl Goal for PiglinAdmireGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.admiring_ticks.load(Ordering::Relaxed) > 0 })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        self.admiring_ticks.load(Ordering::Relaxed) > 0
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.admiring_ticks.load(Ordering::Relaxed) > 0 })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.admiring_ticks.load(Ordering::Relaxed) > 0
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let ticks = &self.admiring_ticks;
-            let remaining = ticks.fetch_sub(1, Ordering::Relaxed) - 1;
-            if remaining > 0 {
-                return;
-            }
-            ticks.store(0, Ordering::Relaxed);
+    fn tick(&mut self, mob: &dyn Mob) {
+        let ticks = &self.admiring_ticks;
+        let remaining = ticks.fetch_sub(1, Ordering::Relaxed) - 1;
+        if remaining > 0 {
+            return;
+        }
+        ticks.store(0, Ordering::Relaxed);
 
-            // `PiglinAi.stopHoldingOffHandItem` (PiglinAi.java:373-399), adult branch.
-            let mut equipment = mob
-                .get_mob_entity()
-                .living_entity
-                .entity_equipment
-                .lock()
-                .await;
-            let taken = equipment.put(&EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone());
-            drop(equipment);
-            mob.get_mob_entity()
-                .living_entity
-                .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone())]);
+        // `PiglinAi.stopHoldingOffHandItem` (PiglinAi.java:373-399), adult branch.
+        let mut equipment = mob
+            .get_mob_entity()
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let taken = equipment.put(&EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone());
+        drop(equipment);
+        mob.get_mob_entity()
+            .living_entity
+            .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone())]);
 
-            if taken.is_empty() {
-                return;
-            }
-            if taken.item.id == Item::GOLD_INGOT.id {
-                throw_barter_item(mob, roll_barter_loot()).await;
-            }
-            // Non-gold-ingot branch (equip-if-armor / put-in-inventory) intentionally
-            // omitted: see module doc, this branch is unreachable in our
-            // interact-only trigger.
-        })
+        if taken.is_empty() {
+            return;
+        }
+        if taken.item.id == Item::GOLD_INGOT.id {
+            throw_barter_item(mob, roll_barter_loot());
+        }
+        // Non-gold-ingot branch (equip-if-armor / put-in-inventory) intentionally
+        // omitted: see module doc, this branch is unreachable in our
+        // interact-only trigger.
     }
 
     fn controls(&self) -> Controls {

@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -32,23 +31,16 @@ impl BlockEntity for DaylightDetectorBlockEntity {
         Self { position }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        _nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn write_nbt(&self, _nbt: &mut NbtCompound) {}
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {
-            if world.get_world_age().await % 20 == 0 && world.dimension.has_skylight {
-                Self::update_power(world, &self.position).await;
-            }
-        })
+    fn tick(&self, world: &Arc<World>) {
+        if world.get_world_age() % 20 == 0 && world.dimension.has_skylight {
+            Self::update_power(world, &self.position);
+        }
     }
 }
 
@@ -60,14 +52,14 @@ impl DaylightDetectorBlockEntity {
         Self { position }
     }
 
-    pub async fn update_power(world: &Arc<World>, block_pos: &BlockPos) {
+    pub fn update_power(world: &Arc<World>, block_pos: &BlockPos) {
         use std::f32::consts::PI;
 
         let (block, state) = world.get_block_and_state(block_pos);
         let mut props = DaylightDetectorProperties::from_state_id(state.id, block);
 
         let inverted = props.inverted;
-        let time_of_day = world.get_time_of_day().await;
+        let time_of_day = world.get_time_of_day();
         let sun_angle = ((time_of_day as f32 / 24_000.0) - 0.25) * (PI * 2.0);
         let power = daylight_detector_power(
             world.get_sky_light_level(block_pos),
@@ -80,8 +72,7 @@ impl DaylightDetectorBlockEntity {
             let state = props.to_state_id(block);
             world
                 .clone()
-                .set_block_state(block_pos, state, BlockFlags::NOTIFY_ALL)
-                .await;
+                .set_block_state(block_pos, state, BlockFlags::NOTIFY_ALL);
         }
     }
 }

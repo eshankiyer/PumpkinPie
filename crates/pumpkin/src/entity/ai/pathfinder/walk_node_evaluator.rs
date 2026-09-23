@@ -153,7 +153,7 @@ impl WalkNodeEvaluator {
     }
 
     /// Returns the best path node for the given position, handling step-ups, falls, and blocked nodes.
-    async fn find_accepted_node(
+    fn find_accepted_node(
         &mut self,
         pos: Vector3<i32>,
         max_y_step: i32,
@@ -162,7 +162,7 @@ impl WalkNodeEvaluator {
         current_path_type: PathType,
     ) -> Option<Node> {
         if self.water_bound {
-            let path_type = self.get_cached_path_type(pos).await;
+            let path_type = self.get_cached_path_type(pos);
             if path_type == PathType::Water
                 || (self.allow_breaching && path_type == PathType::Breach)
             {
@@ -185,7 +185,7 @@ impl WalkNodeEvaluator {
             return None;
         }
 
-        let path_type = self.get_cached_path_type(pos).await;
+        let path_type = self.get_cached_path_type(pos);
         let penalty = self.get_mob_penalty(path_type);
 
         let mut node = (penalty >= 0.0).then(|| {
@@ -198,7 +198,7 @@ impl WalkNodeEvaluator {
         if Self::has_partial_collision(current_path_type)
             && let Some(candidate) = node.as_ref()
             && candidate.cost_malus >= 0.0
-            && !self.can_reach_without_collision(candidate).await
+            && !self.can_reach_without_collision(candidate)
         {
             node = None;
         }
@@ -213,17 +213,21 @@ impl WalkNodeEvaluator {
                 && path_type != PathType::Trapdoor
                 && path_type != PathType::PowderSnow
             {
-                let jump_node = self
-                    .get_jump_on_top_node(pos, max_y_step, last_feet_y, facing, current_path_type)
-                    .await;
+                let jump_node = self.get_jump_on_top_node(
+                    pos,
+                    max_y_step,
+                    last_feet_y,
+                    facing,
+                    current_path_type,
+                );
                 if jump_node.is_some() {
                     node = jump_node;
                 }
             } else if !self.is_amphibious() && path_type == PathType::Water && !self.base.can_float
             {
-                node = self.get_non_water_node_below(pos, node).await;
+                node = self.get_non_water_node_below(pos, node);
             } else if path_type == PathType::Open {
-                node = Some(self.get_open_node(pos).await);
+                node = Some(self.get_open_node(pos));
             } else if Self::is_blocked_type(path_type) && node.is_none() {
                 let mut n = self.base.get_node(pos.as_blockpos());
                 n.closed = true;
@@ -237,7 +241,7 @@ impl WalkNodeEvaluator {
     }
 
     /// Tries stepping up one block at a time (up to `max_y_step`).
-    async fn get_jump_on_top_node(
+    fn get_jump_on_top_node(
         &mut self,
         pos: Vector3<i32>,
         max_y_step: i32,
@@ -254,7 +258,7 @@ impl WalkNodeEvaluator {
                 return None;
             }
 
-            let path_type = self.get_cached_path_type(step_pos).await;
+            let path_type = self.get_cached_path_type(step_pos);
             let penalty = self.get_mob_penalty(path_type);
 
             if penalty >= 0.0
@@ -277,7 +281,7 @@ impl WalkNodeEvaluator {
             }
 
             if path_type == PathType::Open {
-                return Some(self.get_open_node(step_pos).await);
+                return Some(self.get_open_node(step_pos));
             }
 
             return None;
@@ -287,7 +291,7 @@ impl WalkNodeEvaluator {
     }
 
     /// Searches downward for the first non-`OPEN` block, respecting safe fall distance.
-    async fn get_open_node(&mut self, pos: Vector3<i32>) -> Node {
+    fn get_open_node(&mut self, pos: Vector3<i32>) -> Node {
         let safe_fall_distance = self
             .base
             .mob_data
@@ -306,9 +310,7 @@ impl WalkNodeEvaluator {
                 return n;
             }
 
-            let path_type = self
-                .get_cached_path_type(Vector3::new(pos.x, check_y, pos.z))
-                .await;
+            let path_type = self.get_cached_path_type(Vector3::new(pos.x, check_y, pos.z));
             let penalty = self.get_mob_penalty(path_type);
 
             if path_type != PathType::Open {
@@ -333,7 +335,7 @@ impl WalkNodeEvaluator {
         n
     }
 
-    async fn get_non_water_node_below(
+    fn get_non_water_node_below(
         &mut self,
         pos: Vector3<i32>,
         mut node: Option<Node>,
@@ -343,9 +345,7 @@ impl WalkNodeEvaluator {
             return node;
         };
         while y > min_y {
-            let path_type = self
-                .get_cached_path_type(Vector3::new(pos.x, y, pos.z))
-                .await;
+            let path_type = self.get_cached_path_type(Vector3::new(pos.x, y, pos.z));
             if path_type != PathType::Water {
                 return node;
             }
@@ -382,7 +382,7 @@ impl WalkNodeEvaluator {
         )
     }
 
-    async fn can_reach_without_collision(&self, target: &Node) -> bool {
+    fn can_reach_without_collision(&self, target: &Node) -> bool {
         let Some(mob_data) = self.base.mob_data else {
             return false;
         };
@@ -409,16 +409,13 @@ impl WalkNodeEvaluator {
 
         for _ in 0..steps {
             bounding_box = bounding_box.shift(delta);
-            if self
-                .has_collisions_box(
-                    bounding_box,
-                    mob_data.position,
-                    mob_data.can_walk_on_powder_snow,
-                    mob_data.fall_distance,
-                    mob_data.is_descending,
-                )
-                .await
-            {
+            if self.has_collisions_box(
+                bounding_box,
+                mob_data.position,
+                mob_data.can_walk_on_powder_snow,
+                mob_data.fall_distance,
+                mob_data.is_descending,
+            ) {
                 return false;
             }
         }
@@ -426,7 +423,7 @@ impl WalkNodeEvaluator {
         true
     }
 
-    async fn get_cached_path_type(&mut self, pos: Vector3<i32>) -> PathType {
+    fn get_cached_path_type(&mut self, pos: Vector3<i32>) -> PathType {
         if let Some(&cached) = self.path_types_cache.get(&pos) {
             return cached;
         }
@@ -436,7 +433,7 @@ impl WalkNodeEvaluator {
         let path_type = if let Some(mut ctx) = self.base.context.take()
             && let Some(mob_data) = self.base.mob_data
         {
-            let res = self.get_path_type_of_mob(&mut ctx, pos, &mob_data).await;
+            let res = self.get_path_type_of_mob(&mut ctx, pos, &mob_data);
             self.base.context = Some(ctx);
             res
         } else {
@@ -447,7 +444,7 @@ impl WalkNodeEvaluator {
         path_type
     }
 
-    async fn has_collisions_box(
+    fn has_collisions_box(
         &self,
         bounding_box: BoundingBox,
         source_position: Vector3<f64>,
@@ -465,28 +462,27 @@ impl WalkNodeEvaluator {
             fall_distance,
             is_descending,
         )
-        .await
     }
 
-    async fn can_start_at(&mut self, pos: Vector3<i32>) -> bool {
-        let path_type = self.get_cached_path_type(pos).await;
+    fn can_start_at(&mut self, pos: Vector3<i32>) -> bool {
+        let path_type = self.get_cached_path_type(pos);
         path_type != PathType::Open && self.get_mob_penalty(path_type) >= 0.0
     }
 
-    async fn get_start_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
-        if !self.can_start_at(pos).await {
+    fn get_start_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
+        if !self.can_start_at(pos) {
             return None;
         }
 
         let mut node = self.base.get_node(pos.as_blockpos());
-        let path_type = self.get_cached_path_type(pos).await;
+        let path_type = self.get_cached_path_type(pos);
         node.path_type = path_type;
         node.cost_malus = self.get_mob_penalty(path_type);
 
         Some(node)
     }
 
-    async fn get_water_start(&mut self) -> Option<Node> {
+    fn get_water_start(&mut self) -> Option<Node> {
         let mob_data = *self.base.mob_data.as_ref()?;
         let start = Vector3::new(
             (mob_data.position.x - f64::from(mob_data.width) * 0.5).floor() as i32,
@@ -496,7 +492,7 @@ impl WalkNodeEvaluator {
         // `SwimNodeEvaluator.getStart` directly returns the node at the lower corner of the
         // mob's bounding box. It does not apply the land evaluator's passability or collision
         // gate first; that gate would reject a perfectly valid water start.
-        let path_type = self.get_cached_path_type(start).await;
+        let path_type = self.get_cached_path_type(start);
         let mut node = self.base.get_node(start.as_blockpos());
         node.path_type = path_type;
         node.cost_malus = self.get_mob_penalty(path_type);
@@ -506,7 +502,7 @@ impl WalkNodeEvaluator {
     /// `FlyNodeEvaluator.getStart`: flying mobs start at their current block height instead of
     /// searching for a floor below them. The fallback candidates cover the same immediate
     /// escape positions for a blocked start while keeping the evaluator's node cache intact.
-    async fn get_flying_start(&mut self) -> Option<Node> {
+    fn get_flying_start(&mut self) -> Option<Node> {
         let mob_data = *self.base.mob_data.as_ref()?;
         let start = Vector3::new(
             mob_data.position.x.floor() as i32,
@@ -514,7 +510,7 @@ impl WalkNodeEvaluator {
             mob_data.position.z.floor() as i32,
         );
 
-        if let Some(node) = self.get_flying_start_node(start).await {
+        if let Some(node) = self.get_flying_start_node(start) {
             return Some(node);
         }
 
@@ -524,7 +520,7 @@ impl WalkNodeEvaluator {
                     if x == 0 && y == 0 && z == 0 {
                         continue;
                     }
-                    if let Some(node) = self.get_flying_start_node(start.add_raw(x, y, z)).await {
+                    if let Some(node) = self.get_flying_start_node(start.add_raw(x, y, z)) {
                         return Some(node);
                     }
                 }
@@ -533,8 +529,8 @@ impl WalkNodeEvaluator {
         None
     }
 
-    async fn get_flying_start_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
-        let path_type = self.get_cached_path_type(pos).await;
+    fn get_flying_start_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
+        let path_type = self.get_cached_path_type(pos);
         let penalty = self.get_mob_penalty(path_type);
         if penalty < 0.0 {
             return None;
@@ -546,8 +542,8 @@ impl WalkNodeEvaluator {
         Some(node)
     }
 
-    async fn find_flying_accepted_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
-        let path_type = self.get_cached_path_type(pos).await;
+    fn find_flying_accepted_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
+        let path_type = self.get_cached_path_type(pos);
         let penalty = self.get_mob_penalty(path_type);
         if penalty < 0.0 {
             return None;
@@ -565,15 +561,15 @@ impl WalkNodeEvaluator {
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn get_flying_neighbors(&mut self, current: &Node, out: &mut Vec<Node>) {
+    fn get_flying_neighbors(&mut self, current: &Node, out: &mut Vec<Node>) {
         let pos = current.pos.0;
 
-        let south = self.find_flying_accepted_node(pos.add_raw(0, 0, 1)).await;
-        let west = self.find_flying_accepted_node(pos.add_raw(-1, 0, 0)).await;
-        let east = self.find_flying_accepted_node(pos.add_raw(1, 0, 0)).await;
-        let north = self.find_flying_accepted_node(pos.add_raw(0, 0, -1)).await;
-        let up = self.find_flying_accepted_node(pos.add_raw(0, 1, 0)).await;
-        let down = self.find_flying_accepted_node(pos.add_raw(0, -1, 0)).await;
+        let south = self.find_flying_accepted_node(pos.add_raw(0, 0, 1));
+        let west = self.find_flying_accepted_node(pos.add_raw(-1, 0, 0));
+        let east = self.find_flying_accepted_node(pos.add_raw(1, 0, 0));
+        let north = self.find_flying_accepted_node(pos.add_raw(0, 0, -1));
+        let up = self.find_flying_accepted_node(pos.add_raw(0, 1, 0));
+        let down = self.find_flying_accepted_node(pos.add_raw(0, -1, 0));
 
         push_flying_if_open(out, south);
         push_flying_if_open(out, west);
@@ -582,58 +578,58 @@ impl WalkNodeEvaluator {
         push_flying_if_open(out, up);
         push_flying_if_open(out, down);
 
-        let south_up = self.find_flying_accepted_node(pos.add_raw(0, 1, 1)).await;
+        let south_up = self.find_flying_accepted_node(pos.add_raw(0, 1, 1));
         if is_flying_open(&south_up) && has_flying_malus(&south) && has_flying_malus(&up) {
             out.push(south_up.unwrap());
         }
-        let west_up = self.find_flying_accepted_node(pos.add_raw(-1, 1, 0)).await;
+        let west_up = self.find_flying_accepted_node(pos.add_raw(-1, 1, 0));
         if is_flying_open(&west_up) && has_flying_malus(&west) && has_flying_malus(&up) {
             out.push(west_up.unwrap());
         }
-        let east_up = self.find_flying_accepted_node(pos.add_raw(1, 1, 0)).await;
+        let east_up = self.find_flying_accepted_node(pos.add_raw(1, 1, 0));
         if is_flying_open(&east_up) && has_flying_malus(&east) && has_flying_malus(&up) {
             out.push(east_up.unwrap());
         }
-        let north_up = self.find_flying_accepted_node(pos.add_raw(0, 1, -1)).await;
+        let north_up = self.find_flying_accepted_node(pos.add_raw(0, 1, -1));
         if is_flying_open(&north_up) && has_flying_malus(&north) && has_flying_malus(&up) {
             out.push(north_up.unwrap());
         }
 
-        let south_down = self.find_flying_accepted_node(pos.add_raw(0, -1, 1)).await;
+        let south_down = self.find_flying_accepted_node(pos.add_raw(0, -1, 1));
         if is_flying_open(&south_down) && has_flying_malus(&south) && has_flying_malus(&down) {
             out.push(south_down.unwrap());
         }
-        let west_down = self.find_flying_accepted_node(pos.add_raw(-1, -1, 0)).await;
+        let west_down = self.find_flying_accepted_node(pos.add_raw(-1, -1, 0));
         if is_flying_open(&west_down) && has_flying_malus(&west) && has_flying_malus(&down) {
             out.push(west_down.unwrap());
         }
-        let east_down = self.find_flying_accepted_node(pos.add_raw(1, -1, 0)).await;
+        let east_down = self.find_flying_accepted_node(pos.add_raw(1, -1, 0));
         if is_flying_open(&east_down) && has_flying_malus(&east) && has_flying_malus(&down) {
             out.push(east_down.unwrap());
         }
-        let north_down = self.find_flying_accepted_node(pos.add_raw(0, -1, -1)).await;
+        let north_down = self.find_flying_accepted_node(pos.add_raw(0, -1, -1));
         if is_flying_open(&north_down) && has_flying_malus(&north) && has_flying_malus(&down) {
             out.push(north_down.unwrap());
         }
 
-        let north_east = self.find_flying_accepted_node(pos.add_raw(1, 0, -1)).await;
+        let north_east = self.find_flying_accepted_node(pos.add_raw(1, 0, -1));
         if is_flying_open(&north_east) && has_flying_malus(&north) && has_flying_malus(&east) {
             out.push(north_east.unwrap());
         }
-        let south_east = self.find_flying_accepted_node(pos.add_raw(1, 0, 1)).await;
+        let south_east = self.find_flying_accepted_node(pos.add_raw(1, 0, 1));
         if is_flying_open(&south_east) && has_flying_malus(&south) && has_flying_malus(&east) {
             out.push(south_east.unwrap());
         }
-        let north_west = self.find_flying_accepted_node(pos.add_raw(-1, 0, -1)).await;
+        let north_west = self.find_flying_accepted_node(pos.add_raw(-1, 0, -1));
         if is_flying_open(&north_west) && has_flying_malus(&north) && has_flying_malus(&west) {
             out.push(north_west.unwrap());
         }
-        let south_west = self.find_flying_accepted_node(pos.add_raw(-1, 0, 1)).await;
+        let south_west = self.find_flying_accepted_node(pos.add_raw(-1, 0, 1));
         if is_flying_open(&south_west) && has_flying_malus(&south) && has_flying_malus(&west) {
             out.push(south_west.unwrap());
         }
 
-        let north_east_up = self.find_flying_accepted_node(pos.add_raw(1, 1, -1)).await;
+        let north_east_up = self.find_flying_accepted_node(pos.add_raw(1, 1, -1));
         if is_flying_open(&north_east_up)
             && has_flying_malus(&north_east)
             && has_flying_malus(&north)
@@ -644,7 +640,7 @@ impl WalkNodeEvaluator {
         {
             out.push(north_east_up.unwrap());
         }
-        let south_east_up = self.find_flying_accepted_node(pos.add_raw(1, 1, 1)).await;
+        let south_east_up = self.find_flying_accepted_node(pos.add_raw(1, 1, 1));
         if is_flying_open(&south_east_up)
             && has_flying_malus(&south_east)
             && has_flying_malus(&south)
@@ -655,7 +651,7 @@ impl WalkNodeEvaluator {
         {
             out.push(south_east_up.unwrap());
         }
-        let north_west_up = self.find_flying_accepted_node(pos.add_raw(-1, 1, -1)).await;
+        let north_west_up = self.find_flying_accepted_node(pos.add_raw(-1, 1, -1));
         if is_flying_open(&north_west_up)
             && has_flying_malus(&north_west)
             && has_flying_malus(&north)
@@ -666,7 +662,7 @@ impl WalkNodeEvaluator {
         {
             out.push(north_west_up.unwrap());
         }
-        let south_west_up = self.find_flying_accepted_node(pos.add_raw(-1, 1, 1)).await;
+        let south_west_up = self.find_flying_accepted_node(pos.add_raw(-1, 1, 1));
         if is_flying_open(&south_west_up)
             && has_flying_malus(&south_west)
             && has_flying_malus(&south)
@@ -678,7 +674,7 @@ impl WalkNodeEvaluator {
             out.push(south_west_up.unwrap());
         }
 
-        let north_east_down = self.find_flying_accepted_node(pos.add_raw(1, -1, -1)).await;
+        let north_east_down = self.find_flying_accepted_node(pos.add_raw(1, -1, -1));
         if is_flying_open(&north_east_down)
             && has_flying_malus(&north_east)
             && has_flying_malus(&north)
@@ -689,7 +685,7 @@ impl WalkNodeEvaluator {
         {
             out.push(north_east_down.unwrap());
         }
-        let south_east_down = self.find_flying_accepted_node(pos.add_raw(1, -1, 1)).await;
+        let south_east_down = self.find_flying_accepted_node(pos.add_raw(1, -1, 1));
         if is_flying_open(&south_east_down)
             && has_flying_malus(&south_east)
             && has_flying_malus(&south)
@@ -700,9 +696,7 @@ impl WalkNodeEvaluator {
         {
             out.push(south_east_down.unwrap());
         }
-        let north_west_down = self
-            .find_flying_accepted_node(pos.add_raw(-1, -1, -1))
-            .await;
+        let north_west_down = self.find_flying_accepted_node(pos.add_raw(-1, -1, -1));
         if is_flying_open(&north_west_down)
             && has_flying_malus(&north_west)
             && has_flying_malus(&north)
@@ -713,7 +707,7 @@ impl WalkNodeEvaluator {
         {
             out.push(north_west_down.unwrap());
         }
-        let south_west_down = self.find_flying_accepted_node(pos.add_raw(-1, -1, 1)).await;
+        let south_west_down = self.find_flying_accepted_node(pos.add_raw(-1, -1, 1));
         if is_flying_open(&south_west_down)
             && has_flying_malus(&south_west)
             && has_flying_malus(&south)
@@ -726,7 +720,7 @@ impl WalkNodeEvaluator {
         }
     }
 
-    async fn get_water_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
+    fn get_water_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
         let directions = [
             (1, 0, 0),
             (-1, 0, 0),
@@ -739,9 +733,7 @@ impl WalkNodeEvaluator {
 
         for (index, &(dx, dy, dz)) in directions.iter().enumerate() {
             let pos = current.pos.0.add_raw(dx, dy, dz);
-            let node = self
-                .find_accepted_node(pos, 0, 0.0, (dx, dz), current.path_type)
-                .await;
+            let node = self.find_accepted_node(pos, 0, 0.0, (dx, dz), current.path_type);
             if index < 4 {
                 horizontal[index] = node;
             }
@@ -760,9 +752,7 @@ impl WalkNodeEvaluator {
                 && horizontal[second].is_some_and(|node| node.cost_malus >= 0.0)
             {
                 let pos = current.pos.0.add_raw(dx, 0, dz);
-                let node = self
-                    .find_accepted_node(pos, 0, 0.0, (dx, dz), current.path_type)
-                    .await;
+                let node = self.find_accepted_node(pos, 0, 0.0, (dx, dz), current.path_type);
                 if node.is_some_and(|node| !node.closed) {
                     out_neighbors.push(node.unwrap());
                 }
@@ -809,13 +799,13 @@ impl NodeEvaluator for WalkNodeEvaluator {
         self.path_types_cache.clear();
     }
 
-    async fn get_start(&mut self) -> Option<Node> {
+    fn get_start(&mut self) -> Option<Node> {
         if self.water_bound {
-            return self.get_water_start().await;
+            return self.get_water_start();
         }
 
         if self.flying {
-            return self.get_flying_start().await;
+            return self.get_flying_start();
         }
 
         let mob_data = *self.base.mob_data.as_ref()?;
@@ -830,7 +820,7 @@ impl NodeEvaluator for WalkNodeEvaluator {
                 mob_y_f64.floor() as i32,
                 (mob_z - f64::from(mob_data.width) * 0.5).floor() as i32,
             );
-            return self.get_start_node(start).await;
+            return self.get_start_node(start);
         }
 
         let y = if (self.is_amphibious() && mob_data.in_water) || on_ground {
@@ -840,13 +830,11 @@ impl NodeEvaluator for WalkNodeEvaluator {
             let bottom_y = start_y - 64;
             let mut found_y = start_y;
             for check_y in (bottom_y..start_y).rev() {
-                let path_type = self
-                    .get_cached_path_type(Vector3::new(
-                        mob_x.floor() as i32,
-                        check_y,
-                        mob_z.floor() as i32,
-                    ))
-                    .await;
+                let path_type = self.get_cached_path_type(Vector3::new(
+                    mob_x.floor() as i32,
+                    check_y,
+                    mob_z.floor() as i32,
+                ));
                 if path_type != PathType::Open && path_type != PathType::Water {
                     found_y = check_y + 1;
                     break;
@@ -867,19 +855,19 @@ impl NodeEvaluator for WalkNodeEvaluator {
         };
         let start_pos = Vector3::new(block_x, y, block_z);
 
-        if let Some(node) = self.get_start_node(start_pos).await {
+        if let Some(node) = self.get_start_node(start_pos) {
             return Some(node);
         }
 
         for &(dx, dz) in &DIRECTIONS {
             let try_pos = Vector3::new(block_x + dx, y, block_z + dz);
-            if let Some(node) = self.get_start_node(try_pos).await {
+            if let Some(node) = self.get_start_node(try_pos) {
                 return Some(node);
             }
         }
 
         let above_pos = Vector3::new(block_x, y + 1, block_z);
-        self.get_start_node(above_pos).await
+        self.get_start_node(above_pos)
     }
 
     fn get_target(&mut self, pos: BlockPos) -> Target {
@@ -888,21 +876,19 @@ impl NodeEvaluator for WalkNodeEvaluator {
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn get_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
+    fn get_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
         if self.water_bound {
-            self.get_water_neighbors(current, out_neighbors).await;
+            self.get_water_neighbors(current, out_neighbors);
             return;
         }
 
         if self.flying {
-            self.get_flying_neighbors(current, out_neighbors).await;
+            self.get_flying_neighbors(current, out_neighbors);
             return;
         }
 
-        let headroom_type = self
-            .get_cached_path_type(current.pos.0.add_raw(0, 1, 0))
-            .await;
-        let current_type = self.get_cached_path_type(current.pos.0).await;
+        let headroom_type = self.get_cached_path_type(current.pos.0.add_raw(0, 1, 0));
+        let current_type = self.get_cached_path_type(current.pos.0);
 
         let headroom_penalty = self.get_mob_penalty(headroom_type);
         let max_y_step = if headroom_penalty >= 0.0 && current_type != PathType::StickyHoney {
@@ -920,15 +906,13 @@ impl NodeEvaluator for WalkNodeEvaluator {
         for (i, &(dx, dz)) in DIRECTIONS.iter().enumerate() {
             let neighbor_pos = current.pos.0.add_raw(dx, 0, dz);
 
-            let neighbor_opt = self
-                .find_accepted_node(
-                    neighbor_pos,
-                    max_y_step,
-                    floor_level,
-                    (dx, dz),
-                    current.path_type,
-                )
-                .await;
+            let neighbor_opt = self.find_accepted_node(
+                neighbor_pos,
+                max_y_step,
+                floor_level,
+                (dx, dz),
+                current.path_type,
+            );
 
             if let Some(neighbor) = neighbor_opt {
                 self.reusable_neighbors[i] = Some(neighbor);
@@ -939,30 +923,26 @@ impl NodeEvaluator for WalkNodeEvaluator {
         }
 
         if self.is_amphibious() {
-            let up = self
-                .find_accepted_node(
-                    current.pos.0.add_raw(0, 1, 0),
-                    max_y_step.saturating_sub(1),
-                    floor_level,
-                    (0, 0),
-                    current_type,
-                )
-                .await;
+            let up = self.find_accepted_node(
+                current.pos.0.add_raw(0, 1, 0),
+                max_y_step.saturating_sub(1),
+                floor_level,
+                (0, 0),
+                current_type,
+            );
             if up.as_ref().is_some_and(|node| {
                 node.path_type == PathType::Water && Self::is_neighbor_valid(Some(node), current)
             }) {
                 out_neighbors.push(up.unwrap());
             }
 
-            let down = self
-                .find_accepted_node(
-                    current.pos.0.add_raw(0, -1, 0),
-                    max_y_step,
-                    floor_level,
-                    (0, 0),
-                    current_type,
-                )
-                .await;
+            let down = self.find_accepted_node(
+                current.pos.0.add_raw(0, -1, 0),
+                max_y_step,
+                floor_level,
+                (0, 0),
+                current_type,
+            );
             if current_type != PathType::Trapdoor
                 && down.as_ref().is_some_and(|node| {
                     node.path_type == PathType::Water
@@ -990,15 +970,13 @@ impl NodeEvaluator for WalkNodeEvaluator {
             ) {
                 let diagonal_pos = current.pos.0.add_raw(dx, 0, dz);
 
-                let diagonal_opt = self
-                    .find_accepted_node(
-                        diagonal_pos,
-                        max_y_step,
-                        floor_level,
-                        (dx, dz),
-                        current.path_type,
-                    )
-                    .await;
+                let diagonal_opt = self.find_accepted_node(
+                    diagonal_pos,
+                    max_y_step,
+                    floor_level,
+                    (dx, dz),
+                    current.path_type,
+                );
 
                 if let Some(diagonal) = diagonal_opt
                     && Self::is_diagonal_node_valid(Some(&diagonal))
@@ -1022,7 +1000,7 @@ impl NodeEvaluator for WalkNodeEvaluator {
 
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::unused_async_trait_impl)]
-    async fn get_path_type_of_mob(
+    fn get_path_type_of_mob(
         &mut self,
         context: &mut PathfindingContext,
         pos: Vector3<i32>,
@@ -1157,11 +1135,7 @@ impl NodeEvaluator for WalkNodeEvaluator {
     }
 
     #[allow(clippy::unused_async_trait_impl)]
-    async fn get_path_type(
-        &mut self,
-        context: &mut PathfindingContext,
-        pos: Vector3<i32>,
-    ) -> PathType {
+    fn get_path_type(&mut self, context: &mut PathfindingContext, pos: Vector3<i32>) -> PathType {
         context.get_path_type_from_state(pos)
     }
 

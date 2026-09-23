@@ -5,7 +5,7 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::chunk::ChunkHeightmapType;
 use rand::RngExt;
 
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture};
+use crate::entity::ai::goal::{Controls, Goal};
 use crate::entity::mob::Mob;
 
 const MAX_ATTEMPTS: i32 = 64;
@@ -94,34 +94,30 @@ impl GhastRandomFloatAroundGoal {
 }
 
 impl Goal for GhastRandomFloatAroundGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let move_control = mob.get_mob_entity().move_control.lock().unwrap();
-            if !move_control.has_wanted() {
-                return true;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let move_control = mob.get_mob_entity().move_control.lock().unwrap();
+        if !move_control.has_wanted() {
+            return true;
+        }
 
-            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-            let xd = move_control.get_wanted_x() - pos.x;
-            let yd = move_control.get_wanted_y() - pos.y;
-            let zd = move_control.get_wanted_z() - pos.z;
-            Self::should_reroll(xd * xd + yd * yd + zd * zd)
-        })
+        let pos = mob.get_mob_entity().living_entity.entity.pos.load();
+        let xd = move_control.get_wanted_x() - pos.x;
+        let yd = move_control.get_wanted_y() - pos.y;
+        let zd = move_control.get_wanted_z() - pos.z;
+        Self::should_reroll(xd * xd + yd * yd + zd * zd)
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let target = Self::get_suitable_fly_to_position(mob);
-            mob.get_mob_entity()
-                .move_control
-                .lock()
-                .unwrap()
-                .set_wanted_position(target.x, target.y, target.z, 1.0);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        let target = Self::get_suitable_fly_to_position(mob);
+        mob.get_mob_entity()
+            .move_control
+            .lock()
+            .unwrap()
+            .set_wanted_position(target.x, target.y, target.z, 1.0);
     }
 
     fn controls(&self) -> Controls {

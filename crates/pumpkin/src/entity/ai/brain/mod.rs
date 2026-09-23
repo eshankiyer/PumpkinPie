@@ -493,7 +493,7 @@ impl Brain {
     ///
     /// `game_time` is the caller's tick timestamp; see `Mob::tick` for which clock is used and
     /// why it is not vanilla's `level.getGameTime()`.
-    pub async fn tick(&self, mob: &dyn Mob, game_time: i64) {
+    pub fn tick(&self, mob: &dyn Mob, game_time: i64) {
         self.memory.lock().unwrap().tick_expiry();
 
         // Take the runtime out of its mutex so sensor `.await`s hold no lock. The memory half
@@ -502,7 +502,7 @@ impl Brain {
         let mut runtime = RuntimeTakeGuard::new(&self.runtime);
 
         for sensor in &mut runtime.sensors {
-            sensor.tick(mob, self).await;
+            sensor.tick(mob, self);
         }
         runtime.start_each_non_running_behavior(mob, self, game_time);
         runtime.tick_each_running_behavior(mob, self, game_time);

@@ -174,20 +174,17 @@ impl RCONClient {
                     let output_clone = output.clone();
                     let packet_body = packet.get_body().to_owned();
 
-                    let command_source =
-                        CommandSender::Rcon(output_clone).into_source(server).await;
+                    let command_source = CommandSender::Rcon(output_clone).into_source(server);
 
                     // Wait task complete before send output
                     let _ = tokio::spawn(async move {
                         server_clone
                             .command_dispatcher
                             .load()
-                            .handle_command(&command_source, &packet_body)
-                            .await;
-                    })
-                    .await;
+                            .handle_command(&command_source, &packet_body);
+                    });
 
-                    let output = output.lock().await;
+                    let output = output.lock();
                     if config.logging.commands {
                         if output.is_empty() {
                             info!(

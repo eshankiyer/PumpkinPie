@@ -2,7 +2,7 @@ use std::sync::Weak;
 use std::sync::atomic::Ordering::SeqCst;
 
 use super::wander_around::WanderAroundGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{mob::Mob, passive::turtle::TurtleEntity};
 
 /// Vanilla: `Turtle.TurtleRandomStrollGoal` (`Turtle.java:563-575`), a `RandomStrollGoal`
@@ -34,24 +34,22 @@ impl TurtleRandomStrollGoal {
 }
 
 impl Goal for TurtleRandomStrollGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !self.guard_passes(mob) {
-                return false;
-            }
-            self.inner.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !self.guard_passes(mob) {
+            return false;
+        }
+        self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 

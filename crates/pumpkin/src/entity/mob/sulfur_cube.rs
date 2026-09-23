@@ -18,10 +18,10 @@ use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::control::{Control, MoveControlTrait},
-    ai::goal::{Controls, Goal, GoalFuture},
+    ai::goal::{Controls, Goal},
     item::ItemEntity,
     mob::{Mob, MobEntity},
     player::Player,
@@ -200,8 +200,8 @@ impl SulfurCubeEntity {
 
     /// SulfurCube.java:928-930 (`canBePickedFromInside`): a sulfur cube carrying an item
     /// cannot be caught by an empty bucket.
-    pub async fn can_be_picked_from_inside(&self) -> bool {
-        !self.has_body_item().await
+    pub fn can_be_picked_from_inside(&self) -> bool {
+        !self.has_body_item()
     }
 
     /// SulfurCube.java:669-675 (`setSpawnSize`): unlike the generic cube-mob random size
@@ -214,47 +214,60 @@ impl SulfurCubeEntity {
         }
     }
 
-    pub(crate) async fn has_body_item(&self) -> bool {
-        let equipment = self.entity.living_entity.entity_equipment.lock().await;
+    pub(crate) fn has_body_item(&self) -> bool {
+        let equipment = self
+            .entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let stack = equipment.get(&EquipmentSlot::BODY);
         !stack.is_empty()
     }
 
-    pub(crate) async fn can_breathe_underwater(&self) -> bool {
-        self.has_body_item().await
+    pub(crate) fn can_breathe_underwater(&self) -> bool {
+        self.has_body_item()
     }
 
-    async fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
+    fn can_hold_item(&self, item_stack: &ItemStack) -> bool {
         if self.is_baby() {
             return false;
         }
-        !self.has_body_item().await && is_swallowable_item(item_stack)
+        !self.has_body_item() && is_swallowable_item(item_stack)
     }
 
     /// SulfurCube.java:493-522 (`equipItem`).
-    pub(crate) async fn equip_item(&self, item_stack: &ItemStack) -> bool {
+    pub(crate) fn equip_item(&self, item_stack: &ItemStack) -> bool {
         if self.is_baby() {
             return false;
         }
 
         let equipment = self.entity.living_entity.entity_equipment.clone();
-        let body_stack = equipment.lock().await.get(&EquipmentSlot::BODY);
+        let body_stack = equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&EquipmentSlot::BODY);
         if !body_stack.is_empty() && body_stack.item.id == item_stack.item.id {
             return false;
         }
 
         let previous = {
-            let mut equipment = equipment.lock().await;
+            let mut equipment = equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.put(&EquipmentSlot::BODY, item_stack.copy_with_count(1))
         };
 
         if !previous.is_empty() {
             let entity = &self.entity.living_entity.entity;
             let world = entity.world.load();
-            world.drop_stack(&entity.block_pos.load(), previous).await;
+            world.drop_stack(&entity.block_pos.load(), previous);
         }
 
-        let new_body = equipment.lock().await.get(&EquipmentSlot::BODY);
+        let new_body = equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&EquipmentSlot::BODY);
         self.entity
             .living_entity
             .send_equipment_changes(&[(EquipmentSlot::BODY, new_body)]);
@@ -264,10 +277,12 @@ impl SulfurCubeEntity {
     }
 
     /// SulfurCube.java:607-614 (`shear`).
-    async fn shear(&self) {
+    fn shear(&self) {
         let equipment = self.entity.living_entity.entity_equipment.clone();
         let ejected = {
-            let mut equipment = equipment.lock().await;
+            let mut equipment = equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.put(&EquipmentSlot::BODY, ItemStack::EMPTY.clone())
         };
 
@@ -277,7 +292,7 @@ impl SulfurCubeEntity {
 
         let entity = &self.entity.living_entity.entity;
         let world = entity.world.load();
-        world.drop_stack(&entity.block_pos.load(), ejected).await;
+        world.drop_stack(&entity.block_pos.load(), ejected);
 
         self.entity
             .living_entity
@@ -380,15 +395,19 @@ impl SulfurCubeEntity {
 
     /// SulfurCube.java:731-767 (`playerTouch`/`playerPush`): pushes an overlapping player or
     /// the player's root vehicle when the cube is carrying an item.
-    async fn player_push(&self, player: &Player) {
-        if !self.has_body_item().await {
+    fn player_push(&self, player: &Player) {
+        if !self.has_body_item() {
             return;
         }
 
         let player_entity = player.get_entity();
-        let player_is_passenger = player_entity.has_vehicle().await;
+        let player_is_passenger = player_entity.has_vehicle();
         let (pusher_position, pusher_height) = if player_is_passenger {
-            let mut vehicle = player_entity.vehicle.lock().await.clone();
+            let mut vehicle = player_entity
+                .vehicle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
             let mut position = player_entity.pos.load();
             let mut height = player_entity.height();
             while let Some(current) = vehicle {
@@ -400,7 +419,11 @@ impl SulfurCubeEntity {
                 // clone-over-existing-value.
                 #[expect(clippy::assigning_clones)]
                 {
-                    vehicle = current_entity.vehicle.lock().await.clone();
+                    vehicle = current_entity
+                        .vehicle
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
                 }
             }
             (position, height)
@@ -489,33 +512,29 @@ impl AgeableMob for SulfurCubeEntity {
 }
 
 impl NBTStorage for SulfurCubeEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("Size", self.get_size() - 1);
-            nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
-            self.write_ageable_nbt(nbt);
-            nbt.put_int("pickup_timer", self.pickup_timer.load(Ordering::Relaxed));
-            nbt.put_bool("from_bucket", self.from_bucket());
-            nbt.put_int("fuse", self.get_fuse());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.living_entity.write_nbt(nbt);
+        nbt.put_int("Size", self.get_size() - 1);
+        nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
+        self.write_ageable_nbt(nbt);
+        nbt.put_int("pickup_timer", self.pickup_timer.load(Ordering::Relaxed));
+        nbt.put_bool("from_bucket", self.from_bucket());
+        nbt.put_int("fuse", self.get_fuse());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.set_size(nbt.get_int("Size").unwrap_or(0) + 1, false);
-            self.was_on_ground.store(
-                nbt.get_bool("wasOnGround").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.read_ageable_nbt(nbt);
-            self.pickup_timer
-                .store(nbt.get_int("pickup_timer").unwrap_or(0), Ordering::Relaxed);
-            self.set_from_bucket(nbt.get_bool("from_bucket").unwrap_or(false));
-            self.fuse
-                .store(nbt.get_int("fuse").unwrap_or(-1), Ordering::Relaxed);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.living_entity.read_nbt_non_mut(nbt);
+        self.set_size(nbt.get_int("Size").unwrap_or(0) + 1, false);
+        self.was_on_ground.store(
+            nbt.get_bool("wasOnGround").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.read_ageable_nbt(nbt);
+        self.pickup_timer
+            .store(nbt.get_int("pickup_timer").unwrap_or(0), Ordering::Relaxed);
+        self.set_from_bucket(nbt.get_bool("from_bucket").unwrap_or(false));
+        self.fuse
+            .store(nbt.get_int("fuse").unwrap_or(-1), Ordering::Relaxed);
     }
 }
 
@@ -616,7 +635,7 @@ impl Mob for SulfurCubeEntity {
         Box::pin(async move {
             // SulfurCube.java:731-767 (`playerTouch`/`playerPush`): a cube carrying
             // an item pushes an overlapping player or the player's root vehicle.
-            self.player_push(player).await;
+            self.player_push(player);
         })
     }
 
@@ -637,17 +656,16 @@ impl Mob for SulfurCubeEntity {
                 }
                 return self
                     .entity
-                    .mob_interact(player, item_stack, self.can_be_leashed())
-                    .await;
+                    .mob_interact(player, item_stack, self.can_be_leashed());
             }
 
-            if item_stack.item.id == Item::SHEARS.id && self.has_body_item().await {
-                self.shear().await;
+            if item_stack.item.id == Item::SHEARS.id && self.has_body_item() {
+                self.shear();
                 return true;
             }
 
-            if self.can_hold_item(item_stack).await {
-                let equipped = self.equip_item(item_stack).await;
+            if self.can_hold_item(item_stack) {
+                let equipped = self.equip_item(item_stack);
                 if equipped {
                     item_stack.decrement_unless_creative(player.gamemode.load(), 1);
                 }
@@ -656,7 +674,6 @@ impl Mob for SulfurCubeEntity {
 
             self.entity
                 .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
         })
     }
 
@@ -698,7 +715,7 @@ impl Mob for SulfurCubeEntity {
                         .entity
                         .yaw
                         .store(rand::random_range(0.0..360.0));
-                    world.spawn_entity(cube).await;
+                    world.spawn_entity(cube);
                 }
             }
         })
@@ -787,24 +804,20 @@ impl SulfurCubeFloatGoal {
 }
 
 impl Goal for SulfurCubeFloatGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.cube.entity.living_entity.entity;
-            entity.touching_water.load(Ordering::Relaxed)
-                || entity.touching_lava.load(Ordering::Relaxed)
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let entity = &self.cube.entity.living_entity.entity;
+        entity.touching_water.load(Ordering::Relaxed)
+            || entity.touching_lava.load(Ordering::Relaxed)
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if rand::random_range(0.0..1.0) < 0.8 {
-                self.cube
-                    .entity
-                    .jump_requested
-                    .store(true, Ordering::SeqCst);
-            }
-            self.cube.speed_modifier.store(1.2);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        if rand::random_range(0.0..1.0) < 0.8 {
+            self.cube
+                .entity
+                .jump_requested
+                .store(true, Ordering::SeqCst);
+        }
+        self.cube.speed_modifier.store(1.2);
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -833,40 +846,36 @@ impl SulfurCubeRandomDirectionGoal {
 }
 
 impl Goal for SulfurCubeRandomDirectionGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.cube
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        self.cube
+            .entity
+            .living_entity
+            .entity
+            .on_ground
+            .load(Ordering::Relaxed)
+            || self
+                .cube
                 .entity
                 .living_entity
                 .entity
-                .on_ground
+                .touching_water
                 .load(Ordering::Relaxed)
-                || self
-                    .cube
-                    .entity
-                    .living_entity
-                    .entity
-                    .touching_water
-                    .load(Ordering::Relaxed)
-                || self
-                    .cube
-                    .entity
-                    .living_entity
-                    .entity
-                    .touching_lava
-                    .load(Ordering::Relaxed)
-        })
+            || self
+                .cube
+                .entity
+                .living_entity
+                .entity
+                .touching_lava
+                .load(Ordering::Relaxed)
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.next_randomize_time -= 1;
-            if self.next_randomize_time <= 0 {
-                self.next_randomize_time = rand::random_range(40..100);
-                self.chosen_degrees = rand::random_range(0.0..360.0);
-            }
-            self.cube.target_yaw.store(self.chosen_degrees);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.next_randomize_time -= 1;
+        if self.next_randomize_time <= 0 {
+            self.next_randomize_time = rand::random_range(40..100);
+            self.chosen_degrees = rand::random_range(0.0..360.0);
+        }
+        self.cube.target_yaw.store(self.chosen_degrees);
     }
 
     fn controls(&self) -> Controls {
@@ -885,17 +894,20 @@ impl SulfurCubeKeepOnJumpingGoal {
 }
 
 impl Goal for SulfurCubeKeepOnJumpingGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let vehicle = self.cube.entity.living_entity.entity.vehicle.lock().await;
-            vehicle.is_none()
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let vehicle = self
+            .cube
+            .entity
+            .living_entity
+            .entity
+            .vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        vehicle.is_none()
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.cube.speed_modifier.store(1.0);
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.cube.speed_modifier.store(1.0);
     }
 
     fn controls(&self) -> Controls {
@@ -912,102 +924,120 @@ impl Goal for SulfurCubeKeepOnJumpingGoal {
 /// externally equivalent simplification.
 pub struct SulfurCubeSearchForItemsGoal {
     cube: Arc<SulfurCubeEntity>,
-    target_item: tokio::sync::Mutex<Option<Arc<ItemEntity>>>,
+    target_item: std::sync::Mutex<Option<Arc<ItemEntity>>>,
 }
 
 impl SulfurCubeSearchForItemsGoal {
     pub fn new(cube: Arc<SulfurCubeEntity>) -> Self {
         Self {
             cube,
-            target_item: tokio::sync::Mutex::new(None),
+            target_item: std::sync::Mutex::new(None),
         }
     }
 }
 
 impl Goal for SulfurCubeSearchForItemsGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.cube.is_baby() || self.cube.pickup_timer.load(Ordering::Relaxed) > 0 {
-                return false;
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        if self.cube.is_baby() || self.cube.pickup_timer.load(Ordering::Relaxed) > 0 {
+            return false;
+        }
+
+        let entity = &self.cube.entity.living_entity.entity;
+        let world = entity.world.load();
+        let pos = entity.pos.load();
+
+        let mut nearest: Option<(Arc<ItemEntity>, f64)> = None;
+        for candidate in world.get_nearby_entities(pos, 8.0).values() {
+            if !candidate.get_entity().is_alive() {
+                continue;
             }
-
-            let entity = &self.cube.entity.living_entity.entity;
-            let world = entity.world.load();
-            let pos = entity.pos.load();
-
-            let mut nearest: Option<(Arc<ItemEntity>, f64)> = None;
-            for candidate in world.get_nearby_entities(pos, 8.0).values() {
-                if !candidate.get_entity().is_alive() {
-                    continue;
-                }
-                let Ok(item_entity) = Arc::downcast::<ItemEntity>(candidate.clone()) else {
-                    continue;
-                };
-
-                let is_swallowable = {
-                    let stack = item_entity.get_item_stack().lock().await;
-                    !stack.is_empty() && is_swallowable_item(&stack)
-                };
-                if !is_swallowable {
-                    continue;
-                }
-
-                let dist = pos.squared_distance_to_vec(&item_entity.get_entity().pos.load());
-                if nearest.as_ref().is_none_or(|(_, best)| dist < *best) {
-                    nearest = Some((item_entity, dist));
-                }
-            }
-
-            let found = nearest.is_some();
-            *self.target_item.lock().await = nearest.map(|(item, _)| item);
-            found
-        })
-    }
-
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let target = self.target_item.lock().await.clone();
-            let Some(item_entity) = target else {
-                return;
+            let Ok(item_entity) = Arc::downcast::<ItemEntity>(candidate.clone()) else {
+                continue;
             };
 
-            let entity = &self.cube.entity.living_entity.entity;
-            let item_pos = item_entity.get_entity().pos.load();
-            let my_pos = entity.pos.load();
-            let dx = item_pos.x - my_pos.x;
-            let dz = item_pos.z - my_pos.z;
-            let yaw = dx.atan2(dz).to_degrees() as f32;
-            self.cube.target_yaw.store(yaw);
-            self.cube.speed_modifier.store(1.0);
+            let is_swallowable = {
+                let stack = item_entity
+                    .get_item_stack()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                !stack.is_empty() && is_swallowable_item(&stack)
+            };
+            if !is_swallowable {
+                continue;
+            }
 
-            if my_pos.squared_distance_to_vec(&item_pos) <= 1.5 * 1.5 {
-                let can_hold = {
-                    let stack = item_entity.get_item_stack().lock().await;
-                    !stack.is_empty() && self.cube.can_hold_item(&stack).await
+            let dist = pos.squared_distance_to_vec(&item_entity.get_entity().pos.load());
+            if nearest.as_ref().is_none_or(|(_, best)| dist < *best) {
+                nearest = Some((item_entity, dist));
+            }
+        }
+
+        let found = nearest.is_some();
+        *self
+            .target_item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = nearest.map(|(item, _)| item);
+        found
+    }
+
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let target = self
+            .target_item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(item_entity) = target else {
+            return;
+        };
+
+        let entity = &self.cube.entity.living_entity.entity;
+        let item_pos = item_entity.get_entity().pos.load();
+        let my_pos = entity.pos.load();
+        let dx = item_pos.x - my_pos.x;
+        let dz = item_pos.z - my_pos.z;
+        let yaw = dx.atan2(dz).to_degrees() as f32;
+        self.cube.target_yaw.store(yaw);
+        self.cube.speed_modifier.store(1.0);
+
+        if my_pos.squared_distance_to_vec(&item_pos) <= 1.5 * 1.5 {
+            let can_hold = {
+                let stack = item_entity
+                    .get_item_stack()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                !stack.is_empty() && self.cube.can_hold_item(&stack)
+            };
+            if can_hold {
+                let picked = {
+                    let mut stack = item_entity
+                        .get_item_stack()
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    stack.split(1)
                 };
-                if can_hold {
-                    let picked = {
-                        let mut stack = item_entity.get_item_stack().lock().await;
-                        stack.split(1)
-                    };
-                    if self.cube.equip_item(&picked).await {
-                        let remaining_empty = item_entity.get_item_stack().lock().await.is_empty();
-                        if remaining_empty {
-                            let world = entity.world.load();
-                            world.remove_entity(&*item_entity).await;
-                        }
+                if self.cube.equip_item(&picked) {
+                    let remaining_empty = item_entity
+                        .get_item_stack()
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .is_empty();
+                    if remaining_empty {
+                        let world = entity.world.load();
+                        world.remove_entity(&*item_entity);
                     }
                 }
             }
-        })
+        }
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            !self.cube.is_baby()
-                && self.cube.pickup_timer.load(Ordering::Relaxed) <= 0
-                && self.target_item.lock().await.is_some()
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        !self.cube.is_baby()
+            && self.cube.pickup_timer.load(Ordering::Relaxed) <= 0
+            && self
+                .target_item
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
     }
 
     fn controls(&self) -> Controls {
@@ -1024,14 +1054,14 @@ const STOP_DISTANCE_SQUARED: f64 = 1.0;
 
 pub struct SulfurCubeTemptGoal {
     cube: Arc<SulfurCubeEntity>,
-    target_player: tokio::sync::Mutex<Option<Arc<Player>>>,
+    target_player: std::sync::Mutex<Option<Arc<Player>>>,
 }
 
 impl SulfurCubeTemptGoal {
     pub fn new(cube: Arc<SulfurCubeEntity>) -> Self {
         Self {
             cube,
-            target_player: tokio::sync::Mutex::new(None),
+            target_player: std::sync::Mutex::new(None),
         }
     }
 
@@ -1046,80 +1076,88 @@ impl SulfurCubeTemptGoal {
         }
     }
 
-    async fn is_holding_tempt_item(&self, player: &Player) -> bool {
-        let main = player.inventory.held_item().await;
+    fn is_holding_tempt_item(&self, player: &Player) -> bool {
+        let main = player.inventory.held_item();
         if self.is_tempting(&main) {
             return true;
         }
-        let off = player.inventory.off_hand_item().await;
+        let off = player.inventory.off_hand_item();
         self.is_tempting(&off)
     }
 }
 
 impl Goal for SulfurCubeTemptGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.cube.entity.living_entity.entity;
-            let pos = entity.pos.load();
-            let world = entity.world.load();
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let entity = &self.cube.entity.living_entity.entity;
+        let pos = entity.pos.load();
+        let world = entity.world.load();
 
-            let mut nearest: Option<(Arc<Player>, f64)> = None;
-            for player in world.get_nearby_players(pos, 10.0) {
-                if !self.is_holding_tempt_item(&player).await {
-                    continue;
-                }
-                let dist = pos.squared_distance_to_vec(&player.get_entity().pos.load());
-                if nearest.as_ref().is_none_or(|(_, best)| dist < *best) {
-                    nearest = Some((player, dist));
-                }
+        let mut nearest: Option<(Arc<Player>, f64)> = None;
+        for player in world.get_nearby_players(pos, 10.0) {
+            if !self.is_holding_tempt_item(&player) {
+                continue;
             }
-
-            let found = nearest.is_some();
-            *self.target_player.lock().await = nearest.map(|(player, _)| player);
-            found
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(player) = self.target_player.lock().await.clone() else {
-                return false;
-            };
-            let entity = &self.cube.entity.living_entity.entity;
-            let dist = entity
-                .pos
-                .load()
-                .squared_distance_to_vec(&player.get_entity().pos.load());
-            dist <= 10.0 * 10.0 && self.is_holding_tempt_item(&player).await
-        })
-    }
-
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(player) = self.target_player.lock().await.clone() else {
-                return;
-            };
-            let entity = &self.cube.entity.living_entity.entity;
-            let my_pos = entity.pos.load();
-            let player_pos = player.get_entity().pos.load();
-            let dx = player_pos.x - my_pos.x;
-            let dz = player_pos.z - my_pos.z;
-            let yaw = dx.atan2(dz).to_degrees() as f32;
-            self.cube.target_yaw.store(yaw);
-
-            // `TemptGoal.tick`: stop navigating once within `stopDistance` (1.0 here).
-            if my_pos.squared_distance_to_vec(&player_pos) < STOP_DISTANCE_SQUARED {
-                self.cube.speed_modifier.store(0.0);
-            } else {
-                self.cube.speed_modifier.store(1.0);
+            let dist = pos.squared_distance_to_vec(&player.get_entity().pos.load());
+            if nearest.as_ref().is_none_or(|(_, best)| dist < *best) {
+                nearest = Some((player, dist));
             }
-        })
+        }
+
+        let found = nearest.is_some();
+        *self
+            .target_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = nearest.map(|(player, _)| player);
+        found
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            *self.target_player.lock().await = None;
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(player) = self
+            .target_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        let entity = &self.cube.entity.living_entity.entity;
+        let dist = entity
+            .pos
+            .load()
+            .squared_distance_to_vec(&player.get_entity().pos.load());
+        dist <= 10.0 * 10.0 && self.is_holding_tempt_item(&player)
+    }
+
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let Some(player) = self
+            .target_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let entity = &self.cube.entity.living_entity.entity;
+        let my_pos = entity.pos.load();
+        let player_pos = player.get_entity().pos.load();
+        let dx = player_pos.x - my_pos.x;
+        let dz = player_pos.z - my_pos.z;
+        let yaw = dx.atan2(dz).to_degrees() as f32;
+        self.cube.target_yaw.store(yaw);
+
+        // `TemptGoal.tick`: stop navigating once within `stopDistance` (1.0 here).
+        if my_pos.squared_distance_to_vec(&player_pos) < STOP_DISTANCE_SQUARED {
+            self.cube.speed_modifier.store(0.0);
+        } else {
+            self.cube.speed_modifier.store(1.0);
+        }
+    }
+
+    fn stop(&mut self, _mob: &dyn Mob) {
+        *self
+            .target_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     fn controls(&self) -> Controls {

@@ -8,7 +8,7 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 use std::sync::Arc;
 
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, RandomTickArgs};
+use crate::block::{BlockBehaviour, BlockMetadata, BonemealArgs, RandomTickArgs};
 use crate::world::World;
 use crate::world::feature_placer::place_configured_feature;
 
@@ -28,19 +28,15 @@ impl BlockMetadata for NyliumBlock {
 }
 
 impl BlockBehaviour for NyliumBlock {
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if can_be_nylium(args.block, args.world, args.position) {
-                return;
-            }
-            args.world
-                .set_block_state(
-                    args.position,
-                    Block::NETHERRACK.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if can_be_nylium(args.block, args.world, args.position) {
+            return;
+        }
+        args.world.set_block_state(
+            args.position,
+            Block::NETHERRACK.default_state.id,
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 
     /// `NyliumBlock.isValidBonemealTarget` (`NyliumBlock.java:46-49`): air above, inside the
@@ -53,56 +49,50 @@ impl BlockBehaviour for NyliumBlock {
     }
 
     /// `NyliumBlock.performBonemeal` (`NyliumBlock.java:56-71`).
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let above = args.position.up();
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
-            if args.block == &Block::CRIMSON_NYLIUM {
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let above = args.position.up();
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
+        if args.block == &Block::CRIMSON_NYLIUM {
+            place(
+                args.world,
+                ConfiguredFeature::CrimsonForestVegetationBonemeal,
+                above,
+                &mut random,
+            );
+        } else if args.block == &Block::WARPED_NYLIUM {
+            place(
+                args.world,
+                ConfiguredFeature::WarpedForestVegetationBonemeal,
+                above,
+                &mut random,
+            );
+            place(
+                args.world,
+                ConfiguredFeature::NetherSproutsBonemeal,
+                above,
+                &mut random,
+            );
+            if rand::rng().random_range(0..8) == 0 {
                 place(
                     args.world,
-                    ConfiguredFeature::CrimsonForestVegetationBonemeal,
+                    ConfiguredFeature::TwistingVinesBonemeal,
                     above,
                     &mut random,
-                )
-                .await;
-            } else if args.block == &Block::WARPED_NYLIUM {
-                place(
-                    args.world,
-                    ConfiguredFeature::WarpedForestVegetationBonemeal,
-                    above,
-                    &mut random,
-                )
-                .await;
-                place(
-                    args.world,
-                    ConfiguredFeature::NetherSproutsBonemeal,
-                    above,
-                    &mut random,
-                )
-                .await;
-                if rand::rng().random_range(0..8) == 0 {
-                    place(
-                        args.world,
-                        ConfiguredFeature::TwistingVinesBonemeal,
-                        above,
-                        &mut random,
-                    )
-                    .await;
-                }
+                );
             }
-        })
+        }
     }
 }
 
 /// `NyliumBlock.place` (`NyliumBlock.java:73-84`): the build-height guard each placement repeats.
-async fn place(
+fn place(
     world: &Arc<World>,
     feature: ConfiguredFeature,
     pos: BlockPos,
     random: &mut RandomGenerator,
 ) {
     if world.is_in_build_limit(pos) {
-        place_configured_feature(world, feature, pos, random).await;
+        place_configured_feature(world, feature, pos, random);
     }
 }
 

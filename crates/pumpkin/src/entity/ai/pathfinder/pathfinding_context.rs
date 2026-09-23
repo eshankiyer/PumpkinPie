@@ -323,8 +323,12 @@ impl PathfindingContext {
     /// the short ray march around fences and closed doors; checking only `is_full_cube()` misses
     /// partial shapes entirely.
     #[must_use]
-    pub async fn has_collision_box(&self, bounding_box: BoundingBox) -> bool {
-        let border = self.world.worldborder.lock().await;
+    pub fn has_collision_box(&self, bounding_box: BoundingBox) -> bool {
+        let border = self
+            .world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let border_clear = [
             (bounding_box.min.x, bounding_box.min.z),
             (bounding_box.min.x, bounding_box.max.z),
@@ -349,7 +353,7 @@ impl PathfindingContext {
             }
 
             if source_root_vehicle_id.is_some()
-                && source_root_vehicle_id == Some(entity_base.root_vehicle_id().await)
+                && source_root_vehicle_id == Some(entity_base.root_vehicle_id())
             {
                 continue;
             }
@@ -361,7 +365,7 @@ impl PathfindingContext {
     }
 
     #[must_use]
-    pub async fn has_collisions_box(
+    pub fn has_collisions_box(
         &self,
         bounding_box: BoundingBox,
         source_position: Vector3<f64>,
@@ -396,7 +400,11 @@ impl PathfindingContext {
             }
         }
 
-        let border = self.world.worldborder.lock().await;
+        let border = self
+            .world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let max_size = (bounding_box.max.x - bounding_box.min.x)
             .abs()
             .max((bounding_box.max.z - bounding_box.min.z).abs())

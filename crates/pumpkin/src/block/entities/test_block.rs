@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -8,7 +7,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::world::World;
 
@@ -73,15 +72,25 @@ impl BlockEntity for TestBlockBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_string("mode", mode_to_value(*self.mode.lock().await).to_string());
-            nbt.put_string("message", self.message.lock().await.clone());
-            nbt.put_bool("powered", self.powered.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_string(
+            "mode",
+            mode_to_value(
+                *self
+                    .mode
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            )
+            .to_string(),
+        );
+        nbt.put_string(
+            "message",
+            self.message
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_bool("powered", self.powered.load(Ordering::Relaxed));
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -127,7 +136,10 @@ impl TestBlockBlockEntity {
     }
 
     pub async fn get_mode(&self) -> TestBlockMode {
-        *self.mode.lock().await
+        *self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn is_powered(&self) -> bool {
@@ -142,64 +154,71 @@ impl TestBlockBlockEntity {
         self.triggered.load(Ordering::Relaxed)
     }
 
-    pub async fn get_message(&self) -> String {
-        self.message.lock().await.clone()
+    pub fn get_message(&self) -> String {
+        self.message
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    pub async fn set_message(&self, message: String) {
-        *self.message.lock().await = message;
+    pub fn set_message(&self, message: String) {
+        *self
+            .message
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = message;
     }
 
     /// `setMode` + `updateBlockState`: writes the mode back onto the block state with
     /// vanilla flag 2 (`BLOCK_UPDATE`: notify clients, do not notify neighbours).
-    pub async fn set_mode(&self, world: &Arc<World>, mode: TestBlockMode) {
-        *self.mode.lock().await = mode;
+    pub fn set_mode(&self, world: &Arc<World>, mode: TestBlockMode) {
+        *self
+            .mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
         let (block, state) = world.get_block_and_state(&self.position);
         if block.id != BlockId::TEST_BLOCK {
             return;
         }
         let mut props = TestBlockLikeProperties::from_state_id(state.id, block);
         props.mode = mode;
-        world
-            .set_block_state(
-                &self.position,
-                props.to_state_id(block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        world.set_block_state(
+            &self.position,
+            props.to_state_id(block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
     /// `reset`: clears the transient trigger flag and, in START mode, drops the emitted
     /// redstone signal back to zero.
-    pub async fn reset(&self, world: &Arc<World>) {
+    pub fn reset(&self, world: &Arc<World>) {
         self.triggered.store(false, Ordering::Relaxed);
         if self.get_mode().await == TestBlockMode::Start {
             self.set_powered(false);
-            world.update_neighbors(&self.position, None).await;
+            world.update_neighbors(&self.position, None);
         }
     }
 
     /// `trigger`: START powers the block and schedules its reset; LOG logs; every
     /// non-START mode records that it fired.
-    pub async fn trigger(&self, world: &Arc<World>) {
+    pub fn trigger(&self, world: &Arc<World>) {
         let mode = self.get_mode().await;
         if mode == TestBlockMode::Start {
             self.set_powered(true);
-            world.update_neighbors(&self.position, None).await;
+            world.update_neighbors(&self.position, None);
             // getBlockTicks().willTickThisTick(pos, block): reset on this same tick.
             world.schedule_block_tick(&Block::TEST_BLOCK, self.position, 0, TickPriority::Normal);
-            self.log().await;
+            self.log();
         } else {
             if mode == TestBlockMode::Log {
-                self.log().await;
+                self.log();
             }
             self.triggered.store(true, Ordering::Relaxed);
         }
     }
 
     /// `log`: blank messages are not logged.
-    pub async fn log(&self) {
-        let message = self.get_message().await;
+    pub fn log(&self) {
+        let message = self.get_message();
         if message.trim().is_empty() {
             return;
         }

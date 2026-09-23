@@ -2,7 +2,7 @@ use crate::block::blocks::plant::{
     PlantBlockBase, bonemeal_grow_plant_head, connected_plant_head, grow_plant_head,
 };
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
+    BlockBehaviour, BlockMetadata, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
     GetStateForNeighborUpdateArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockStateId;
@@ -43,90 +43,73 @@ impl BlockBehaviour for TwistingVinesBlock {
     /// `TwistingVinesBlock` inherits `GrowingPlantHeadBlock.performBonemeal`
     /// (`GrowingPlantHeadBlock.java:125-134`) and uses `NetherVines.java:14-22` for
     /// the geometric growth count.
-    fn perform_bonemeal<'a>(&'a self, args: crate::block::BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some((head_pos, _)) = connected_plant_head(
+    fn perform_bonemeal(&self, args: crate::block::BonemealArgs<'_>) {
+        if let Some((head_pos, _)) = connected_plant_head(
+            args.world,
+            args.position,
+            &Block::TWISTING_VINES,
+            &Block::TWISTING_VINES_PLANT,
+            pumpkin_data::BlockDirection::Up,
+        ) {
+            bonemeal_grow_plant_head(
                 args.world,
-                args.position,
+                head_pos,
                 &Block::TWISTING_VINES,
                 &Block::TWISTING_VINES_PLANT,
                 pumpkin_data::BlockDirection::Up,
-            ) {
-                bonemeal_grow_plant_head(
-                    args.world,
-                    head_pos,
-                    &Block::TWISTING_VINES,
-                    &Block::TWISTING_VINES_PLANT,
-                    pumpkin_data::BlockDirection::Up,
-                )
-                .await;
-            }
-        })
+            );
+        }
     }
 
     /// `GrowingPlantHeadBlock.randomTick` with `NetherVines.isValidGrowthState`
     /// (`NetherVines.java:10-12`: the target must be air).
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            grow_plant_head(
-                args.world,
-                args.position,
-                &Block::TWISTING_VINES,
-                &Block::TWISTING_VINES_PLANT,
-                pumpkin_data::BlockDirection::Up,
-                GROW_PER_TICK_PROBABILITY,
-                Block::is_air,
-            )
-            .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        grow_plant_head(
+            args.world,
+            args.position,
+            &Block::TWISTING_VINES,
+            &Block::TWISTING_VINES_PLANT,
+            pumpkin_data::BlockDirection::Up,
+            GROW_PER_TICK_PROBABILITY,
+            Block::is_air,
+        );
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let support_pos = args.position.down();
-            let support_block = args.world.get_block(&support_pos);
-            if support_block == &Block::TWISTING_VINES {
-                args.world
-                    .set_block_state(
-                        &support_pos,
-                        Block::TWISTING_VINES_PLANT.default_state.id,
-                        BlockFlags::empty(),
-                    )
-                    .await;
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let support_pos = args.position.down();
+        let support_block = args.world.get_block(&support_pos);
+        if support_block == &Block::TWISTING_VINES {
+            args.world.set_block_state(
+                &support_pos,
+                Block::TWISTING_VINES_PLANT.default_state.id,
+                BlockFlags::empty(),
+            );
+        }
     }
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let support_pos = args.position.down();
-            let support_block = args.world.get_block(&support_pos);
-            if support_block == &Block::TWISTING_VINES_PLANT {
-                args.world
-                    .set_block_state(
-                        &support_pos,
-                        Block::TWISTING_VINES.default_state.id,
-                        BlockFlags::empty(),
-                    )
-                    .await;
-            }
-        })
+    fn broken(&self, args: BrokenArgs<'_>) {
+        let support_pos = args.position.down();
+        let support_block = args.world.get_block(&support_pos);
+        if support_block == &Block::TWISTING_VINES_PLANT {
+            args.world.set_block_state(
+                &support_pos,
+                Block::TWISTING_VINES.default_state.id,
+                BlockFlags::empty(),
+            );
+        }
     }
 }
 
@@ -152,7 +135,7 @@ impl PlantBlockBase for TwistingVinesBlock {
         false
     }
     #[allow(clippy::unused_async_trait_impl)]
-    async fn get_state_for_neighbor_update(
+    fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,
         block_pos: &BlockPos,

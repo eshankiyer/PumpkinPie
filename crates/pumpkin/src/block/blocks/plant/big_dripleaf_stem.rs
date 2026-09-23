@@ -3,8 +3,7 @@ use std::sync::Arc;
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::blocks::plant::big_dripleaf::{can_grow_into, can_plant_dripleaf_on_top};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs,
+    BlockBehaviour, BonemealArgs, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
 };
 use crate::world::World;
 use pumpkin_data::BlockStateId;
@@ -48,71 +47,59 @@ impl BlockBehaviour for BigDripleafStemBlock {
     /// (`BigDripleafStemBlock.java:115-125`): convert the connected top leaf
     /// to a stem and place a new leaf above it, preserving facing and
     /// waterlogging.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some((head_pos, head_state_id)) = crate::block::blocks::plant::connected_plant_head(
-                args.world,
-                args.position,
-                &Block::BIG_DRIPLEAF,
-                &Block::BIG_DRIPLEAF_STEM,
-                BlockDirection::Up,
-            ) else {
-                return;
-            };
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let Some((head_pos, head_state_id)) = crate::block::blocks::plant::connected_plant_head(
+            args.world,
+            args.position,
+            &Block::BIG_DRIPLEAF,
+            &Block::BIG_DRIPLEAF_STEM,
+            BlockDirection::Up,
+        ) else {
+            return;
+        };
 
-            let stem_props = BigDripleafStemLikeProperties::from_state_id(
-                args.state_id,
-                &Block::BIG_DRIPLEAF_STEM,
-            );
-            let head_props =
-                BigDripleafLikeProperties::from_state_id(head_state_id, &Block::BIG_DRIPLEAF);
-            let mut new_stem_props =
-                BigDripleafStemLikeProperties::default(&Block::BIG_DRIPLEAF_STEM);
-            new_stem_props.facing = stem_props.facing;
-            new_stem_props.waterlogged = head_props.waterlogged;
+        let stem_props =
+            BigDripleafStemLikeProperties::from_state_id(args.state_id, &Block::BIG_DRIPLEAF_STEM);
+        let head_props =
+            BigDripleafLikeProperties::from_state_id(head_state_id, &Block::BIG_DRIPLEAF);
+        let mut new_stem_props = BigDripleafStemLikeProperties::default(&Block::BIG_DRIPLEAF_STEM);
+        new_stem_props.facing = stem_props.facing;
+        new_stem_props.waterlogged = head_props.waterlogged;
 
-            args.world
-                .set_block_state(
-                    &head_pos,
-                    new_stem_props.to_state_id(&Block::BIG_DRIPLEAF_STEM),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
+        args.world.set_block_state(
+            &head_pos,
+            new_stem_props.to_state_id(&Block::BIG_DRIPLEAF_STEM),
+            BlockFlags::NOTIFY_ALL,
+        );
 
-            let new_leaf_pos = head_pos.up();
-            let mut new_leaf_props = BigDripleafLikeProperties::default(&Block::BIG_DRIPLEAF);
-            new_leaf_props.facing = stem_props.facing;
-            new_leaf_props.waterlogged = args.world.get_block(&new_leaf_pos) == &Block::WATER;
-            args.world
-                .set_block_state(
-                    &new_leaf_pos,
-                    new_leaf_props.to_state_id(&Block::BIG_DRIPLEAF),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+        let new_leaf_pos = head_pos.up();
+        let mut new_leaf_props = BigDripleafLikeProperties::default(&Block::BIG_DRIPLEAF);
+        new_leaf_props.facing = stem_props.facing;
+        new_leaf_props.waterlogged = args.world.get_block(&new_leaf_pos) == &Block::WATER;
+        args.world.set_block_state(
+            &new_leaf_pos,
+            new_leaf_props.to_state_id(&Block::BIG_DRIPLEAF),
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { handle_big_dripleaf_breaking(args.world, args.position).await })
+    fn broken(&self, args: BrokenArgs<'_>) {
+        handle_big_dripleaf_breaking(args.world, args.position)
     }
 }
 impl PlantBlockBase for BigDripleafStemBlock {
@@ -122,7 +109,7 @@ impl PlantBlockBase for BigDripleafStemBlock {
     }
 
     #[allow(clippy::unused_async_trait_impl)]
-    async fn get_state_for_neighbor_update(
+    fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,
         block_pos: &BlockPos,
@@ -141,7 +128,7 @@ impl PlantBlockBase for BigDripleafStemBlock {
         block_state
     }
 }
-pub async fn handle_big_dripleaf_breaking(world: &Arc<World>, position: &BlockPos) {
+pub fn handle_big_dripleaf_breaking(world: &Arc<World>, position: &BlockPos) {
     let support_pos = position.down();
     let (support_block, support_state_id) = world.get_block_and_state_id(&support_pos);
     if support_block == &Block::BIG_DRIPLEAF_STEM {
@@ -151,12 +138,10 @@ pub async fn handle_big_dripleaf_breaking(world: &Arc<World>, position: &BlockPo
         let mut dripleaf_props = BigDripleafLikeProperties::default(&Block::BIG_DRIPLEAF);
         dripleaf_props.facing = dripleaf_stem_props.facing;
         dripleaf_props.waterlogged = dripleaf_stem_props.waterlogged;
-        world
-            .set_block_state(
-                &support_pos,
-                dripleaf_props.to_state_id(&Block::BIG_DRIPLEAF),
-                BlockFlags::empty(),
-            )
-            .await;
+        world.set_block_state(
+            &support_pos,
+            dripleaf_props.to_state_id(&Block::BIG_DRIPLEAF),
+            BlockFlags::empty(),
+        );
     }
 }

@@ -32,14 +32,14 @@ pub type RawArgs<'a> = Vec<RawArg<'a>>;
 pub type CommandSuggestionResult<'a> = Pin<Box<dyn Future<Output = Suggestions> + Send + 'a>>;
 
 pub trait CommandSuggestionProvider: Send + Sync {
-    fn suggest<'a>(
-        &'a self,
-        src: &'a CommandSender,
-        server: &'a Server,
-        input: &'a str,
+    fn suggest(
+        &self,
+        src: &CommandSender,
+        server: &Server,
+        input: &str,
         start: usize,
         end: usize,
-    ) -> CommandSuggestionResult<'a>;
+    ) -> CommandSuggestionResult;
 }
 
 #[derive(Debug, Clone)]

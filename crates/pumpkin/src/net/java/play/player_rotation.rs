@@ -11,8 +11,7 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
         let entity = &player.get_entity();
@@ -28,7 +27,7 @@ impl JavaClient {
         );
         // `Entity.turn` notifies the vehicle after passenger rotation changes
         // (`Entity.java:490-501`).
-        entity.notify_vehicle_of_turn().await;
+        entity.notify_vehicle_of_turn();
         // Send the new position to all other players.
         let entity_id = entity.entity_id;
         let yaw = (entity.yaw.load() * 256.0 / 360.0).rem_euclid(256.0);

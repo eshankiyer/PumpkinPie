@@ -1,5 +1,5 @@
 use super::revenge::RevengeGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
 
@@ -28,31 +28,29 @@ impl PandaHurtByTargetGoal {
 }
 
 impl Goal for PandaHurtByTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
         self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>()
-                && (panda.got_bamboo() || panda.did_bite())
-            {
-                panda.get_mob_entity().set_target(None).await;
-                return false;
-            }
-            self.inner.should_continue(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>()
+            && (panda.got_bamboo() || panda.did_bite())
+        {
+            panda.get_mob_entity().set_target(None);
+            return false;
+        }
+        self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

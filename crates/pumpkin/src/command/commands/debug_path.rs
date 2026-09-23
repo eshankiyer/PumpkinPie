@@ -24,42 +24,38 @@ struct DebugPathExecutor;
 
 impl CommandExecutor for DebugPathExecutor {
     /// Implements `DebugPathCommand.fillBlocks` (`DebugPathCommand.java:29-45`).
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            // DebugPathCommand.java:29-45 creates a ground path navigation for the source mob,
-            // rejects missing or incomplete paths, and reports success only for a reachable path.
-            let mob = context
-                .source
-                .entity
-                .as_ref()
-                .and_then(|entity| entity.get_mob())
-                .ok_or_else(|| ERROR_NOT_MOB.create_without_context())?;
-            let target = BlockPosArgumentType::get_loaded_block_pos(context, ARG_TARGET)?;
-            let destination = Vector3::new(
-                f64::from(target.0.x),
-                f64::from(target.0.y),
-                f64::from(target.0.z),
-            );
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        // DebugPathCommand.java:29-45 creates a ground path navigation for the source mob,
+        // rejects missing or incomplete paths, and reports success only for a reachable path.
+        let mob = context
+            .source
+            .entity
+            .as_ref()
+            .and_then(|entity| entity.get_mob())
+            .ok_or_else(|| ERROR_NOT_MOB.create_without_context())?;
+        let target = BlockPosArgumentType::get_loaded_block_pos(context, ARG_TARGET)?;
+        let destination = Vector3::new(
+            f64::from(target.0.x),
+            f64::from(target.0.y),
+            f64::from(target.0.z),
+        );
 
-            // Vanilla constructs a GroundPathNavigation here, independent of the mob's
-            // currently configured navigation implementation.
-            let mut navigator = Navigator::default();
-            // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
-            // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
-            let path = navigator
-                .compute_path_with_reach_for_mob(mob, destination, 0)
-                .await
-                .ok_or_else(|| ERROR_NO_PATH.create_without_context())?;
-            if !path.can_reach() {
-                return Err(ERROR_NOT_COMPLETE.create_without_context());
-            }
+        // Vanilla constructs a GroundPathNavigation here, independent of the mob's
+        // currently configured navigation implementation.
+        let mut navigator = Navigator::default();
+        // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+        // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
+        let path = navigator
+            .compute_path_with_reach_for_mob(mob, destination, 0)
+            .ok_or_else(|| ERROR_NO_PATH.create_without_context())?;
+        if !path.can_reach() {
+            return Err(ERROR_NOT_COMPLETE.create_without_context());
+        }
 
-            context
-                .source
-                .send_feedback(TextComponent::text("Made path"), true)
-                .await;
-            Ok(1)
-        })
+        context
+            .source
+            .send_feedback(TextComponent::text("Made path"), true);
+        Ok(1)
     }
 }
 

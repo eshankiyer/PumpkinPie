@@ -268,7 +268,7 @@ impl NetherPortal {
         self.height
     }
 
-    pub async fn create(&self, world: &Arc<World>) {
+    pub fn create(&self, world: &Arc<World>) {
         let mut props = NetherPortalLikeProperties::default(&Block::NETHER_PORTAL);
         props.axis = self.axis;
         let state = props.to_state_id(&Block::NETHER_PORTAL);
@@ -280,14 +280,16 @@ impl NetherPortal {
         );
 
         for pos in blocks {
+            world.set_block_state(
+                &pos,
+                state,
+                BlockFlags::NOTIFY_LISTENERS | BlockFlags::FORCE_STATE,
+            );
             world
-                .set_block_state(
-                    &pos,
-                    state,
-                    BlockFlags::NOTIFY_LISTENERS | BlockFlags::FORCE_STATE,
-                )
-                .await;
-            world.portal_poi.lock().await.add_portal(pos);
+                .portal_poi
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .add_portal(pos);
         }
     }
 
@@ -471,7 +473,7 @@ impl NetherPortal {
             || block == &Block::NETHER_PORTAL
     }
 
-    pub async fn search_for_portal(
+    pub fn search_for_portal(
         world: &Arc<World>,
         target_pos: BlockPos,
     ) -> Option<PortalSearchResult> {
@@ -480,7 +482,10 @@ impl NetherPortal {
             world.dimension.minecraft_name,
             target_pos
         );
-        let worldborder = world.worldborder.lock().await;
+        let worldborder = world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let search_radius =
             if world.dimension.minecraft_name == Dimension::THE_NETHER.minecraft_name {
@@ -489,7 +494,10 @@ impl NetherPortal {
                 SEARCH_RADIUS_OVERWORLD
             };
 
-        let mut poi_storage = world.portal_poi.lock().await;
+        let mut poi_storage = world
+            .portal_poi
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let portal_positions =
             poi_storage.get_in_square(target_pos, search_radius, Some(poi::POI_TYPE_NETHER_PORTAL));
         drop(poi_storage);
@@ -550,7 +558,7 @@ impl NetherPortal {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub async fn find_safe_location(
+    pub fn find_safe_location(
         world: &Arc<World>,
         target_pos: BlockPos,
         axis: HorizontalAxis,
@@ -562,7 +570,10 @@ impl NetherPortal {
         );
         let min_y = world.min_y;
         let max_y = min_y + world.dimension.height - 1;
-        let worldborder = world.worldborder.lock().await;
+        let worldborder = world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let top_y_limit = if world.dimension.has_ceiling {
             (min_y + world.dimension.logical_height - 1).min(max_y)
@@ -631,7 +642,6 @@ impl NetherPortal {
 
                             for check_axis in [HorizontalAxis::X, HorizontalAxis::Z] {
                                 if Self::is_valid_portal_pos_async(world, floor_pos, check_axis, 0)
-                                    .await
                                 {
                                     let dist = f64::from(target_pos.0.squared_distance_to(
                                         floor_pos.0.x,
@@ -641,12 +651,9 @@ impl NetherPortal {
 
                                     let is_ideal = Self::is_valid_portal_pos_async(
                                         world, floor_pos, check_axis, -1,
-                                    )
-                                    .await
-                                        && Self::is_valid_portal_pos_async(
-                                            world, floor_pos, check_axis, 1,
-                                        )
-                                        .await;
+                                    ) && Self::is_valid_portal_pos_async(
+                                        world, floor_pos, check_axis, 1,
+                                    );
 
                                     if is_ideal {
                                         if ideal_pos.as_ref().is_none_or(|p| dist < p.2) {
@@ -707,7 +714,7 @@ impl NetherPortal {
         state.replaceable() && !state.is_liquid() && !state.is_waterlogged()
     }
 
-    async fn is_valid_portal_pos_async(
+    fn is_valid_portal_pos_async(
         world: &Arc<World>,
         floor_pos: BlockPos,
         axis: HorizontalAxis,
@@ -746,7 +753,7 @@ impl NetherPortal {
         true
     }
 
-    pub async fn build_portal_frame(
+    pub fn build_portal_frame(
         world: &Arc<World>,
         lower_corner: BlockPos,
         axis: HorizontalAxis,
@@ -784,9 +791,7 @@ impl NetherPortal {
                         } else {
                             air_state
                         };
-                        world
-                            .set_block_state(&pos, state, BlockFlags::NOTIFY_ALL)
-                            .await;
+                        world.set_block_state(&pos, state, BlockFlags::NOTIFY_ALL);
                     }
                 }
             }
@@ -798,9 +803,7 @@ impl NetherPortal {
                     let pos = lower_corner
                         .offset_dir(direction.to_offset(), portal_dir)
                         .offset_dir(BlockDirection::Up.to_offset(), height);
-                    world
-                        .set_block_state(&pos, obsidian_state, BlockFlags::NOTIFY_ALL)
-                        .await;
+                    world.set_block_state(&pos, obsidian_state, BlockFlags::NOTIFY_ALL);
                 }
             }
         }
@@ -814,14 +817,16 @@ impl NetherPortal {
                 let pos = lower_corner
                     .offset_dir(direction.to_offset(), x)
                     .offset_dir(BlockDirection::Up.to_offset(), y);
+                world.set_block_state(
+                    &pos,
+                    portal_state,
+                    BlockFlags::NOTIFY_LISTENERS | BlockFlags::FORCE_STATE,
+                );
                 world
-                    .set_block_state(
-                        &pos,
-                        portal_state,
-                        BlockFlags::NOTIFY_LISTENERS | BlockFlags::FORCE_STATE,
-                    )
-                    .await;
-                world.portal_poi.lock().await.add_portal(pos);
+                    .portal_poi
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .add_portal(pos);
             }
         }
     }

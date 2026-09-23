@@ -19,9 +19,9 @@ use pumpkin_world::world::BlockFlags;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::shelf::ShelfBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockHitResult, GetComparatorOutputArgs,
-    GetStateForNeighborUpdateArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnStateReplacedArgs,
-    PlacedArgs, UseWithItemArgs, registry::BlockActionResult,
+    BlockBehaviour, BlockHitResult, GetComparatorOutputArgs, GetStateForNeighborUpdateArgs,
+    OnNeighborUpdateArgs, OnPlaceArgs, OnStateReplacedArgs, PlacedArgs, UseWithItemArgs,
+    registry::BlockActionResult,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -150,7 +150,7 @@ fn right_pos(center: &BlockPos, facing: HorizontalFacing, steps: i32) -> BlockPo
 }
 
 /// `SideChainPartBlock.setPart` (`SideChainPartBlock.java:99-104`).
-async fn set_part(world: &Arc<World>, pos: &BlockPos, new_part: SideChainPart) {
+fn set_part(world: &Arc<World>, pos: &BlockPos, new_part: SideChainPart) {
     let block = world.get_block(pos);
     let state_id = world.get_block_state_id(pos);
     if !block.has_tag(&tag::Block::MINECRAFT_WOODEN_SHELVES) {
@@ -161,9 +161,7 @@ async fn set_part(world: &Arc<World>, pos: &BlockPos, new_part: SideChainPart) {
         return;
     }
     props.side_chain = new_part;
-    world
-        .set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-        .await;
+    world.set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
 }
 
 /// `SideChainPartBlock.addBlocksConnectingTowards` (`SideChainPartBlock.java:40-53`): the
@@ -224,18 +222,18 @@ const fn can_connect(new_blocks_to_connect_to: i32, current_chain_length: i32) -
 }
 
 /// `SideChainPartBlock.updateNeighborsAfterPoweringDown` (`SideChainPartBlock.java:55-59`).
-async fn update_neighbors_after_powering_down(
+fn update_neighbors_after_powering_down(
     world: &Arc<World>,
     pos: &BlockPos,
     facing: HorizontalFacing,
 ) {
     let left = read_neighbor(world, left_pos(pos, facing, 1), facing);
     if let Some((_, _, part)) = left.data {
-        set_part(world, &left.pos, when_disconnected_from_the_right(part)).await;
+        set_part(world, &left.pos, when_disconnected_from_the_right(part));
     }
     let right = read_neighbor(world, right_pos(pos, facing, 1), facing);
     if let Some((_, _, part)) = right.data {
-        set_part(world, &right.pos, when_disconnected_from_the_left(part)).await;
+        set_part(world, &right.pos, when_disconnected_from_the_left(part));
     }
 }
 
@@ -254,7 +252,7 @@ fn is_being_updated_by_neighbor(
 }
 
 /// `SideChainPartBlock.updateSelfAndNeighborsOnPoweringUp` (`SideChainPartBlock.java:61-83`).
-async fn update_self_and_neighbors_on_powering_up(
+fn update_self_and_neighbors_on_powering_up(
     world: &Arc<World>,
     pos: &BlockPos,
     block: &Block,
@@ -288,22 +286,22 @@ async fn update_self_and_neighbors_on_powering_up(
     if can_connect(existing_chain_on_the_left, current_chain_length) {
         new_part_for_self = when_connected_to_the_left(new_part_for_self);
         if let Some((_, _, part)) = left.data {
-            set_part(world, &left.pos, when_connected_to_the_right(part)).await;
+            set_part(world, &left.pos, when_connected_to_the_right(part));
         }
         current_chain_length += existing_chain_on_the_left;
     }
     if can_connect(existing_chain_on_the_right, current_chain_length) {
         new_part_for_self = when_connected_to_the_right(new_part_for_self);
         if let Some((_, _, part)) = right.data {
-            set_part(world, &right.pos, when_connected_to_the_left(part)).await;
+            set_part(world, &right.pos, when_connected_to_the_left(part));
         }
     }
 
-    set_part(world, pos, new_part_for_self).await;
+    set_part(world, pos, new_part_for_self);
 }
 
 /// `ShelfBlock.onPlace` (`ShelfBlock.java:277-285`).
-async fn update_chain(
+fn update_chain(
     world: &Arc<World>,
     pos: &BlockPos,
     block: &Block,
@@ -312,41 +310,36 @@ async fn update_chain(
 ) {
     let props = ShelfProperties::from_state_id(state_id, block);
     if props.powered {
-        update_self_and_neighbors_on_powering_up(world, pos, block, state_id, old_state_id).await;
+        update_self_and_neighbors_on_powering_up(world, pos, block, state_id, old_state_id);
     } else {
-        update_neighbors_after_powering_down(world, pos, props.facing).await;
+        update_neighbors_after_powering_down(world, pos, props.facing);
     }
 }
 
 impl BlockBehaviour for ShelfBlock {
     /// `ShelfBlock.getStateForPlacement` (`ShelfBlock.java:126-133`).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut properties = ShelfProperties::default(args.block);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut properties = ShelfProperties::default(args.block);
 
-            // Face in the opposite direction the player is facing
-            properties.facing = args.player.get_entity().get_horizontal_facing().opposite();
-            properties.waterlogged = args.replacing.water_source();
-            properties.powered = block_receives_redstone_power(args.world, args.position).await;
+        // Face in the opposite direction the player is facing
+        properties.facing = args.player.get_entity().get_horizontal_facing().opposite();
+        properties.waterlogged = args.replacing.water_source();
+        properties.powered = block_receives_redstone_power(args.world, args.position);
 
-            properties.to_state_id(args.block)
-        })
+        properties.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = ShelfBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(entity));
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = ShelfBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(entity));
 
-            update_chain(
-                args.world,
-                args.position,
-                args.block,
-                args.state_id,
-                args.old_state_id,
-            )
-            .await;
-        })
+        update_chain(
+            args.world,
+            args.position,
+            args.block,
+            args.state_id,
+            args.old_state_id,
+        );
     }
 
     /// `ShelfBlock.neighborChanged` (`ShelfBlock.java:107-122`).
@@ -354,75 +347,67 @@ impl BlockBehaviour for ShelfBlock {
     /// Vanilla reaches the side-chain update through `setBlock`'s `onPlace` callback. Pumpkin only
     /// fires `placed` when the *block* changes, not on a state-only edit, so `update_chain` is
     /// invoked here directly.
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = ShelfProperties::from_state_id(state_id, args.block);
-            let signal = block_receives_redstone_power(args.world, args.position).await;
-            if props.powered == signal {
-                return;
-            }
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let mut props = ShelfProperties::from_state_id(state_id, args.block);
+        let signal = block_receives_redstone_power(args.world, args.position);
+        if props.powered == signal {
+            return;
+        }
 
-            props.powered = signal;
-            if !signal {
-                props.side_chain = SideChainPart::Unconnected;
-            }
-            let new_state_id = props.to_state_id(args.block);
-            args.world
-                .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+        props.powered = signal;
+        if !signal {
+            props.side_chain = SideChainPart::Unconnected;
+        }
+        let new_state_id = props.to_state_id(args.block);
+        args.world
+            .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_ALL);
 
-            args.world.play_sound(
-                if signal {
-                    Sound::BlockShelfActivate
-                } else {
-                    Sound::BlockShelfDeactivate
-                },
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
+        args.world.play_sound(
+            if signal {
+                Sound::BlockShelfActivate
+            } else {
+                Sound::BlockShelfDeactivate
+            },
+            SoundCategory::Blocks,
+            &args.position.to_f64(),
+        );
 
-            update_chain(
-                args.world,
-                args.position,
-                args.block,
-                new_state_id,
-                state_id,
-            )
-            .await;
-        })
+        update_chain(
+            args.world,
+            args.position,
+            args.block,
+            new_state_id,
+            state_id,
+        );
     }
 
     /// `ShelfBlock.updateShape` (`ShelfBlock.java:296-310`) schedules a water tick for a
     /// waterlogged shelf whenever the world recomputes its state from a neighbour update.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let properties = ShelfProperties::from_state_id(args.state_id, args.block);
-            if properties.waterlogged {
-                args.world.schedule_fluid_tick(
-                    &Fluid::WATER,
-                    *args.position,
-                    Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let properties = ShelfProperties::from_state_id(args.state_id, args.block);
+        if properties.waterlogged {
+            args.world.schedule_fluid_tick(
+                &Fluid::WATER,
+                *args.position,
+                Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
+        args.state_id
     }
 
     /// `ShelfBlock.affectNeighborsAfterRemoval` (`ShelfBlock.java:101-105`): the surviving
     /// neighbours have to forget the shelf that just went away.
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !args.block.has_tag(&tag::Block::MINECRAFT_WOODEN_SHELVES) {
-                return;
-            }
-            let facing = ShelfProperties::from_state_id(args.old_state_id, args.block).facing;
-            update_neighbors_after_powering_down(args.world, args.position, facing).await;
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        if !args.block.has_tag(&tag::Block::MINECRAFT_WOODEN_SHELVES) {
+            return;
+        }
+        let facing = ShelfProperties::from_state_id(args.old_state_id, args.block).facing;
+        update_neighbors_after_powering_down(args.world, args.position, facing);
     }
 
     /// `ShelfBlock.useItemOn` (`ShelfBlock.java:156-204`): right-clicking a shelf face swaps the
@@ -432,72 +417,66 @@ impl BlockBehaviour for ShelfBlock {
     /// Vanilla returns `SUCCESS.heldItemTransformedTo(...)`; Pumpkin drops the held-stack
     /// mutation when the action is consumed, so the inventory writes and client syncs happen
     /// directly inside [`Self::swap_single_item`] / [`Self::swap_hotbar`].
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            // `!hand.equals(InteractionHand.OFF_HAND)` (`ShelfBlock.java:165`): only the main
-            // hand interacts with shelves.
-            if matches!(args.equipment_slot, EquipmentSlot::OffHand(_)) {
-                return BlockActionResult::Pass;
-            }
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        // `!hand.equals(InteractionHand.OFF_HAND)` (`ShelfBlock.java:165`): only the main
+        // hand interacts with shelves.
+        if matches!(args.equipment_slot, EquipmentSlot::OffHand(_)) {
+            return BlockActionResult::Pass;
+        }
 
-            let state_id = args.world.get_block_state_id(args.position);
-            let properties = ShelfProperties::from_state_id(state_id, args.block);
+        let state_id = args.world.get_block_state_id(args.position);
+        let properties = ShelfProperties::from_state_id(state_id, args.block);
 
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::Pass;
-            };
-            let Some(shelf) = block_entity.as_any().downcast_ref::<ShelfBlockEntity>() else {
-                return BlockActionResult::Pass;
-            };
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return BlockActionResult::Pass;
+        };
+        let Some(shelf) = block_entity.as_any().downcast_ref::<ShelfBlockEntity>() else {
+            return BlockActionResult::Pass;
+        };
 
-            let Some(hit_slot) = get_hit_slot(args.hit, properties.facing) else {
-                return BlockActionResult::Pass;
-            };
+        let Some(hit_slot) = get_hit_slot(args.hit, properties.facing) else {
+            return BlockActionResult::Pass;
+        };
 
-            let player = args.player;
+        let player = args.player;
 
-            if !properties.powered {
-                let placed_was_empty = args.item_stack.is_empty();
-                let item_removed =
-                    swap_single_item(args.world, shelf, hit_slot, args.item_stack.clone(), player)
-                        .await;
-                if item_removed {
-                    args.world.play_sound(
-                        if placed_was_empty {
-                            Sound::BlockShelfTakeItem
-                        } else {
-                            Sound::BlockShelfSingleSwap
-                        },
-                        SoundCategory::Blocks,
-                        &args.position.to_f64(),
-                    );
-                } else {
+        if !properties.powered {
+            let placed_was_empty = args.item_stack.is_empty();
+            let item_removed =
+                swap_single_item(args.world, shelf, hit_slot, args.item_stack.clone(), player);
+            if item_removed {
+                args.world.play_sound(
                     if placed_was_empty {
-                        return BlockActionResult::Pass;
-                    }
-                    args.world.play_sound(
-                        Sound::BlockShelfPlaceItem,
-                        SoundCategory::Blocks,
-                        &args.position.to_f64(),
-                    );
+                        Sound::BlockShelfTakeItem
+                    } else {
+                        Sound::BlockShelfSingleSwap
+                    },
+                    SoundCategory::Blocks,
+                    &args.position.to_f64(),
+                );
+            } else {
+                if placed_was_empty {
+                    return BlockActionResult::Pass;
                 }
-                return BlockActionResult::SuccessServer;
+                args.world.play_sound(
+                    Sound::BlockShelfPlaceItem,
+                    SoundCategory::Blocks,
+                    &args.position.to_f64(),
+                );
             }
+            return BlockActionResult::SuccessServer;
+        }
 
-            let any_swapped = swap_hotbar(args.world, args.position, player).await;
-            if !any_swapped {
-                return BlockActionResult::Consume;
-            }
-            args.world.play_sound(
-                Sound::BlockShelfMultiSwap,
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
-            BlockActionResult::SuccessServer
-        })
+        let any_swapped = swap_hotbar(args.world, args.position, player);
+        if !any_swapped {
+            return BlockActionResult::Consume;
+        }
+        args.world.play_sound(
+            Sound::BlockShelfMultiSwap,
+            SoundCategory::Blocks,
+            &args.position.to_f64(),
+        );
+        BlockActionResult::SuccessServer
     }
 
     /// `ShelfBlock.getAnalogOutputSignal` (`ShelfBlock.java:314-327`): one bit per occupied slot,
@@ -507,27 +486,25 @@ impl BlockBehaviour for ShelfBlock {
     /// `FACING.getOpposite()` (`ShelfBlock.java:322-323`). `GetComparatorOutputArgs` carries no
     /// direction, and the only callers live in `blocks/redstone/comparator.rs`, so that filter is
     /// not reproducible without widening the trait; the signal is emitted on every side here.
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return Some(0);
-            };
-            let Some(shelf) = block_entity.as_any().downcast_ref::<ShelfBlockEntity>() else {
-                return Some(0);
-            };
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return Some(0);
+        };
+        let Some(shelf) = block_entity.as_any().downcast_ref::<ShelfBlockEntity>() else {
+            return Some(0);
+        };
 
-            let items = shelf.items.read().await;
-            let mut signal = 0u8;
-            for (slot, item) in items.iter().enumerate() {
-                if !item.is_empty() {
-                    signal |= 1 << slot;
-                }
+        let items = shelf
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut signal = 0u8;
+        for (slot, item) in items.iter().enumerate() {
+            if !item.is_empty() {
+                signal |= 1 << slot;
             }
-            Some(signal)
-        })
+        }
+        Some(signal)
     }
 }
 
@@ -576,16 +553,14 @@ fn get_section(relative_coordinate: f32, max_sections: i32) -> i32 {
 /// The vanilla vibration opt-out for items carrying a `minecraft:use_effects` component with
 /// `interact_vibrations=false` is not modelled (the flag defaults to `true`, `UseEffects.java:9`),
 /// so the `ITEM_INTERACT_FINISH` vibration always fires.
-async fn swap_single_item(
+fn swap_single_item(
     world: &Arc<World>,
     shelf: &ShelfBlockEntity,
     hit_slot: usize,
     placed_stack: ItemStack,
     player: &Arc<Player>,
 ) -> bool {
-    let removed_item = shelf
-        .swap_item_no_update(hit_slot, placed_stack.clone())
-        .await;
+    let removed_item = shelf.swap_item_no_update(hit_slot, placed_stack.clone());
 
     // A creative player placing onto an empty slot keeps a copy of what they placed
     // (`ShelfBlock.java:210`).
@@ -597,17 +572,11 @@ async fn swap_single_item(
 
     let inventory = player.inventory();
     let selected_slot = usize::from(inventory.get_selected_slot());
-    inventory
-        .set_stack(selected_slot, new_inventory_item.clone())
-        .await;
-    player
-        .sync_hand_slot(selected_slot, new_inventory_item)
-        .await;
+    inventory.set_stack(selected_slot, new_inventory_item.clone());
+    player.sync_hand_slot(selected_slot, new_inventory_item);
 
     // `shelfBlockEntity.setChanged(...)` (`ShelfBlock.java:213-217`).
-    shelf
-        .set_changed_with_game_event(world, Some(GameEvent::ItemInteractFinish))
-        .await;
+    shelf.set_changed_with_game_event(world, Some(GameEvent::ItemInteractFinish));
 
     !removed_item.is_empty()
 }
@@ -615,7 +584,7 @@ async fn swap_single_item(
 /// `ShelfBlock.swapHotbar` (`ShelfBlock.java:221-250`): while powered, every shelf in the chain
 /// (leftmost first) swaps its three slots against consecutive hotbar slots, so a full chain of
 /// three shelves covers slots 0-8.
-async fn swap_hotbar(world: &Arc<World>, pos: &BlockPos, player: &Arc<Player>) -> bool {
+fn swap_hotbar(world: &Arc<World>, pos: &BlockPos, player: &Arc<Player>) -> bool {
     let connected_blocks = get_all_blocks_connected_to(world, pos);
     if connected_blocks.is_empty() {
         return false;
@@ -643,26 +612,19 @@ async fn swap_hotbar(world: &Arc<World>, pos: &BlockPos, player: &Arc<Player>) -
                 continue;
             }
 
-            let placed_inventory_item = inventory.remove_stack(inventory_slot).await;
-            let removed_shelf_item = shelf_part
-                .swap_item_no_update(slot, placed_inventory_item.clone())
-                .await;
+            let placed_inventory_item = inventory.remove_stack(inventory_slot);
+            let removed_shelf_item =
+                shelf_part.swap_item_no_update(slot, placed_inventory_item.clone());
             if !placed_inventory_item.is_empty() || !removed_shelf_item.is_empty() {
-                inventory
-                    .set_stack(inventory_slot, removed_shelf_item.clone())
-                    .await;
-                player
-                    .sync_hand_slot(inventory_slot, removed_shelf_item.clone())
-                    .await;
+                inventory.set_stack(inventory_slot, removed_shelf_item.clone());
+                player.sync_hand_slot(inventory_slot, removed_shelf_item.clone());
                 any_swapped = true;
             }
         }
 
         // `inventory.setChanged(); shelfPart.setChanged(GameEvent.ENTITY_INTERACT)`
         // (`ShelfBlock.java:244-245`).
-        shelf_part
-            .set_changed_with_game_event(world, Some(GameEvent::EntityInteract))
-            .await;
+        shelf_part.set_changed_with_game_event(world, Some(GameEvent::EntityInteract));
     }
 
     any_swapped

@@ -29,7 +29,7 @@ impl<'a> WorldBlockPlacer<'a> {
         }
     }
 
-    pub async fn finalize(&mut self) {
+    pub fn finalize(&mut self) {
         // BlockPlacer writes the live chunk directly so a structure can be applied
         // as one batch. Vanilla still runs the light engine after those block-state
         // changes; update each final position once, in a stable order, before the
@@ -56,14 +56,10 @@ impl<'a> WorldBlockPlacer<'a> {
         // neighbors (`StructureTemplate.java:356-380`). Apply the existing world hooks after the
         // batch write and before block entities are installed.
         for (position, state_id) in self.changed_positions.clone() {
-            let new_state_id = self
-                .world
-                .update_from_neighbor_shapes(state_id, &position)
-                .await;
+            let new_state_id = self.world.update_from_neighbor_shapes(state_id, &position);
             if new_state_id != state_id {
                 self.world
-                    .set_block_state(&position, new_state_id, BlockFlags::NOTIFY_LISTENERS)
-                    .await;
+                    .set_block_state(&position, new_state_id, BlockFlags::NOTIFY_LISTENERS);
                 for (changed_position, changed_state_id) in &mut self.changed_positions {
                     if *changed_position == position {
                         *changed_state_id = new_state_id;
@@ -72,15 +68,13 @@ impl<'a> WorldBlockPlacer<'a> {
             }
             for direction in BlockDirection::all() {
                 let neighbor_position = position.offset(direction.to_offset());
-                self.world
-                    .replace_with_state_for_neighbor_update(
-                        &neighbor_position,
-                        direction.opposite(),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
+                self.world.replace_with_state_for_neighbor_update(
+                    &neighbor_position,
+                    direction.opposite(),
+                    BlockFlags::NOTIFY_LISTENERS,
+                );
             }
-            self.world.update_neighbors(&position, None).await;
+            self.world.update_neighbors(&position, None);
         }
 
         for nbt in &self.block_entity_nbts {

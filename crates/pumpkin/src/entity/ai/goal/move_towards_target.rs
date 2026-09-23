@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pumpkin_util::math::vector3::Vector3;
 
 use super::random_pos::default_get_pos_towards;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
@@ -56,66 +56,57 @@ impl MoveTowardsTargetGoal {
 }
 
 impl Goal for MoveTowardsTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.target = mob.get_mob_entity().get_target().await;
-            let Some(target) = self.target.clone() else {
-                return false;
-            };
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.target = mob.get_mob_entity().get_target();
+        let Some(target) = self.target.clone() else {
+            return false;
+        };
 
-            if Self::distance_to_sqr(mob, &target) > self.within_sq() {
-                self.target = None;
-                return false;
-            }
+        if Self::distance_to_sqr(mob, &target) > self.within_sq() {
+            self.target = None;
+            return false;
+        }
 
-            let target_pos = target.get_entity().pos.load();
-            self.wanted =
-                default_get_pos_towards(mob, 16, 7, target_pos, std::f64::consts::FRAC_PI_2);
-            if self.wanted.is_none() {
-                self.target = None;
-                return false;
-            }
-            true
-        })
+        let target_pos = target.get_entity().pos.load();
+        self.wanted = default_get_pos_towards(mob, 16, 7, target_pos, std::f64::consts::FRAC_PI_2);
+        if self.wanted.is_none() {
+            self.target = None;
+            return false;
+        }
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(target) = self.target.clone() else {
-                return false;
-            };
-            let navigator_idle = mob
-                .get_mob_entity()
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(target) = self.target.clone() else {
+            return false;
+        };
+        let navigator_idle = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        !navigator_idle
+            && target.get_entity().is_alive()
+            && Self::distance_to_sqr(mob, &target) < self.within_sq()
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(wanted) = self.wanted {
+            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
+            mob.get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            !navigator_idle
-                && target.get_entity().is_alive()
-                && Self::distance_to_sqr(mob, &target) < self.within_sq()
-        })
+                .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
+        }
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(wanted) = self.wanted {
-                let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // Vanilla `stop()` only clears the target; it deliberately does not stop the
-            // navigation (`MoveTowardsTargetGoal.java:53-56`).
-            self.target = None;
-            self.wanted = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        // Vanilla `stop()` only clears the target; it deliberately does not stop the
+        // navigation (`MoveTowardsTargetGoal.java:53-56`).
+        self.target = None;
+        self.wanted = None;
     }
 
     fn controls(&self) -> Controls {

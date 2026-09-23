@@ -13,11 +13,11 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::world::BlockAccessor;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::block::CanPlaceAtArgs;
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, NormalUseArgs};
+use crate::block::{BlockBehaviour, NormalUseArgs};
 use crate::block::{GetStateForNeighborUpdateArgs, OnPlaceArgs};
 
 use super::abstract_wall_mounting::WallMountedBlock;
@@ -26,34 +26,27 @@ use super::abstract_wall_mounting::WallMountedBlock;
 pub struct GrindstoneBlock;
 
 impl BlockBehaviour for GrindstoneBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props =
-                GrindstoneLikeProperties::from_state_id(args.block.default_state.id, args.block);
-            (props.face, props.facing) =
-                WallMountedBlock::get_placement_face(self, args.player, args.direction);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props =
+            GrindstoneLikeProperties::from_state_id(args.block.default_state.id, args.block);
+        (props.face, props.facing) =
+            WallMountedBlock::get_placement_face(self, args.player, args.direction);
 
-            props.to_state_id(args.block)
-        })
+        props.to_state_id(args.block)
     }
 
     // useWithoutItem (GrindstoneBlock.java:73-83): opens the repair/disenchant menu and awards
     // the interaction stat.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            args.player
-                .increment_interaction_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::InteractWithGrindstone as i32,
-                    1,
-                )
-                .await;
-            args.player
-                .open_handled_screen(&GrindstoneScreenFactory, Some(*args.position))
-                .await;
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        args.player.increment_interaction_stat(
+            pumpkin_data::statistic::StatisticCategory::Custom,
+            pumpkin_data::statistic::CustomStatistic::InteractWithGrindstone as i32,
+            1,
+        );
+        args.player
+            .open_handled_screen(&GrindstoneScreenFactory, Some(*args.position));
 
-            BlockActionResult::Success
-        })
+        BlockActionResult::Success
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -65,11 +58,11 @@ impl BlockBehaviour for GrindstoneBlock {
         WallMountedBlock::can_place_at(self, args.block_accessor, args.position, direction)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { WallMountedBlock::get_state_for_neighbor_update(self, args).await })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        WallMountedBlock::get_state_for_neighbor_update(self, args)
     }
 }
 

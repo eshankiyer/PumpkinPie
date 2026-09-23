@@ -10,7 +10,7 @@ use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, OnEntityCollisionArgs, OnNeighborUpdateArgs,
+    BlockBehaviour, BlockMetadata, OnEntityCollisionArgs, OnNeighborUpdateArgs,
     OnScheduledTickArgs, PlacedArgs,
 };
 use crate::world::World;
@@ -172,129 +172,117 @@ fn bubble_column_velocity(
 }
 
 impl BlockBehaviour for BubbleColumnBlock {
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block != &Block::BUBBLE_COLUMN {
-                return;
-            }
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        if args.block != &Block::BUBBLE_COLUMN {
+            return;
+        }
 
-            // `Player.onAboveBubbleColumn` and `Player.onInsideBubbleColumn`
-            // (`Player.java:310-321`) delegate to the superclass only while the player is not
-            // flying. The collision callback is the shared server-side implementation of both
-            // bubble-column hooks, so flying players must not receive the column impulse.
-            if let Some(player) = args.entity.get_player()
-                && player.is_flying().await
-            {
-                return;
-            }
+        // `Player.onAboveBubbleColumn` and `Player.onInsideBubbleColumn`
+        // (`Player.java:310-321`) delegate to the superclass only while the player is not
+        // flying. The collision callback is the shared server-side implementation of both
+        // bubble-column hooks, so flying players must not receive the column impulse.
+        if let Some(player) = args.entity.get_player()
+            && player.is_flying()
+        {
+            return;
+        }
 
-            let kind = kind_from_state(args.state.id);
-            let above = args.world.get_block_state_id(&args.position.up());
-            let above_state = pumpkin_data::BlockState::from_id(above);
-            let at_surface = above_state.get_block_collision_shapes().next().is_none()
-                && Fluid::from_state_id(above).is_none();
-            let entity = args.entity.get_entity();
-            entity.velocity.store(bubble_column_velocity(
-                entity.velocity.load(),
-                kind,
-                at_surface,
-            ));
-            if at_surface {
-                // Vanilla `Entity.handleOnAboveBubbleColumn` sends two splash and two bubble
-                // particles at the column top (`Entity.java:2841-2867`). The movement itself is
-                // handled by this block callback; keep the server-side client effect here too.
-                let particle_pos = Vector3::new(
-                    f64::from(args.position.0.x),
-                    f64::from(args.position.0.y) + 1.0,
-                    f64::from(args.position.0.z),
-                );
-                args.world.spawn_particle(
-                    particle_pos,
-                    Vector3::new(1.0, 0.0, 1.0),
-                    1.0,
-                    2,
-                    pumpkin_data::particle::Particle::Splash,
-                );
-                args.world.spawn_particle(
-                    particle_pos,
-                    Vector3::new(1.0, 0.0, 1.0),
-                    0.2,
-                    2,
-                    pumpkin_data::particle::Particle::Bubble,
-                );
-            }
-            if !at_surface && let Some(living) = args.entity.get_living_entity() {
-                living.fall_distance.store(0.0);
-            }
-        })
+        let kind = kind_from_state(args.state.id);
+        let above = args.world.get_block_state_id(&args.position.up());
+        let above_state = pumpkin_data::BlockState::from_id(above);
+        let at_surface = above_state.get_block_collision_shapes().next().is_none()
+            && Fluid::from_state_id(above).is_none();
+        let entity = args.entity.get_entity();
+        entity.velocity.store(bubble_column_velocity(
+            entity.velocity.load(),
+            kind,
+            at_surface,
+        ));
+        if at_surface {
+            // Vanilla `Entity.handleOnAboveBubbleColumn` sends two splash and two bubble
+            // particles at the column top (`Entity.java:2841-2867`). The movement itself is
+            // handled by this block callback; keep the server-side client effect here too.
+            let particle_pos = Vector3::new(
+                f64::from(args.position.0.x),
+                f64::from(args.position.0.y) + 1.0,
+                f64::from(args.position.0.z),
+            );
+            args.world.spawn_particle(
+                particle_pos,
+                Vector3::new(1.0, 0.0, 1.0),
+                1.0,
+                2,
+                pumpkin_data::particle::Particle::Splash,
+            );
+            args.world.spawn_particle(
+                particle_pos,
+                Vector3::new(1.0, 0.0, 1.0),
+                0.2,
+                2,
+                pumpkin_data::particle::Particle::Bubble,
+            );
+        }
+        if !at_surface && let Some(living) = args.entity.get_living_entity() {
+            living.fall_distance.store(0.0);
+        }
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block == &Block::WATER && is_source_water(args.world, *args.position) {
-                schedule_reconcile(args.world, *args.position, CREATE_DELAY_TICKS);
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        if args.block == &Block::WATER && is_source_water(args.world, *args.position) {
+            schedule_reconcile(args.world, *args.position, CREATE_DELAY_TICKS);
+        }
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state_id(args.position);
-            if args.block == &Block::BUBBLE_COLUMN {
-                schedule_reconcile(args.world, *args.position, REMOVE_DELAY_TICKS);
-            } else if args.block == &Block::WATER
-                && is_source_water_state(state)
-                && (args.source_block == &Block::BUBBLE_COLUMN
-                    || kind_from_support(args.source_block).is_some())
-            {
-                schedule_reconcile(args.world, *args.position, CREATE_DELAY_TICKS);
-            }
-        })
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let state = args.world.get_block_state_id(args.position);
+        if args.block == &Block::BUBBLE_COLUMN {
+            schedule_reconcile(args.world, *args.position, REMOVE_DELAY_TICKS);
+        } else if args.block == &Block::WATER
+            && is_source_water_state(state)
+            && (args.source_block == &Block::BUBBLE_COLUMN
+                || kind_from_support(args.source_block).is_some())
+        {
+            schedule_reconcile(args.world, *args.position, CREATE_DELAY_TICKS);
+        }
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state_id(args.position);
-            let block = Block::from_state_id(state);
-            if block != &Block::BUBBLE_COLUMN && block != &Block::WATER {
-                return;
-            }
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state = args.world.get_block_state_id(args.position);
+        let block = Block::from_state_id(state);
+        if block != &Block::BUBBLE_COLUMN && block != &Block::WATER {
+            return;
+        }
 
-            let below_pos = args.position.down();
-            let below_state = args.world.get_block_state_id(&below_pos);
-            let below_block = Block::from_state_id(below_state);
+        let below_pos = args.position.down();
+        let below_state = args.world.get_block_state_id(&below_pos);
+        let below_block = Block::from_state_id(below_state);
 
-            match reconcile_action(block, state, below_block, below_state) {
-                ReconcileAction::SetBubble(kind) => {
-                    let new_state = bubble_column_state(kind);
+        match reconcile_action(block, state, below_block, below_state) {
+            ReconcileAction::SetBubble(kind) => {
+                let new_state = bubble_column_state(kind);
+                args.world
+                    .set_block_state(args.position, new_state, BlockFlags::NOTIFY_ALL);
+                let mut position = args.position.up();
+                while {
+                    let state = args.world.get_block_state_id(&position);
+                    let block = Block::from_state_id(state);
+                    block == &Block::BUBBLE_COLUMN || is_source_water_state(state)
+                } {
                     args.world
-                        .set_block_state(args.position, new_state, BlockFlags::NOTIFY_ALL)
-                        .await;
-                    let mut position = args.position.up();
-                    while {
-                        let state = args.world.get_block_state_id(&position);
-                        let block = Block::from_state_id(state);
-                        block == &Block::BUBBLE_COLUMN || is_source_water_state(state)
-                    } {
-                        args.world
-                            .set_block_state(&position, new_state, BlockFlags::NOTIFY_ALL)
-                            .await;
-                        position = position.up();
-                    }
+                        .set_block_state(&position, new_state, BlockFlags::NOTIFY_ALL);
+                    position = position.up();
                 }
-                ReconcileAction::RestoreWater => {
-                    args.world
-                        .set_block_state(
-                            args.position,
-                            source_water_state(),
-                            BlockFlags::NOTIFY_ALL,
-                        )
-                        .await;
-                    schedule_reconcile(args.world, args.position.up(), REMOVE_DELAY_TICKS);
-                }
-                ReconcileAction::Stop => {}
             }
-        })
+            ReconcileAction::RestoreWater => {
+                args.world.set_block_state(
+                    args.position,
+                    source_water_state(),
+                    BlockFlags::NOTIFY_ALL,
+                );
+                schedule_reconcile(args.world, args.position.up(), REMOVE_DELAY_TICKS);
+            }
+            ReconcileAction::Stop => {}
+        }
     }
 }
 

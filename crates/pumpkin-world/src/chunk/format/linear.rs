@@ -399,7 +399,7 @@ impl<S: SingleChunkDataSerializer + 'static> ChunkSerializer for LinearV2File<S>
 
     async fn write(&self, path: &PathBuf) -> Result<(), std::io::Error> {
         let temp_path = path.with_extension("tmp");
-        let file = tokio::fs::File::create(&temp_path).await?;
+        let file = tokio::fs::File::create(&temp_path)?;
         let mut writer = BufWriter::new(file);
 
         let grid_size = self.grid_size;

@@ -7,7 +7,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ageable::AgeableMob,
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal,
@@ -84,20 +84,16 @@ impl AgeableMob for MooshroomEntity {
 }
 
 impl NBTStorage for MooshroomEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
     }
 }
 
@@ -120,11 +116,7 @@ impl Mob for MooshroomEntity {
         Animal::get_walk_target_value(self, pos)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.animal_interact(player, item_stack, Sound::EntityCowAmbient)
     }
 }

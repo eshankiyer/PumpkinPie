@@ -9,7 +9,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         follow_flock_leader::FollowFlockLeaderGoal, look_around::RandomLookAroundGoal,
@@ -163,21 +163,17 @@ impl SalmonEntity {
 }
 
 impl NBTStorage for SalmonEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_string("type", self.variant().name().to_string());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_string("type", self.variant().name().to_string());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            let variant = nbt
-                .get_string("type")
-                .map_or(SalmonVariant::Medium, SalmonVariant::from_name);
-            self.set_variant(variant);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        let variant = nbt
+            .get_string("type")
+            .map_or(SalmonVariant::Medium, SalmonVariant::from_name);
+        self.set_variant(variant);
     }
 }
 
@@ -186,15 +182,13 @@ impl Mob for SalmonEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    tracked_data::salmon::DATA_TYPE,
-                    VarInt(i32::from(self.variant.load(Relaxed))),
-                )],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::salmon::DATA_TYPE,
+                VarInt(i32::from(self.variant.load(Relaxed))),
+            )],
+            None,
+        );
     }
 }

@@ -20,7 +20,6 @@ impl pumpkin::plugin::ipc::Host for PluginHostState {
         };
         Ok(server
             .plugin_manager
-            .send_message(name, &recipient, &message)
-            .await)
+            .send_message(name, &recipient, &message))
     }
 }

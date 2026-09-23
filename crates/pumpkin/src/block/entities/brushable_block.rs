@@ -14,9 +14,8 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
-use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 /// `BrushableBlockEntity.java:44-46`.
 const BRUSH_COOLDOWN_TICKS: i64 = 10;
@@ -288,14 +287,12 @@ impl BlockEntity for BrushableBlockBlockEntity {
 
     /// `BrushableBlockEntity.saveAdditional` (`BrushableBlockEntity.java:217-223`): the
     /// rolled item is written only when no deferred loot table remains.
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let state = self.state.lock().await;
-            write_state(&state, nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        write_state(&state, nbt);
     }
 
     /// `BrushableBlockEntity.getUpdateTag` (`BrushableBlockEntity.java:189-199`): the
@@ -366,8 +363,11 @@ impl BrushableBlockBlockEntity {
     }
 
     /// `BrushableBlockEntity.setLootTable` (`BrushableBlockEntity.java:225-228`).
-    pub async fn set_loot_table(&self, key: String, seed: i64) {
-        let mut state = self.state.lock().await;
+    pub fn set_loot_table(&self, key: String, seed: i64) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.loot_table = Some(key);
         state.loot_table_seed = seed;
         state.item = None;
@@ -375,8 +375,11 @@ impl BrushableBlockBlockEntity {
 
     /// Unpacks any pending loot table and takes the contained item, for the drop that
     /// happens when the block is mined rather than brushed away.
-    pub async fn take_item(&self) -> Option<ItemStack> {
-        let mut state = self.state.lock().await;
+    pub fn take_item(&self) -> Option<ItemStack> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.unpack_loot_table();
         state.item.take()
     }
@@ -393,7 +396,10 @@ impl BrushableBlockBlockEntity {
         let block = world.get_block(&self.position);
 
         let outcome = {
-            let mut state = self.state.lock().await;
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if state.hit_direction.is_none() {
                 state.hit_direction = Some(direction);
             }
@@ -424,14 +430,13 @@ impl BrushableBlockBlockEntity {
 
         match outcome {
             BrushOutcome::Completed(item, hit_direction) => {
-                self.brushing_completed(world, block, item, hit_direction)
-                    .await;
+                self.brushing_completed(world, block, item, hit_direction);
                 true
             }
             other => {
                 world.schedule_block_tick(block, self.position, TICK_DELAY, TickPriority::Normal);
                 if let BrushOutcome::Dusted(stage) = other {
-                    set_dusted(world, &self.position, block, stage).await;
+                    set_dusted(world, &self.position, block, stage);
                 }
                 false
             }
@@ -440,7 +445,7 @@ impl BrushableBlockBlockEntity {
 
     /// `BrushableBlockEntity.brushingCompleted` and `dropContent`
     /// (`BrushableBlockEntity.java:116-146`).
-    async fn brushing_completed(
+    fn brushing_completed(
         &self,
         world: &Arc<World>,
         block: &'static Block,
@@ -458,9 +463,7 @@ impl BrushableBlockBlockEntity {
                 f64::from(drop_pos.0.z) + 0.5 * center_range + half_size,
             );
             let entity = Entity::new(world.clone(), spawn_pos, &EntityType::ITEM);
-            world
-                .spawn_entity(Arc::new(ItemEntity::new(entity, stack)))
-                .await;
+            world.spawn_entity(Arc::new(ItemEntity::new(entity, stack)));
         }
 
         // Vanilla plays no sound server-side here: level event 3008 is what makes the
@@ -473,21 +476,22 @@ impl BrushableBlockBlockEntity {
             state_id.as_u16().into(),
         );
 
-        world
-            .set_block_state(
-                &self.position,
-                turns_into(block).default_state.id,
-                BlockFlags::NOTIFY_ALL,
-            )
-            .await;
+        world.set_block_state(
+            &self.position,
+            turns_into(block).default_state.id,
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 
     /// `BrushableBlockEntity.checkReset` (`BrushableBlockEntity.java:148-168`).
-    pub async fn check_reset(&self, world: &Arc<World>, game_time: i64) {
+    pub fn check_reset(&self, world: &Arc<World>, game_time: i64) {
         let block = world.get_block(&self.position);
 
         let (new_stage, reschedule) = {
-            let mut state = self.state.lock().await;
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut new_stage = None;
             if state.brush_count != 0 && game_time >= state.brush_count_resets_at_tick {
                 let previous = completion_state(state.brush_count);
@@ -510,7 +514,7 @@ impl BrushableBlockBlockEntity {
         };
 
         if let Some(stage) = new_stage {
-            set_dusted(world, &self.position, block, stage).await;
+            set_dusted(world, &self.position, block, stage);
         }
         if reschedule {
             world.schedule_block_tick(block, self.position, TICK_DELAY, TickPriority::Normal);
@@ -518,13 +522,11 @@ impl BrushableBlockBlockEntity {
     }
 }
 
-async fn set_dusted(world: &Arc<World>, position: &BlockPos, block: &'static Block, stage: u8) {
+fn set_dusted(world: &Arc<World>, position: &BlockPos, block: &'static Block, stage: u8) {
     let state_id = world.get_block_state_id(position);
     let mut props = SuspiciousSandLikeProperties::from_state_id(state_id, block);
     props.dusted = stage;
-    world
-        .set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-        .await;
+    world.set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
 }
 
 #[cfg(test)]

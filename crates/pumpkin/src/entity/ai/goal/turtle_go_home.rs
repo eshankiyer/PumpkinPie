@@ -4,7 +4,7 @@ use std::sync::Weak;
 
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::{
     ageable::AgeableMob, ai::pathfinder::NavigatorGoal, mob::Mob, passive::turtle::TurtleEntity,
 };
@@ -49,86 +49,76 @@ impl TurtleGoHomeGoal {
 }
 
 impl Goal for TurtleGoHomeGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(turtle) = self.turtle.upgrade() else {
-                return false;
-            };
-            if turtle.is_baby() {
-                return false;
-            }
-            if turtle.has_egg() {
-                return true;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(turtle) = self.turtle.upgrade() else {
+            return false;
+        };
+        if turtle.is_baby() {
+            return false;
+        }
+        if turtle.has_egg() {
+            return true;
+        }
 
-            if mob
-                .get_random()
-                .random_range(0..to_goal_ticks(HOME_CHECK_INTERVAL))
-                != 0
-            {
-                return false;
-            }
-            let Some(dist_sq) = Self::distance_sq_to_home(mob, &turtle) else {
-                return false;
-            };
-            dist_sq > FAR_FROM_HOME_DISTANCE * FAR_FROM_HOME_DISTANCE
-        })
+        if mob
+            .get_random()
+            .random_range(0..to_goal_ticks(HOME_CHECK_INTERVAL))
+            != 0
+        {
+            return false;
+        }
+        let Some(dist_sq) = Self::distance_sq_to_home(mob, &turtle) else {
+            return false;
+        };
+        dist_sq > FAR_FROM_HOME_DISTANCE * FAR_FROM_HOME_DISTANCE
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(turtle) = self.turtle.upgrade() else {
-                return false;
-            };
-            let Some(dist_sq) = Self::distance_sq_to_home(mob, &turtle) else {
-                return false;
-            };
-            dist_sq > CLOSE_TO_HOME_DISTANCE * CLOSE_TO_HOME_DISTANCE
-                && self.close_to_home_try_ticks <= to_goal_ticks(GIVE_UP_TICKS)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(turtle) = self.turtle.upgrade() else {
+            return false;
+        };
+        let Some(dist_sq) = Self::distance_sq_to_home(mob, &turtle) else {
+            return false;
+        };
+        dist_sq > CLOSE_TO_HOME_DISTANCE * CLOSE_TO_HOME_DISTANCE
+            && self.close_to_home_try_ticks <= to_goal_ticks(GIVE_UP_TICKS)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(turtle) = self.turtle.upgrade() {
-                turtle.set_going_home(true);
-            }
-            self.close_to_home_try_ticks = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        if let Some(turtle) = self.turtle.upgrade() {
+            turtle.set_going_home(true);
+        }
+        self.close_to_home_try_ticks = 0;
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(turtle) = self.turtle.upgrade() {
-                turtle.set_going_home(false);
-            }
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        if let Some(turtle) = self.turtle.upgrade() {
+            turtle.set_going_home(false);
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(turtle) = self.turtle.upgrade() else {
-                return;
-            };
-            let Some(home) = turtle.get_home() else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(turtle) = self.turtle.upgrade() else {
+            return;
+        };
+        let Some(home) = turtle.get_home() else {
+            return;
+        };
 
-            if Self::distance_sq_to_home(mob, &turtle).is_some_and(|d| d < 16.0 * 16.0) {
-                self.close_to_home_try_ticks += 1;
-            }
+        if Self::distance_sq_to_home(mob, &turtle).is_some_and(|d| d < 16.0 * 16.0) {
+            self.close_to_home_try_ticks += 1;
+        }
 
-            let navigator_idle = mob.get_mob_entity().navigator.lock().unwrap().is_idle();
-            if navigator_idle {
-                let my_pos = mob.get_entity().pos.load();
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(
-                    my_pos,
-                    home.to_centered_f64(),
-                    self.speed,
-                ));
-            }
-        })
+        let navigator_idle = mob.get_mob_entity().navigator.lock().unwrap().is_idle();
+        if navigator_idle {
+            let my_pos = mob.get_entity().pos.load();
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            navigator.set_progress(NavigatorGoal::new(
+                my_pos,
+                home.to_centered_f64(),
+                self.speed,
+            ));
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -5,7 +5,7 @@ use pumpkin_data::sound::Sound;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
@@ -35,7 +35,7 @@ pub struct EvokerEntity {
     /// Vanilla: `SpellcasterIllager.spellCastingTickCount` / `currentSpell`.
     pub spellcaster: SpellcasterState,
     /// Vanilla: `Evoker.wololoTarget`.
-    pub wololo_target: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
+    pub wololo_target: std::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     /// Vanilla `Raider`/`PatrollingMonster` fields.
     pub raider_data: RaiderData,
 }
@@ -46,7 +46,7 @@ impl EvokerEntity {
         let evoker = Self {
             mob_entity,
             spellcaster: SpellcasterState::new(),
-            wololo_target: tokio::sync::Mutex::new(None),
+            wololo_target: std::sync::Mutex::new(None),
             raider_data: RaiderData::default(),
         };
         let mob_arc = Arc::new(evoker);
@@ -142,23 +142,19 @@ impl EvokerEntity {
 
 impl NBTStorage for EvokerEntity {
     /// Vanilla: `SpellcasterIllager.addAdditionalSaveData` (`SpellTicks`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            // `Raider.addAdditionalSaveData` (incl. `PatrollingMonster`'s patrol fields).
-            self.write_raider_nbt(nbt);
-            nbt.put_int("SpellTicks", self.spellcaster.casting_ticks_left());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        // `Raider.addAdditionalSaveData` (incl. `PatrollingMonster`'s patrol fields).
+        self.write_raider_nbt(nbt);
+        nbt.put_int("SpellTicks", self.spellcaster.casting_ticks_left());
     }
 
     /// Vanilla: `SpellcasterIllager.readAdditionalSaveData` (`SpellTicks`, default 0).
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_raider_nbt(nbt);
-            self.spellcaster
-                .set_casting_time(nbt.get_int("SpellTicks").unwrap_or(0));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_raider_nbt(nbt);
+        self.spellcaster
+            .set_casting_time(nbt.get_int("SpellTicks").unwrap_or(0));
     }
 }
 
@@ -168,10 +164,8 @@ impl Mob for EvokerEntity {
     }
 
     /// Vanilla: `SpellcasterIllager.customServerAiStep`.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.spellcaster.tick();
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.spellcaster.tick();
     }
 
     fn as_patrolling_monster(&self) -> Option<&dyn PatrollingMonster> {

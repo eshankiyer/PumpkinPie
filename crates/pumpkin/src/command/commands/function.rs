@@ -37,19 +37,17 @@ static ERROR_INSTANTIATION_FAILURE: CommandErrorType<2> = CommandErrorType::new(
 pub(super) struct FunctionSuggestionProvider;
 
 impl SuggestionProvider for FunctionSuggestionProvider {
-    fn suggest<'a>(
-        &'a self,
-        context: &'a CommandContext,
+    fn suggest(
+        &self,
+        context: &CommandContext,
         mut builder: SuggestionsBuilder,
-    ) -> SuggestionProviderResult<'a> {
-        Box::pin(async move {
-            let server = context.server();
-            let function_names = server.datapack_manager.get_function_names().await;
-            for name in function_names {
-                builder = builder.suggest(name);
-            }
-            builder.build()
-        })
+    ) -> SuggestionProviderResult {
+        let server = context.server();
+        let function_names = server.datapack_manager.get_function_names();
+        for name in function_names {
+            builder = builder.suggest(name);
+        }
+        builder.build()
     }
 }
 
@@ -59,21 +57,18 @@ impl SuggestionProvider for FunctionSuggestionProvider {
 struct FunctionExecutor;
 
 impl CommandExecutor for FunctionExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let name_str = StringArgumentType::get(context, "name")?;
-            let server = context.server();
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let name_str = StringArgumentType::get(context, "name")?;
+        let server = context.server();
 
-            let executed_count = server
-                .datapack_manager
-                .execute_function(server, &context.source, name_str, None)
-                .await
-                .map_err(|error| map_error(error, name_str))?;
+        let executed_count = server
+            .datapack_manager
+            .execute_function(server, &context.source, name_str, None)
+            .map_err(|error| map_error(error, name_str))?;
 
-            send_success_feedback(context, executed_count, name_str).await;
+        send_success_feedback(context, executed_count, name_str);
 
-            Ok(executed_count as i32)
-        })
+        Ok(executed_count as i32)
     }
 }
 
@@ -84,56 +79,47 @@ impl CommandExecutor for FunctionExecutor {
 struct FunctionWithArgumentsExecutor;
 
 impl CommandExecutor for FunctionWithArgumentsExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let name_str = StringArgumentType::get(context, "name")?;
-            let arguments = NbtCompoundArgumentType::get(context, "arguments")?;
-            let server = context.server();
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let name_str = StringArgumentType::get(context, "name")?;
+        let arguments = NbtCompoundArgumentType::get(context, "arguments")?;
+        let server = context.server();
 
-            let executed_count = server
-                .datapack_manager
-                .execute_function(server, &context.source, name_str, Some(arguments))
-                .await
-                .map_err(|error| map_error(error, name_str))?;
+        let executed_count = server
+            .datapack_manager
+            .execute_function(server, &context.source, name_str, Some(arguments))
+            .map_err(|error| map_error(error, name_str))?;
 
-            send_success_feedback(context, executed_count, name_str).await;
+        send_success_feedback(context, executed_count, name_str);
 
-            Ok(executed_count as i32)
-        })
+        Ok(executed_count as i32)
     }
 }
 
-async fn send_success_feedback(context: &CommandContext<'_>, executed_count: usize, name: &str) {
+fn send_success_feedback(context: &CommandContext<'_>, executed_count: usize, name: &str) {
     if name.starts_with('#') {
-        context
-            .source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_MULTIPLE,
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_MULTIPLE,
-                    [
-                        TextComponent::text(executed_count.to_string()),
-                        TextComponent::text(name.to_string()),
-                    ],
-                ),
-                true,
-            )
-            .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_FUNCTION_SUCCESS_MULTIPLE,
+                translation::java::COMMANDS_FUNCTION_SUCCESS_MULTIPLE,
+                [
+                    TextComponent::text(executed_count.to_string()),
+                    TextComponent::text(name.to_string()),
+                ],
+            ),
+            true,
+        );
     } else {
-        context
-            .source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_SINGLE,
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_SINGLE,
-                    [
-                        TextComponent::text(executed_count.to_string()),
-                        TextComponent::text(name.to_string()),
-                    ],
-                ),
-                true,
-            )
-            .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_FUNCTION_SUCCESS_SINGLE,
+                translation::java::COMMANDS_FUNCTION_SUCCESS_SINGLE,
+                [
+                    TextComponent::text(executed_count.to_string()),
+                    TextComponent::text(name.to_string()),
+                ],
+            ),
+            true,
+        );
     }
 }
 

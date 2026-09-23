@@ -20,29 +20,23 @@ struct SetExecutor;
 
 impl CommandExecutor for SetExecutor {
     /// Sets the source player's warning level and reports the command result.
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let player = context.source.player_or_err()?;
-            let warning_level = *context.get_argument::<i32>(ARG_WARNING_LEVEL)?;
-            warden_spawn_tracker::set_warning_level_of(
-                &player.world(),
-                player.gameprofile.id,
-                warning_level,
-            )
-            .await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let player = context.source.player_or_err()?;
+        let warning_level = *context.get_argument::<i32>(ARG_WARNING_LEVEL)?;
+        warden_spawn_tracker::set_warning_level_of(
+            &player.world(),
+            player.gameprofile.id,
+            warning_level,
+        );
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::text(format!(
-                        "Set Warden spawn warning level for {} to {warning_level}",
-                        player.get_display_name().await.get_text()
-                    )),
-                    true,
-                )
-                .await;
-            Ok(1)
-        })
+        context.source.send_feedback(
+            TextComponent::text(format!(
+                "Set Warden spawn warning level for {} to {warning_level}",
+                player.get_display_name().get_text()
+            )),
+            true,
+        );
+        Ok(1)
     }
 }
 
@@ -52,23 +46,18 @@ struct ClearExecutor;
 
 impl CommandExecutor for ClearExecutor {
     /// Resets the source player's tracker and reports the command result.
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let player = context.source.player_or_err()?;
-            warden_spawn_tracker::reset_tracker_of(&player.world(), player.gameprofile.id).await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let player = context.source.player_or_err()?;
+        warden_spawn_tracker::reset_tracker_of(&player.world(), player.gameprofile.id);
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::text(format!(
-                        "Cleared Warden spawn warning tracker for {}",
-                        player.get_display_name().await.get_text()
-                    )),
-                    true,
-                )
-                .await;
-            Ok(1)
-        })
+        context.source.send_feedback(
+            TextComponent::text(format!(
+                "Cleared Warden spawn warning tracker for {}",
+                player.get_display_name().get_text()
+            )),
+            true,
+        );
+        Ok(1)
     }
 }
 

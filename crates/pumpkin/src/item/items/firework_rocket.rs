@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::player::Player;
@@ -28,108 +27,99 @@ impl ItemMetadata for FireworkRocketItem {
 }
 
 impl ItemBehaviour for FireworkRocketItem {
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         face: BlockDirection,
         cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Vanilla `FireworkRocketItem#useOn` returns PASS while the player is elytra flying,
-            // so the block interaction happens instead of placing a rocket.
-            if player.get_entity().is_fall_flying() {
-                return;
-            }
+        _block: &Block,
+        _server: &Server,
+    ) {
+        // Vanilla `FireworkRocketItem#useOn` returns PASS while the player is elytra flying,
+        // so the block interaction happens instead of placing a rocket.
+        if player.get_entity().is_fall_flying() {
+            return;
+        }
 
-            let world = player.world();
-            // Vanilla offsets the spawn by ROCKET_PLACEMENT_OFFSET (0.15) along the clicked face.
-            let offset = face.to_offset();
-            let entity = Entity::new(
-                world.clone(),
-                Vector3::new(
-                    f64::from(location.0.x) + f64::from(cursor_pos.x) + f64::from(offset.x) * 0.15,
-                    f64::from(location.0.y) + f64::from(cursor_pos.y) + f64::from(offset.y) * 0.15,
-                    f64::from(location.0.z) + f64::from(cursor_pos.z) + f64::from(offset.z) * 0.15,
-                ),
-                &EntityType::FIREWORK_ROCKET,
-            );
-            let entity = FireworkRocketEntity::new_with_item(entity, item);
-            world.spawn_entity(Arc::new(entity)).await;
-            if should_consume_rocket(player.is_creative()) {
-                item.decrement(1);
-            }
-        })
+        let world = player.world();
+        // Vanilla offsets the spawn by ROCKET_PLACEMENT_OFFSET (0.15) along the clicked face.
+        let offset = face.to_offset();
+        let entity = Entity::new(
+            world.clone(),
+            Vector3::new(
+                f64::from(location.0.x) + f64::from(cursor_pos.x) + f64::from(offset.x) * 0.15,
+                f64::from(location.0.y) + f64::from(cursor_pos.y) + f64::from(offset.y) * 0.15,
+                f64::from(location.0.z) + f64::from(cursor_pos.z) + f64::from(offset.z) * 0.15,
+            ),
+            &EntityType::FIREWORK_ROCKET,
+        );
+        let entity = FireworkRocketEntity::new_with_item(entity, item);
+        world.spawn_entity(Arc::new(entity));
+        if should_consume_rocket(player.is_creative()) {
+            item.decrement(1);
+        }
     }
 
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {
-            if player.get_entity().is_fall_flying() {
-                let world = player.world();
-                // Vanilla `FireworkRocketItem::use` breaks the player's leash connections
-                // before launching an attached rocket (`FireworkRocketItem.java:58-70`).
-                if player.get_entity().drop_all_leash_connections().await {
-                    world.play_sound(
-                        Sound::ItemLeadBreak,
-                        SoundCategory::Neutral,
-                        &player.get_entity().pos.load(),
-                    );
-                }
-                let entity = Entity::new(
-                    world.clone(),
-                    player.get_entity().pos.load(),
-                    &EntityType::FIREWORK_ROCKET,
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        if player.get_entity().is_fall_flying() {
+            let world = player.world();
+            // Vanilla `FireworkRocketItem::use` breaks the player's leash connections
+            // before launching an attached rocket (`FireworkRocketItem.java:58-70`).
+            if player.get_entity().drop_all_leash_connections() {
+                world.play_sound(
+                    Sound::ItemLeadBreak,
+                    SoundCategory::Neutral,
+                    &player.get_entity().pos.load(),
                 );
-                // The entity keeps the pre-consumption stack. Its Fireworks component
-                // determines both the client payload and the vanilla lifetime.
-                let mut main_hand = player.inventory.held_item().await;
-                let mut used_main_hand = true;
-                let mut source_stack = {
-                    let stack = main_hand.clone();
-                    (stack.item == &Item::FIREWORK_ROCKET).then_some(stack)
-                };
-                if source_stack.is_none() {
-                    let off_hand = player.inventory.off_hand_item().await;
-                    if off_hand.item == &Item::FIREWORK_ROCKET {
-                        source_stack = Some(off_hand);
-                        used_main_hand = false;
-                    }
-                }
-
-                let Some(source_stack) = source_stack else {
-                    return;
-                };
-                let entity = FireworkRocketEntity::new_shot_with_item(
-                    entity,
-                    player.get_entity(),
-                    &source_stack,
-                );
-                world.spawn_entity(Arc::new(entity)).await;
-
-                // Vanilla `FireworkRocketItem::use` consumes the hand that launched
-                // the attached rocket, except in Creative mode.
-                if should_consume_rocket(player.is_creative()) {
-                    if used_main_hand {
-                        main_hand.decrement(1);
-                        player.inventory.set_held_item(main_hand).await;
-                    } else {
-                        let mut off_hand = player.inventory.off_hand_item().await;
-                        off_hand.decrement(1);
-                        player
-                            .inventory
-                            .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand)
-                            .await;
-                    }
+            }
+            let entity = Entity::new(
+                world.clone(),
+                player.get_entity().pos.load(),
+                &EntityType::FIREWORK_ROCKET,
+            );
+            // The entity keeps the pre-consumption stack. Its Fireworks component
+            // determines both the client payload and the vanilla lifetime.
+            let mut main_hand = player.inventory.held_item();
+            let mut used_main_hand = true;
+            let mut source_stack = {
+                let stack = main_hand.clone();
+                (stack.item == &Item::FIREWORK_ROCKET).then_some(stack)
+            };
+            if source_stack.is_none() {
+                let off_hand = player.inventory.off_hand_item();
+                if off_hand.item == &Item::FIREWORK_ROCKET {
+                    source_stack = Some(off_hand);
+                    used_main_hand = false;
                 }
             }
-        })
+
+            let Some(source_stack) = source_stack else {
+                return;
+            };
+            let entity = FireworkRocketEntity::new_shot_with_item(
+                entity,
+                player.get_entity(),
+                &source_stack,
+            );
+            world.spawn_entity(Arc::new(entity));
+
+            // Vanilla `FireworkRocketItem::use` consumes the hand that launched
+            // the attached rocket, except in Creative mode.
+            if should_consume_rocket(player.is_creative()) {
+                if used_main_hand {
+                    main_hand.decrement(1);
+                    player.inventory.set_held_item(main_hand);
+                } else {
+                    let mut off_hand = player.inventory.off_hand_item();
+                    off_hand.decrement(1);
+                    player
+                        .inventory
+                        .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand);
+                }
+            }
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

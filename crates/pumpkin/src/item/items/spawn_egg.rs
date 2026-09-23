@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use std::sync::Arc;
 
 use crate::block::entities::mob_spawner::MobSpawnerBlockEntity;
@@ -73,7 +71,7 @@ pub(crate) fn apply_entity_variant(item: &ItemStack, mob: &dyn EntityBase) {
     }
 }
 
-async fn spawn_egg_mob(
+fn spawn_egg_mob(
     entity_type: &'static EntityType,
     stack: &ItemStack,
     world: &Arc<World>,
@@ -92,12 +90,10 @@ async fn spawn_egg_mob(
 
     // `SpawnEggItem.spawn` applies the stack's implicit entity components before adding the
     // offspring (`SpawnEggItem.java:169-171`).
-    mob.get_entity()
-        .apply_components_from_item_stack(stack)
-        .await;
+    mob.get_entity().apply_components_from_item_stack(stack);
 
     // Broadcast the new mob to all players
-    world.spawn_entity(mob).await;
+    world.spawn_entity(mob);
 
     // `SpawnEggItem.spawn` emits ENTITY_PLACE after a successful spawn (`SpawnEggItem.java:90-93`).
     if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
@@ -106,8 +102,7 @@ async fn spawn_egg_mob(
             pumpkin_data::game_event::GameEvent::EntityPlace,
             pos,
             GameEventContext::of_entity(player_arc),
-        )
-        .await;
+        );
     }
 }
 
@@ -117,165 +112,151 @@ impl ItemBehaviour for SpawnEggItem {
     /// `LiquidBlock`, spawns the mob inside the fluid itself (`tryMoveDown = false`).
     /// Without this, water/lava mob eggs (cod, squid, dolphin, strider, ...) do nothing when
     /// used on the surface of a fluid.
-    fn normal_use<'a>(
-        &'a self,
-        item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let Some(entity_type) = entity_from_egg(item.id) else {
-                return;
-            };
-            let world = player.world();
-            let (start_pos, end_pos) = self.get_start_and_end_pos(player);
+    fn normal_use(&self, item: &Item, player: &Player) {
+        let Some(entity_type) = entity_from_egg(item.id) else {
+            return;
+        };
+        let world = player.world();
+        let (start_pos, end_pos) = self.get_start_and_end_pos(player);
 
-            // ClipContext.Fluid.SOURCE_ONLY: stop on any non-air block outline and on
-            // full fluid source blocks, but pass through flowing fluid.
-            let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
-                let state_id = world_inner.get_block_state_id(pos);
-                let block = Block::from_state_id(state_id);
-                if state_id == Block::AIR.default_state.id {
-                    return false;
-                }
-                if block.id == Block::WATER.id || block.id == Block::LAVA.id {
-                    return state_id == block.default_state.id;
-                }
-                true
-            };
-
-            let Some((pos, face)) = world.raycast(start_pos, end_pos, checker).await else {
-                return;
-            };
-
-            // SpawnEggItem.java:114: only a LiquidBlock is spawned into by `use`; anything
-            // else is left to `useOn`.
-            let hit_block = world.get_block(&pos);
-            if hit_block.id != Block::WATER.id && hit_block.id != Block::LAVA.id {
-                return;
+        // ClipContext.Fluid.SOURCE_ONLY: stop on any non-air block outline and on
+        // full fluid source blocks, but pass through flowing fluid.
+        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+            let state_id = world_inner.get_block_state_id(pos);
+            let block = Block::from_state_id(state_id);
+            if state_id == Block::AIR.default_state.id {
+                return false;
             }
+            if block.id == Block::WATER.id || block.id == Block::LAVA.id {
+                return state_id == block.default_state.id;
+            }
+            true
+        };
 
-            let inventory = player.inventory();
-            let held = inventory.held_item().await;
-            let (mut stack, hand) = if !held.is_empty() && held.item.id == item.id {
-                (held, Hand::Right)
+        let Some((pos, face)) = world.raycast(start_pos, end_pos, checker) else {
+            return;
+        };
+
+        // SpawnEggItem.java:114: only a LiquidBlock is spawned into by `use`; anything
+        // else is left to `useOn`.
+        let hit_block = world.get_block(&pos);
+        if hit_block.id != Block::WATER.id && hit_block.id != Block::LAVA.id {
+            return;
+        }
+
+        let inventory = player.inventory();
+        let held = inventory.held_item();
+        let (mut stack, hand) = if !held.is_empty() && held.item.id == item.id {
+            (held, Hand::Right)
+        } else {
+            let off_hand = inventory.off_hand_item();
+            if !off_hand.is_empty() && off_hand.item.id == item.id {
+                (off_hand, Hand::Left)
             } else {
-                let off_hand = inventory.off_hand_item().await;
-                if !off_hand.is_empty() && off_hand.item.id == item.id {
-                    (off_hand, Hand::Left)
-                } else {
-                    return;
-                }
-            };
-
-            // `SpawnEggItem.use` gates liquid spawning with `Player.mayUseItemAt`
-            // (`SpawnEggItem.java:112-119`).
-            if !player.may_use_item_at(&pos, face, &stack).await {
                 return;
             }
+        };
 
-            let spawn_pos = Vector3::new(
+        // `SpawnEggItem.use` gates liquid spawning with `Player.mayUseItemAt`
+        // (`SpawnEggItem.java:112-119`).
+        if !player.may_use_item_at(&pos, face, &stack) {
+            return;
+        }
+
+        let spawn_pos = Vector3::new(
+            f64::from(pos.0.x) + 0.5,
+            f64::from(pos.0.y),
+            f64::from(pos.0.z) + 0.5,
+        );
+        spawn_egg_mob(entity_type, &stack, &world, spawn_pos, player);
+        // `SpawnEggItem.use` awards ITEM_USED after a successful liquid spawn
+        // (`SpawnEggItem.java:118-122`).
+        player.increment_stat(
+            pumpkin_data::statistic::StatisticCategory::Used,
+            item.id as i32,
+            1,
+        );
+        stack.decrement_unless_creative(player.gamemode.load(), 1);
+        inventory.set_stack_in_hand(hand, stack);
+    }
+
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
+        location: BlockPos,
+        face: BlockDirection,
+        _cursor_pos: Vector3<f32>,
+        _block: &Block,
+        _server: &Server,
+    ) {
+        if let Some(entity_type) = entity_from_egg(item.item.id) {
+            let world = player.world();
+
+            if let Some(block_entity) = player.world().get_block_entity(&location)
+                && let Some(spawner) = block_entity
+                    .as_any()
+                    .downcast_ref::<MobSpawnerBlockEntity>()
+            {
+                spawner.set_entity_type(entity_type);
+                world.update_block_entity(&block_entity);
+                // `SpawnEggItem.useOn` emits BLOCK_CHANGE after retargeting a spawner
+                // (`SpawnEggItem.java:62-65`).
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    emit_game_event(
+                        &world,
+                        pumpkin_data::game_event::GameEvent::BlockChange,
+                        location.to_centered_f64(),
+                        GameEventContext::of_entity(player_arc),
+                    );
+                }
+                item.decrement_unless_creative(player.gamemode.load(), 1);
+                return;
+            }
+            // Vanilla `SpawnEggItem#useOn` (SpawnEggItem.java:54): the `Spawner`
+            // check also matches trial spawner block entities, whose
+            // `setEntityId` overrides the entity they spawn.
+            if let Some(block_entity) = player.world().get_block_entity(&location)
+                && let Some(trial_spawner) = block_entity
+                    .as_any()
+                    .downcast_ref::<TrialSpawnerBlockEntity>()
+            {
+                trial_spawner.set_entity_id(&world, entity_type);
+                world.update_block_entity(&block_entity);
+                // `SpawnEggItem.useOn` emits BLOCK_CHANGE after retargeting a spawner
+                // (`SpawnEggItem.java:62-65`).
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    emit_game_event(
+                        &world,
+                        pumpkin_data::game_event::GameEvent::BlockChange,
+                        location.to_centered_f64(),
+                        GameEventContext::of_entity(player_arc),
+                    );
+                }
+                item.decrement_unless_creative(player.gamemode.load(), 1);
+                return;
+            }
+            // Vanilla `SpawnEggItem#useOn`: the mob is placed inside the clicked block when
+            // that block has no collision shape (grass, torches, ...), and only otherwise on
+            // the block adjacent to the clicked face.
+            let pos = if world
+                .get_block_state(&location)
+                .get_block_collision_shapes()
+                .next()
+                .is_none()
+            {
+                location
+            } else {
+                BlockPos(location.0 + face.to_offset())
+            };
+            let pos = Vector3::new(
                 f64::from(pos.0.x) + 0.5,
                 f64::from(pos.0.y),
                 f64::from(pos.0.z) + 0.5,
             );
-            spawn_egg_mob(entity_type, &stack, &world, spawn_pos, player).await;
-            // `SpawnEggItem.use` awards ITEM_USED after a successful liquid spawn
-            // (`SpawnEggItem.java:118-122`).
-            player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Used,
-                    item.id as i32,
-                    1,
-                )
-                .await;
-            stack.decrement_unless_creative(player.gamemode.load(), 1);
-            inventory.set_stack_in_hand(hand, stack).await;
-        })
-    }
-
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
-        location: BlockPos,
-        face: BlockDirection,
-        _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(entity_type) = entity_from_egg(item.item.id) {
-                let world = player.world();
-
-                if let Some(block_entity) = player.world().get_block_entity(&location)
-                    && let Some(spawner) = block_entity
-                        .as_any()
-                        .downcast_ref::<MobSpawnerBlockEntity>()
-                {
-                    spawner.set_entity_type(entity_type);
-                    world.update_block_entity(&block_entity);
-                    // `SpawnEggItem.useOn` emits BLOCK_CHANGE after retargeting a spawner
-                    // (`SpawnEggItem.java:62-65`).
-                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
-                    {
-                        emit_game_event(
-                            &world,
-                            pumpkin_data::game_event::GameEvent::BlockChange,
-                            location.to_centered_f64(),
-                            GameEventContext::of_entity(player_arc),
-                        )
-                        .await;
-                    }
-                    item.decrement_unless_creative(player.gamemode.load(), 1);
-                    return;
-                }
-                // Vanilla `SpawnEggItem#useOn` (SpawnEggItem.java:54): the `Spawner`
-                // check also matches trial spawner block entities, whose
-                // `setEntityId` overrides the entity they spawn.
-                if let Some(block_entity) = player.world().get_block_entity(&location)
-                    && let Some(trial_spawner) = block_entity
-                        .as_any()
-                        .downcast_ref::<TrialSpawnerBlockEntity>()
-                {
-                    trial_spawner.set_entity_id(&world, entity_type).await;
-                    world.update_block_entity(&block_entity);
-                    // `SpawnEggItem.useOn` emits BLOCK_CHANGE after retargeting a spawner
-                    // (`SpawnEggItem.java:62-65`).
-                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
-                    {
-                        emit_game_event(
-                            &world,
-                            pumpkin_data::game_event::GameEvent::BlockChange,
-                            location.to_centered_f64(),
-                            GameEventContext::of_entity(player_arc),
-                        )
-                        .await;
-                    }
-                    item.decrement_unless_creative(player.gamemode.load(), 1);
-                    return;
-                }
-                // Vanilla `SpawnEggItem#useOn`: the mob is placed inside the clicked block when
-                // that block has no collision shape (grass, torches, ...), and only otherwise on
-                // the block adjacent to the clicked face.
-                let pos = if world
-                    .get_block_state(&location)
-                    .get_block_collision_shapes()
-                    .next()
-                    .is_none()
-                {
-                    location
-                } else {
-                    BlockPos(location.0 + face.to_offset())
-                };
-                let pos = Vector3::new(
-                    f64::from(pos.0.x) + 0.5,
-                    f64::from(pos.0.y),
-                    f64::from(pos.0.z) + 0.5,
-                );
-                spawn_egg_mob(entity_type, item, &world, pos, player).await;
-                item.decrement_unless_creative(player.gamemode.load(), 1);
-            }
-        })
+            spawn_egg_mob(entity_type, item, &world, pos, player);
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

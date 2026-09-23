@@ -6,7 +6,6 @@ impl JavaClient {
         player
             .chunk_manager
             .lock()
-            .await
             .handle_acknowledge(packet.chunks_per_tick);
         trace!(
             "Client requested {} chunks per tick",

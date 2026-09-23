@@ -1,6 +1,6 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
-    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetCloneItemStackArgs, GetStateForNeighborUpdateArgs,
+    OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::EntityBase;
 use pumpkin_data::block_properties::{
@@ -83,30 +83,26 @@ impl BlockBehaviour for BannerBlock {
         }
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = BannerBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(entity));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = BannerBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(entity));
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if is_wall_banner(args.block) {
-                // `WallBannerBlock#getStateForPlacement` (WallBannerBlock.java:66-83) faces the
-                // banner away from the surface it was placed against.
-                let mut props = WallTorchLikeProperties::default(args.block);
-                if let Some(facing) = args.direction.opposite().to_horizontal_facing() {
-                    props.facing = facing;
-                }
-                return props.to_state_id(args.block);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        if is_wall_banner(args.block) {
+            // `WallBannerBlock#getStateForPlacement` (WallBannerBlock.java:66-83) faces the
+            // banner away from the surface it was placed against.
+            let mut props = WallTorchLikeProperties::default(args.block);
+            if let Some(facing) = args.direction.opposite().to_horizontal_facing() {
+                props.facing = facing;
             }
+            return props.to_state_id(args.block);
+        }
 
-            // `BannerBlock#getStateForPlacement` (BannerBlock.java:57-60).
-            let mut props = WhiteBannerLikeProperties::default(args.block);
-            props.rotation = args.player.get_entity().get_flipped_rotation_16();
-            props.to_state_id(args.block)
-        })
+        // `BannerBlock#getStateForPlacement` (BannerBlock.java:57-60).
+        let mut props = WhiteBannerLikeProperties::default(args.block);
+        props.rotation = args.player.get_entity().get_flipped_rotation_16();
+        props.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -134,28 +130,23 @@ impl BlockBehaviour for BannerBlock {
             .is_solid()
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            if !can_survive(args.world.as_ref(), args.block, state_id, args.position) {
-                args.world
-                    .break_block(args.position, None, BlockFlags::empty())
-                    .await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        if !can_survive(args.world.as_ref(), args.block, state_id, args.position) {
+            args.world
+                .break_block(args.position, None, BlockFlags::empty());
+        }
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if !can_survive(args.world, args.block, args.state_id, args.position) {
-                args.world
-                    .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if !can_survive(args.world, args.block, args.state_id, args.position) {
+            args.world
+                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+        }
+        args.state_id
     }
 }
 

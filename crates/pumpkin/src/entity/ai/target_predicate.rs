@@ -118,7 +118,7 @@ impl TargetPredicate {
         }));
     }
 
-    pub async fn test(
+    pub fn test(
         &self,
         world: &Arc<World>,
         tester: Option<&LivingEntity>,
@@ -152,7 +152,7 @@ impl TargetPredicate {
             && self.base_max_distance > 0.0
         {
             let visibility_modifier = if self.use_distance_scaling_factor {
-                targeter_visibility_modifier(tester_ent, target).await
+                targeter_visibility_modifier(tester_ent, target)
             } else {
                 1.0
             };
@@ -179,7 +179,6 @@ impl TargetPredicate {
                     target.entity.get_eye_pos(),
                     async |block_pos, world| world.get_block_state(block_pos).is_solid(),
                 )
-                .await
                 .is_some()
         {
             return false;
@@ -189,7 +188,7 @@ impl TargetPredicate {
     }
 }
 
-async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEntity) -> f64 {
+fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEntity) -> f64 {
     let mut modifier = 1.0;
 
     // `LivingEntity.getVisibilityPercent` (`LivingEntity.java:919-922`): a discrete target is
@@ -200,7 +199,10 @@ async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEn
     }
 
     if target.entity.invisible.load(Relaxed) {
-        let equipment = target.entity_equipment.lock().await;
+        let equipment = target
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let armor_slots = [
             EquipmentSlot::HEAD,
             EquipmentSlot::CHEST,
@@ -219,7 +221,7 @@ async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEn
     let head_item = target
         .entity_equipment
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(&EquipmentSlot::HEAD)
         .item
         .id;

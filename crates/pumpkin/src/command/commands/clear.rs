@@ -35,14 +35,17 @@ const MAX_NO_CLEAR_BUT_SIMULATE: i32 = 0;
 /// If `max` provided is [`MAX_NO_UPPER_LIMIT`] (`-1`), then there is no limit in clearing.
 ///
 /// Otherwise, at most `max` items are cleared.
-async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
+fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
     let inventory = target.inventory();
     let mut count: i32 = 0;
     let mut max: i32 = max;
     let mut is_done: bool = false;
 
     {
-        let mut main_inv = inventory.main_inventory.write().await;
+        let mut main_inv = inventory
+            .main_inventory
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for slot in main_inv.iter_mut() {
             test_and_clear(&mut count, &mut max, item, slot, &mut is_done);
             if is_done {
@@ -52,7 +55,10 @@ async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
     }
 
     if !is_done {
-        let mut entity_equipment_lock = inventory.entity_equipment.lock().await;
+        let mut entity_equipment_lock = inventory
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for slot in entity_equipment_lock.equipment.values_mut() {
             test_and_clear(&mut count, &mut max, item, slot, &mut is_done);
             if is_done {
@@ -67,9 +73,9 @@ async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
         let crafting_inventory = target
             .player_screen_handler
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get_crafting_inventory();
-        let crafting_count = clear_inventory(crafting_inventory.as_ref(), item, max).await;
+        let crafting_count = clear_inventory(crafting_inventory.as_ref(), item, max);
         count += crafting_count;
         if max > 0 {
             max -= crafting_count;
@@ -80,9 +86,19 @@ async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
     // Vanilla then processes the current menu's carried stack and normalizes an
     // empty result back to ItemStack.EMPTY (Inventory.java:185-189).
     if !is_done {
-        let current_screen_handler = target.current_screen_handler.lock().await.clone();
-        let screen_handler = current_screen_handler.lock().await;
-        let mut carried = screen_handler.get_behaviour().cursor_stack.lock().await;
+        let current_screen_handler = target
+            .current_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let screen_handler = current_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut carried = screen_handler
+            .get_behaviour()
+            .cursor_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         test_and_clear(&mut count, &mut max, item, &mut carried, &mut is_done);
         if carried.is_empty() {
             *carried = ItemStack::EMPTY.clone();
@@ -94,17 +110,15 @@ async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
     target
         .current_screen_handler
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .lock()
-        .await
-        .send_content_updates()
-        .await;
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .send_content_updates();
     target
         .player_screen_handler
         .lock()
-        .await
-        .send_content_updates()
-        .await;
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .send_content_updates();
 
     count
 }
@@ -112,17 +126,13 @@ async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
 /// Clears or counts matching stacks in an async inventory, preserving the
 /// `ContainerHelper.clearOrCountMatchingItems` ordering and amount semantics
 /// (ContainerHelper.java:48-80).
-async fn clear_inventory(
-    inventory: &dyn Inventory,
-    item: &ItemPredicate,
-    amount_to_remove: i32,
-) -> i32 {
+fn clear_inventory(inventory: &dyn Inventory, item: &ItemPredicate, amount_to_remove: i32) -> i32 {
     let counting_only = amount_to_remove == 0;
     let mut remaining = amount_to_remove;
     let mut count = 0;
 
     for slot in 0..inventory.size() {
-        let stack = inventory.get_stack(slot).await;
+        let stack = inventory.get_stack(slot);
         if stack.is_empty() || !item.test_item_stack(&stack) {
             continue;
         }
@@ -137,7 +147,7 @@ async fn clear_inventory(
         } else {
             remaining.min(i32::from(stack.item_count)) as u8
         };
-        let removed = inventory.remove_stack_specific(slot, amount).await;
+        let removed = inventory.remove_stack_specific(slot, amount);
         count += i32::from(removed.item_count);
         if remaining > 0 {
             remaining -= i32::from(removed.item_count);
@@ -188,22 +198,22 @@ fn test_and_clear(
     }
 }
 
-async fn command_result(
+fn command_result(
     sender: &CommandSender,
     item_count: i32,
     max_count: i32,
     targets: &[Arc<Player>],
 ) -> Result<i32, CommandError> {
-    match clear_command_text_output(item_count, max_count, targets).await {
+    match clear_command_text_output(item_count, max_count, targets) {
         Ok(success) => {
-            sender.send_message(success).await;
+            sender.send_message(success);
             Ok(item_count)
         }
         Err(failure) => Err(CommandError::CommandFailed(failure)),
     }
 }
 
-async fn clear_command_text_output(
+fn clear_command_text_output(
     item_count: i32,
     max_count: i32,
     targets: &[Arc<Player>],
@@ -212,7 +222,7 @@ async fn clear_command_text_output(
         ([target], true, _) => Err(TextComponent::translate_cross(
             translation::java::CLEAR_FAILED_SINGLE,
             translation::bedrock::COMMANDS_CLEAR_FAILURE,
-            [target.get_display_name().await],
+            [target.get_display_name()],
         )),
         (targets, true, _) => Err(TextComponent::translate_cross(
             translation::java::CLEAR_FAILED_MULTIPLE,
@@ -224,7 +234,7 @@ async fn clear_command_text_output(
             translation::java::COMMANDS_CLEAR_SUCCESS_SINGLE,
             [
                 TextComponent::text(item_count.to_string()),
-                target.get_display_name().await,
+                target.get_display_name(),
             ],
         )),
         (targets, false, false) => Ok(TextComponent::translate_cross(
@@ -240,7 +250,7 @@ async fn clear_command_text_output(
             translation::java::COMMANDS_CLEAR_TEST_SINGLE,
             [
                 TextComponent::text(item_count.to_string()),
-                target.get_display_name().await,
+                target.get_display_name(),
             ],
         )),
         (targets, false, true) => Ok(TextComponent::translate_cross(
@@ -261,104 +271,94 @@ const fn count_consumer() -> BoundedNumArgumentConsumer<i32> {
 struct SelfExecutor;
 
 impl CommandExecutor for SelfExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        _args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let target = sender.as_player().ok_or(CommandError::InvalidRequirement)?;
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        _args: &ConsumedArgs,
+    ) -> CommandResult {
+        let target = sender.as_player().ok_or(CommandError::InvalidRequirement)?;
 
-            let items_cleared =
-                clear_player(&target, &ItemPredicate::Any, MAX_NO_UPPER_LIMIT).await;
+        let items_cleared = clear_player(&target, &ItemPredicate::Any, MAX_NO_UPPER_LIMIT);
 
-            command_result(sender, items_cleared, MAX_NO_UPPER_LIMIT, &[target]).await
-        })
+        command_result(sender, items_cleared, MAX_NO_UPPER_LIMIT, &[target])
     }
 }
 
 struct Executor;
 
 impl CommandExecutor for Executor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
-                return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
-            };
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+            return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
+        };
 
-            let mut total_items_cleared = 0;
-            for target in targets {
-                total_items_cleared +=
-                    clear_player(target, &ItemPredicate::Any, MAX_NO_UPPER_LIMIT).await;
-            }
+        let mut total_items_cleared = 0;
+        for target in targets {
+            total_items_cleared += clear_player(target, &ItemPredicate::Any, MAX_NO_UPPER_LIMIT);
+        }
 
-            command_result(sender, total_items_cleared, MAX_NO_UPPER_LIMIT, targets).await
-        })
+        command_result(sender, total_items_cleared, MAX_NO_UPPER_LIMIT, targets)
     }
 }
 
 struct ItemExecutor;
 
 impl CommandExecutor for ItemExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
-                return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
-            };
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+            return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
+        };
 
-            let item = ItemPredicateArgumentConsumer::find_arg(args, ARG_ITEM)?;
+        let item = ItemPredicateArgumentConsumer::find_arg(args, ARG_ITEM)?;
 
-            let mut total_items_cleared = 0;
-            for target in targets {
-                total_items_cleared += clear_player(target, &item, MAX_NO_UPPER_LIMIT).await;
-            }
+        let mut total_items_cleared = 0;
+        for target in targets {
+            total_items_cleared += clear_player(target, &item, MAX_NO_UPPER_LIMIT);
+        }
 
-            command_result(sender, total_items_cleared, MAX_NO_UPPER_LIMIT, targets).await
-        })
+        command_result(sender, total_items_cleared, MAX_NO_UPPER_LIMIT, targets)
     }
 }
 
 struct ItemCountExecutor;
 
 impl CommandExecutor for ItemCountExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
-                return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
-            };
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+            return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
+        };
 
-            let item = ItemPredicateArgumentConsumer::find_arg(args, ARG_ITEM)?;
-            let Ok(max) = count_consumer().find_arg_default_name(args)? else {
-                return Err(CommandError::CommandFailed(TextComponent::translate_cross(
-                    translation::java::PARSING_INT_INVALID,
-                    translation::java::PARSING_INT_INVALID,
-                    [TextComponent::text(i32::MAX.to_string())],
-                )));
-            };
+        let item = ItemPredicateArgumentConsumer::find_arg(args, ARG_ITEM)?;
+        let Ok(max) = count_consumer().find_arg_default_name(args)? else {
+            return Err(CommandError::CommandFailed(TextComponent::translate_cross(
+                translation::java::PARSING_INT_INVALID,
+                translation::java::PARSING_INT_INVALID,
+                [TextComponent::text(i32::MAX.to_string())],
+            )));
+        };
 
-            let mut total_items_cleared = 0;
-            for target in targets {
-                total_items_cleared += clear_player(target, &item, max).await;
-            }
+        let mut total_items_cleared = 0;
+        for target in targets {
+            total_items_cleared += clear_player(target, &item, max);
+        }
 
-            command_result(sender, total_items_cleared, max, targets).await
-        })
+        command_result(sender, total_items_cleared, max, targets)
     }
 }
 

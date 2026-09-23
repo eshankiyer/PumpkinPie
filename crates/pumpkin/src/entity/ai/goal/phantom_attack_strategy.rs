@@ -12,7 +12,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::chunk::ChunkHeightmapType;
 use rand::RngExt;
 
-use crate::entity::ai::goal::{Goal, GoalFuture};
+use crate::entity::ai::goal::Goal;
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::mob::Mob;
 use crate::entity::mob::phantom::{AttackPhase, PhantomEntity};
@@ -31,11 +31,16 @@ impl PhantomAttackStrategyGoal {
         }
     }
 
-    async fn set_anchor_above_target(phantom: &PhantomEntity, mob: &dyn Mob) {
+    fn set_anchor_above_target(phantom: &PhantomEntity, mob: &dyn Mob) {
         if phantom.anchor_point().is_none() {
             return;
         }
-        let target = phantom.mob_entity.target.lock().await.clone();
+        let target = phantom
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let Some(target) = target else {
             return;
         };
@@ -66,88 +71,80 @@ pub fn anchor_above_target(target_pos: BlockPos, random_extra: i32, sea_level: i
 }
 
 impl Goal for PhantomAttackStrategyGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(phantom) = self.phantom.upgrade() else {
-                return false;
-            };
-            let target = phantom.mob_entity.target.lock().await.clone();
-            let Some(target) = target else {
-                return false;
-            };
-            let Some(target_living) = target.get_living_entity() else {
-                return false;
-            };
-            let world = phantom.mob_entity.living_entity.entity.world.load_full();
-            TargetPredicate::create_attackable()
-                .test(
-                    &world,
-                    Some(&phantom.mob_entity.living_entity),
-                    target_living,
-                )
-                .await
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(phantom) = self.phantom.upgrade() else {
+            return false;
+        };
+        let target = phantom
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            return false;
+        };
+        let Some(target_living) = target.get_living_entity() else {
+            return false;
+        };
+        let world = phantom.mob_entity.living_entity.entity.world.load_full();
+        TargetPredicate::create_attackable().test(
+            &world,
+            Some(&phantom.mob_entity.living_entity),
+            target_living,
+        )
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(phantom) = self.phantom.upgrade() else {
-                return;
-            };
-            self.next_sweep_tick = self.get_tick_count(10);
-            phantom.set_attack_phase(AttackPhase::Circle);
-            Self::set_anchor_above_target(&phantom, mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        let Some(phantom) = self.phantom.upgrade() else {
+            return;
+        };
+        self.next_sweep_tick = self.get_tick_count(10);
+        phantom.set_attack_phase(AttackPhase::Circle);
+        Self::set_anchor_above_target(&phantom, mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(phantom) = self.phantom.upgrade() else {
-                return;
-            };
-            let Some(anchor) = phantom.anchor_point() else {
-                return;
-            };
-            let world = phantom.mob_entity.living_entity.entity.world.load_full();
-            let ground_y = world.get_heightmap_height(
-                ChunkHeightmapType::MotionBlocking,
-                anchor.0.x,
-                anchor.0.z,
+    fn stop(&mut self, mob: &dyn Mob) {
+        let Some(phantom) = self.phantom.upgrade() else {
+            return;
+        };
+        let Some(anchor) = phantom.anchor_point() else {
+            return;
+        };
+        let world = phantom.mob_entity.living_entity.entity.world.load_full();
+        let ground_y =
+            world.get_heightmap_height(ChunkHeightmapType::MotionBlocking, anchor.0.x, anchor.0.z);
+        let random_extra = mob.get_random().random_range(0..20);
+        let new_anchor =
+            BlockPos::new(anchor.0.x, ground_y, anchor.0.z).up_height(10 + random_extra);
+        phantom.set_anchor_point(Some(new_anchor));
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(phantom) = self.phantom.upgrade() else {
+            return;
+        };
+        if phantom.attack_phase() != AttackPhase::Circle {
+            return;
+        }
+        self.next_sweep_tick -= 1;
+        if self.next_sweep_tick <= 0 {
+            phantom.set_attack_phase(AttackPhase::Swoop);
+            Self::set_anchor_above_target(&phantom, mob);
+            let extra_seconds = mob.get_random().random_range(0..4);
+            self.next_sweep_tick = self.get_tick_count((8 + extra_seconds) * 20);
+
+            let entity = &phantom.mob_entity.living_entity.entity;
+            let pos = entity.pos.load();
+            let pitch = 0.95 + mob.get_random().random::<f32>() * 0.1;
+            entity.world.load().play_sound_fine(
+                Sound::EntityPhantomSwoop,
+                SoundCategory::Hostile,
+                &pos,
+                10.0,
+                pitch,
             );
-            let random_extra = mob.get_random().random_range(0..20);
-            let new_anchor =
-                BlockPos::new(anchor.0.x, ground_y, anchor.0.z).up_height(10 + random_extra);
-            phantom.set_anchor_point(Some(new_anchor));
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(phantom) = self.phantom.upgrade() else {
-                return;
-            };
-            if phantom.attack_phase() != AttackPhase::Circle {
-                return;
-            }
-            self.next_sweep_tick -= 1;
-            if self.next_sweep_tick <= 0 {
-                phantom.set_attack_phase(AttackPhase::Swoop);
-                Self::set_anchor_above_target(&phantom, mob).await;
-                let extra_seconds = mob.get_random().random_range(0..4);
-                self.next_sweep_tick = self.get_tick_count((8 + extra_seconds) * 20);
-
-                let entity = &phantom.mob_entity.living_entity.entity;
-                let pos = entity.pos.load();
-                let pitch = 0.95 + mob.get_random().random::<f32>() * 0.1;
-                entity.world.load().play_sound_fine(
-                    Sound::EntityPhantomSwoop,
-                    SoundCategory::Hostile,
-                    &pos,
-                    10.0,
-                    pitch,
-                );
-            }
-        })
+        }
     }
 }
 

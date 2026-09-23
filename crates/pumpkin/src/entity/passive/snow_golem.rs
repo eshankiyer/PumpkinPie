@@ -9,7 +9,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         nearest_hostile_target::NearestHostileTargetGoal,
@@ -113,7 +113,7 @@ impl SnowGolemEntity {
     /// Vanilla `SnowGolem.performRangedAttack` (`SnowGolem.java:118-134`): aims at the
     /// target's eye height minus 1.1 with a horizontal-distance lead, shot at speed 1.6 with
     /// `rangedAttackUncertainty` 12.
-    pub async fn throw_snowball(&self, target: &Arc<dyn EntityBase>) {
+    pub fn throw_snowball(&self, target: &Arc<dyn EntityBase>) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
@@ -135,7 +135,7 @@ impl SnowGolemEntity {
             .set_velocity(dx, dy + yo - projectile_y, dz, 1.6, 12.0);
 
         let snowball_arc: Arc<dyn EntityBase> = Arc::new(snowball);
-        world.spawn_entity(snowball_arc).await;
+        world.spawn_entity(snowball_arc);
 
         if !entity.silent.load(Ordering::Relaxed) {
             world.play_sound(
@@ -167,13 +167,7 @@ impl Mob for SnowGolemEntity {
 }
 
 impl RangedAttackMob for SnowGolemEntity {
-    fn perform_ranged_attack<'a>(
-        &'a self,
-        target: &'a Arc<dyn EntityBase>,
-        _power: f32,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.throw_snowball(target).await;
-        })
+    fn perform_ranged_attack(&self, target: &Arc<dyn EntityBase>, _power: f32) {
+        self.throw_snowball(target);
     }
 }

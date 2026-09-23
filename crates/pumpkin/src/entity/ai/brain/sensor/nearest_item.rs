@@ -73,7 +73,11 @@ impl Sensor for NearestItemSensor {
                 };
                 // The item-stack guard is a tokio mutex, so clone the stack out and drop the
                 // guard before touching the brain's std mutex.
-                let stack = item_entity.get_item_stack().lock().await.clone();
+                let stack = item_entity
+                    .get_item_stack()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
                 if !mob.wants_to_pick_up_item(&world, &stack) {
                     continue;
                 }
@@ -86,7 +90,6 @@ impl Sensor for NearestItemSensor {
                             !world.get_block_state(block_pos).collision_shapes.is_empty()
                         },
                     )
-                    .await
                     .is_none();
                 if has_line_of_sight {
                     nearest = Some(candidate);

@@ -28,74 +28,68 @@ const ARG_ANGLE: &str = "angle";
 struct NoArgsWorldSpawnExecutor;
 
 impl CommandExecutor for NoArgsWorldSpawnExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        server: &'a crate::server::Server,
-        _args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(player) = sender.as_player() else {
-                if sender.is_console() {
-                    return Err(CommandError::CommandFailed(TextComponent::text(
-                        "You must specify a Position!",
-                    )));
-                }
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        server: &crate::server::Server,
+        _args: &ConsumedArgs,
+    ) -> CommandResult {
+        let Some(player) = sender.as_player() else {
+            if sender.is_console() {
                 return Err(CommandError::CommandFailed(TextComponent::text(
-                    "Failed to get Sender as Player!",
+                    "You must specify a Position!",
                 )));
-            };
-            let block_pos = player.position();
-            setworldspawn(sender, server, block_pos.to_block_pos(), 0.0, 0.0).await
-        })
+            }
+            return Err(CommandError::CommandFailed(TextComponent::text(
+                "Failed to get Sender as Player!",
+            )));
+        };
+        let block_pos = player.position();
+        setworldspawn(sender, server, block_pos.to_block_pos(), 0.0, 0.0)
     }
 }
 
 struct DefaultWorldSpawnExecutor;
 
 impl CommandExecutor for DefaultWorldSpawnExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(Arg::BlockPos(block_pos)) = args.get(ARG_BLOCK_POS) else {
-                return Err(InvalidConsumption(Some(ARG_BLOCK_POS.into())));
-            };
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let Some(Arg::BlockPos(block_pos)) = args.get(ARG_BLOCK_POS) else {
+            return Err(InvalidConsumption(Some(ARG_BLOCK_POS.into())));
+        };
 
-            setworldspawn(sender, server, *block_pos, 0.0, 0.0).await
-        })
+        setworldspawn(sender, server, *block_pos, 0.0, 0.0)
     }
 }
 
 struct AngleWorldSpawnExecutor;
 
 impl CommandExecutor for AngleWorldSpawnExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(Arg::BlockPos(block_pos)) = args.get(ARG_BLOCK_POS) else {
-                return Err(InvalidConsumption(Some(ARG_BLOCK_POS.into())));
-            };
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let Some(Arg::BlockPos(block_pos)) = args.get(ARG_BLOCK_POS) else {
+            return Err(InvalidConsumption(Some(ARG_BLOCK_POS.into())));
+        };
 
-            // Note: Rotation argument is (yaw, is_yaw_relative, pitch, is_pitch_relative)
-            // For setworldspawn, we use absolute values only (ignore relative flags)
-            let Some(Arg::Rotation(yaw, _, pitch, _)) = args.get(ARG_ANGLE) else {
-                return Err(InvalidConsumption(Some(ARG_ANGLE.into())));
-            };
+        // Note: Rotation argument is (yaw, is_yaw_relative, pitch, is_pitch_relative)
+        // For setworldspawn, we use absolute values only (ignore relative flags)
+        let Some(Arg::Rotation(yaw, _, pitch, _)) = args.get(ARG_ANGLE) else {
+            return Err(InvalidConsumption(Some(ARG_ANGLE.into())));
+        };
 
-            setworldspawn(sender, server, *block_pos, *yaw, *pitch).await
-        })
+        setworldspawn(sender, server, *block_pos, *yaw, *pitch)
     }
 }
 
-async fn setworldspawn(
+fn setworldspawn(
     sender: &CommandSender,
     server: &Server,
     block_pos: BlockPos,
@@ -138,8 +132,7 @@ async fn setworldspawn(
     if let Some(server_arc) = world.server.upgrade() {
         server_arc
             .plugin_manager
-            .fire(&server_arc, &mut event)
-            .await;
+            .fire_blocking(&server_arc, &mut event);
     }
     new_position = event.new_position;
     new_yaw = event.new_yaw;
@@ -155,20 +148,18 @@ async fn setworldspawn(
 
     server.level_info.store(Arc::new(new_info));
 
-    sender
-        .send_message(TextComponent::translate_cross(
-            translation::java::COMMANDS_SETWORLDSPAWN_SUCCESS_NEW,
-            translation::java::COMMANDS_SETWORLDSPAWN_SUCCESS_NEW,
-            [
-                TextComponent::text(new_position.0.x.to_string()),
-                TextComponent::text(new_position.0.y.to_string()),
-                TextComponent::text(new_position.0.z.to_string()),
-                TextComponent::text(new_yaw.to_string()),
-                TextComponent::text(new_pitch.to_string()),
-                TextComponent::text(world.dimension.minecraft_name),
-            ],
-        ))
-        .await;
+    sender.send_message(TextComponent::translate_cross(
+        translation::java::COMMANDS_SETWORLDSPAWN_SUCCESS_NEW,
+        translation::java::COMMANDS_SETWORLDSPAWN_SUCCESS_NEW,
+        [
+            TextComponent::text(new_position.0.x.to_string()),
+            TextComponent::text(new_position.0.y.to_string()),
+            TextComponent::text(new_position.0.z.to_string()),
+            TextComponent::text(new_yaw.to_string()),
+            TextComponent::text(new_pitch.to_string()),
+            TextComponent::text(world.dimension.minecraft_name),
+        ],
+    ));
 
     Ok(1)
 }

@@ -8,7 +8,6 @@
 //!   `BuiltInLootTables.HARVEST_CAVE_VINE` (`CaveVines.java:26-33`), which that table's only
 //!   entry produces anyway.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use pumpkin_data::block_properties::{
@@ -24,7 +23,7 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle};
+use super::{Controls, Goal, ParentHandle};
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
 use crate::world::World;
@@ -80,7 +79,7 @@ impl FoxEatBerriesGoal {
     }
 
     /// `onReachedTarget` (`Fox.java:943-952`).
-    async fn on_reached_target(&self, mob: &dyn Mob) {
+    fn on_reached_target(&self, mob: &dyn Mob) {
         let entity = mob.get_entity();
         let world = entity.world.load_full();
         if !world.level_info.load().game_rules.mob_griefing {
@@ -89,14 +88,14 @@ impl FoxEatBerriesGoal {
         let pos = self.move_to_target_pos_goal.target_pos;
         let (block, state_id) = world.get_block_and_state_id(&pos);
         if block == &Block::SWEET_BERRY_BUSH {
-            self.pick_sweet_berries(mob, &world, pos, state_id).await;
+            self.pick_sweet_berries(mob, &world, pos, state_id);
         } else if Self::has_glow_berries(block, state_id) {
-            Self::pick_glow_berry(mob, &world, pos, block, state_id).await;
+            Self::pick_glow_berry(mob, &world, pos, block, state_id);
         }
     }
 
     /// `pickSweetBerries` (`Fox.java:958-973`).
-    async fn pick_sweet_berries(
+    fn pick_sweet_berries(
         &self,
         mob: &dyn Mob,
         world: &Arc<World>,
@@ -110,16 +109,14 @@ impl FoxEatBerriesGoal {
         if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>()
             && fox.can_hold_item()
         {
-            fox.set_held_item(ItemStack::new(1, &Item::SWEET_BERRIES))
-                .await;
+            fox.set_held_item(ItemStack::new(1, &Item::SWEET_BERRIES));
             count -= 1;
         }
 
         if count > 0 {
             world
                 .clone()
-                .drop_stack(&pos, ItemStack::new(count as u8, &Item::SWEET_BERRIES))
-                .await;
+                .drop_stack(&pos, ItemStack::new(count as u8, &Item::SWEET_BERRIES));
         }
 
         let entity_pos = mob.get_entity().pos.load();
@@ -129,17 +126,15 @@ impl FoxEatBerriesGoal {
             &entity_pos,
         );
         let picked = NetherWartLikeProperties { age: 1 };
-        world
-            .set_block_state(
-                &pos,
-                picked.to_state_id(&Block::SWEET_BERRY_BUSH),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        world.set_block_state(
+            &pos,
+            picked.to_state_id(&Block::SWEET_BERRY_BUSH),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
     /// `pickGlowBerry` -> `CaveVines.use` (`Fox.java:954-956`, `CaveVines.java:23-45`).
-    async fn pick_glow_berry(
+    fn pick_glow_berry(
         mob: &dyn Mob,
         world: &Arc<World>,
         pos: BlockPos,
@@ -159,66 +154,57 @@ impl FoxEatBerriesGoal {
 
         world
             .clone()
-            .drop_stack(&pos, ItemStack::new(1, &Item::GLOW_BERRIES))
-            .await;
+            .drop_stack(&pos, ItemStack::new(1, &Item::GLOW_BERRIES));
         let _ = mob;
         world.play_sound(
             Sound::BlockCaveVinesPickBerries,
             SoundCategory::Blocks,
             &pos.to_centered_f64(),
         );
-        world
-            .set_block_state(&pos, picked_state, BlockFlags::NOTIFY_LISTENERS)
-            .await;
+        world.set_block_state(&pos, picked_state, BlockFlags::NOTIFY_LISTENERS);
     }
 }
 
 impl Goal for FoxEatBerriesGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let is_sleeping = mob
-                .cast_any()
-                .downcast_ref::<FoxEntity>()
-                .is_some_and(FoxEntity::is_sleeping);
-            if is_sleeping {
-                return false;
-            }
-            self.move_to_target_pos_goal.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let is_sleeping = mob
+            .cast_any()
+            .downcast_ref::<FoxEntity>()
+            .is_some_and(FoxEntity::is_sleeping);
+        if is_sleeping {
+            return false;
+        }
+        self.move_to_target_pos_goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.move_to_target_pos_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.move_to_target_pos_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_waited = 0;
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.set_sitting(false);
-            }
-            self.move_to_target_pos_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.ticks_waited = 0;
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.set_sitting(false);
+        }
+        self.move_to_target_pos_goal.start(mob);
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if self.move_to_target_pos_goal.reached {
-                if self.ticks_waited >= WAIT_TICKS {
-                    self.on_reached_target(mob).await;
-                } else {
-                    self.ticks_waited += 1;
-                }
-            } else if { mob.get_random().random::<f32>() } < 0.05 {
-                let entity = mob.get_entity();
-                entity.world.load().play_sound(
-                    Sound::EntityFoxSniff,
-                    SoundCategory::Neutral,
-                    &entity.pos.load(),
-                );
+    fn tick(&mut self, mob: &dyn Mob) {
+        if self.move_to_target_pos_goal.reached {
+            if self.ticks_waited >= WAIT_TICKS {
+                self.on_reached_target(mob);
+            } else {
+                self.ticks_waited += 1;
             }
-            self.move_to_target_pos_goal.tick(mob).await;
-        })
+        } else if { mob.get_random().random::<f32>() } < 0.05 {
+            let entity = mob.get_entity();
+            entity.world.load().play_sound(
+                Sound::EntityFoxSniff,
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+            );
+        }
+        self.move_to_target_pos_goal.tick(mob);
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -231,12 +217,8 @@ impl Goal for FoxEatBerriesGoal {
 }
 
 impl MoveToTargetPos for FoxEatBerriesGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move { Self::is_berry_block(&world, &block_pos) })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        Self::is_berry_block(&world, &block_pos)
     }
 
     fn get_desired_distance_to_target(&self) -> f64 {

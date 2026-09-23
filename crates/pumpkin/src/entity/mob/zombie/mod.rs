@@ -1,5 +1,4 @@
 use super::{Mob, MobEntity};
-use crate::entity::EntityBaseFuture;
 use crate::entity::ai::goal::destroy_egg::DestroyEggGoal;
 use crate::entity::ai::goal::look_around::RandomLookAroundGoal;
 use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
@@ -13,7 +12,7 @@ use crate::entity::living::LivingEntity;
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::r#type::{SpawnRuleContext, check_spawn_rules, from_type};
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal},
 };
 use crate::world::World;
@@ -146,7 +145,7 @@ impl ZombieEntityBase {
 
     /// Runs `Zombie::handleAttributes` (`Zombie.java:531-558`) once, and only for a genuine
     /// fresh spawn, recording the leader outcome in `is_leader`.
-    pub async fn roll_spawn_attributes(&self) {
+    pub fn roll_spawn_attributes(&self) {
         if self.restored_from_nbt.load(Ordering::Relaxed) {
             return;
         }
@@ -156,18 +155,17 @@ impl ZombieEntityBase {
         let is_leader = handle_attributes(
             &self.mob_entity.living_entity,
             difficulty.special_multiplier,
-        )
-        .await;
+        );
         self.is_leader.store(is_leader, Ordering::Relaxed);
     }
 }
 
 impl NBTStorage for ZombieEntityBase {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
         self.mob_entity.living_entity.write_nbt(nbt)
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
         self.mark_restored_from_nbt();
         self.mob_entity.living_entity.read_nbt_non_mut(nbt)
     }
@@ -182,80 +180,82 @@ impl Mob for ZombieEntityBase {
     /// `Mob` default's baby-metadata send. That default is inlined rather than reached through
     /// `Mob::mob_init_data_tracker(self)`, which would resolve straight back into this override
     /// and recurse.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            if entity.age.load(Ordering::Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
-                    None,
-                );
-            }
-            self.roll_spawn_attributes().await;
-        })
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        if entity.age.load(Ordering::Relaxed) < 0 {
+            entity.send_meta_data(
+                &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
+                None,
+            );
+        }
+        self.roll_spawn_attributes();
     }
 
     /// Vanilla: `Zombie.populateDefaultEquipmentSlots` (super's armor roll, then a 5%/1% chance
     /// of an iron sword/spear/shovel). Upstream plugin-facing hook; natural spawns are equipped
     /// through `equipment::equip_mob_on_spawn`'s registry instead, which does not call this.
-    fn populate_default_equipment_slots<'a>(
-        &'a self,
-        _world: &'a Arc<World>,
-        difficulty: &'a RegionalDifficulty,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // Default armor slots (super.populateDefaultEquipmentSlots)
-            if rand::random::<f32>()
-                < MobEntity::MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier
-            {
-                let mut armor_type = rand::random_range(0..3);
-                for _ in 1..=3 {
-                    if rand::random::<f32>() < MobEntity::WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
-                        armor_type += 1;
-                    }
-                }
-
-                let partial_chance = if difficulty.base_difficulty == Difficulty::Hard {
-                    0.1f32
-                } else {
-                    0.25f32
-                };
-
-                let living = &self.mob_entity.living_entity;
-                let mut equipment = living.entity_equipment.lock().await;
-                let mut first = true;
-
-                for slot in &MobEntity::EQUIPMENT_POPULATION_ORDER {
-                    let current = equipment.get(slot);
-                    if !first && rand::random::<f32>() < partial_chance {
-                        break;
-                    }
-                    first = false;
-                    if current.is_empty()
-                        && let Some(item) = MobEntity::get_equipment_for_slot(slot, armor_type)
-                    {
-                        equipment.put(slot, ItemStack::new(1, item));
-                    }
+    fn populate_default_equipment_slots(
+        &self,
+        _world: &Arc<World>,
+        difficulty: &RegionalDifficulty,
+    ) {
+        // Default armor slots (super.populateDefaultEquipmentSlots)
+        if rand::random::<f32>()
+            < MobEntity::MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier
+        {
+            let mut armor_type = rand::random_range(0..3);
+            for _ in 1..=3 {
+                if rand::random::<f32>() < MobEntity::WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
+                    armor_type += 1;
                 }
             }
 
-            let weapon_chance = if difficulty.base_difficulty == Difficulty::Hard {
-                0.05f32
+            let partial_chance = if difficulty.base_difficulty == Difficulty::Hard {
+                0.1f32
             } else {
-                0.01f32
+                0.25f32
             };
-            if rand::random::<f32>() < weapon_chance {
-                let r = rand::random_range(0..6);
-                let weapon_item = match r {
-                    0 => &Item::IRON_SWORD,
-                    1 => &Item::IRON_SPEAR,
-                    _ => &Item::IRON_SHOVEL,
-                };
-                let living = &self.mob_entity.living_entity;
-                let mut equipment = living.entity_equipment.lock().await;
-                equipment.put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, weapon_item));
+
+            let living = &self.mob_entity.living_entity;
+            let mut equipment = living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut first = true;
+
+            for slot in &MobEntity::EQUIPMENT_POPULATION_ORDER {
+                let current = equipment.get(slot);
+                if !first && rand::random::<f32>() < partial_chance {
+                    break;
+                }
+                first = false;
+                if current.is_empty()
+                    && let Some(item) = MobEntity::get_equipment_for_slot(slot, armor_type)
+                {
+                    equipment.put(slot, ItemStack::new(1, item));
+                }
             }
-        })
+        }
+
+        let weapon_chance = if difficulty.base_difficulty == Difficulty::Hard {
+            0.05f32
+        } else {
+            0.01f32
+        };
+        if rand::random::<f32>() < weapon_chance {
+            let r = rand::random_range(0..6);
+            let weapon_item = match r {
+                0 => &Item::IRON_SWORD,
+                1 => &Item::IRON_SPEAR,
+                _ => &Item::IRON_SHOVEL,
+            };
+            let living = &self.mob_entity.living_entity;
+            let mut equipment = living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            equipment.put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, weapon_item));
+        }
     }
 }
 
@@ -318,7 +318,7 @@ fn randomize_reinforcements_chance(living: &LivingEntity) {
 /// Divergence: vanilla skips the heal for `CONVERSION`/`LOAD`/`DIMENSION_TRAVEL` spawn
 /// reasons; Pumpkin has no spawn-reason plumbing, so callers only invoke this on a genuine
 /// fresh spawn, which covers the same intent.
-pub async fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) -> bool {
+pub fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) -> bool {
     randomize_reinforcements_chance(living);
 
     // `Zombie.java:533-535`: KNOCKBACK_RESISTANCE += random.nextDouble() * 0.05F.
@@ -370,7 +370,7 @@ pub async fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) 
         living.set_health(living.get_max_health());
     }
 
-    crate::entity::attributes::send_attribute_updates_for_living(living, touched).await;
+    crate::entity::attributes::send_attribute_updates_for_living(living, touched);
     is_leader
 }
 
@@ -386,13 +386,13 @@ pub async fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) 
 /// * `EntitySpawnReason.REINFORCEMENT` is passed as `SpawnRuleContext::Natural`, the only
 ///   non-worldgen context this codebase models.
 /// * positions in unloaded chunks are skipped instead of forcing a chunk load.
-pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn EntityBase>) {
+pub fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn EntityBase>) {
     let living = &mob.living_entity;
     let entity = &living.entity;
     let world = entity.world.load_full();
 
     // `Zombie.java:289-292`: the current target, falling back to the attacker.
-    let target = if let Some(target) = mob.get_target().await {
+    let target = if let Some(target) = mob.get_target() {
         target
     } else {
         let Some(source) = source else {
@@ -430,7 +430,11 @@ pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn Entit
     let base_y = pos.y.floor() as i32;
     let base_z = pos.z.floor() as i32;
     let entity_type = entity.entity_type;
-    let is_thundering = world.weather.lock().await.thundering;
+    let is_thundering = world
+        .weather
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .thundering;
 
     for _ in 0..REINFORCEMENT_ATTEMPTS {
         // `Zombie.java:304-306`: `Mth.nextInt` is inclusive on both bounds.
@@ -475,8 +479,7 @@ pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn Entit
             // `Zombie.java:317`.
             reinforcement_mob
                 .get_mob_entity()
-                .set_target(Some(target.clone()))
-                .await;
+                .set_target(Some(target.clone()));
         }
         if let Some(reinforcement_living) = reinforcement.get_living_entity() {
             // `Zombie.java:327`.
@@ -508,7 +511,7 @@ pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn Entit
         // `Zombie.java:318-319`: `finalizeSpawn` then `addFreshEntityWithPassengers`.
         // `World::spawn_entity` runs `init_data_tracker`, which is where this codebase's
         // `finalizeSpawn` equivalent (`Mob::mob_init_data_tracker`) lives.
-        world.spawn_entity(reinforcement).await;
+        world.spawn_entity(reinforcement);
         break;
     }
 }

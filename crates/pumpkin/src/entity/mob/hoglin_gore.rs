@@ -61,7 +61,7 @@ pub fn gore_knockback_vector(
 /// randomized-damage, resistance-adjusted-knockback gore attack. Babies use the
 /// same roll (which collapses to flat `base_attack_damage`) but never throw
 /// (`if (!body.isBaby()) throwTarget(...)`).
-pub async fn try_gore_attack(hoglin: &HoglinEntity, target: &dyn EntityBase) -> bool {
+pub fn try_gore_attack(hoglin: &HoglinEntity, target: &dyn EntityBase) -> bool {
     let is_baby = !hoglin.is_adult();
     let living = &hoglin.mob_entity.living_entity;
 
@@ -80,16 +80,14 @@ pub async fn try_gore_attack(hoglin: &HoglinEntity, target: &dyn EntityBase) -> 
         .load()
         .get_entity_by_id(living.entity.entity_id);
 
-    let damaged = target
-        .damage_with_context(
-            target,
-            damage,
-            DamageType::MOB_ATTACK,
-            Some(pos),
-            caller.as_deref(),
-            caller.as_deref(),
-        )
-        .await;
+    let damaged = target.damage_with_context(
+        target,
+        damage,
+        DamageType::MOB_ATTACK,
+        Some(pos),
+        caller.as_deref(),
+        caller.as_deref(),
+    );
 
     if damaged && !is_baby {
         let Some(target_living) = target.get_living_entity() else {

@@ -3,7 +3,7 @@ use std::sync::Weak;
 use rand::RngExt;
 
 use super::{Controls, Goal};
-use crate::entity::{ai::goal::GoalFuture, mob::Mob, passive::equine::AbstractHorse};
+use crate::entity::{ai::goal::mob::Mob, passive::equine::AbstractHorse};
 
 /// `AbstractHorse.getAmbientStandInterval` delegates to `getAmbientSoundInterval`,
 /// which `AbstractHorse` overrides to 400 ticks (`AbstractHorse.java:401-405`).
@@ -47,41 +47,37 @@ impl<T: AbstractHorse + Mob> AmbientStandGoal<T> {
 }
 
 impl<T: AbstractHorse + Mob + Send + Sync + 'static> Goal for AmbientStandGoal<T> {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return false;
-            };
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(horse) = self.horse.upgrade() else {
+            return false;
+        };
 
-            self.next_stand += 1;
-            let roll_1000 = mob.get_random().random_range(0..1000);
-            let roll_10 = mob.get_random().random_range(0..10);
-            let (should_reset, should_stand) =
-                evaluate_stand_trigger(self.next_stand, roll_1000, roll_10, horse.is_immobile());
+        self.next_stand += 1;
+        let roll_1000 = mob.get_random().random_range(0..1000);
+        let roll_10 = mob.get_random().random_range(0..10);
+        let (should_reset, should_stand) =
+            evaluate_stand_trigger(self.next_stand, roll_1000, roll_10, horse.is_immobile());
 
-            if should_reset {
-                self.next_stand = -AMBIENT_STAND_INTERVAL_TICKS;
-            }
+        if should_reset {
+            self.next_stand = -AMBIENT_STAND_INTERVAL_TICKS;
+        }
 
-            should_stand
-        })
+        should_stand
     }
 
     /// `RandomStandGoal.canContinueToUse` always returns `false`: this goal is instantaneous.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `RandomStandGoal.start` also calls `playStandSound()`; skipped here since this
-            // codebase has no per-species "play ambient sound now" hook to call it through
-            // (same simplification the `equine` module doc already notes for the standing
-            // pose itself never auto-clearing).
-            if let Some(horse) = self.horse.upgrade() {
-                horse.stand_if_possible();
-            }
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        // `RandomStandGoal.start` also calls `playStandSound()`; skipped here since this
+        // codebase has no per-species "play ambient sound now" hook to call it through
+        // (same simplification the `equine` module doc already notes for the standing
+        // pose itself never auto-clearing).
+        if let Some(horse) = self.horse.upgrade() {
+            horse.stand_if_possible();
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

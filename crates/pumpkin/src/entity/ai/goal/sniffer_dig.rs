@@ -1,8 +1,7 @@
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle, to_goal_ticks};
+use super::{Controls, Goal, ParentHandle, to_goal_ticks};
 use crate::entity::Entity;
 use crate::entity::item::ItemEntity;
 use crate::entity::mob::Mob;
@@ -69,123 +68,112 @@ impl SnifferDigGoal {
 }
 
 impl Goal for SnifferDigGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            if !entity.on_ground.load(Ordering::Relaxed)
-                || entity.touching_water.load(Ordering::SeqCst)
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        if !entity.on_ground.load(Ordering::Relaxed) || entity.touching_water.load(Ordering::SeqCst)
+        {
+            return false;
+        }
+
+        if mob.get_random().random_range(0..to_goal_ticks(700)) != 0 {
+            return false;
+        }
+
+        self.move_to_target_pos_goal.can_start(mob)
+    }
+
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.digging_ticks > 0 || self.move_to_target_pos_goal.should_continue(mob)
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob);
+        self.digging_ticks = 0;
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob);
+        self.digging_ticks = 0;
+        if let Some(sniffer) = mob
+            .cast_any()
+            .downcast_ref::<crate::entity::passive::sniffer::SnifferEntity>()
+        {
+            sniffer.transition_to(crate::entity::passive::sniffer::SnifferState::Idling);
+        }
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        if self.digging_ticks == 0 {
+            self.move_to_target_pos_goal.tick(mob);
+        }
+
+        if !self.move_to_target_pos_goal.reached {
+            return;
+        }
+
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let world = entity.world.load_full();
+        let dig_pos = self.move_to_target_pos_goal.target_pos;
+        let head_pos = dig_pos.up();
+
+        if self.digging_ticks == 0 {
+            self.digging_ticks = DIG_DURATION;
+            let pos_f64 = head_pos.to_f64();
+            world.play_sound_raw(
+                Sound::EntitySnifferDigging as u16,
+                SoundCategory::Neutral,
+                &pos_f64,
+                1.0,
+                1.0,
+            );
+            if let Some(sniffer) = mob
+                .cast_any()
+                .downcast_ref::<crate::entity::passive::sniffer::SnifferEntity>()
             {
-                return false;
+                sniffer.transition_to(crate::entity::passive::sniffer::SnifferState::Digging);
             }
+            return;
+        }
 
-            if mob.get_random().random_range(0..to_goal_ticks(700)) != 0 {
-                return false;
+        self.digging_ticks -= 1;
+
+        if self.digging_ticks == DROP_AT_TICKS_REMAINING {
+            let seed = if mob.get_random().random_range(0..2) == 0 {
+                &Item::TORCHFLOWER_SEEDS
+            } else {
+                &Item::PITCHER_POD
+            };
+
+            let item_entity = ItemEntity::new(
+                Entity::new(world.clone(), head_pos.to_f64(), &EntityType::ITEM),
+                ItemStack::new(1, seed),
+            );
+            world.spawn_entity(Arc::new(item_entity));
+
+            let pos_f64 = head_pos.to_f64();
+            world.play_sound_raw(
+                Sound::EntitySnifferDropSeed as u16,
+                SoundCategory::Neutral,
+                &pos_f64,
+                1.0,
+                1.0,
+            );
+        }
+
+        if self.digging_ticks <= 0 {
+            self.digging_ticks = 0;
+            self.move_to_target_pos_goal.cooldown = to_goal_ticks(200);
+            // `Sniffer.onDiggingComplete(true)` (`Sniffer.java:251-255`).
+            if let Some(sniffer) = self.sniffer.upgrade() {
+                sniffer.store_explored_position(dig_pos);
             }
-
-            self.move_to_target_pos_goal.can_start(mob).await
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            self.digging_ticks > 0 || self.move_to_target_pos_goal.should_continue(mob).await
-        })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.start(mob).await;
-            self.digging_ticks = 0;
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.stop(mob).await;
-            self.digging_ticks = 0;
             if let Some(sniffer) = mob
                 .cast_any()
                 .downcast_ref::<crate::entity::passive::sniffer::SnifferEntity>()
             {
                 sniffer.transition_to(crate::entity::passive::sniffer::SnifferState::Idling);
             }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            if self.digging_ticks == 0 {
-                self.move_to_target_pos_goal.tick(mob).await;
-            }
-
-            if !self.move_to_target_pos_goal.reached {
-                return;
-            }
-
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let world = entity.world.load_full();
-            let dig_pos = self.move_to_target_pos_goal.target_pos;
-            let head_pos = dig_pos.up();
-
-            if self.digging_ticks == 0 {
-                self.digging_ticks = DIG_DURATION;
-                let pos_f64 = head_pos.to_f64();
-                world.play_sound_raw(
-                    Sound::EntitySnifferDigging as u16,
-                    SoundCategory::Neutral,
-                    &pos_f64,
-                    1.0,
-                    1.0,
-                );
-                if let Some(sniffer) = mob
-                    .cast_any()
-                    .downcast_ref::<crate::entity::passive::sniffer::SnifferEntity>()
-                {
-                    sniffer.transition_to(crate::entity::passive::sniffer::SnifferState::Digging);
-                }
-                return;
-            }
-
-            self.digging_ticks -= 1;
-
-            if self.digging_ticks == DROP_AT_TICKS_REMAINING {
-                let seed = if mob.get_random().random_range(0..2) == 0 {
-                    &Item::TORCHFLOWER_SEEDS
-                } else {
-                    &Item::PITCHER_POD
-                };
-
-                let item_entity = ItemEntity::new(
-                    Entity::new(world.clone(), head_pos.to_f64(), &EntityType::ITEM),
-                    ItemStack::new(1, seed),
-                );
-                world.spawn_entity(Arc::new(item_entity)).await;
-
-                let pos_f64 = head_pos.to_f64();
-                world.play_sound_raw(
-                    Sound::EntitySnifferDropSeed as u16,
-                    SoundCategory::Neutral,
-                    &pos_f64,
-                    1.0,
-                    1.0,
-                );
-            }
-
-            if self.digging_ticks <= 0 {
-                self.digging_ticks = 0;
-                self.move_to_target_pos_goal.cooldown = to_goal_ticks(200);
-                // `Sniffer.onDiggingComplete(true)` (`Sniffer.java:251-255`).
-                if let Some(sniffer) = self.sniffer.upgrade() {
-                    sniffer.store_explored_position(dig_pos);
-                }
-                if let Some(sniffer) = mob
-                    .cast_any()
-                    .downcast_ref::<crate::entity::passive::sniffer::SnifferEntity>()
-                {
-                    sniffer.transition_to(crate::entity::passive::sniffer::SnifferState::Idling);
-                }
-            }
-        })
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -198,29 +186,23 @@ impl Goal for SnifferDigGoal {
 }
 
 impl MoveToTargetPos for SnifferDigGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move {
-            let block = world.get_block(&block_pos);
-            if !block.has_tag(&tag::Block::MINECRAFT_SNIFFER_DIGGABLE_BLOCK) {
-                return false;
-            }
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        let block = world.get_block(&block_pos);
+        if !block.has_tag(&tag::Block::MINECRAFT_SNIFFER_DIGGABLE_BLOCK) {
+            return false;
+        }
 
-            // `Sniffer.canDig(BlockPos)` (`Sniffer.java:280-283`): never dig a position this
-            // sniffer has already dug.
-            if self
-                .sniffer
-                .upgrade()
-                .is_some_and(|sniffer| sniffer.has_explored(block_pos))
-            {
-                return false;
-            }
+        // `Sniffer.canDig(BlockPos)` (`Sniffer.java:280-283`): never dig a position this
+        // sniffer has already dug.
+        if self
+            .sniffer
+            .upgrade()
+            .is_some_and(|sniffer| sniffer.has_explored(block_pos))
+        {
+            return false;
+        }
 
-            world.get_block_state(&block_pos.up()).is_air()
-                && world.get_block_state(&block_pos.up_height(2)).is_air()
-        })
+        world.get_block_state(&block_pos.up()).is_air()
+            && world.get_block_state(&block_pos.up_height(2)).is_air()
     }
 }

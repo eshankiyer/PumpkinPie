@@ -7,7 +7,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::block::blocks::plant::PlantBlockBase;
-use crate::block::{BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs};
+use crate::block::{BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs};
 
 /// `EyeblossomBlock.Type.OPEN` particle color.
 pub const EYEBLOSSOM_OPEN_COLOR: i32 = 16_545_810;
@@ -65,19 +65,16 @@ impl BlockBehaviour for FlowerBlock {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 }
 

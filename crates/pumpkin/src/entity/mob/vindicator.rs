@@ -13,7 +13,7 @@ use pumpkin_util::difficulty::Difficulty;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
@@ -147,22 +147,18 @@ impl VindicatorEntity {
 }
 
 impl NBTStorage for VindicatorEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if self.is_johnny() {
-                nbt.put_bool("Johnny", true);
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        if self.is_johnny() {
+            nbt.put_bool("Johnny", true);
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if nbt.get_bool("Johnny") == Some(true) {
-                self.is_johnny.store(true, Relaxed);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        if nbt.get_bool("Johnny") == Some(true) {
+            self.is_johnny.store(true, Relaxed);
+        }
     }
 }
 
@@ -178,22 +174,20 @@ impl Mob for VindicatorEntity {
     /// approximated with `has_active_raid()` (this mob's own raid membership) rather than
     /// re-querying the level for any raid covering this position -- same approximation
     /// `InteractWithDoorGoal::raid_gated`/`BreakDoorGoal` already use.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.is_johnny.load(Relaxed)
-                && let Some(name) = &**self.mob_entity.living_entity.entity.custom_name.load()
-                && name.clone().get_text() == "Johnny"
-            {
-                self.is_johnny.store(true, Relaxed);
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if !self.is_johnny.load(Relaxed)
+            && let Some(name) = &**self.mob_entity.living_entity.entity.custom_name.load()
+            && name.clone().get_text() == "Johnny"
+        {
+            self.is_johnny.store(true, Relaxed);
+        }
 
-            let can_open_doors = self.mob_entity.living_entity.has_active_raid();
-            self.mob_entity
-                .navigator
-                .lock()
-                .unwrap()
-                .set_can_open_doors(can_open_doors);
-        })
+        let can_open_doors = self.mob_entity.living_entity.has_active_raid();
+        self.mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .set_can_open_doors(can_open_doors);
     }
 
     /// Vanilla: `Vindicator.applyRaidBuffs` (`Vindicator.java:168-180`). Builds a fresh
@@ -203,44 +197,45 @@ impl Mob for VindicatorEntity {
     /// `<= getNumGroups(Normal)` and `raid/vindicator_post_wave_5` (Sharpness II) after.
     /// The `DifficultyInstance` argument is threaded through by vanilla but unused by
     /// `SingleEnchantment`, so no regional difficulty is consulted here.
-    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            let mut axe = ItemStack::new(1, &Item::IRON_AXE);
+    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) {
+        let living = &self.mob_entity.living_entity;
+        let mut axe = ItemStack::new(1, &Item::IRON_AXE);
 
-            // Vindicator.java:170-171: `shouldEnchant =
-            // this.random.nextFloat() <= raid.getEnchantOdds()` against
-            // `getCurrentRaid()`. Pumpkin keeps only the raid membership cached on the
-            // entity, so a missing membership/raid skips the roll entirely (vanilla can
-            // never reach this method without an active raid).
-            let should_enchant = {
-                let world = living.entity.world.load();
-                let raids = world.raids.lock().await;
-                living
-                    .raid_membership
-                    .load()
-                    .and_then(|membership| raids.raid(membership.raid_id))
-                    .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
-            };
-
-            // Vindicator.java:173-176: provider selection is
-            // `wave > raid.getNumGroups(Difficulty.NORMAL)`.
-            if should_enchant {
-                enchant_item_from_single_enchantment(
-                    &mut axe,
-                    &Enchantment::SHARPNESS,
-                    raid_vindicator_sharpness_level(wave),
-                );
-            }
-
-            // Vindicator.java:179: `setItemSlot(EquipmentSlot.MAINHAND, axe)` --
-            // unconditional, enchanted or not.
-            living
-                .entity_equipment
+        // Vindicator.java:170-171: `shouldEnchant =
+        // this.random.nextFloat() <= raid.getEnchantOdds()` against
+        // `getCurrentRaid()`. Pumpkin keeps only the raid membership cached on the
+        // entity, so a missing membership/raid skips the roll entirely (vanilla can
+        // never reach this method without an active raid).
+        let should_enchant = {
+            let world = living.entity.world.load();
+            let raids = world
+                .raids
                 .lock()
-                .await
-                .put(&EquipmentSlot::MAIN_HAND, axe);
-        })
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            living
+                .raid_membership
+                .load()
+                .and_then(|membership| raids.raid(membership.raid_id))
+                .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
+        };
+
+        // Vindicator.java:173-176: provider selection is
+        // `wave > raid.getNumGroups(Difficulty.NORMAL)`.
+        if should_enchant {
+            enchant_item_from_single_enchantment(
+                &mut axe,
+                &Enchantment::SHARPNESS,
+                raid_vindicator_sharpness_level(wave),
+            );
+        }
+
+        // Vindicator.java:179: `setItemSlot(EquipmentSlot.MAINHAND, axe)` --
+        // unconditional, enchanted or not.
+        living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .put(&EquipmentSlot::MAIN_HAND, axe);
     }
 }
 

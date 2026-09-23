@@ -116,9 +116,7 @@ pub trait FlowingFluid: Send + Sync {
                     let new_state_id = new_state.to_state_id(fluid);
 
                     if new_state_id != current_block_state_id {
-                        world
-                            .set_block_state(block_pos, new_state_id, BlockFlags::NOTIFY_ALL)
-                            .await;
+                        world.set_block_state(block_pos, new_state_id, BlockFlags::NOTIFY_ALL);
 
                         // Schedule next tick for this position
                         let old_state =
@@ -136,13 +134,11 @@ pub trait FlowingFluid: Send + Sync {
                     state_for_spreading = new_state;
                 } else {
                     if !waterlogged {
-                        world
-                            .set_block_state(
-                                block_pos,
-                                Block::AIR.default_state.id,
-                                BlockFlags::NOTIFY_ALL,
-                            )
-                            .await;
+                        world.set_block_state(
+                            block_pos,
+                            Block::AIR.default_state.id,
+                            BlockFlags::NOTIFY_ALL,
+                        );
                     }
                     return; // Don't spread if fluid is gone
                 }
@@ -194,8 +190,7 @@ pub trait FlowingFluid: Send + Sync {
             // Try to flow down first
             if is_hole {
                 let falling_props = self.get_flowing(fluid, Level::L8, true);
-                self.spread_to(world, fluid, &below_pos, falling_props.to_state_id(fluid))
-                    .await;
+                self.spread_to(world, fluid, &below_pos, falling_props.to_state_id(fluid));
 
                 // Check if we should also spread to sides
                 if props.level == Level::L8 && props.falling == Falling::False {
@@ -375,9 +370,7 @@ pub trait FlowingFluid: Send + Sync {
                     if should_convert {
                         let source_props = self.get_source(fluid, false);
                         let source_state_id = source_props.to_state_id(fluid);
-                        world
-                            .set_block_state(pos, source_state_id, BlockFlags::NOTIFY_ALL)
-                            .await;
+                        world.set_block_state(pos, source_state_id, BlockFlags::NOTIFY_ALL);
 
                         // Sources don't need ticks
                         return;
@@ -402,8 +395,7 @@ pub trait FlowingFluid: Send + Sync {
                 {
                     crate::block::blocks::campfire::CampfireBlock::place_liquid(
                         world, pos, block, state.id, fluid,
-                    )
-                    .await;
+                    );
                     return;
                 }
                 if fluid.matches_type(&Fluid::WATER)
@@ -411,16 +403,13 @@ pub trait FlowingFluid: Send + Sync {
                     && crate::block::blocks::candles::CandleBlock::place_liquid(
                         world, pos, block, state.id, fluid,
                     )
-                    .await
                 {
                     return;
                 }
                 if let Some(waterlogged_state) =
                     physics::waterlogged_replacement_state(state, block, fluid)
                 {
-                    world
-                        .set_block_state(pos, waterlogged_state, BlockFlags::NOTIFY_ALL)
-                        .await;
+                    world.set_block_state(pos, waterlogged_state, BlockFlags::NOTIFY_ALL);
                     world.schedule_fluid_tick(
                         fluid,
                         *pos,
@@ -430,7 +419,7 @@ pub trait FlowingFluid: Send + Sync {
                     return;
                 }
                 if block.id != Block::AIR.id {
-                    self.before_destroying_block(world, pos).await;
+                    self.before_destroying_block(world, pos);
                 }
             }
 
@@ -440,15 +429,13 @@ pub trait FlowingFluid: Send + Sync {
                 &pumpkin_data::Block::WATER,
             );
             if let Some(server) = world.server.upgrade() {
-                server.plugin_manager.fire(&server, &mut event).await;
+                server.plugin_manager.fire_blocking(&server, &mut event);
             }
             if event.cancelled {
                 return;
             }
 
-            world
-                .set_block_state(pos, state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+            world.set_block_state(pos, state_id, BlockFlags::NOTIFY_ALL);
 
             // Check for infinite source formation after placing new fluid
             if self.can_convert_to_source(world) {
@@ -459,9 +446,7 @@ pub trait FlowingFluid: Send + Sync {
                 if should_convert {
                     let source_props = self.get_source(fluid, false);
                     let source_state_id = source_props.to_state_id(fluid);
-                    world
-                        .set_block_state(pos, source_state_id, BlockFlags::NOTIFY_ALL)
-                        .await;
+                    world.set_block_state(pos, source_state_id, BlockFlags::NOTIFY_ALL);
 
                     // Sources don't need ticks
                     return;
@@ -546,7 +531,7 @@ pub trait FlowingFluid: Send + Sync {
         pos: &'a BlockPos,
     ) -> impl std::future::Future<Output = ()> + Send + 'a {
         async move {
-            world.break_block(pos, None, BlockFlags::NOTIFY_ALL).await;
+            world.break_block(pos, None, BlockFlags::NOTIFY_ALL);
         }
     }
 
@@ -592,12 +577,12 @@ pub trait FlowingFluid: Send + Sync {
                 return;
             }
 
-            let (spread_dirs, count) = pathfinder::get_spread(self, world, fluid, block_pos).await;
+            let (spread_dirs, count) = pathfinder::get_spread(self, world, fluid, block_pos);
 
             for &(direction, state_id) in spread_dirs.iter().take(count) {
                 let side_pos = block_pos.offset(direction.to_offset());
 
-                self.spread_to(world, fluid, &side_pos, state_id).await;
+                self.spread_to(world, fluid, &side_pos, state_id);
             }
         }
     }

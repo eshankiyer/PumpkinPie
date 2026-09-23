@@ -5,7 +5,7 @@ use pumpkin_util::Difficulty;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     mob::{Mob, MobEntity, spider::SpiderEntity},
 };
 
@@ -47,25 +47,20 @@ impl Mob for CaveSpiderEntity {
         )
     }
 
-    fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let duration =
-                poison_duration(self.get_entity().world.load().level_info.load().difficulty);
+    fn on_successful_attack(&self, target: &dyn EntityBase) {
+        let duration = poison_duration(self.get_entity().world.load().level_info.load().difficulty);
 
-            if let (Some(duration), Some(living)) = (duration, target.get_living_entity()) {
-                living
-                    .add_effect(Effect {
-                        effect_type: &StatusEffect::POISON,
-                        duration,
-                        amplifier: 0,
-                        ambient: false,
-                        show_particles: true,
-                        show_icon: true,
-                        blend: false,
-                    })
-                    .await;
-            }
-        })
+        if let (Some(duration), Some(living)) = (duration, target.get_living_entity()) {
+            living.add_effect(Effect {
+                effect_type: &StatusEffect::POISON,
+                duration,
+                amplifier: 0,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            });
+        }
     }
 }
 

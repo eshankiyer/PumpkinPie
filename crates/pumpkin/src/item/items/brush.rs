@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::block::blocks::brushable_block::brush_sound;
@@ -32,170 +31,150 @@ impl ItemMetadata for BrushItem {
 impl ItemBehaviour for BrushItem {
     /// `BrushItem.useOn` (`BrushItem.java:37-45`) recalculates the view hit before
     /// starting the use animation; all of the work happens in `onUseTick`.
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         _location: BlockPos,
         _face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
-            let (start, end) = self.get_start_and_end_pos(player);
-            if world
-                .raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
-                .await
-                .is_none()
-            {
-                return;
-            }
+        _block: &Block,
+        _server: &Server,
+    ) {
+        let world = player.world();
+        let (start, end) = self.get_start_and_end_pos(player);
+        if world
+            .raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
+            .is_none()
+        {
+            return;
+        }
 
-            let off_hand = player.inventory().off_hand_item().await;
-            let hand = brushing_hand(item, &off_hand);
-            player
-                .living_entity
-                .set_active_hand(hand, item.clone(), Self::USE_DURATION)
-                .await;
-        })
+        let off_hand = player.inventory().off_hand_item();
+        let hand = brushing_hand(item, &off_hand);
+        player
+            .living_entity
+            .set_active_hand(hand, item.clone(), Self::USE_DURATION);
     }
 
     /// `BrushItem.onUseTick` (`BrushItem.java:57-96`): one brush stroke lands on every
     /// tick where `elapsed % 10 == 5`, and the brush is damaged only when the stroke
     /// finished the block off (`BrushItem.java:81-87`).
-    fn on_use_tick<'a>(
-        &'a self,
-        stack: &'a ItemStack,
-        player: &'a Player,
-        remaining_use_ticks: i32,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if remaining_use_ticks < 0 {
-                player.living_entity.clear_active_hand().await;
-                return;
-            }
+    fn on_use_tick(&self, stack: &ItemStack, player: &Player, remaining_use_ticks: i32) {
+        if remaining_use_ticks < 0 {
+            player.living_entity.clear_active_hand();
+            return;
+        }
 
-            let world = player.world();
-            let (start, end) = self.get_start_and_end_pos(player);
-            let Some((position, face)) = world
-                .raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
-                .await
-            else {
-                // `BrushItem.java:90-92`: losing the target stops the use.
-                player.living_entity.clear_active_hand().await;
-                return;
+        let world = player.world();
+        let (start, end) = self.get_start_and_end_pos(player);
+        let Some((position, face)) =
+            world.raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
+        else {
+            // `BrushItem.java:90-92`: losing the target stops the use.
+            player.living_entity.clear_active_hand();
+            return;
+        };
+
+        let elapsed = Self::USE_DURATION - remaining_use_ticks + 1;
+        if elapsed % 10 != 5 {
+            return;
+        }
+
+        let block = world.get_block(&position);
+        let state = world.get_block_state(&position);
+        // `BrushItem.onUseTick` emits dust only when the state allows terrain particles
+        // (`BrushItem.java:65-70`); the property comes from `noTerrainParticles`
+        // (`BlockBehaviour.java:1265-1267`).
+        if state.should_spawn_terrain_particles() {
+            let mut particle_data = Vec::new();
+            let _ = VarInt(i32::from(pumpkin_data::BlockState::to_be_network_id(
+                state.id,
+            )))
+            .encode(&mut particle_data);
+            let look = player.living_entity.get_looking_vector();
+            let dust = match face {
+                BlockDirection::Down | BlockDirection::Up => (look.z, -look.x),
+                BlockDirection::North => (1.0, -0.1),
+                BlockDirection::South => (-1.0, 0.1),
+                BlockDirection::West => (-0.1, -1.0),
+                BlockDirection::East => (0.1, 1.0),
             };
-
-            let elapsed = Self::USE_DURATION - remaining_use_ticks + 1;
-            if elapsed % 10 != 5 {
-                return;
+            let mut particle_position = position.to_centered_f64();
+            match face {
+                BlockDirection::Down => particle_position.y -= 0.5,
+                BlockDirection::Up => particle_position.y += 0.5,
+                BlockDirection::North => particle_position.z -= 0.5,
+                BlockDirection::South => particle_position.z += 0.5,
+                BlockDirection::West => particle_position.x -= 0.5,
+                BlockDirection::East => particle_position.x += 0.5,
             }
-
-            let block = world.get_block(&position);
-            let state = world.get_block_state(&position);
-            // `BrushItem.onUseTick` emits dust only when the state allows terrain particles
-            // (`BrushItem.java:65-70`); the property comes from `noTerrainParticles`
-            // (`BlockBehaviour.java:1265-1267`).
-            if state.should_spawn_terrain_particles() {
-                let mut particle_data = Vec::new();
-                let _ = VarInt(i32::from(pumpkin_data::BlockState::to_be_network_id(
-                    state.id,
-                )))
-                .encode(&mut particle_data);
-                let look = player.living_entity.get_looking_vector();
-                let dust = match face {
-                    BlockDirection::Down | BlockDirection::Up => (look.z, -look.x),
-                    BlockDirection::North => (1.0, -0.1),
-                    BlockDirection::South => (-1.0, 0.1),
-                    BlockDirection::West => (-0.1, -1.0),
-                    BlockDirection::East => (0.1, 1.0),
-                };
-                let mut particle_position = position.to_centered_f64();
-                match face {
-                    BlockDirection::Down => particle_position.y -= 0.5,
-                    BlockDirection::Up => particle_position.y += 0.5,
-                    BlockDirection::North => particle_position.z -= 0.5,
-                    BlockDirection::South => particle_position.z += 0.5,
-                    BlockDirection::West => particle_position.x -= 0.5,
-                    BlockDirection::East => particle_position.x += 0.5,
-                }
-                world.spawn_particle_with_data(
-                    particle_position,
-                    Vector3::new((dust.0 * 3.0) as f32, 0.0, (dust.1 * 3.0) as f32),
-                    0.0,
-                    rand::random_range(7..12),
-                    pumpkin_data::particle::Particle::BlockCrumble,
-                    &particle_data,
-                );
-            }
-            world.play_sound(
-                brush_sound(block),
-                SoundCategory::Blocks,
-                &position.to_f64(),
+            world.spawn_particle_with_data(
+                particle_position,
+                Vector3::new((dust.0 * 3.0) as f32, 0.0, (dust.1 * 3.0) as f32),
+                0.0,
+                rand::random_range(7..12),
+                pumpkin_data::particle::Particle::BlockCrumble,
+                &particle_data,
             );
+        }
+        world.play_sound(
+            brush_sound(block),
+            SoundCategory::Blocks,
+            &position.to_f64(),
+        );
 
-            let Some(be) = world.get_block_entity(&position) else {
-                return;
-            };
-            let Some(brush_be) = be.as_any().downcast_ref::<BrushableBlockBlockEntity>() else {
-                return;
-            };
+        let Some(be) = world.get_block_entity(&position) else {
+            return;
+        };
+        let Some(brush_be) = be.as_any().downcast_ref::<BrushableBlockBlockEntity>() else {
+            return;
+        };
 
-            let game_time = world.get_world_age().await;
-            if brush_be.brush(&world, game_time, face).await {
-                // `BrushItem.onUseTick` chooses OFFHAND when the active stack equals the
-                // off-hand stack, otherwise MAINHAND (`BrushItem.java:80-87`).
-                let off_hand = player.inventory().off_hand_item().await;
-                let hand = brushing_hand(stack, &off_hand);
-                let equipment_slot = match hand {
-                    Hand::Right => EquipmentSlot::MAIN_HAND,
-                    Hand::Left => EquipmentSlot::OFF_HAND,
-                };
-                player.damage_item_in_slot(&equipment_slot, 1).await;
-            }
-        })
+        let game_time = world.get_world_age();
+        if brush_be.brush(&world, game_time, face).await {
+            // `BrushItem.onUseTick` chooses OFFHAND when the active stack equals the
+            // off-hand stack, otherwise MAINHAND (`BrushItem.java:80-87`).
+            let off_hand = player.inventory().off_hand_item();
+            let hand = brushing_hand(stack, &off_hand);
+            let equipment_slot = match hand {
+                Hand::Right => EquipmentSlot::MAIN_HAND,
+                Hand::Left => EquipmentSlot::OFF_HAND,
+            };
+            player.damage_item_in_slot(&equipment_slot, 1);
+        }
     }
 
-    fn use_on_entity<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
-        entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let ent = entity.get_entity();
-            if ent.entity_type == &EntityType::ARMADILLO {
-                let world = player.world();
-                world.play_sound(
-                    Sound::EntityArmadilloBrush,
-                    SoundCategory::Neutral,
-                    &ent.pos.load(),
-                );
+    fn use_on_entity(&self, _item: &mut ItemStack, player: &Player, entity: Arc<dyn EntityBase>) {
+        let ent = entity.get_entity();
+        if ent.entity_type == &EntityType::ARMADILLO {
+            let world = player.world();
+            world.play_sound(
+                Sound::EntityArmadilloBrush,
+                SoundCategory::Neutral,
+                &ent.pos.load(),
+            );
 
-                let item_entity = Arc::new(ItemEntity::new(
-                    Entity::new(world.clone(), ent.pos.load(), &EntityType::ITEM),
-                    ItemStack::new(1, &Item::ARMADILLO_SCUTE),
-                ));
-                world.spawn_entity(item_entity).await;
+            let item_entity = Arc::new(ItemEntity::new(
+                Entity::new(world.clone(), ent.pos.load(), &EntityType::ITEM),
+                ItemStack::new(1, &Item::ARMADILLO_SCUTE),
+            ));
+            world.spawn_entity(item_entity);
 
-                player.damage_held_item(16).await;
-            } else {
-                let world = player.world();
-                world.play_sound(
-                    Sound::ItemBrushBrushingGeneric,
-                    SoundCategory::Neutral,
-                    &ent.pos.load(),
-                );
-            }
+            player.damage_held_item(16);
+        } else {
+            let world = player.world();
+            world.play_sound(
+                Sound::ItemBrushBrushingGeneric,
+                SoundCategory::Neutral,
+                &ent.pos.load(),
+            );
+        }
 
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION)
-                .await;
-        })
+        let stack = player.inventory().held_item();
+        player
+            .living_entity
+            .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION);
     }
 
     fn get_use_duration(&self) -> i32 {

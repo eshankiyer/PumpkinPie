@@ -79,40 +79,33 @@ impl JavaClient {
         // player instead of silently dropping an out-of-range interaction, using the overlay
         // channel (`ServerPlayer.java:1798-1805`).
         if position.0.y > world.get_top_y() {
-            player
-                .send_overlay_message(
-                    &TextComponent::translate_cross(
-                        translation::java::BUILD_TOOHIGH,
-                        translation::bedrock::BUILD_TOOHIGH,
-                        vec![TextComponent::text(world.get_top_y().to_string())],
-                    )
-                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+            player.send_overlay_message(
+                &TextComponent::translate_cross(
+                    translation::java::BUILD_TOOHIGH,
+                    translation::bedrock::BUILD_TOOHIGH,
+                    vec![TextComponent::text(world.get_top_y().to_string())],
                 )
-                .await;
+                .color_named(pumpkin_util::text::color::NamedColor::Red),
+            );
             return Ok(());
         }
         if position.0.y < world.get_bottom_y() {
-            player
-                .send_overlay_message(
-                    &TextComponent::translate_cross(
-                        translation::java::BUILD_TOOLOW,
-                        translation::bedrock::BUILD_TOOLOW,
-                        vec![TextComponent::text(world.get_bottom_y().to_string())],
-                    )
-                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+            player.send_overlay_message(
+                &TextComponent::translate_cross(
+                    translation::java::BUILD_TOOLOW,
+                    translation::bedrock::BUILD_TOOLOW,
+                    vec![TextComponent::text(world.get_bottom_y().to_string())],
                 )
-                .await;
+                .color_named(pumpkin_util::text::color::NamedColor::Red),
+            );
             return Ok(());
         }
         // isUnderSpawnProtection and ServerLevel.mayInteract both gate the
         // interaction before ServerPlayerGameMode.useItemOn runs.
-        if player
-            .is_under_spawn_protection(server, &world, &position)
-            .await
+        if player.is_under_spawn_protection(server, &world, &position)
             || !world
                 .worldborder
                 .lock()
-                .await
                 .contains_block(position.0.x, position.0.z)
         {
             return Ok(());
@@ -129,22 +122,19 @@ impl JavaClient {
             };
             server
                 .block_registry
-                .on_use_for_spectator(block, player, &position, &hit, server, &world)
-                .await;
+                .on_use_for_spectator(block, player, &position, &hit, server, &world);
             return Ok(());
         }
 
         let inventory = player.inventory();
-        let held_item = inventory.held_item().await;
-        let off_hand_item = inventory.off_hand_item().await;
+        let held_item = inventory.held_item();
+        let off_hand_item = inventory.off_hand_item();
         let held_item_empty = held_item.is_empty();
         let off_hand_item_empty = off_hand_item.is_empty();
 
-        let mut item = inventory.get_stack_in_hand(hand).await;
+        let mut item = inventory.get_stack_in_hand(hand);
         let item_id = item.item.id;
-        player
-            .increment_stat(StatisticCategory::Used, item_id as i32, 1)
-            .await;
+        player.increment_stat(StatisticCategory::Used, item_id as i32, 1);
 
         let event = PlayerInteractEvent::new(
             player,
@@ -177,25 +167,23 @@ impl JavaClient {
 
         // Code based on the java class ServerPlayerInteractionManager
         if !(sneaking && (!held_item_empty || !off_hand_item_empty)) {
-            let result = self
-                .call_use_item_on(
-                    player,
-                    hand,
-                    &position,
-                    &cursor_pos,
-                    &face,
-                    &mut item,
-                    &equipment_slot,
-                    &world,
-                    block,
-                    server,
-                )
-                .await;
+            let result = self.call_use_item_on(
+                player,
+                hand,
+                &position,
+                &cursor_pos,
+                &face,
+                &mut item,
+                &equipment_slot,
+                &world,
+                block,
+                server,
+            );
             if result.consumes_action() {
                 // TODO: Trigger ANY_BLOCK_USE Criteria
 
                 if matches!(result, BlockActionResult::SuccessServer) {
-                    player.swing_hand(hand, true).await;
+                    player.swing_hand(hand, true);
                 }
                 return Ok(());
             }
@@ -219,7 +207,7 @@ impl JavaClient {
         // to the item (`ItemStack.java:357-365`); `ServerPlayerGameMode.useItemOn` reaches this
         // fallback after block interaction (`ServerPlayerGameMode.java:386-395`).
         if player.gamemode.load() == GameMode::Adventure
-            && !player.abilities.lock().await.allow_modify_world
+            && !player.abilities.lock().allow_modify_world
             && !item.can_place_on_block_in_adventure_mode(block, world.get_block_state(&position))
         {
             return Ok(());
@@ -233,8 +221,7 @@ impl JavaClient {
 
         server
             .item_registry
-            .use_on_block(&mut item, player, position, face, cursor_pos, block, server)
-            .await;
+            .use_on_block(&mut item, player, position, face, cursor_pos, block, server);
 
         // Check if the item is a block, because not every item can be placed :D
         let item_id = item.item.id;
@@ -262,15 +249,15 @@ impl JavaClient {
         // gated on `DamageResult::Broken`, in `Player::damage_item_in_slot`.
 
         if !after.are_equal(&before) {
-            player.sync_hand_slot(slot_index, after.clone()).await;
-            inventory.set_stack_in_hand(hand, after).await;
+            player.sync_hand_slot(slot_index, after.clone());
+            inventory.set_stack_in_hand(hand, after);
         }
 
         Ok(())
     }
 
     #[expect(clippy::too_many_arguments)]
-    async fn call_use_item_on(
+    fn call_use_item_on(
         &self,
         player: &Arc<Player>,
         hand: Hand,
@@ -283,19 +270,16 @@ impl JavaClient {
         block: &Block,
         server: &Arc<Server>,
     ) -> BlockActionResult {
-        let result = server
-            .block_registry
-            .use_with_item(
-                block,
-                player,
-                position,
-                &BlockHitResult { face, cursor_pos },
-                held_item,
-                equipment_slot,
-                server,
-                world,
-            )
-            .await;
+        let result = server.block_registry.use_with_item(
+            block,
+            player,
+            position,
+            &BlockHitResult { face, cursor_pos },
+            held_item,
+            equipment_slot,
+            server,
+            world,
+        );
 
         if result.consumes_action() {
             // TODO: Trigger ITEM_USED_ON_BLOCK Criteria
@@ -305,17 +289,14 @@ impl JavaClient {
         // BlockState.useItemOn only falls back to useWithoutItem for the main hand,
         // so an off-hand pass must stay passive.
         if uses_main_hand(hand) && matches!(result, BlockActionResult::PassToDefaultBlockAction) {
-            let result = server
-                .block_registry
-                .on_use(
-                    block,
-                    player,
-                    position,
-                    &BlockHitResult { face, cursor_pos },
-                    server,
-                    world,
-                )
-                .await;
+            let result = server.block_registry.on_use(
+                block,
+                player,
+                position,
+                &BlockHitResult { face, cursor_pos },
+                server,
+                world,
+            );
 
             if result.consumes_action() {
                 // TODO: Trigger DEFAULT_BLOCK_USE Criteria
@@ -338,7 +319,6 @@ impl JavaClient {
         match server
             .block_registry
             .place_block(player, block, server, &use_item_on, location, face)
-            .await
         {
             Ok(Some((final_block_pos, new_state))) => {
                 self.send_packet(&CBlockUpdate::new(

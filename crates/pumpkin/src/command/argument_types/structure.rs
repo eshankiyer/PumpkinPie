@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use crate::command::argument_types::FromStringReader;
 use crate::command::argument_types::argument_type::{ArgumentType, JavaClientArgumentType};
 use crate::command::context::command_context::CommandContext;
@@ -18,11 +16,11 @@ impl ArgumentType for StructureNameArgumentType {
         Identifier::from_reader(reader)
     }
 
-    fn list_suggestions<'a>(
-        &'a self,
-        _context: &'a CommandContext,
+    fn list_suggestions(
+        &self,
+        _context: &CommandContext,
         builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send + 'a>> {
+    ) -> Suggestions {
         let names = pumpkin_world::generation::structure::template::all_structure_names();
         Box::pin(async move {
             builder

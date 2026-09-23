@@ -1,6 +1,6 @@
 use crate::block::blocks::plant::{PlantBlockBase, connected_plant_head, grow_plant_head};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
+    BlockBehaviour, BlockMetadata, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
     GetStateForNeighborUpdateArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockStateId;
@@ -23,19 +23,16 @@ const GROW_PER_TICK_PROBABILITY: f64 = 0.14;
 impl BlockBehaviour for KelpBlock {
     /// `GrowingPlantHeadBlock.randomTick` with `KelpBlock.canGrowInto`
     /// (`KelpBlock.java:36-38`: the target must be water).
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            grow_plant_head(
-                args.world,
-                args.position,
-                &Block::KELP,
-                &Block::KELP_PLANT,
-                pumpkin_data::BlockDirection::Up,
-                GROW_PER_TICK_PROBABILITY,
-                |block| block == &Block::WATER,
-            )
-            .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        grow_plant_head(
+            args.world,
+            args.position,
+            &Block::KELP,
+            &Block::KELP_PLANT,
+            pumpkin_data::BlockDirection::Up,
+            GROW_PER_TICK_PROBABILITY,
+            |block| block == &Block::WATER,
+        );
     }
 
     fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
@@ -67,97 +64,78 @@ impl BlockBehaviour for KelpBlock {
     /// with `KelpBlock.getBlocksToGrowWhenBonemealed` = 1 (`KelpBlock.java:66-68`). Vanilla
     /// converts the old head to body through `updateShape`; pumpkin has no such update chain
     /// for these blocks, so it is applied explicitly, exactly as `bonemeal_grow_plant_head` does.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some((head_pos, head_state_id)) = connected_plant_head(
-                args.world,
-                args.position,
-                &Block::KELP,
-                &Block::KELP_PLANT,
-                pumpkin_data::BlockDirection::Up,
-            ) else {
-                return;
-            };
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let Some((head_pos, head_state_id)) = connected_plant_head(
+            args.world,
+            args.position,
+            &Block::KELP,
+            &Block::KELP_PLANT,
+            pumpkin_data::BlockDirection::Up,
+        ) else {
+            return;
+        };
 
-            let forward_pos = head_pos.up();
-            if !args.world.is_in_height_limit(forward_pos.0.y)
-                || args.world.get_block(&forward_pos) != &Block::WATER
-            {
-                return;
-            }
+        let forward_pos = head_pos.up();
+        if !args.world.is_in_height_limit(forward_pos.0.y)
+            || args.world.get_block(&forward_pos) != &Block::WATER
+        {
+            return;
+        }
 
-            let mut grown = KelpLikeProperties::from_state_id(head_state_id, &Block::KELP);
-            grown.age = grown.age.saturating_add(1).min(25);
-            args.world
-                .set_block_state(
-                    &forward_pos,
-                    grown.to_state_id(&Block::KELP),
-                    BlockFlags::NOTIFY_NEIGHBORS,
-                )
-                .await;
-            args.world
-                .set_block_state(
-                    &head_pos,
-                    Block::KELP_PLANT.default_state.id,
-                    BlockFlags::NOTIFY_NEIGHBORS,
-                )
-                .await;
-        })
+        let mut grown = KelpLikeProperties::from_state_id(head_state_id, &Block::KELP);
+        grown.age = grown.age.saturating_add(1).min(25);
+        args.world.set_block_state(
+            &forward_pos,
+            grown.to_state_id(&Block::KELP),
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
+        args.world.set_block_state(
+            &head_pos,
+            Block::KELP_PLANT.default_state.id,
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
+    }
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let support_pos = args.position.down();
+        let support_block = args.world.get_block(&support_pos);
+        if support_block == &Block::KELP {
+            args.world.set_block_state(
+                &support_pos,
+                Block::KELP_PLANT.default_state.id,
+                BlockFlags::empty(),
+            );
+        }
+    }
+    fn broken(&self, args: BrokenArgs<'_>) {
+        let support_pos = args.position.down();
+        let support_block = args.world.get_block(&support_pos);
+        if support_block == &Block::KELP_PLANT {
+            args.world.set_block_state(
+                &support_pos,
+                Block::KELP.default_state.id,
+                BlockFlags::empty(),
+            );
+            args.world.set_block_state(
                 args.position,
-                args.state_id,
-            )
-            .await
-        })
-    }
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let support_pos = args.position.down();
-            let support_block = args.world.get_block(&support_pos);
-            if support_block == &Block::KELP {
-                args.world
-                    .set_block_state(
-                        &support_pos,
-                        Block::KELP_PLANT.default_state.id,
-                        BlockFlags::empty(),
-                    )
-                    .await;
-            }
-        })
-    }
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let support_pos = args.position.down();
-            let support_block = args.world.get_block(&support_pos);
-            if support_block == &Block::KELP_PLANT {
-                args.world
-                    .set_block_state(
-                        &support_pos,
-                        Block::KELP.default_state.id,
-                        BlockFlags::empty(),
-                    )
-                    .await;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        Block::WATER.default_state.id,
-                        BlockFlags::empty(),
-                    )
-                    .await;
-            }
-        })
+                Block::WATER.default_state.id,
+                BlockFlags::empty(),
+            );
+        }
     }
 }
 
@@ -201,7 +179,7 @@ impl PlantBlockBase for KelpBlock {
         false
     }
     #[allow(clippy::unused_async_trait_impl)]
-    async fn get_state_for_neighbor_update(
+    fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,
         block_pos: &BlockPos,

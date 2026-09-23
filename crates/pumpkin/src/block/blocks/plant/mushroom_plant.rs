@@ -10,8 +10,8 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs, RandomTickArgs, blocks::plant::PlantBlockBase,
+    BlockBehaviour, BlockMetadata, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    RandomTickArgs, blocks::plant::PlantBlockBase,
 };
 use crate::plugin::api::events::world::structure_grow::{StructureGrowEvent, TreeType};
 use crate::world::World;
@@ -52,7 +52,7 @@ impl MushroomPlantBlock {
     /// `MushroomBlock.growMushroom`: remove the mushroom, run the huge mushroom feature, and put
     /// the mushroom back if the feature declines. Both the removal and the feature are buffered in
     /// one [`FeatureCache`], so a declined placement simply never commits and the mushroom stays.
-    pub async fn grow_mushroom(
+    pub fn grow_mushroom(
         world: &Arc<World>,
         pos: &BlockPos,
         block: &Block,
@@ -69,7 +69,7 @@ impl MushroomPlantBlock {
         };
         let mut event = StructureGrowEvent::new(*pos, species, true);
         if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire(&server, &mut event).await;
+            server.plugin_manager.fire_blocking(&server, &mut event);
         }
         if event.cancelled {
             return false;
@@ -79,7 +79,7 @@ impl MushroomPlantBlock {
         let mut cache = FeatureCache::new(world);
         cache.set_block(*pos, Block::AIR.default_state.id);
         if cache.place(feature, *pos, &mut random) {
-            cache.commit().await
+            cache.commit()
         } else {
             false
         }
@@ -118,56 +118,49 @@ impl BlockBehaviour for MushroomPlantBlock {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 
     /// `MushroomBlock.randomTick`: a 1-in-25 chance to spread to a nearby spot, taking up to
     /// four random steps through empty positions the mushroom could survive on.
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if rand::rng().random_range(0..25) != 0 {
-                return;
-            }
-            let world = args.world;
-            let mut pos = *args.position;
-            if !Self::can_spread(world, &pos, args.block) {
-                return;
-            }
-            let state_id = world.get_block_state_id(&pos);
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if rand::rng().random_range(0..25) != 0 {
+            return;
+        }
+        let world = args.world;
+        let mut pos = *args.position;
+        if !Self::can_spread(world, &pos, args.block) {
+            return;
+        }
+        let state_id = world.get_block_state_id(&pos);
 
-            let can_spread_to = |target: &BlockPos| {
-                world.is_loaded(target)
-                    && world.get_block_state(target).is_air()
-                    && Self::can_survive(world.as_ref(), target)
-            };
+        let can_spread_to = |target: &BlockPos| {
+            world.is_loaded(target)
+                && world.get_block_state(target).is_air()
+                && Self::can_survive(world.as_ref(), target)
+        };
 
-            let mut offset = Self::random_spread_offset(pos);
-            for _ in 0..4 {
-                if can_spread_to(&offset) {
-                    pos = offset;
-                }
-                offset = Self::random_spread_offset(pos);
-            }
-
+        let mut offset = Self::random_spread_offset(pos);
+        for _ in 0..4 {
             if can_spread_to(&offset) {
-                // `level.setBlock(offset, state, 2)`.
-                world
-                    .set_block_state(&offset, state_id, BlockFlags::NOTIFY_LISTENERS)
-                    .await;
+                pos = offset;
             }
-        })
+            offset = Self::random_spread_offset(pos);
+        }
+
+        if can_spread_to(&offset) {
+            // `level.setBlock(offset, state, 2)`.
+            world.set_block_state(&offset, state_id, BlockFlags::NOTIFY_LISTENERS);
+        }
     }
 
     /// `MushroomBlock.isValidBonemealTarget`: the position `4 + foliageRadius` above must be
@@ -186,10 +179,8 @@ impl BlockBehaviour for MushroomPlantBlock {
     }
 
     /// `MushroomBlock.performBonemeal`.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            Self::grow_mushroom(args.world, args.position, args.block, args.state_id).await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        Self::grow_mushroom(args.world, args.position, args.block, args.state_id);
     }
 }
 

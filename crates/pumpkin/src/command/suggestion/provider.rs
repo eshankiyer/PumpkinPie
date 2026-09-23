@@ -16,9 +16,9 @@ pub trait SuggestionProvider: Send + Sync {
     ///
     /// # Returns
     /// The [`Suggestions`] representing the suggested items.
-    fn suggest<'a>(
-        &'a self,
-        context: &'a CommandContext,
+    fn suggest(
+        &self,
+        context: &CommandContext,
         builder: SuggestionsBuilder,
-    ) -> SuggestionProviderResult<'a>;
+    ) -> SuggestionProviderResult;
 }

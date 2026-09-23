@@ -241,7 +241,7 @@ impl JavaClient {
             std::time::Duration::from_secs(keep_alive_time.saturating_mul(2).max(1));
 
         // Skip the immediate first tick so we don't send a keep-alive the exact millisecond they join
-        keep_alive_interval.tick().await;
+        keep_alive_interval.tick();
 
         loop {
             tokio::select! {
@@ -258,7 +258,7 @@ impl JavaClient {
                       || (self.last_packet_time.load().elapsed() > timeout_duration);
 
                     if has_timed_out {
-                        self.kick(pumpkin_macros::translate_cross!(translation::java::DISCONNECT_TIMEOUT, translation::bedrock::DISCONNECT_TIMEOUT)).await;
+                        self.kick(pumpkin_macros::translate_cross!(translation::java::DISCONNECT_TIMEOUT, translation::bedrock::DISCONNECT_TIMEOUT));
                         break;
                     }
 
@@ -307,8 +307,7 @@ impl JavaClient {
                                 .packet_limiter
                                 .kick_message
                                 .clone(),
-                        ))
-                        .await;
+                        ));
                         break;
                     }
 
@@ -317,12 +316,11 @@ impl JavaClient {
                         Err(e) => {
                             if e.is_kick() {
                                 if let Some(kick_reason) = e.client_kick_reason() {
-                                    self.kick(TextComponent::text(kick_reason)).await;
+                                    self.kick(TextComponent::text(kick_reason));
                                 } else {
                                     self.kick(TextComponent::text(format!(
                                         "Error while handling incoming packet {e}"
-                                    )))
-                                    .await;
+                                    )));
                                 }
                             }
                             error!(
@@ -506,7 +504,7 @@ impl JavaClient {
                         if !matches!(err, PacketDecodeError::ConnectionClosed) {
                             debug!("Failed to decode packet from client {}: {}", self.id, err);
                             let text = format!("Error while reading incoming packet {err}");
-                            self.kick(TextComponent::text(text)).await;
+                            self.kick(TextComponent::text(text));
                         }
                         None
                     }
@@ -784,8 +782,7 @@ impl JavaClient {
                 self.handle_change_game_mode(
                     player,
                     SChangeGameMode::read(&mut payload, &version)?,
-                )
-                .await;
+                );
             }
             id if id == SChatAck::to_id(version) => {
                 let packet = SChatAck::read(&mut payload, &version)?;
@@ -843,8 +840,7 @@ impl JavaClient {
                     .await;
             }
             id if id == SPaddleBoat::to_id(version) => {
-                self.handle_paddle_boat(player, SPaddleBoat::read(&mut payload, &version)?)
-                    .await;
+                self.handle_paddle_boat(player, SPaddleBoat::read(&mut payload, &version)?);
             }
             id if id == SInteract::to_id(version) => {
                 self.handle_interact(player, SInteract::read(&mut payload, &version)?, server)
@@ -994,14 +990,13 @@ impl JavaClient {
                     .await;
             }
             id if id == SClickSlot::to_id(version) => {
-                player
-                    .on_slot_click(SClickSlot::read(&mut payload, &version)?, server)
-                    .await;
+                player.on_slot_click(SClickSlot::read(&mut payload, &version)?, server);
             }
             id if id == SContainerButtonClick::to_id(version) => {
-                player
-                    .on_container_button_click(SContainerButtonClick::read(&mut payload, &version)?)
-                    .await;
+                player.on_container_button_click(SContainerButtonClick::read(
+                    &mut payload,
+                    &version,
+                )?);
             }
             id if id == SSetHeldItem::to_id(version) => {
                 self.handle_set_held_item(
@@ -1027,8 +1022,7 @@ impl JavaClient {
                     .await;
             }
             id if id == SEditBook::to_id(version) => {
-                self.handle_edit_book(player, SEditBook::read(&mut payload, &version)?)
-                    .await;
+                self.handle_edit_book(player, SEditBook::read(&mut payload, &version)?);
             }
             id if id == SUseItemOn::to_id(version) => {
                 self.handle_use_item_on(player, SUseItemOn::read(&mut payload, &version)?, server)
@@ -1054,8 +1048,7 @@ impl JavaClient {
                     player,
                     server,
                     SCloseContainer::read(&mut payload, &version)?,
-                )
-                .await;
+                );
             }
             id if id == SChunkBatch::to_id(version) => {
                 self.handle_chunk_batch(player, SChunkBatch::read(&mut payload, &version)?)
@@ -1100,9 +1093,7 @@ impl JavaClient {
                     .await;
             }
             id if id == SSetBeacon::to_id(version) => {
-                player
-                    .on_set_beacon(SSetBeacon::read(&mut payload, &version)?)
-                    .await;
+                player.on_set_beacon(SSetBeacon::read(&mut payload, &version)?);
             }
             id if id == SPlaceRecipe::to_id(version) => {
                 let packet = SPlaceRecipe::read(&mut payload, &version)?;
@@ -1149,16 +1140,14 @@ impl JavaClient {
                     server,
                     player,
                     &SLockDifficulty::read(&mut payload, &version)?,
-                )
-                .await;
+                );
             }
             id if id == SChangeDifficulty::to_id(version) => {
                 self.handle_change_difficulty(
                     server,
                     player,
                     &SChangeDifficulty::read(&mut payload, &version)?,
-                )
-                .await;
+                );
             }
             id if id == SSetBeacon::to_id(version) => {
                 self.handle_set_beacon(player, &SSetBeacon::read(&mut payload, &version)?)

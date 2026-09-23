@@ -246,7 +246,7 @@ impl RedstoneWireTurbo {
     }
 
     /// This is the start of a great adventure
-    pub async fn update_surrounding_neighbors(world: &Arc<World>, pos: BlockPos) {
+    pub fn update_surrounding_neighbors(world: &Arc<World>, pos: BlockPos) {
         let mut turbo = Self::new();
         let mut root_node = UpdateNode::new(world, pos);
         root_node.visited = true;
@@ -254,7 +254,7 @@ impl RedstoneWireTurbo {
         turbo.node_cache.insert(pos, node_id);
         turbo.nodes.push(root_node);
         turbo.propagate_changes(world, node_id, 0);
-        turbo.breadth_first_walk(world).await;
+        turbo.breadth_first_walk(world);
     }
 
     fn propagate_changes(&mut self, world: &World, upd1: NodeId, layer: u32) {
@@ -290,7 +290,7 @@ impl RedstoneWireTurbo {
         }
     }
 
-    async fn breadth_first_walk(&mut self, world: &Arc<World>) {
+    fn breadth_first_walk(&mut self, world: &Arc<World>) {
         self.shift_queue();
         self.current_walk_layer = 1;
 
@@ -301,15 +301,12 @@ impl RedstoneWireTurbo {
             for node_id in &current_queue {
                 let block = Block::from_state_id(self.nodes[node_id.index].state.id);
                 if block == &Block::REDSTONE_WIRE {
-                    self.update_node(world, *node_id, self.current_walk_layer)
-                        .await;
+                    self.update_node(world, *node_id, self.current_walk_layer);
                 } else {
                     // This only works because updating any other block than a wire will
                     // never change the state of the block. If that changes in the future,
                     // the cached state will need to be updated
-                    world
-                        .update_neighbor(&self.nodes[node_id.index].pos, block)
-                        .await;
+                    world.update_neighbor(&self.nodes[node_id.index].pos, block);
                 }
             }
 
@@ -329,14 +326,14 @@ impl RedstoneWireTurbo {
         self.update_queue.push(t);
     }
 
-    async fn update_node(&mut self, world: &Arc<World>, upd1: NodeId, layer: u32) {
+    fn update_node(&mut self, world: &Arc<World>, upd1: NodeId, layer: u32) {
         let old_wire = {
             let node = &mut self.nodes[upd1.index];
             node.visited = true;
             unwrap_wire(node.state)
         };
 
-        let new_wire = self.calculate_current_changes(world, upd1).await;
+        let new_wire = self.calculate_current_changes(world, upd1);
         if old_wire.power != new_wire.power {
             let node = &mut self.nodes[upd1.index];
             let mut wire = unwrap_wire(node.state);
@@ -351,11 +348,7 @@ impl RedstoneWireTurbo {
     const RS_NEIGHBORS_UP: [usize; 4] = [9, 11, 13, 15];
     const RS_NEIGHBORS_DN: [usize; 4] = [8, 10, 12, 14];
 
-    async fn calculate_current_changes(
-        &mut self,
-        world: &Arc<World>,
-        upd: NodeId,
-    ) -> RedstoneWireProps {
+    fn calculate_current_changes(&mut self, world: &Arc<World>, upd: NodeId) -> RedstoneWireProps {
         let mut wire = unwrap_wire(self.nodes[upd.index].state);
         let i = wire.power;
         let mut block_power = 0;
@@ -370,16 +363,13 @@ impl RedstoneWireTurbo {
         for side in BlockDirection::all() {
             let neighbor_pos = pos.offset(side.to_offset());
             let neighbor = &self.nodes[self.node_cache[&neighbor_pos].index].state;
-            wire_power = wire_power.max(
-                get_redstone_power_no_dust(
-                    Block::from_state_id(neighbor.id),
-                    neighbor,
-                    world,
-                    neighbor_pos,
-                    side,
-                )
-                .await,
-            );
+            wire_power = wire_power.max(get_redstone_power_no_dust(
+                Block::from_state_id(neighbor.id),
+                neighbor,
+                world,
+                neighbor_pos,
+                side,
+            ));
         }
 
         if wire_power < 15 {
@@ -412,13 +402,11 @@ impl RedstoneWireTurbo {
         }
         if i != j {
             wire.power = j;
-            world
-                .set_block_state(
-                    &pos,
-                    wire.to_state_id(&Block::REDSTONE_WIRE),
-                    BlockFlags::empty(),
-                )
-                .await;
+            world.set_block_state(
+                &pos,
+                wire.to_state_id(&Block::REDSTONE_WIRE),
+                BlockFlags::empty(),
+            );
         }
         wire
     }

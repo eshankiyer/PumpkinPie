@@ -254,7 +254,7 @@ impl SculkSpreader {
     /// Returns the `levelEvent(3006, ...)` payloads vanilla emits inline; the caller
     /// forwards them to clients (this codebase has no `LevelAccessor.levelEvent`, only
     /// `World::sync_world_event`, which a `dyn SculkWorld` has no access to).
-    pub async fn update_cursors(
+    pub fn update_cursors(
         &mut self,
         world: &dyn SculkWorld,
         origin_pos: BlockPos,
@@ -286,8 +286,7 @@ impl SculkSpreader {
                 random,
                 &self.config,
                 spread_veins,
-            )
-            .await;
+            );
             if cursor.charge() <= 0 {
                 events.push(ChargeParticleEvent {
                     pos: cursor.pos(),
@@ -347,7 +346,7 @@ impl SculkSpreader {
 }
 
 /// `ChargeCursor.update` (`SculkSpreader.java:254-297`).
-async fn update_cursor(
+fn update_cursor(
     cursor: &mut ChargeCursor,
     world: &dyn SculkWorld,
     origin_pos: BlockPos,
@@ -373,9 +372,7 @@ async fn update_cursor(
     if spread_veins {
         let source_faces = available_faces(current_state);
         let source_is_vein = Block::from_state_id(current_state.id) == &Block::SCULK_VEIN;
-        if behaviour
-            .attempt_spread_vein(world, pos, source_faces, source_is_vein, cursor.facings())
-            .await
+        if behaviour.attempt_spread_vein(world, pos, source_faces, source_is_vein, cursor.facings())
         {
             if behaviour.can_change_block_state_on_spread() {
                 current_state = world.accessor().get_block_state(&pos);
@@ -385,18 +382,17 @@ async fn update_cursor(
         }
     }
 
-    let new_charge = behaviour
-        .attempt_use_charge(cursor, world, origin_pos, random, config, spread_veins)
-        .await;
+    let new_charge =
+        behaviour.attempt_use_charge(cursor, world, origin_pos, random, config, spread_veins);
     cursor.set_charge(new_charge);
 
     if new_charge <= 0 {
-        behaviour.on_discharged(world, cursor.pos(), random).await;
+        behaviour.on_discharged(world, cursor.pos(), random);
         return;
     }
 
     if let Some(transfer_pos) = get_valid_movement_pos(world.accessor(), cursor.pos(), random) {
-        behaviour.on_discharged(world, cursor.pos(), random).await;
+        behaviour.on_discharged(world, cursor.pos(), random);
         cursor.set_pos(transfer_pos);
         if config.is_world_generation() {
             // `!this.pos.closerThan(new Vec3i(originX, this.pos.getY(), originZ), 15.0)`.
@@ -546,16 +542,14 @@ mod tests {
         fn accessor(&self) -> &dyn BlockAccessor {
             self
         }
-        fn place(&self, _spread_pos: SpreadPos) -> BlockFuture<'_, bool> {
-            Box::pin(async { false })
+        fn place(&self, _spread_pos: SpreadPos) -> bool {
+            false
         }
     }
 
     impl SculkWorld for FakeWorld {
-        fn set_block(&self, pos: BlockPos, state_id: BlockStateId) -> BlockFuture<'_, ()> {
-            Box::pin(async move {
-                self.states.lock().unwrap().insert(pos, state_id.to_state());
-            })
+        fn set_block(&self, pos: BlockPos, state_id: BlockStateId) {
+            self.states.lock().unwrap().insert(pos, state_id.to_state());
         }
         fn play_block_sound(&self, _pos: BlockPos, _sound: Sound) {}
         fn push_entities_up(&self, _pos: BlockPos) {}
@@ -710,7 +704,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cursors_at_the_same_position_merge_below_max_charge() {
+    fn cursors_at_the_same_position_merge_below_max_charge() {
         let world = FakeWorld::new(Block::AIR.default_state);
         let pos = BlockPos::new(0, 0, 0);
         world.set(pos, Block::SCULK.default_state);
@@ -720,39 +714,37 @@ mod tests {
         spreader.add_cursor(ChargeCursor::fresh(pos, 100));
 
         let mut rng = random();
-        spreader.update_cursors(&world, pos, &mut rng, false).await;
+        spreader.update_cursors(&world, pos, &mut rng, false);
         assert_eq!(spreader.cursors().len(), 1);
         assert!(spreader.cursors()[0].charge() >= 190);
     }
 
     #[tokio::test]
-    async fn unreasonably_distant_cursors_are_dropped() {
+    fn unreasonably_distant_cursors_are_dropped() {
         let world = FakeWorld::new(Block::AIR.default_state);
         let mut spreader = SculkSpreader::level_spreader();
         spreader.add_cursor(ChargeCursor::fresh(BlockPos::new(5000, 0, 0), 500));
         let mut rng = random();
-        let events = spreader
-            .update_cursors(&world, BlockPos::new(0, 0, 0), &mut rng, false)
-            .await;
+        let events = spreader.update_cursors(&world, BlockPos::new(0, 0, 0), &mut rng, false);
         assert!(spreader.cursors().is_empty());
         assert!(events.is_empty(), "dropped cursors emit no particle event");
     }
 
     #[tokio::test]
-    async fn a_discharged_cursor_emits_a_pop_event_and_leaves_the_list() {
+    fn a_discharged_cursor_emits_a_pop_event_and_leaves_the_list() {
         let world = FakeWorld::new(Block::AIR.default_state);
         let pos = BlockPos::new(0, 0, 0);
         let mut spreader = SculkSpreader::level_spreader();
         // Charge 0 on air: DEFAULT holds it at 0, so the cursor is culled.
         spreader.add_cursor(ChargeCursor::from_parts(pos, 1, 0, 0, None));
         let mut rng = random();
-        let events = spreader.update_cursors(&world, pos, &mut rng, false).await;
+        let events = spreader.update_cursors(&world, pos, &mut rng, false);
         assert!(spreader.cursors().is_empty());
         assert_eq!(events, vec![ChargeParticleEvent { pos, data: 0 }]);
     }
 
     #[tokio::test]
-    async fn a_cursor_on_sculk_moves_onto_an_adjacent_sculk_block() {
+    fn a_cursor_on_sculk_moves_onto_an_adjacent_sculk_block() {
         let world = FakeWorld::new(Block::AIR.default_state);
         let start = BlockPos::new(0, 0, 0);
         let neighbour = BlockPos::new(1, 0, 0);
@@ -762,9 +754,7 @@ mod tests {
         let mut spreader = SculkSpreader::level_spreader();
         spreader.add_cursor(ChargeCursor::fresh(start, MAX_CHARGE));
         let mut rng = random();
-        spreader
-            .update_cursors(&world, start, &mut rng, false)
-            .await;
+        spreader.update_cursors(&world, start, &mut rng, false);
         assert_eq!(spreader.cursors().len(), 1);
         assert_eq!(spreader.cursors()[0].pos(), neighbour);
         // Sitting on a SculkBehaviour block refreshes `facings` from an empty set.
@@ -772,14 +762,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_delay_is_consumed_before_any_charge_work() {
+    fn update_delay_is_consumed_before_any_charge_work() {
         let world = FakeWorld::new(Block::AIR.default_state);
         let pos = BlockPos::new(0, 0, 0);
         world.set(pos, Block::SCULK.default_state);
         let mut spreader = SculkSpreader::level_spreader();
         spreader.add_cursor(ChargeCursor::from_parts(pos, 500, 1, 3, None));
         let mut rng = random();
-        spreader.update_cursors(&world, pos, &mut rng, false).await;
+        spreader.update_cursors(&world, pos, &mut rng, false);
         assert_eq!(spreader.cursors()[0].update_delay(), 2);
         assert_eq!(spreader.cursors()[0].charge(), 500);
         assert_eq!(spreader.cursors()[0].pos(), pos);

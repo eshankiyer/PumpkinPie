@@ -81,116 +81,98 @@ impl RedstoneOreBlock {
         }
     }
 
-    async fn light_up(world: &Arc<World>, pos: &BlockPos, block: &Block, state: &BlockState) {
+    fn light_up(world: &Arc<World>, pos: &BlockPos, block: &Block, state: &BlockState) {
         let mut props = RedstoneOreLikeProperties::from_state_id(state.id, block);
         if !props.lit {
             props.lit = true;
-            world
-                .set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-                .await;
+            world.set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
         }
     }
 
-    async fn interact(world: &Arc<World>, pos: &BlockPos, block: &Block, state: &BlockState) {
+    fn interact(world: &Arc<World>, pos: &BlockPos, block: &Block, state: &BlockState) {
         Self::spawn_particles(world, pos);
-        Self::light_up(world, pos, block, state).await;
+        Self::light_up(world, pos, block, state);
     }
 }
 
 impl BlockBehaviour for RedstoneOreBlock {
     fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            Self::interact(args.world, args.position, args.block, args.state).await;
+            Self::interact(args.world, args.position, args.block, args.state);
         })
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            Self::interact(args.world, args.position, args.block, state).await;
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        let state = args.world.get_block_state(args.position);
+        Self::interact(args.world, args.position, args.block, state);
+        BlockActionResult::Success
+    }
+
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        let state = args.world.get_block_state(args.position);
+        Self::interact(args.world, args.position, args.block, state);
+
+        // RedStoneOreBlock.useItemOn lights the ore before allowing a placeable block item
+        // to continue through BlockItem's placement path. `BlockPlaceContext.canPlace()` only
+        // checks whether the clicked block or the adjacent block can be replaced.
+        let can_place = state.replaceable()
+            || args
+                .world
+                .get_block_state(&BlockPos::new(
+                    args.position.0.x + args.hit.face.to_offset().x,
+                    args.position.0.y + args.hit.face.to_offset().y,
+                    args.position.0.z + args.hit.face.to_offset().z,
+                ))
+                .replaceable();
+        if Block::from_item_id(args.item_stack.item.id).is_some() && can_place {
+            BlockActionResult::Pass
+        } else {
             BlockActionResult::Success
-        })
+        }
     }
 
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            Self::interact(args.world, args.position, args.block, state).await;
-
-            // RedStoneOreBlock.useItemOn lights the ore before allowing a placeable block item
-            // to continue through BlockItem's placement path. `BlockPlaceContext.canPlace()` only
-            // checks whether the clicked block or the adjacent block can be replaced.
-            let can_place = state.replaceable()
-                || args
-                    .world
-                    .get_block_state(&BlockPos::new(
-                        args.position.0.x + args.hit.face.to_offset().x,
-                        args.position.0.y + args.hit.face.to_offset().y,
-                        args.position.0.z + args.hit.face.to_offset().z,
-                    ))
-                    .replaceable();
-            if Block::from_item_id(args.item_stack.item.id).is_some() && can_place {
-                BlockActionResult::Pass
-            } else {
-                BlockActionResult::Success
-            }
-        })
+    fn on_entity_step(&self, args: OnEntityStepArgs<'_>) {
+        if args.entity.get_entity().is_sneaking() {
+            return;
+        }
+        let state = args.world.get_block_state(args.position);
+        Self::interact(args.world, args.position, args.block, state);
     }
 
-    fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.entity.get_entity().is_sneaking() {
-                return;
-            }
-            let state = args.world.get_block_state(args.position);
-            Self::interact(args.world, args.position, args.block, state).await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let mut props = RedstoneOreLikeProperties::from_state_id(state.id, args.block);
+
+        if props.lit {
+            props.lit = false;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut props = RedstoneOreLikeProperties::from_state_id(state.id, args.block);
+    fn broken(&self, args: BrokenArgs<'_>) {
+        // RedStoneOreBlock.spawnAfterBreak awards 1..=5 XP when normal block drops are
+        // enabled and the break is eligible for drops. Silk Touch is handled by the vanilla
+        // block-experience enchantment effect and therefore suppresses this award.
+        if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
+            || !args.world.level_info.load().game_rules.block_drops
+            || !args
+                .player
+                .can_harvest(args.state, Block::from_state_id(args.state.id))
+        {
+            return;
+        }
 
-            if props.lit {
-                props.lit = false;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
-    }
+        let tool = args.player.inventory().held_item();
+        if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
+            return;
+        }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // RedStoneOreBlock.spawnAfterBreak awards 1..=5 XP when normal block drops are
-            // enabled and the break is eligible for drops. Silk Touch is handled by the vanilla
-            // block-experience enchantment effect and therefore suppresses this award.
-            if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
-                || !args.world.level_info.load().game_rules.block_drops
-                || !args
-                    .player
-                    .can_harvest(args.state, Block::from_state_id(args.state.id))
-                    .await
-            {
-                return;
-            }
-
-            let tool = args.player.inventory().held_item().await;
-            if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
-                return;
-            }
-
-            let amount = rand::rng().random_range(1..=5);
-            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount).await;
-        })
+        let amount = rand::rng().random_range(1..=5);
+        ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount);
     }
 }
 

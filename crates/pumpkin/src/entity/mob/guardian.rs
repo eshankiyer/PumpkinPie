@@ -5,7 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -27,32 +27,30 @@ use crate::entity::{
 /// * `randomStrollGoal.trigger()` (Guardian.java:319-321) is skipped; a mob cannot reach an
 ///   individual goal instance out of `goals_selector` here, so a hurt guardian does not
 ///   immediately re-roll its stroll destination.
-pub(super) fn guardian_thorns<'a>(
-    guardian: &'a dyn Mob,
+pub(super) fn guardian_thorns(
+    guardian: &dyn Mob,
     damage_type: DamageType,
-    source: Option<&'a dyn EntityBase>,
-) -> EntityBaseFuture<'a, ()> {
-    Box::pin(async move {
-        let moving = !guardian
-            .get_mob_entity()
-            .navigator
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_idle();
-        if moving
-            || damage_type.has_tag(&tag::DamageType::MINECRAFT_AVOIDS_GUARDIAN_THORNS)
-            || damage_type == DamageType::THORNS
-        {
-            return;
-        }
-        let Some(attacker) = source else {
-            return;
-        };
-        if attacker.get_living_entity().is_none() {
-            return;
-        }
-        attacker.damage(attacker, 2.0, DamageType::THORNS).await;
-    })
+    source: Option<&dyn EntityBase>,
+) {
+    let moving = !guardian
+        .get_mob_entity()
+        .navigator
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_idle();
+    if moving
+        || damage_type.has_tag(&tag::DamageType::MINECRAFT_AVOIDS_GUARDIAN_THORNS)
+        || damage_type == DamageType::THORNS
+    {
+        return;
+    }
+    let Some(attacker) = source else {
+        return;
+    };
+    if attacker.get_living_entity().is_none() {
+        return;
+    }
+    attacker.damage(attacker, 2.0, DamageType::THORNS);
 }
 
 pub struct GuardianEntity {
@@ -152,11 +150,7 @@ impl Mob for GuardianEntity {
         &self.mob_entity
     }
 
-    fn on_damage<'a>(
-        &'a self,
-        damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn on_damage(&self, damage_type: DamageType, source: Option<&dyn EntityBase>) {
         guardian_thorns(self, damage_type, source)
     }
 }

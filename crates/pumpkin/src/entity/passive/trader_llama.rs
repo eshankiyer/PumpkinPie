@@ -11,7 +11,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         escape_danger::EscapeDangerGoal,
         trader_llama_defend_wandering_trader::TraderLlamaDefendWanderingTraderGoal,
@@ -93,7 +93,7 @@ impl TraderLlamaEntity {
     }
 
     /// `Llama.spit` (`Llama.java:340-365`), also reachable through [`RangedAttackMob`].
-    pub async fn spit(&self, target: &Arc<dyn EntityBase>) {
+    pub fn spit(&self, target: &Arc<dyn EntityBase>) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
@@ -114,7 +114,7 @@ impl TraderLlamaEntity {
         spit.thrown.set_velocity(dx, dy + yo, dz, 1.5, 10.0);
 
         let spit_arc: Arc<dyn EntityBase> = Arc::new(spit);
-        world.spawn_entity(spit_arc).await;
+        world.spawn_entity(spit_arc);
 
         if !entity.silent.load(Ordering::Relaxed) {
             world.play_sound(Sound::EntityLlamaSpit, SoundCategory::Neutral, &mob_pos);
@@ -125,28 +125,24 @@ impl TraderLlamaEntity {
 }
 
 impl NBTStorage for TraderLlamaEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
-            self.write_llama_nbt(nbt);
-            nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        self.write_horse_nbt(nbt);
+        self.write_chested_horse_nbt(nbt);
+        self.write_llama_nbt(nbt);
+        nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            self.read_llama_strength_variant(nbt);
-            self.read_horse_nbt(nbt);
-            self.read_chested_horse_nbt(nbt).await;
-            if let Some(delay) = nbt.get_int("DespawnDelay") {
-                self.despawn_delay.store(delay, Ordering::Relaxed);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_animal_nbt(nbt);
+        self.read_llama_strength_variant(nbt);
+        self.read_horse_nbt(nbt);
+        self.read_chested_horse_nbt(nbt);
+        if let Some(delay) = nbt.get_int("DespawnDelay") {
+            self.despawn_delay.store(delay, Ordering::Relaxed);
+        }
     }
 }
 
@@ -185,11 +181,7 @@ impl AbstractHorse for TraderLlamaEntity {
         Some(Sound::EntityLlamaEat)
     }
 
-    fn handle_eating<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn handle_eating(&self, player: &Arc<Player>, item_stack: &ItemStack) -> bool {
         self.handle_llama_eating(player, item_stack)
     }
 }
@@ -231,41 +223,30 @@ impl Mob for TraderLlamaEntity {
 
     /// `ServerPlayer.openHorseInventory` receives the chested horse container
     /// (`ServerPlayer.java:1372-1382`) after the ridden-vehicle inventory command.
-    fn open_custom_inventory_screen<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.is_tamed() {
-                AbstractChestedHorse::open_chest_inventory(self, player).await;
-            }
-        })
+    fn open_custom_inventory_screen(&self, player: &Arc<Player>) {
+        if self.is_tamed() {
+            AbstractChestedHorse::open_chest_inventory(self, player);
+        }
     }
 
     fn get_follow_leash_speed(&self) -> f32 {
         2.0
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.chested_mob_interact(player, item_stack)
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            crate::entity::passive::llama::send_baby_id_if_baby(self.get_entity());
-            self.send_llama_metadata();
-        })
+    fn mob_init_data_tracker(&self) {
+        crate::entity::passive::llama::send_baby_id_if_baby(self.get_entity());
+        self.send_llama_metadata();
     }
 
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn EntityBase>> {
         self.create_llama_offspring(mate, world)
     }
 
@@ -277,50 +258,46 @@ impl Mob for TraderLlamaEntity {
     /// `WanderingTrader`, the countdown slaves itself to the trader's own `despawn_delay` minus
     /// one every tick (`TraderLlama.java:93-95`) so it automatically tracks any reset/extension of
     /// the trader's timer; otherwise it decrements independently.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.tick_horse_ai().await;
-            let entity = &self.mob_entity.living_entity.entity;
-            let holder = entity.leashed_to.lock().await.clone();
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.tick_horse_ai();
+        let entity = &self.mob_entity.living_entity.entity;
+        let holder = entity
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
-            let leashed_to_other = holder.is_some()
-                && holder
-                    .as_ref()
-                    .and_then(|h| h.cast_any().downcast_ref::<WanderingTraderEntity>())
-                    .is_none();
-
-            let can_despawn = !self.is_tamed() && !leashed_to_other;
-            if !can_despawn {
-                return;
-            }
-
-            let trader = holder
+        let leashed_to_other = holder.is_some()
+            && holder
                 .as_ref()
-                .and_then(|h| h.cast_any().downcast_ref::<WanderingTraderEntity>());
+                .and_then(|h| h.cast_any().downcast_ref::<WanderingTraderEntity>())
+                .is_none();
 
-            let new_delay = trader.map_or_else(
-                || self.despawn_delay.load(Ordering::Relaxed) - 1,
-                |trader| trader.despawn_delay.load(Ordering::Relaxed) - 1,
-            );
-            self.despawn_delay.store(new_delay, Ordering::Relaxed);
+        let can_despawn = !self.is_tamed() && !leashed_to_other;
+        if !can_despawn {
+            return;
+        }
 
-            if new_delay <= 0 {
-                entity.unleash().await;
-                let world = entity.world.load();
-                world.remove_entity(self).await;
-            }
-        })
+        let trader = holder
+            .as_ref()
+            .and_then(|h| h.cast_any().downcast_ref::<WanderingTraderEntity>());
+
+        let new_delay = trader.map_or_else(
+            || self.despawn_delay.load(Ordering::Relaxed) - 1,
+            |trader| trader.despawn_delay.load(Ordering::Relaxed) - 1,
+        );
+        self.despawn_delay.store(new_delay, Ordering::Relaxed);
+
+        if new_delay <= 0 {
+            entity.unleash();
+            let world = entity.world.load();
+            world.remove_entity(self);
+        }
     }
 }
 
 impl RangedAttackMob for TraderLlamaEntity {
-    fn perform_ranged_attack<'a>(
-        &'a self,
-        target: &'a Arc<dyn EntityBase>,
-        _power: f32,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.spit(target).await;
-        })
+    fn perform_ranged_attack(&self, target: &Arc<dyn EntityBase>, _power: f32) {
+        self.spit(target);
     }
 }

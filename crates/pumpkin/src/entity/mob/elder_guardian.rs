@@ -11,7 +11,7 @@ use pumpkin_protocol::java::client::play::{CGameEvent, GameEvent};
 use pumpkin_util::GameMode;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -124,7 +124,7 @@ impl ElderGuardianEntity {
         }
     }
 
-    async fn apply_mining_fatigue(&self) {
+    fn apply_mining_fatigue(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load();
         let origin = entity.pos.load();
@@ -146,24 +146,26 @@ impl ElderGuardianEntity {
             }
 
             let should_apply = {
-                let effects = player.living_entity.active_effects.lock().await;
+                let effects = player
+                    .living_entity
+                    .active_effects
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 Self::should_receive_effect(effects.get(&StatusEffect::MINING_FATIGUE))
             };
             if !should_apply {
                 continue;
             }
 
-            player
-                .add_effect(Effect {
-                    effect_type: &StatusEffect::MINING_FATIGUE,
-                    duration: EFFECT_DURATION,
-                    amplifier: EFFECT_AMPLIFIER,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                })
-                .await;
+            player.add_effect(Effect {
+                effect_type: &StatusEffect::MINING_FATIGUE,
+                duration: EFFECT_DURATION,
+                amplifier: EFFECT_AMPLIFIER,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            });
 
             player
                 .send_client_packet(&CGameEvent::new(
@@ -183,41 +185,35 @@ impl Mob for ElderGuardianEntity {
     }
 
     /// `ElderGuardian` inherits `Guardian.hurtServer` (Guardian.java:311-324) unchanged.
-    fn on_damage<'a>(
-        &'a self,
-        damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn on_damage(&self, damage_type: DamageType, source: Option<&dyn EntityBase>) {
         guardian_thorns(self, damage_type, source)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            if !entity.is_alive() {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if !entity.is_alive() {
+            return;
+        }
 
-            // `ElderGuardian.customServerAiStep` (`ElderGuardian.java:65-78`) creates a
-            // 16-block home restriction once; the existing move-towards-restriction goal consumes it.
-            if self.mob_entity.position_target_range.load(Relaxed) == -1 {
-                self.mob_entity
-                    .position_target
-                    .store(entity.block_pos.load());
-                self.mob_entity.position_target_range.store(16, Relaxed);
-            }
+        // `ElderGuardian.customServerAiStep` (`ElderGuardian.java:65-78`) creates a
+        // 16-block home restriction once; the existing move-towards-restriction goal consumes it.
+        if self.mob_entity.position_target_range.load(Relaxed) == -1 {
+            self.mob_entity
+                .position_target
+                .store(entity.block_pos.load());
+            self.mob_entity.position_target_range.store(16, Relaxed);
+        }
 
-            // Vanilla staggers the aura per entity so guardians in one monument do not
-            // all fire on the same tick.
-            let ticks = self.tick_count.fetch_add(1, Relaxed);
-            if ticks
-                .wrapping_add(entity.entity_id)
-                .rem_euclid(EFFECT_INTERVAL)
-                == 0
-            {
-                self.apply_mining_fatigue().await;
-            }
-        })
+        // Vanilla staggers the aura per entity so guardians in one monument do not
+        // all fire on the same tick.
+        let ticks = self.tick_count.fetch_add(1, Relaxed);
+        if ticks
+            .wrapping_add(entity.entity_id)
+            .rem_euclid(EFFECT_INTERVAL)
+            == 0
+        {
+            self.apply_mining_fatigue();
+        }
     }
 }
 

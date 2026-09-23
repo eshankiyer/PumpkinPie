@@ -5,9 +5,13 @@ use crate::entity::{Entity, EntityBase, player::Player};
 pub(super) struct RideableMinecart;
 
 impl RideableMinecart {
-    pub(super) async fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
-        if !player.get_entity().can_start_riding().await
-            || !entity.passengers.lock().await.is_empty()
+    pub(super) fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
+        if !player.get_entity().can_start_riding()
+            || !entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
         {
             return false;
         }
@@ -20,9 +24,7 @@ impl RideableMinecart {
             return false;
         };
 
-        entity
-            .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-            .await;
+        entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
         true
     }
 }

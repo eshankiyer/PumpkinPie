@@ -60,70 +60,61 @@ impl BlockEntity for CreakingHeartBlockEntity {
         entity
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let creaking_uuid = self.creaking_uuid.load();
-            if let Some(uuid) = creaking_uuid {
-                nbt.put("creaking", uuid_to_int_array(uuid));
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let creaking_uuid = self.creaking_uuid.load();
+        if let Some(uuid) = creaking_uuid {
+            nbt.put("creaking", uuid_to_int_array(uuid));
+        }
     }
 
     /// `CreakingHeartBlockEntity.serverTick`, minus the protector spawn/upkeep branch.
     /// Vanilla's `CreakingHeartBlock.getTicker` returns null while the heart is UPROOTED,
     /// so an uprooted heart does not tick here either.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let (block, state) = world.get_block_and_state(&self.position);
-            if block.id != Block::CREAKING_HEART.id {
-                return;
-            }
-            let mut props = CreakingHeartLikeProperties::from_state_id(state.id, block);
-            if props.creaking_heart_state == CreakingHeartState::Uprooted {
-                return;
-            }
+    fn tick(&self, world: &Arc<World>) {
+        let (block, state) = world.get_block_and_state(&self.position);
+        if block.id != Block::CREAKING_HEART.id {
+            return;
+        }
+        let mut props = CreakingHeartLikeProperties::from_state_id(state.id, block);
+        if props.creaking_heart_state == CreakingHeartState::Uprooted {
+            return;
+        }
 
-            let computed = self.compute_analog_output_signal();
-            if self.output_signal.swap(computed, Ordering::Relaxed) != computed {
-                world.update_comparators(&self.position, block).await;
-            }
+        let computed = self.compute_analog_output_signal();
+        if self.output_signal.swap(computed, Ordering::Relaxed) != computed {
+            world.update_comparators(&self.position, block);
+        }
 
-            // `if (entity.ticker-- < 0)`: post-decrement, so the body runs on the tick the
-            // pre-decrement value is negative. Reseeds to `nextInt(5) + 20`.
-            if self.ticker.fetch_sub(1, Ordering::Relaxed) >= 0 {
-                return;
-            }
-            self.ticker
-                .store(20 + rand::rng().random_range(0..5), Ordering::Relaxed);
+        // `if (entity.ticker-- < 0)`: post-decrement, so the body runs on the tick the
+        // pre-decrement value is negative. Reseeds to `nextInt(5) + 20`.
+        if self.ticker.fetch_sub(1, Ordering::Relaxed) >= 0 {
+            return;
+        }
+        self.ticker
+            .store(20 + rand::rng().random_range(0..5), Ordering::Relaxed);
 
-            // updateCreakingState: an uprooted-eligible heart (no logs, no bound creaking)
-            // goes UPROOTED, otherwise it tracks the creaking_active environment attribute.
-            let new_state = if has_required_logs(world, &self.position, props.axis)
-                || self.creaking_uuid.load().is_some()
-            {
-                if creaking_active(world).await {
-                    CreakingHeartState::Awake
-                } else {
-                    CreakingHeartState::Dormant
-                }
+        // updateCreakingState: an uprooted-eligible heart (no logs, no bound creaking)
+        // goes UPROOTED, otherwise it tracks the creaking_active environment attribute.
+        let new_state = if has_required_logs(world, &self.position, props.axis)
+            || self.creaking_uuid.load().is_some()
+        {
+            if creaking_active(world) {
+                CreakingHeartState::Awake
             } else {
-                CreakingHeartState::Uprooted
-            };
-
-            if new_state != props.creaking_heart_state {
-                props.creaking_heart_state = new_state;
-                world
-                    .set_block_state(
-                        &self.position,
-                        props.to_state_id(block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
+                CreakingHeartState::Dormant
             }
-        })
+        } else {
+            CreakingHeartState::Uprooted
+        };
+
+        if new_state != props.creaking_heart_state {
+            props.creaking_heart_state = new_state;
+            world.set_block_state(
+                &self.position,
+                props.to_state_id(block),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -145,7 +136,7 @@ impl BlockEntity for CreakingHeartBlockEntity {
         Self: 'a,
     {
         Box::pin(async move {
-            self.remove_protector_on_removal(&world).await;
+            self.remove_protector_on_removal(&world);
         })
     }
 
@@ -193,14 +184,14 @@ impl CreakingHeartBlockEntity {
     /// `CreakingHeartBlockEntity.removeProtector(null)`
     /// (`CreakingHeartBlockEntity.java:309-327`): removal without a damage source tears down
     /// the bound creaking and clears the persisted binding atomically.
-    pub async fn remove_protector_on_removal(&self, world: &Arc<World>) {
-        self.remove_protector(world, None).await;
+    pub fn remove_protector_on_removal(&self, world: &Arc<World>) {
+        self.remove_protector(world, None);
     }
 
     /// `CreakingHeartBlockEntity.removeProtector` (`CreakingHeartBlockEntity.java:314-327`):
     /// damage removes the binding, starts the creaking death effects, and sets health to zero;
     /// removal without damage tears the protector down immediately.
-    pub async fn remove_protector(&self, world: &Arc<World>, damage_type: Option<DamageType>) {
+    pub fn remove_protector(&self, world: &Arc<World>, damage_type: Option<DamageType>) {
         let Some(uuid) = self.creaking_uuid.swap(None) else {
             return;
         };
@@ -211,7 +202,7 @@ impl CreakingHeartBlockEntity {
                 creaking.creaking_death_effects();
                 creaking.mob_entity.living_entity.set_health(0.0);
             } else {
-                creaking.tear_down().await;
+                creaking.tear_down();
             }
         }
     }

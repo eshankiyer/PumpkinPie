@@ -145,7 +145,7 @@ impl<S: ChunkSerializer<WriteBackend = PathBuf>> ChunkFileManager<S> {
                 // Clone the Arc *before* releasing the lock so it stays alive.
                 let loader = loader.clone();
                 drop(locks);
-                return loader.get().await;
+                return loader.get();
             }
         }
 
@@ -159,7 +159,7 @@ impl<S: ChunkSerializer<WriteBackend = PathBuf>> ChunkFileManager<S> {
             // must not hold the map lock.
         };
 
-        loader.get().await
+        loader.get()
     }
 
     /// Attempt to evict the cached serializer for `path`.

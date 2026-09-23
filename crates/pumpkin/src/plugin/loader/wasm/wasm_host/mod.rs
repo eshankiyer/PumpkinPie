@@ -142,7 +142,7 @@ impl PluginRuntime {
 
         let wasm_plugin = Arc::new(wasm_plugin);
         {
-            let mut store = wasm_plugin.store.lock().await;
+            let mut store = wasm_plugin.store.lock();
             store.data_mut().plugin = Some(Arc::downgrade(&wasm_plugin));
             store.data_mut().marketplace_metadata = marketplace_metadata;
         };
@@ -209,7 +209,7 @@ impl WasmPlugin {
         &self,
         context: Arc<Context>,
     ) -> Result<Result<(), String>, wasmtime::Error> {
-        let mut store = self.store.lock().await;
+        let mut store = self.store.lock();
 
         let mut builder = WasiCtxBuilder::new();
 
@@ -361,16 +361,12 @@ impl WasmPlugin {
         &self,
         context: Arc<Context>,
     ) -> Result<Result<(), String>, wasmtime::Error> {
-        let mut store = self.store.lock().await;
+        let mut store = self.store.lock();
 
         if let Some(weak_plugin) = &store.data().plugin
             && let Some(plugin) = weak_plugin.upgrade()
         {
-            context
-                .server
-                .task_scheduler
-                .cancel_all_tasks(&plugin)
-                .await;
+            context.server.task_scheduler.cancel_all_tasks(&plugin);
         }
 
         match self.plugin_instance {
@@ -394,7 +390,7 @@ impl WasmPlugin {
         sender: &String,
         message: &Vec<u8>,
     ) -> Result<Result<Vec<u8>, String>, wasmtime::Error> {
-        let mut store = self.store.lock().await;
+        let mut store = self.store.lock();
 
         match self.plugin_instance {
             PluginInstance::V0_1(ref plugin) => {

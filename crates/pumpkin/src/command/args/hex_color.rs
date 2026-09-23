@@ -82,12 +82,7 @@ impl ArgumentConsumer for HexColorArgumentConsumer {
         Box::pin(async move { result })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        _input: &'a str,
-    ) -> SuggestResult<'a> {
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {
         let suggestions = vec![
             CommandSuggestion::new("F00".to_string(), None),
             CommandSuggestion::new("FF0000".to_string(), None),

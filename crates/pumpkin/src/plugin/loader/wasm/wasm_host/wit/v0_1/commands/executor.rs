@@ -34,7 +34,7 @@ impl CommandExecutor for WasmCommandExecutor {
         args: &'a crate::command::args::ConsumedArgs<'a>,
     ) -> crate::command::CommandResult<'a> {
         Box::pin(async move {
-            let mut store = self.plugin.store.lock().await;
+            let mut store = self.plugin.store.lock();
 
             let sender_resource = store
                 .data_mut()
@@ -125,83 +125,81 @@ pub struct WasmCommandSuggestionProvider {
 }
 
 impl CommandSuggestionProvider for WasmCommandSuggestionProvider {
-    fn suggest<'a>(
-        &'a self,
-        src: &'a crate::command::CommandSender,
-        _server: &'a Server,
-        input: &'a str,
+    fn suggest(
+        &self,
+        src: &crate::command::CommandSender,
+        _server: &Server,
+        input: &str,
         start: usize,
         end: usize,
-    ) -> CommandSuggestionResult<'a> {
-        Box::pin(async move {
-            let mut store = self.plugin.store.lock().await;
+    ) -> CommandSuggestionResult {
+        let mut store = self.plugin.store.lock();
 
-            let sender_resource = match store.data_mut().add_command_sender(src.clone()) {
-                Ok(resource) => resource,
-                Err(error) => {
-                    tracing::error!(
-                        "Failed to create command sender resource for suggestions: {error}"
-                    );
-                    return Suggestions::empty();
+        let sender_resource = match store.data_mut().add_command_sender(src.clone()) {
+            Ok(resource) => resource,
+            Err(error) => {
+                tracing::error!(
+                    "Failed to create command sender resource for suggestions: {error}"
+                );
+                return Suggestions::empty();
+            }
+        };
+        let server_resource = match store.data_mut().add_server(self.server.clone()) {
+            Ok(resource) => resource,
+            Err(error) => {
+                tracing::error!("Failed to create server resource for suggestions: {error}");
+                return Suggestions::empty();
+            }
+        };
+
+        let request = SuggestionRequest {
+            input: input.to_string(),
+            cursor: input.len().try_into().unwrap_or(u32::MAX),
+            start: start.try_into().unwrap_or(u32::MAX),
+            remaining: input[start.min(input.len())..end.min(input.len())].to_string(),
+        };
+
+        let response = match self.plugin.plugin_instance {
+            PluginInstance::V0_1(ref plugin) => {
+                plugin
+                    .call_handle_command_suggestion(
+                        &mut *store,
+                        self.handler_id,
+                        sender_resource,
+                        server_resource,
+                        &request,
+                    )
+                    .await
+            }
+        };
+
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::error!("Wasm command suggestion failed: {error}");
+                return Suggestions::empty();
+            }
+        };
+
+        let start = response.start as usize;
+        let end = start.saturating_add(response.length as usize);
+        let range = StringRange::between(start, end.min(input.len()));
+        let suggestions = response
+            .values
+            .into_iter()
+            .map(|suggestion| {
+                if let Some(tooltip) = suggestion.tooltip {
+                    Suggestion::with_tooltip(
+                        range,
+                        suggestion.value,
+                        tooltip.consume(store.data_mut()).provider,
+                    )
+                } else {
+                    Suggestion::without_tooltip(range, suggestion.value)
                 }
-            };
-            let server_resource = match store.data_mut().add_server(self.server.clone()) {
-                Ok(resource) => resource,
-                Err(error) => {
-                    tracing::error!("Failed to create server resource for suggestions: {error}");
-                    return Suggestions::empty();
-                }
-            };
+            })
+            .collect();
 
-            let request = SuggestionRequest {
-                input: input.to_string(),
-                cursor: input.len().try_into().unwrap_or(u32::MAX),
-                start: start.try_into().unwrap_or(u32::MAX),
-                remaining: input[start.min(input.len())..end.min(input.len())].to_string(),
-            };
-
-            let response = match self.plugin.plugin_instance {
-                PluginInstance::V0_1(ref plugin) => {
-                    plugin
-                        .call_handle_command_suggestion(
-                            &mut *store,
-                            self.handler_id,
-                            sender_resource,
-                            server_resource,
-                            &request,
-                        )
-                        .await
-                }
-            };
-
-            let response = match response {
-                Ok(response) => response,
-                Err(error) => {
-                    tracing::error!("Wasm command suggestion failed: {error}");
-                    return Suggestions::empty();
-                }
-            };
-
-            let start = response.start as usize;
-            let end = start.saturating_add(response.length as usize);
-            let range = StringRange::between(start, end.min(input.len()));
-            let suggestions = response
-                .values
-                .into_iter()
-                .map(|suggestion| {
-                    if let Some(tooltip) = suggestion.tooltip {
-                        Suggestion::with_tooltip(
-                            range,
-                            suggestion.value,
-                            tooltip.consume(store.data_mut()).provider,
-                        )
-                    } else {
-                        Suggestion::without_tooltip(range, suggestion.value)
-                    }
-                })
-                .collect();
-
-            Suggestions::new(range, suggestions)
-        })
+        Suggestions::new(range, suggestions)
     }
 }

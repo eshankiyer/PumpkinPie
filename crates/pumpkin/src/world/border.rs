@@ -126,7 +126,7 @@ impl Worldborder {
         self.lerp_ticks_remaining
     }
 
-    pub async fn init_client(&self, client: &JavaClient) {
+    pub fn init_client(&self, client: &JavaClient) {
         client
             .enqueue_client_packet(&CInitializeWorldBorder::new(
                 self.center_x,

@@ -2,8 +2,7 @@ use super::BlockEntity;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 /// `TheEndGatewayBlockEntity.saveAdditional` (`TheEndGatewayBlockEntity.java:51`) stores the
 /// exit position under `exit_portal` with `BlockPos.CODEC`, which is `Codec.INT_STREAM`
@@ -63,21 +62,31 @@ impl BlockEntity for EndGatewayBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_long("Age", *self.age.lock().await);
-            // `TheEndGatewayBlockEntity.saveAdditional` (:52-54) only emits
-            // `ExactTeleport` when it is true.
-            if *self.exact_teleport.lock().await {
-                nbt.put_bool("ExactTeleport", true);
-            }
-            if let Some(exit) = self.exit_portal.lock().await.as_ref() {
-                write_exit_portal(nbt, *exit);
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_long(
+            "Age",
+            *self
+                .age
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        // `TheEndGatewayBlockEntity.saveAdditional` (:52-54) only emits
+        // `ExactTeleport` when it is true.
+        if *self
+            .exact_teleport
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            nbt.put_bool("ExactTeleport", true);
+        }
+        if let Some(exit) = self
+            .exit_portal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            write_exit_portal(nbt, *exit);
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

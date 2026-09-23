@@ -1,7 +1,7 @@
 use std::sync::{Arc, Weak};
 
 use super::look_at_entity::LookAtEntityGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 use pumpkin_data::entity::EntityType;
@@ -31,34 +31,32 @@ impl LookAtTradingPlayerGoal {
 }
 
 impl Goal for LookAtTradingPlayerGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // `canUse` (`LookAtTradingPlayerGoal.java:15-22`):
-            // `if (this.villager.isTrading()) { this.lookAt = this.villager.getTradingPlayer(); return true; }`.
-            // `Mob::get_trading_player` resolves to `Some` exactly while the merchant session
-            // tracked by `trading_player` is active (see `WanderingTraderEntity` /
-            // `VillagerEntity` overrides), so a single lookup covers both vanilla calls.
-            if let Some(player) = mob.get_trading_player() {
-                self.inner.set_look_target(player as Arc<dyn EntityBase>);
-                return true;
-            }
-            false
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // `canUse` (`LookAtTradingPlayerGoal.java:15-22`):
+        // `if (this.villager.isTrading()) { this.lookAt = this.villager.getTradingPlayer(); return true; }`.
+        // `Mob::get_trading_player` resolves to `Some` exactly while the merchant session
+        // tracked by `trading_player` is active (see `WanderingTraderEntity` /
+        // `VillagerEntity` overrides), so a single lookup covers both vanilla calls.
+        if let Some(player) = mob.get_trading_player() {
+            self.inner.set_look_target(player as Arc<dyn EntityBase>);
+            return true;
+        }
+        false
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

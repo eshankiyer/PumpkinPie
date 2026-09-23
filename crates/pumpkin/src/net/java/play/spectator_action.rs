@@ -27,7 +27,6 @@ impl JavaClient {
         if !world
             .worldborder
             .lock()
-            .await
             .contains_block(target_pos.x.floor() as i32, target_pos.z.floor() as i32)
             || target
                 .get_entity()

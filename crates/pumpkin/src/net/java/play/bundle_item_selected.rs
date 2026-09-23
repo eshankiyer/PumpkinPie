@@ -14,13 +14,12 @@ impl JavaClient {
 
         let selected_item_index = packet.selected_item_index.0;
         if selected_item_index < 0 && selected_item_index != -1 {
-            self.kick(TextComponent::text("Invalid selected item index"))
-                .await;
+            self.kick(TextComponent::text("Invalid selected item index"));
             return;
         }
 
-        let current_handler = player.current_screen_handler.lock().await.clone();
-        let handler = current_handler.lock().await;
+        let current_handler = player.current_screen_handler.lock().clone();
+        let handler = current_handler.lock();
         let Some(slot) = handler
             .get_behaviour()
             .slots
@@ -29,13 +28,13 @@ impl JavaClient {
         else {
             return;
         };
-        let mut stack = slot.get_stack().await;
+        let mut stack = slot.get_stack();
         if let Some(contents) =
             stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
         {
             contents.toggle_selected_item(selected_item_index);
-            slot.set_stack(stack).await;
-            slot.mark_dirty().await;
+            slot.set_stack(stack);
+            slot.mark_dirty();
         }
     }
 }

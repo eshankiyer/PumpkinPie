@@ -15,8 +15,7 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_VEHICLE_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_VEHICLE_MOVEMENT,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
         // Vanilla only applies vehicle movement after the client-load and controlling-vehicle
@@ -26,13 +25,12 @@ impl JavaClient {
         }
         let entity = player.get_entity();
         let pos = Vector3::new(packet.x, packet.y, packet.z);
-        let vehicle = entity.vehicle.lock().await.clone();
+        let vehicle = entity.vehicle.lock().clone();
         if let Some(vehicle) = vehicle {
             let is_controlling_passenger = vehicle
                 .get_entity()
                 .passengers
                 .lock()
-                .await
                 .first()
                 .is_some_and(|passenger| passenger.get_entity().entity_id == player.entity_id());
             if !is_controlling_passenger {
@@ -50,19 +48,17 @@ impl JavaClient {
             );
             // Vehicle movement calls `doCheckFallDamage` after applying the client delta
             // (`ServerGamePacketListenerImpl.java:507-508`).
-            vehicle_entity
-                .do_check_fall_damage(
-                    vehicle.clone(),
-                    pos.x - old_pos.x,
-                    pos.y - old_pos.y,
-                    pos.z - old_pos.z,
-                    packet.on_ground,
-                )
-                .await;
+            vehicle_entity.do_check_fall_damage(
+                vehicle.clone(),
+                pos.x - old_pos.x,
+                pos.y - old_pos.y,
+                pos.z - old_pos.z,
+                packet.on_ground,
+            );
 
             drop(vehicle);
             entity.set_pos(pos);
-            chunker::update_position(player).await;
+            chunker::update_position(player);
         }
     }
 }

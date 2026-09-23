@@ -15,7 +15,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::control::vex_move_control::VexMoveControl,
     ai::goal::{
         active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal, revenge::RevengeGoal,
@@ -174,37 +174,33 @@ impl NBTStorage for VexEntity {
     /// across a save/load, and `MobEntity` has no UUID-reference machinery to hang it on, so the
     /// owner is deliberately not persisted. A reloaded vex therefore stops copying its evoker's
     /// target, but keeps its bound origin and its limited life.
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if let Some(origin) = self.bound_origin.load() {
-                nbt.put(
-                    "bound_pos",
-                    NbtTag::IntArray(vec![origin.0.x, origin.0.y, origin.0.z]),
-                );
-            }
-            if self.has_limited_life.load(Relaxed) {
-                nbt.put_int("life_ticks", self.limited_life_ticks.load(Relaxed));
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        if let Some(origin) = self.bound_origin.load() {
+            nbt.put(
+                "bound_pos",
+                NbtTag::IntArray(vec![origin.0.x, origin.0.y, origin.0.z]),
+            );
+        }
+        if self.has_limited_life.load(Relaxed) {
+            nbt.put_int("life_ticks", self.limited_life_ticks.load(Relaxed));
+        }
     }
 
     /// Vanilla `Vex.readAdditionalSaveData` (Vex.java:108-114): a missing `life_ticks` clears
     /// `hasLimitedLife` rather than leaving it set.
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.bound_origin
-                .store(if let Some(&[x, y, z]) = nbt.get_int_array("bound_pos") {
-                    Some(BlockPos::new(x, y, z))
-                } else {
-                    None
-                });
-            match nbt.get_int("life_ticks") {
-                Some(life_ticks) => self.set_limited_life(life_ticks),
-                None => self.has_limited_life.store(false, Relaxed),
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.bound_origin
+            .store(if let Some(&[x, y, z]) = nbt.get_int_array("bound_pos") {
+                Some(BlockPos::new(x, y, z))
+            } else {
+                None
+            });
+        match nbt.get_int("life_ticks") {
+            Some(life_ticks) => self.set_limited_life(life_ticks),
+            None => self.has_limited_life.store(false, Relaxed),
+        }
     }
 }
 
@@ -225,18 +221,14 @@ impl Mob for VexEntity {
     /// entity/physics model has no such toggle anywhere (`no_physics` does not exist on `Entity`),
     /// so this vex will still collide with blocks while flying. `setNoGravity(true)` (persistent,
     /// unlike `noPhysics`) is ported below via `get_mob_gravity`.
-    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.has_limited_life.load(Relaxed) {
-                let remaining = self.limited_life_ticks.fetch_sub(1, Relaxed) - 1;
-                if remaining <= 0 {
-                    self.limited_life_ticks.store(20, Relaxed);
-                    caller
-                        .damage(caller.as_ref(), 1.0, DamageType::STARVE)
-                        .await;
-                }
+    fn mob_tick(&self, caller: &Arc<dyn EntityBase>) {
+        if self.has_limited_life.load(Relaxed) {
+            let remaining = self.limited_life_ticks.fetch_sub(1, Relaxed) - 1;
+            if remaining <= 0 {
+                self.limited_life_ticks.store(20, Relaxed);
+                caller.damage(caller.as_ref(), 1.0, DamageType::STARVE);
             }
-        })
+        }
     }
 
     /// Vanilla: `Vex#tick`'s persistent `setNoGravity(true)`.

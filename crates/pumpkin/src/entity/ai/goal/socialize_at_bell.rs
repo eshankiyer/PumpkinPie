@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::ai::goal::villager_schedule::{VillagerActivity, villager_activity_for_time};
 use crate::entity::ai::pathfinder::NavigatorGoal;
@@ -29,7 +29,7 @@ impl SocializeAtBellGoal {
         Self { target: None }
     }
 
-    async fn find_target(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    fn find_target(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let entity = mob.get_entity();
         let world = entity.world.load();
         let meeting_point = mob.get_meeting_point()?;
@@ -72,7 +72,6 @@ impl SocializeAtBellGoal {
                     candidate.get_entity().get_eye_pos(),
                     async |block_pos, world| world.get_block_state(block_pos).is_solid(),
                 )
-                .await
                 .is_none();
             if visible {
                 return Some(candidate);
@@ -89,90 +88,80 @@ impl Default for SocializeAtBellGoal {
 }
 
 impl Goal for SocializeAtBellGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let world = mob.get_entity().world.load();
-            if villager_activity_for_time(world.get_time_of_day().await) != VillagerActivity::Meet
-                || mob.get_random().random_range(0..100) != 0
-            {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let world = mob.get_entity().world.load();
+        if villager_activity_for_time(world.get_time_of_day()) != VillagerActivity::Meet
+            || mob.get_random().random_range(0..100) != 0
+        {
+            return false;
+        }
 
-            self.target = Self::find_target(mob).await;
-            self.target.is_some()
-        })
+        self.target = Self::find_target(mob);
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(target) = self.target.as_ref() else {
-                return false;
-            };
-            let world = mob.get_entity().world.load();
-            let Some(meeting_point) = mob.get_meeting_point() else {
-                return false;
-            };
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(target) = self.target.as_ref() else {
+            return false;
+        };
+        let world = mob.get_entity().world.load();
+        let Some(meeting_point) = mob.get_meeting_point() else {
+            return false;
+        };
+        let position = mob.get_entity().pos.load();
+        let target_position = target.get_entity().pos.load();
+        villager_activity_for_time(world.get_time_of_day()) == VillagerActivity::Meet
+            && target.get_entity().is_alive()
+            && meeting_point
+                .to_centered_f64()
+                .squared_distance_to_vec(&position)
+                < BELL_DISTANCE_SQR
+            && position.squared_distance_to_vec(&target_position) > 1.0
+            && !mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_idle()
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        // `interactionTarget.set`, `lookTarget.set`, and `walkTarget.set` in
+        // `SocializeAtBell.java:32-35` become the existing goal target, look control, and
+        // navigator state.
+        if let Some(target) = self.target.as_ref() {
             let position = mob.get_entity().pos.load();
             let target_position = target.get_entity().pos.load();
-            villager_activity_for_time(world.get_time_of_day().await) == VillagerActivity::Meet
-                && target.get_entity().is_alive()
-                && meeting_point
-                    .to_centered_f64()
-                    .squared_distance_to_vec(&position)
-                    < BELL_DISTANCE_SQR
-                && position.squared_distance_to_vec(&target_position) > 1.0
-                && !mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_idle()
-        })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `interactionTarget.set`, `lookTarget.set`, and `walkTarget.set` in
-            // `SocializeAtBell.java:32-35` become the existing goal target, look control, and
-            // navigator state.
-            if let Some(target) = self.target.as_ref() {
-                let position = mob.get_entity().pos.load();
-                let target_position = target.get_entity().pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_progress(NavigatorGoal::new(
-                        position,
-                        target_position,
-                        SPEED_MODIFIER,
-                    ));
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `new EntityTracker(mob, true)` (`SocializeAtBell.java:34`) is the look target.
-            if let Some(target) = self.target.as_ref() {
-                mob.get_mob_entity()
-                    .look_control
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .look_at_entity(mob, target);
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
             mob.get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+                .set_progress(NavigatorGoal::new(
+                    position,
+                    target_position,
+                    SPEED_MODIFIER,
+                ));
+        }
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        // `new EntityTracker(mob, true)` (`SocializeAtBell.java:34`) is the look target.
+        if let Some(target) = self.target.as_ref() {
+            mob.get_mob_entity()
+                .look_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .look_at_entity(mob, target);
+        }
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     fn controls(&self) -> Controls {

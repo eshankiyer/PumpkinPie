@@ -1,6 +1,5 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs,
+    BlockBehaviour, BlockMetadata, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
 };
 use crate::world::feature_placer::place_configured_feature;
 use pumpkin_data::BlockStateId;
@@ -57,27 +56,23 @@ impl BlockBehaviour for FungusBlock {
 
     /// `NetherFungusBlock.performBonemeal` (`NetherFungusBlock.java:81-84`) places the configured
     /// planted crimson or warped huge-fungus feature at the fungus position.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let feature = if args.block == &Block::WARPED_FUNGUS {
-                ConfiguredFeature::WarpedFungusPlanted
-            } else {
-                ConfiguredFeature::CrimsonFungusPlanted
-            };
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
-            place_configured_feature(args.world, feature, *args.position, &mut random).await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let feature = if args.block == &Block::WARPED_FUNGUS {
+            ConfiguredFeature::WarpedFungusPlanted
+        } else {
+            ConfiguredFeature::CrimsonFungusPlanted
+        };
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
+        place_configured_feature(args.world, feature, *args.position, &mut random);
     }
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if has_support(args.world, args.block, args.position) {
-                args.state_id
-            } else {
-                Block::AIR.default_state.id
-            }
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if has_support(args.world, args.block, args.position) {
+            args.state_id
+        } else {
+            Block::AIR.default_state.id
+        }
     }
 }

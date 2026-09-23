@@ -10,10 +10,10 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ai::control::ghast_move_control::GhastMoveControl,
     ai::goal::{
-        Controls, Goal, GoalFuture, ghast_random_float::GhastRandomFloatAroundGoal,
+        Controls, Goal, ghast_random_float::GhastRandomFloatAroundGoal,
         ghast_shoot_fireball::GhastShootFireballGoal, ghast_target::GhastNearestPlayerTargetGoal,
     },
     mob::{Mob, MobEntity},
@@ -120,22 +120,18 @@ impl GhastEntity {
 
 impl NBTStorage for GhastEntity {
     /// `Ghast.addAdditionalSaveData` (`Ghast.java:160-164`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_byte("ExplosionPower", self.explosion_power() as i8);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_byte("ExplosionPower", self.explosion_power() as i8);
     }
 
     /// `Ghast.readAdditionalSaveData` (`Ghast.java:166-170`): `getByteOr("ExplosionPower", 1)`.
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            let power = nbt
-                .get_byte("ExplosionPower")
-                .map_or(Self::DEFAULT_EXPLOSION_POWER, |power| power as u8);
-            self.set_explosion_power(power);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        let power = nbt
+            .get_byte("ExplosionPower")
+            .map_or(Self::DEFAULT_EXPLOSION_POWER, |power| power as u8);
+        self.set_explosion_power(power);
     }
 }
 
@@ -155,16 +151,14 @@ impl Mob for GhastEntity {
     }
 
     /// `Ghast.defineSynchedData`: `DATA_IS_CHARGING`.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            if self.is_charging() {
-                entity.send_meta_data(
-                    &[Metadata::new(tracked_data::ghast::DATA_IS_CHARGING, true)],
-                    None,
-                );
-            }
-        })
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        if self.is_charging() {
+            entity.send_meta_data(
+                &[Metadata::new(tracked_data::ghast::DATA_IS_CHARGING, true)],
+                None,
+            );
+        }
     }
 
     /// `Ghast.hurtServer` (`Ghast.java:101-108`) turns a reflected large fireball into 1000
@@ -205,8 +199,8 @@ impl GhastLookGoal {
 }
 
 impl Goal for GhastLookGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { true })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        true
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -215,27 +209,28 @@ impl Goal for GhastLookGoal {
 
     /// `Ghast.faceMovementDirection` (`Ghast.java:187-202`): faces the target within 64 blocks,
     /// or the movement direction without one, setting `yRot` and `yBodyRot` directly.
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            let entity = &mob_entity.living_entity.entity;
-            let target_opt = mob_entity.target.lock().await.clone();
+    fn tick(&mut self, mob: &dyn Mob) {
+        let mob_entity = mob.get_mob_entity();
+        let entity = &mob_entity.living_entity.entity;
+        let target_opt = mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
-            let yaw = if let Some(target) = target_opt {
-                let mob_pos = entity.pos.load();
-                let target_pos = target.get_entity().pos.load();
-                if target_pos.squared_distance_to_vec(&mob_pos) >= 4096.0 {
-                    return;
-                }
-                -(f64::atan2(target_pos.x - mob_pos.x, target_pos.z - mob_pos.z) as f32)
-                    .to_degrees()
-            } else {
-                let velocity = entity.velocity.load();
-                -(f64::atan2(velocity.x, velocity.z) as f32).to_degrees()
-            };
-            entity.yaw.store(yaw);
-            entity.body_yaw.store(yaw);
-        })
+        let yaw = if let Some(target) = target_opt {
+            let mob_pos = entity.pos.load();
+            let target_pos = target.get_entity().pos.load();
+            if target_pos.squared_distance_to_vec(&mob_pos) >= 4096.0 {
+                return;
+            }
+            -(f64::atan2(target_pos.x - mob_pos.x, target_pos.z - mob_pos.z) as f32).to_degrees()
+        } else {
+            let velocity = entity.velocity.load();
+            -(f64::atan2(velocity.x, velocity.z) as f32).to_degrees()
+        };
+        entity.yaw.store(yaw);
+        entity.body_yaw.store(yaw);
     }
 
     fn controls(&self) -> Controls {

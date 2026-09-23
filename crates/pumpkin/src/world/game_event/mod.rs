@@ -206,7 +206,7 @@ fn is_occluded(world: &World, from: Vector3<f64>, to: Vector3<f64>) -> bool {
 // notification radius, closest-first (GameEvent.ListenerInfo::compareTo), gated by the
 // occlusion check above. Vanilla's chunk-section iteration is replaced by scanning the
 // flat registry (see module doc comment).
-pub async fn emit_game_event(
+pub fn emit_game_event(
     world: &Arc<World>,
     event: GameEvent,
     position: Vector3<f64>,
@@ -217,7 +217,7 @@ pub async fn emit_game_event(
     // Keep this source-side gate here so every listener observes the same rule.
     if let Some(source) = context.source_entity.clone()
         && let Some(item) = source.get_item_entity()
-        && item.dampens_vibrations().await
+        && item.dampens_vibrations()
     {
         return;
     }
@@ -225,7 +225,11 @@ pub async fn emit_game_event(
     let radius = f64::from(notification_radius(&event));
     let radius_sq = radius * radius;
 
-    let listeners = world.game_event_listeners.lock().await.clone();
+    let listeners = world
+        .game_event_listeners
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     let mut in_range: Vec<(f64, Arc<dyn GameEventListener>, Vector3<f64>)> = listeners
         .into_iter()
         .filter_map(|listener| {

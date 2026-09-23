@@ -1,5 +1,4 @@
 use pumpkin_inventory::crafting::recipe_provider::RecipeProvider;
-use pumpkin_inventory::slot::BoxFuture;
 pub use pumpkin_protocol::codec::recipe::DynamicRecipe;
 use pumpkin_protocol::codec::recipe::{OwnedCookingRecipeType, OwnedCraftingRecipe};
 use tokio::sync::RwLock;
@@ -22,17 +21,17 @@ impl RecipeManager {
         }
     }
 
-    pub async fn add_recipe(&self, recipe: DynamicRecipe) {
+    pub fn add_recipe(&self, recipe: DynamicRecipe) {
         let mut recipes = self.dynamic_recipes.write().await;
         recipes.push(recipe);
     }
 
-    pub async fn add_recipes(&self, new_recipes: impl IntoIterator<Item = DynamicRecipe>) {
+    pub fn add_recipes(&self, new_recipes: impl IntoIterator<Item = DynamicRecipe>) {
         let mut recipes = self.dynamic_recipes.write().await;
         recipes.extend(new_recipes);
     }
 
-    pub async fn set_recipes(&self, new_recipes: Vec<DynamicRecipe>) {
+    pub fn set_recipes(&self, new_recipes: Vec<DynamicRecipe>) {
         let mut recipes = self.dynamic_recipes.write().await;
         *recipes = new_recipes;
     }
@@ -42,7 +41,7 @@ impl RecipeManager {
         recipes.clear();
     }
 
-    pub async fn get_dynamic_recipes_internal(&self) -> Vec<DynamicRecipe> {
+    pub fn get_dynamic_recipes_internal(&self) -> Vec<DynamicRecipe> {
         self.dynamic_recipes.read().await.clone()
     }
 
@@ -85,8 +84,8 @@ fn dynamic_recipe_id(recipe: &DynamicRecipe) -> String {
 }
 
 impl RecipeProvider for RecipeManager {
-    fn get_dynamic_recipes(&self) -> BoxFuture<'_, Vec<DynamicRecipe>> {
-        Box::pin(async move { self.dynamic_recipes.read().await.clone() })
+    fn get_dynamic_recipes(&self) -> Vec<DynamicRecipe> {
+        self.dynamic_recipes.read().await.clone()
     }
 }
 
@@ -100,18 +99,16 @@ mod tests {
     async fn recipe_ids_include_generated_and_dynamic_recipes() {
         // RecipeManager.java:175-177 requires the query to include both recipe sources.
         let manager = RecipeManager::new();
-        manager
-            .add_recipe(DynamicRecipe::Crafting(OwnedCraftingRecipe::Shapeless {
-                recipe_id: Some("example:custom_recipe".to_owned()),
-                category: RecipeCategoryTypes::Misc,
-                group: None,
-                ingredients: vec![OwnedRecipeIngredient::Simple("minecraft:stone".to_owned())],
-                result: OwnedRecipeResult {
-                    item_id: "minecraft:stone".to_owned(),
-                    count: 1,
-                },
-            }))
-            .await;
+        manager.add_recipe(DynamicRecipe::Crafting(OwnedCraftingRecipe::Shapeless {
+            recipe_id: Some("example:custom_recipe".to_owned()),
+            category: RecipeCategoryTypes::Misc,
+            group: None,
+            ingredients: vec![OwnedRecipeIngredient::Simple("minecraft:stone".to_owned())],
+            result: OwnedRecipeResult {
+                item_id: "minecraft:stone".to_owned(),
+                count: 1,
+            },
+        }));
 
         let ids = manager.get_recipe_ids().await;
         assert!(ids.iter().any(|id| id == "example:custom_recipe"));

@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -56,90 +55,87 @@ impl BlockEntity for PotentSulfurBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_int("countdown", self.waiting_countdown.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int("countdown", self.waiting_countdown.load(Ordering::Relaxed));
     }
 
     /// `SERVER_WAITING_COUNTDOWN_TICKER`, which vanilla attaches only to the DORMANT and
     /// ERUPTING states.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let (block, state) = world.get_block_and_state(&self.position);
-            if block.id != BlockId::POTENT_SULFUR {
-                return;
-            }
-            let mut props = PotentSulfurLikeProperties::from_state_id(state.id, block);
-            let is_dormant = match props.potent_sulfur_state {
-                PotentSulfurState::Dormant => true,
-                PotentSulfurState::Erupting => false,
-                _ => return,
-            };
+    fn tick(&self, world: &Arc<World>) {
+        let (block, state) = world.get_block_and_state(&self.position);
+        if block.id != BlockId::POTENT_SULFUR {
+            return;
+        }
+        let mut props = PotentSulfurLikeProperties::from_state_id(state.id, block);
+        let is_dormant = match props.potent_sulfur_state {
+            PotentSulfurState::Dormant => true,
+            PotentSulfurState::Erupting => false,
+            _ => return,
+        };
 
-            if world.level_time.lock().await.world_age % 20 != 0 {
-                return;
-            }
+        if world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age
+            % 20
+            != 0
+        {
+            return;
+        }
 
-            let Some(source_block) = find_noxious_gas_source_block(world, &self.position) else {
-                return;
-            };
+        let Some(source_block) = find_noxious_gas_source_block(world, &self.position) else {
+            return;
+        };
 
-            if self.waiting_countdown.load(Ordering::Relaxed) <= 0 {
-                let water_blocks = source_block.0.y - self.position.0.y - 1;
-                let mut rng = self.geyser_positional(world);
-                // The dormant wait scales with the water column; the erupting wait is
-                // short and burns one draw first, so the two phases diverge.
-                let countdown = if is_dormant {
-                    10 * (water_blocks - 1) + next_int_between_inclusive(&mut rng, 15, 30)
-                } else {
-                    rng.next_i32();
-                    water_blocks - 1 + next_int_between_inclusive(&mut rng, 1, 2)
-                };
-                self.waiting_countdown.store(countdown, Ordering::Relaxed);
-            }
-
-            let remaining = self.waiting_countdown.load(Ordering::Relaxed);
-            if remaining > 0 {
-                self.waiting_countdown
-                    .store(remaining - 1, Ordering::Relaxed);
-            }
-
-            if self.waiting_countdown.load(Ordering::Relaxed) != 0 {
-                return;
-            }
-
-            let next_state = if is_dormant {
-                PotentSulfurState::Erupting
+        if self.waiting_countdown.load(Ordering::Relaxed) <= 0 {
+            let water_blocks = source_block.0.y - self.position.0.y - 1;
+            let mut rng = self.geyser_positional(world);
+            // The dormant wait scales with the water column; the erupting wait is
+            // short and burns one draw first, so the two phases diverge.
+            let countdown = if is_dormant {
+                10 * (water_blocks - 1) + next_int_between_inclusive(&mut rng, 15, 30)
             } else {
-                PotentSulfurState::Dormant
+                rng.next_i32();
+                water_blocks - 1 + next_int_between_inclusive(&mut rng, 1, 2)
             };
-            props.potent_sulfur_state = next_state;
-            world
-                .set_block_state(
-                    &self.position,
-                    props.to_state_id(block),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
+            self.waiting_countdown.store(countdown, Ordering::Relaxed);
+        }
 
-            if next_state == PotentSulfurState::Dormant {
-                emit_game_event(
-                    world,
-                    GameEvent::BlockDeactivate,
-                    Vector3::new(
-                        f64::from(self.position.0.x) + 0.5,
-                        f64::from(self.position.0.y) + 0.5,
-                        f64::from(self.position.0.z) + 0.5,
-                    ),
-                    GameEventContext::none(),
-                )
-                .await;
-            }
-        })
+        let remaining = self.waiting_countdown.load(Ordering::Relaxed);
+        if remaining > 0 {
+            self.waiting_countdown
+                .store(remaining - 1, Ordering::Relaxed);
+        }
+
+        if self.waiting_countdown.load(Ordering::Relaxed) != 0 {
+            return;
+        }
+
+        let next_state = if is_dormant {
+            PotentSulfurState::Erupting
+        } else {
+            PotentSulfurState::Dormant
+        };
+        props.potent_sulfur_state = next_state;
+        world.set_block_state(
+            &self.position,
+            props.to_state_id(block),
+            BlockFlags::NOTIFY_ALL,
+        );
+
+        if next_state == PotentSulfurState::Dormant {
+            emit_game_event(
+                world,
+                GameEvent::BlockDeactivate,
+                Vector3::new(
+                    f64::from(self.position.0.x) + 0.5,
+                    f64::from(self.position.0.y) + 0.5,
+                    f64::from(self.position.0.z) + 0.5,
+                ),
+                GameEventContext::none(),
+            );
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -179,7 +175,7 @@ impl PotentSulfurBlockEntity {
     /// (`PotentSulfurBlockEntity.java:47-61`) runs every 20 ticks, finds nearby living
     /// entities, and applies nausea to any this returns true for. No caller here does that
     /// yet - this check alone has no observable effect until a ticker calls it.
-    pub async fn can_be_reached_by_noxious_gas(
+    pub fn can_be_reached_by_noxious_gas(
         world: &Arc<World>,
         source_block: &BlockPos,
         pos: Vector3<f64>,
@@ -205,7 +201,6 @@ impl PotentSulfurBlockEntity {
 
         world
             .raycast_collision(below_source, below_pos, async |_, _| true)
-            .await
             .is_none()
     }
 

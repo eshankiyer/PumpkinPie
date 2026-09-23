@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 use tracing::{info, warn};
 
 use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
@@ -95,7 +95,7 @@ impl DatapackManager {
         }
     }
 
-    pub async fn load_all(
+    pub fn load_all(
         &self,
         world_path: &Path,
         enabled_packs: &[String],
@@ -203,10 +203,19 @@ impl DatapackManager {
             }
         }
 
-        recipe_manager.set_recipes(all_recipes).await;
-        *self.loaded_packs.write().await = loaded_packs_vec;
-        *self.functions.write().await = all_functions;
-        *self.function_tags.write().await = all_function_tags;
+        recipe_manager.set_recipes(all_recipes);
+        *self
+            .loaded_packs
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = loaded_packs_vec;
+        *self
+            .functions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = all_functions;
+        *self
+            .function_tags
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = all_function_tags;
         // Instantiations of the old function set are invalid now; vanilla gets
         // this for free because each reload builds fresh MacroFunction objects.
         self.instantiation_caches
@@ -215,17 +224,29 @@ impl DatapackManager {
             .clear();
     }
 
-    pub async fn get_loaded_packs(&self) -> Vec<LoadedDatapack> {
-        self.loaded_packs.read().await.clone()
+    pub fn get_loaded_packs(&self) -> Vec<LoadedDatapack> {
+        self.loaded_packs
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    pub async fn get_functions(&self) -> HashMap<String, LoadedFunction> {
-        self.functions.read().await.clone()
+    pub fn get_functions(&self) -> HashMap<String, LoadedFunction> {
+        self.functions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    pub async fn get_function_names(&self) -> Vec<String> {
-        let fns = self.functions.read().await;
-        let tags = self.function_tags.read().await;
+    pub fn get_function_names(&self) -> Vec<String> {
+        let fns = self
+            .functions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tags = self
+            .function_tags
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut names = Vec::with_capacity(fns.len() + tags.len());
         names.extend(fns.keys().cloned());
         for tag in tags.keys() {
@@ -236,7 +257,7 @@ impl DatapackManager {
 
     /// Executes a function or function tag, optionally supplying macro
     /// arguments (vanilla `/function <name> <compound>`).
-    pub async fn execute_function(
+    pub fn execute_function(
         &self,
         server: &Arc<Server>,
         source: &CommandSource,
@@ -263,9 +284,13 @@ impl DatapackManager {
         // chain and shares its quota, like vanilla reuses the ambient
         // ExecutionContext (`Commands.java:412-414`).
         if REMAINING_COMMAND_QUOTA.try_with(Cell::get).is_ok() {
-            return self
-                .execute_function_in_context(server, &function_source, name, arguments, limit)
-                .await;
+            return self.execute_function_in_context(
+                server,
+                &function_source,
+                name,
+                arguments,
+                limit,
+            );
         }
 
         REMAINING_COMMAND_QUOTA
@@ -286,7 +311,7 @@ impl DatapackManager {
     /// vanilla's log message. Functions containing `$` macro lines are
     /// instantiated first (`MacroFunction.instantiate`,
     /// `MacroFunction.java:52-82`).
-    async fn execute_function_in_context(
+    fn execute_function_in_context(
         &self,
         server: &Arc<Server>,
         source: &CommandSource,
@@ -295,7 +320,10 @@ impl DatapackManager {
         limit: i64,
     ) -> Result<usize, ExecuteFunctionError> {
         let (functions_to_run, is_tag) = if let Some(tag_name) = name.strip_prefix('#') {
-            let tags = self.function_tags.read().await;
+            let tags = self
+                .function_tags
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let Some(fns) = tags.get(tag_name) else {
                 return Err(ExecuteFunctionError::Unknown(format!("#{tag_name}")));
             };
@@ -304,7 +332,10 @@ impl DatapackManager {
             (vec![name.to_string()], false)
         };
 
-        let all_fns = self.functions.read().await;
+        let all_fns = self
+            .functions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut total_executed = 0;
 
         for fn_id in functions_to_run {
@@ -332,8 +363,7 @@ impl DatapackManager {
                 server
                     .command_dispatcher
                     .load()
-                    .handle_command(source, &line)
-                    .await;
+                    .handle_command(source, &line);
                 total_executed += 1;
             }
         }

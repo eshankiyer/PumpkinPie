@@ -11,7 +11,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::mob::zombie::{ZombieEntityBase, zombie::ZombieEntity};
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     mob::{Mob, MobEntity},
 };
 
@@ -57,7 +57,7 @@ impl HuskEntity {
     /// `ZombieVillagerEntity::finish_conversion`'s simplified copy set (position/velocity/
     /// rotation/age/custom name/active effects) -- Pumpkin has no generic `Mob::convertTo`
     /// (equipment/leash/passenger transfer), so those are not carried over.
-    async fn finish_conversion(&self) {
+    fn finish_conversion(&self) {
         let old_entity = self.get_entity();
         let world = old_entity.world.load().clone();
         let pos = old_entity.pos.load();
@@ -94,16 +94,16 @@ impl HuskEntity {
             .living_entity
             .active_effects
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .cloned()
             .collect();
         let new_living = &zombie.get_mob_entity().living_entity;
         for effect in effects {
-            new_living.add_effect(effect).await;
+            new_living.add_effect(effect);
         }
 
-        world.spawn_entity(zombie).await;
+        world.spawn_entity(zombie);
         // Zombie.java:243 gates this on `!isSilent()`, which has no equivalent field here.
         world.sync_world_event(
             WorldEvent::SoundHuskToZombie,
@@ -111,32 +111,24 @@ impl HuskEntity {
             0,
         );
 
-        old_entity.remove().await;
+        old_entity.remove();
     }
 }
 
 impl NBTStorage for HuskEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int(
-                "DrownedConversionTime",
-                self.conversion_time.load(Ordering::Relaxed),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_int(
+            "DrownedConversionTime",
+            self.conversion_time.load(Ordering::Relaxed),
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.mark_restored_from_nbt();
-            self.entity
-                .mob_entity
-                .living_entity
-                .read_nbt_non_mut(nbt)
-                .await;
-            let time = nbt.get_int("DrownedConversionTime").unwrap_or(-1);
-            self.conversion_time.store(time, Ordering::Relaxed);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.mark_restored_from_nbt();
+        self.entity.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        let time = nbt.get_int("DrownedConversionTime").unwrap_or(-1);
+        self.conversion_time.store(time, Ordering::Relaxed);
     }
 }
 
@@ -147,92 +139,79 @@ impl Mob for HuskEntity {
 
     /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s
     /// `handleAttributes` roll (`Zombie.java:505`) that every zombie variant inherits.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move { self.entity.mob_init_data_tracker().await })
+    fn mob_init_data_tracker(&self) {
+        self.entity.mob_init_data_tracker()
     }
 
     /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`), inherited by `Husk`.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            crate::entity::mob::zombie::try_spawn_reinforcements(&self.entity.mob_entity, source)
-                .await;
-        })
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        crate::entity::mob::zombie::try_spawn_reinforcements(&self.entity.mob_entity, source);
     }
 
     /// Vanilla `Husk::doHurtTarget`: an unarmed husk hit applies Hunger for
     /// `140 * getEffectiveDifficulty()` ticks.
-    fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let held_item = self.entity.mob_entity.living_entity.held_item(entity).await;
-            let main_hand_empty = held_item.is_empty();
-            if !main_hand_empty {
-                return;
-            }
-            let Some(target_living) = target.get_living_entity() else {
-                return;
-            };
+    fn on_successful_attack(&self, target: &dyn EntityBase) {
+        let entity = self.get_entity();
+        let held_item = self.entity.mob_entity.living_entity.held_item(entity);
+        let main_hand_empty = held_item.is_empty();
+        if !main_hand_empty {
+            return;
+        }
+        let Some(target_living) = target.get_living_entity() else {
+            return;
+        };
 
-            let difficulty = RegionalDifficulty::at(&entity.world.load(), entity.pos.load());
-            let duration = husk_hunger_duration(difficulty.effective_difficulty);
-            target_living
-                .add_effect(Effect {
-                    effect_type: &StatusEffect::HUNGER,
-                    duration,
-                    amplifier: 0,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                })
-                .await;
-        })
+        let difficulty = RegionalDifficulty::at(&entity.world.load(), entity.pos.load());
+        let duration = husk_hunger_duration(difficulty.effective_difficulty);
+        target_living.add_effect(Effect {
+            effect_type: &StatusEffect::HUNGER,
+            duration,
+            amplifier: 0,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+            blend: false,
+        });
     }
 
     /// Vanilla `Zombie::tick`'s underwater-conversion timer (`convertsInWater` is `true` for the
     /// base `Zombie`, and `Husk` doesn't override it, so husks convert to zombies just like any
     /// other zombie submerged for long enough).
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self
-                .entity
-                .mob_entity
-                .living_entity
-                .dead
-                .load(Ordering::Relaxed)
-            {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self
+            .entity
+            .mob_entity
+            .living_entity
+            .dead
+            .load(Ordering::Relaxed)
+        {
+            return;
+        }
 
-            let converting_time = self.conversion_time.load(Ordering::Relaxed);
-            if converting_time >= 0 {
-                let new_time = converting_time - 1;
-                self.conversion_time.store(new_time, Ordering::Relaxed);
-                if new_time < 0 {
-                    self.finish_conversion().await;
-                }
-            } else if self
-                .entity
-                .mob_entity
-                .living_entity
-                .entity
-                .touching_water
-                .load(Ordering::Relaxed)
-            {
-                let new_time = self.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
-                if new_time >= WATER_TICKS_TO_START_CONVERSION {
-                    self.in_water_time.store(0, Ordering::Relaxed);
-                    self.conversion_time
-                        .store(CONVERSION_TICKS, Ordering::Relaxed);
-                }
-            } else {
-                self.in_water_time.store(-1, Ordering::Relaxed);
+        let converting_time = self.conversion_time.load(Ordering::Relaxed);
+        if converting_time >= 0 {
+            let new_time = converting_time - 1;
+            self.conversion_time.store(new_time, Ordering::Relaxed);
+            if new_time < 0 {
+                self.finish_conversion();
             }
-        })
+        } else if self
+            .entity
+            .mob_entity
+            .living_entity
+            .entity
+            .touching_water
+            .load(Ordering::Relaxed)
+        {
+            let new_time = self.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
+            if new_time >= WATER_TICKS_TO_START_CONVERSION {
+                self.in_water_time.store(0, Ordering::Relaxed);
+                self.conversion_time
+                    .store(CONVERSION_TICKS, Ordering::Relaxed);
+            }
+        } else {
+            self.in_water_time.store(-1, Ordering::Relaxed);
+        }
     }
 }
 

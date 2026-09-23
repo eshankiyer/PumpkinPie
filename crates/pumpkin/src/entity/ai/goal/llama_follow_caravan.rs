@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use pumpkin_data::entity::EntityType;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
@@ -42,7 +42,7 @@ impl LlamaFollowCaravanGoal {
 
     /// `LlamaFollowCaravanGoal.firstIsLeashed`: walks up the caravan chain from `start`, looking
     /// for a leashed llama within `MAX_CARAVAN_CHAIN_DEPTH` hops.
-    async fn first_is_leashed(start: &dyn EntityBase, mut counter: i32) -> bool {
+    fn first_is_leashed(start: &dyn EntityBase, mut counter: i32) -> bool {
         let mut current_id = {
             let Some(data) = llama_data_of(start) else {
                 return false;
@@ -58,7 +58,7 @@ impl LlamaFollowCaravanGoal {
             let Some(current) = world.get_entity_by_id(current_id) else {
                 return false;
             };
-            if Self::is_leashed(current.as_ref()).await {
+            if Self::is_leashed(current.as_ref()) {
                 return true;
             }
             let Some(data) = llama_data_of(current.as_ref()) else {
@@ -69,178 +69,174 @@ impl LlamaFollowCaravanGoal {
         }
     }
 
-    async fn is_leashed(entity: &dyn EntityBase) -> bool {
-        entity.get_entity().leashed_to.lock().await.is_some()
+    fn is_leashed(entity: &dyn EntityBase) -> bool {
+        entity
+            .get_entity()
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 }
 
 impl Goal for LlamaFollowCaravanGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let Some(data) = llama_data_of(mob as &dyn EntityBase) else {
-                return false;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        let Some(data) = llama_data_of(mob as &dyn EntityBase) else {
+            return false;
+        };
+
+        if Self::is_leashed(mob as &dyn EntityBase) || data.in_caravan() {
+            return false;
+        }
+
+        let pos = entity.pos.load();
+        let world = entity.world.load();
+        let candidates: Vec<_> = world
+            .get_nearby_entities(pos, CARAVAN_SEARCH_RADIUS)
+            .into_values()
+            .filter(|e| {
+                e.get_entity().entity_id != entity.entity_id
+                    && (e.get_entity().entity_type == &EntityType::LLAMA
+                        || e.get_entity().entity_type == &EntityType::TRADER_LLAMA)
+            })
+            .collect();
+
+        let mut closest: Option<(f64, std::sync::Arc<dyn EntityBase>)> = None;
+        for candidate in &candidates {
+            let Some(cdata) = llama_data_of(candidate.as_ref()) else {
+                continue;
             };
-
-            if Self::is_leashed(mob as &dyn EntityBase).await || data.in_caravan() {
-                return false;
+            if cdata.in_caravan() && !cdata.has_caravan_tail() {
+                let dist = pos.squared_distance_to_vec(&candidate.get_entity().pos.load());
+                if closest.as_ref().is_none_or(|(best, _)| dist < *best) {
+                    closest = Some((dist, candidate.clone()));
+                }
             }
+        }
 
-            let pos = entity.pos.load();
-            let world = entity.world.load();
-            let candidates: Vec<_> = world
-                .get_nearby_entities(pos, CARAVAN_SEARCH_RADIUS)
-                .into_values()
-                .filter(|e| {
-                    e.get_entity().entity_id != entity.entity_id
-                        && (e.get_entity().entity_type == &EntityType::LLAMA
-                            || e.get_entity().entity_type == &EntityType::TRADER_LLAMA)
-                })
-                .collect();
-
-            let mut closest: Option<(f64, std::sync::Arc<dyn EntityBase>)> = None;
+        if closest.is_none() {
             for candidate in &candidates {
                 let Some(cdata) = llama_data_of(candidate.as_ref()) else {
                     continue;
                 };
-                if cdata.in_caravan() && !cdata.has_caravan_tail() {
+                if !cdata.has_caravan_tail() && Self::is_leashed(candidate.as_ref()) {
                     let dist = pos.squared_distance_to_vec(&candidate.get_entity().pos.load());
                     if closest.as_ref().is_none_or(|(best, _)| dist < *best) {
                         closest = Some((dist, candidate.clone()));
                     }
                 }
             }
+        }
 
-            if closest.is_none() {
-                for candidate in &candidates {
-                    let Some(cdata) = llama_data_of(candidate.as_ref()) else {
-                        continue;
-                    };
-                    if !cdata.has_caravan_tail() && Self::is_leashed(candidate.as_ref()).await {
-                        let dist = pos.squared_distance_to_vec(&candidate.get_entity().pos.load());
-                        if closest.as_ref().is_none_or(|(best, _)| dist < *best) {
-                            closest = Some((dist, candidate.clone()));
-                        }
-                    }
-                }
-            }
+        let Some((dist_sq, closest)) = closest else {
+            return false;
+        };
 
-            let Some((dist_sq, closest)) = closest else {
-                return false;
-            };
+        if dist_sq < MIN_JOIN_DISTANCE_SQUARED {
+            return false;
+        }
 
-            if dist_sq < MIN_JOIN_DISTANCE_SQUARED {
-                return false;
-            }
+        let closest_leashed = Self::is_leashed(closest.as_ref());
+        if !closest_leashed && !Self::first_is_leashed(closest.as_ref(), 1) {
+            return false;
+        }
 
-            let closest_leashed = Self::is_leashed(closest.as_ref()).await;
-            if !closest_leashed && !Self::first_is_leashed(closest.as_ref(), 1).await {
-                return false;
-            }
+        let Some(closest_data) = llama_data_of(closest.as_ref()) else {
+            return false;
+        };
+        data.caravan_head_id
+            .store(closest.get_entity().entity_id, Relaxed);
+        closest_data
+            .caravan_tail_id
+            .store(entity.entity_id, Relaxed);
 
-            let Some(closest_data) = llama_data_of(closest.as_ref()) else {
-                return false;
-            };
-            data.caravan_head_id
-                .store(closest.get_entity().entity_id, Relaxed);
-            closest_data
-                .caravan_tail_id
-                .store(entity.entity_id, Relaxed);
-
-            true
-        })
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let Some(data) = llama_data_of(mob as &dyn EntityBase) else {
-                return false;
-            };
-            let head_id = data.caravan_head_id.load(Relaxed);
-            if head_id == -1 {
-                return false;
-            }
-            let world = entity.world.load();
-            let Some(head) = world.get_entity_by_id(head_id) else {
-                return false;
-            };
-            if !head.get_entity().is_alive() {
-                return false;
-            }
-            if !Self::first_is_leashed(mob as &dyn EntityBase, 0).await {
-                return false;
-            }
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        let Some(data) = llama_data_of(mob as &dyn EntityBase) else {
+            return false;
+        };
+        let head_id = data.caravan_head_id.load(Relaxed);
+        if head_id == -1 {
+            return false;
+        }
+        let world = entity.world.load();
+        let Some(head) = world.get_entity_by_id(head_id) else {
+            return false;
+        };
+        if !head.get_entity().is_alive() {
+            return false;
+        }
+        if !Self::first_is_leashed(mob as &dyn EntityBase, 0) {
+            return false;
+        }
 
-            let dist_sqr = entity
-                .pos
-                .load()
-                .squared_distance_to_vec(&head.get_entity().pos.load());
-            if dist_sqr > MAX_FOLLOW_DISTANCE_SQUARED {
-                if self.speed <= 3.0 {
-                    self.speed *= 1.2;
-                    self.dist_check_counter = super::to_goal_ticks(40);
-                    return true;
-                }
-                if self.dist_check_counter == 0 {
-                    return false;
-                }
+        let dist_sqr = entity
+            .pos
+            .load()
+            .squared_distance_to_vec(&head.get_entity().pos.load());
+        if dist_sqr > MAX_FOLLOW_DISTANCE_SQUARED {
+            if self.speed <= 3.0 {
+                self.speed *= 1.2;
+                self.dist_check_counter = super::to_goal_ticks(40);
+                return true;
             }
-
-            if self.dist_check_counter > 0 {
-                self.dist_check_counter -= 1;
+            if self.dist_check_counter == 0 {
+                return false;
             }
+        }
 
-            true
-        })
+        if self.dist_check_counter > 0 {
+            self.dist_check_counter -= 1;
+        }
+
+        true
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(data) = llama_data_of(mob as &dyn EntityBase) {
-                let head_id = data.caravan_head_id.swap(-1, Relaxed);
-                if head_id != -1 {
-                    let world = mob.get_entity().world.load();
-                    if let Some(head) = world.get_entity_by_id(head_id)
-                        && let Some(head_data) = llama_data_of(head.as_ref())
-                    {
-                        head_data.caravan_tail_id.store(-1, Relaxed);
-                    }
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(data) = llama_data_of(mob as &dyn EntityBase) {
+            let head_id = data.caravan_head_id.swap(-1, Relaxed);
+            if head_id != -1 {
+                let world = mob.get_entity().world.load();
+                if let Some(head) = world.get_entity_by_id(head_id)
+                    && let Some(head_data) = llama_data_of(head.as_ref())
+                {
+                    head_data.caravan_tail_id.store(-1, Relaxed);
                 }
             }
-            self.speed = 2.1;
-        })
+        }
+        self.speed = 2.1;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let Some(data) = llama_data_of(mob as &dyn EntityBase) else {
-                return;
-            };
-            let head_id = data.caravan_head_id.load(Relaxed);
-            if head_id == -1 {
-                return;
-            }
-            let world = entity.world.load();
-            let Some(head) = world.get_entity_by_id(head_id) else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let Some(data) = llama_data_of(mob as &dyn EntityBase) else {
+            return;
+        };
+        let head_id = data.caravan_head_id.load(Relaxed);
+        if head_id == -1 {
+            return;
+        }
+        let world = entity.world.load();
+        let Some(head) = world.get_entity_by_id(head_id) else {
+            return;
+        };
 
-            let self_pos = entity.pos.load();
-            let head_pos = head.get_entity().pos.load();
-            let distance_to = self_pos.squared_distance_to_vec(&head_pos).sqrt();
-            let wanted_distance = 2.0;
-            let delta =
-                (head_pos - self_pos).normalize() * (distance_to - wanted_distance).max(0.0);
-            let destination = self_pos + delta;
+        let self_pos = entity.pos.load();
+        let head_pos = head.get_entity().pos.load();
+        let distance_to = self_pos.squared_distance_to_vec(&head_pos).sqrt();
+        let wanted_distance = 2.0;
+        let delta = (head_pos - self_pos).normalize() * (distance_to - wanted_distance).max(0.0);
+        let destination = self_pos + delta;
 
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap()
-                .set_progress(NavigatorGoal::new(self_pos, destination, self.speed));
-        })
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress(NavigatorGoal::new(self_pos, destination, self.speed));
     }
 
     fn controls(&self) -> Controls {

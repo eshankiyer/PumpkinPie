@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::potion::Effect;
@@ -70,94 +70,83 @@ impl Default for AxolotlPlayDeadGoal {
 }
 
 impl Goal for AxolotlPlayDeadGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.ticks_remaining > 0 {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.ticks_remaining > 0 {
+            return false;
+        }
 
-            let mob_entity = mob.get_mob_entity();
-            if mob_entity.is_no_ai() {
-                return false;
-            }
-            let living = &mob_entity.living_entity;
+        let mob_entity = mob.get_mob_entity();
+        if mob_entity.is_no_ai() {
+            return false;
+        }
+        let living = &mob_entity.living_entity;
 
-            // Vanilla: `source.getEntity() != null || source.getDirectEntity() != null` -- only
-            // entities update `last_attacked_time`/`last_attacker_id` (environmental damage
-            // doesn't), so "attacked this tick" implies an attacker entity.
-            let age = living.entity.age.load(Relaxed);
-            if living.last_attacked_time.load(Relaxed) != age {
-                return false;
-            }
+        // Vanilla: `source.getEntity() != null || source.getDirectEntity() != null` -- only
+        // entities update `last_attacked_time`/`last_attacker_id` (environmental damage
+        // doesn't), so "attacked this tick" implies an attacker entity.
+        let age = living.entity.age.load(Relaxed);
+        if living.last_attacked_time.load(Relaxed) != age {
+            return false;
+        }
 
-            if !living.is_in_water() {
-                return false;
-            }
+        if !living.is_in_water() {
+            return false;
+        }
 
-            let health = living.health.load();
-            if health <= 0.0 {
-                return false;
-            }
+        let health = living.health.load();
+        if health <= 0.0 {
+            return false;
+        }
 
-            let mut rng = mob.get_random();
-            let last_damage = living.last_damage_taken.load();
-            should_trigger_from_rolls(
-                rng.random_range(0..3),
-                rng.random_range(0..3),
-                last_damage,
-                health,
-                living.get_max_health(),
-            )
-        })
+        let mut rng = mob.get_random();
+        let last_damage = living.last_damage_taken.load();
+        should_trigger_from_rolls(
+            rng.random_range(0..3),
+            rng.random_range(0..3),
+            last_damage,
+            health,
+            living.get_max_health(),
+        )
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.ticks_remaining > 0 })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.ticks_remaining > 0
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_remaining = TOTAL_PLAYDEAD_TICKS;
+    fn start(&mut self, mob: &dyn Mob) {
+        self.ticks_remaining = TOTAL_PLAYDEAD_TICKS;
 
-            let mob_entity = mob.get_mob_entity();
-            mob_entity.navigator.lock().unwrap().stop();
-            mob_entity
-                .living_entity
-                .not_targetable_as_enemy
-                .store(true, Relaxed);
+        let mob_entity = mob.get_mob_entity();
+        mob_entity.navigator.lock().unwrap().stop();
+        mob_entity
+            .living_entity
+            .not_targetable_as_enemy
+            .store(true, Relaxed);
 
-            // Vanilla `PlayDead.start`: `addEffect(new MobEffectInstance(REGENERATION, 200, 0))`.
-            mob_entity
-                .living_entity
-                .add_effect(Effect {
-                    effect_type: &StatusEffect::REGENERATION,
-                    duration: TOTAL_PLAYDEAD_TICKS,
-                    amplifier: 0,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                })
-                .await;
-        })
+        // Vanilla `PlayDead.start`: `addEffect(new MobEffectInstance(REGENERATION, 200, 0))`.
+        mob_entity.living_entity.add_effect(Effect {
+            effect_type: &StatusEffect::REGENERATION,
+            duration: TOTAL_PLAYDEAD_TICKS,
+            amplifier: 0,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+            blend: false,
+        });
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_remaining = 0;
-            mob.get_mob_entity()
-                .living_entity
-                .not_targetable_as_enemy
-                .store(false, Relaxed);
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.ticks_remaining = 0;
+        mob.get_mob_entity()
+            .living_entity
+            .not_targetable_as_enemy
+            .store(false, Relaxed);
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_remaining = (self.ticks_remaining - 1).max(0);
-            // Keep the axolotl from drifting or being pathed away while playing dead.
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.ticks_remaining = (self.ticks_remaining - 1).max(0);
+        // Keep the axolotl from drifting or being pathed away while playing dead.
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -1,9 +1,6 @@
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicI32, Ordering},
-    },
+use std::pin::sync::{
+    Arc,
+    atomic::{AtomicI32, Ordering},
 };
 
 use crossbeam::atomic::AtomicCell;
@@ -115,23 +112,19 @@ impl BlockEntity for MobSpawnerBlockEntity {
         self.position
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // For the block form, vanilla's `broadcastEvent` override is
-            // `level.blockEvent(pos, this, 1, 0)`; the shared core returns whether
-            // vanilla reached a `delay()` call site so the notification stays here.
-            if base_spawner_server_tick(
-                world,
-                self.position,
-                &self.delay,
-                self.config(),
-                self.entity_type.load(),
-            )
-            .await
-            {
-                world.add_synced_block_event(self.position, 1, 0).await;
-            }
-        })
+    fn tick(&self, world: &Arc<World>) {
+        // For the block form, vanilla's `broadcastEvent` override is
+        // `level.blockEvent(pos, this, 1, 0)`; the shared core returns whether
+        // vanilla reached a `delay()` call site so the notification stays here.
+        if base_spawner_server_tick(
+            world,
+            self.position,
+            &self.delay,
+            self.config(),
+            self.entity_type.load(),
+        ) {
+            world.add_synced_block_event(self.position, 1, 0);
+        }
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -197,13 +190,8 @@ impl BlockEntity for MobSpawnerBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.write_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_nbt(nbt);
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -258,7 +246,7 @@ fn roll_delay(delay: &AtomicI32, config: BaseSpawnerConfig) {
 /// (BaseSpawner.java:91, 149, 186); the caller emits the matching event-1
 /// notification. The delay reset itself happens here so both callers stay in
 /// lockstep with vanilla's ordering.
-pub(crate) async fn base_spawner_server_tick(
+pub(crate) fn base_spawner_server_tick(
     world: &Arc<World>,
     position: BlockPos,
     delay: &AtomicI32,
@@ -362,7 +350,7 @@ pub(crate) async fn base_spawner_server_tick(
         entity
             .get_entity()
             .set_rotation(rand::random::<f32>() * 360.0, 0.0);
-        world.spawn_entity(entity.clone()).await;
+        world.spawn_entity(entity.clone());
         // `BaseSpawner.serverTick` (`BaseSpawner.java:169-177`) invokes `Mob.spawnAnim` after
         // the entity has been added to the level.
         if let Some(mob) = entity.get_mob() {

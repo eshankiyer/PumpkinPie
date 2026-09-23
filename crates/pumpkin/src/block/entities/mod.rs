@@ -75,16 +75,11 @@ pub use pumpkin_world::block::entities::PropertyDelegate;
 
 //TODO: We need a mark_dirty for chests
 pub trait BlockEntity: Any + Send + Sync {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+    fn write_nbt(&self, nbt: &mut NbtCompound);
     fn from_nbt(nbt: &NbtCompound, position: BlockPos) -> Self
     where
         Self: Sized;
-    fn tick<'a>(&'a self, _world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn tick(&self, _world: &Arc<World>) {}
     fn resource_location(&self) -> &'static str;
     fn get_position(&self) -> BlockPos;
 
@@ -103,18 +98,13 @@ pub trait BlockEntity: Any + Send + Sync {
         false
     }
 
-    fn write_internal<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_string("id", self.resource_location().to_string());
-            let position = self.get_position();
-            nbt.put_int("x", position.0.x);
-            nbt.put_int("y", position.0.y);
-            nbt.put_int("z", position.0.z);
-            self.write_nbt(nbt).await;
-        })
+    fn write_internal(&self, nbt: &mut NbtCompound) {
+        nbt.put_string("id", self.resource_location().to_string());
+        let position = self.get_position();
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        self.write_nbt(nbt);
     }
     fn get_id(&self) -> u32 {
         let name = self
@@ -166,7 +156,7 @@ pub trait BlockEntity: Any + Send + Sync {
         Box::pin(async move {
             if let Some(inventory) = self.get_inventory() {
                 // Assuming scatter_inventory is an async method on World
-                world.scatter_inventory(&position, &inventory).await;
+                world.scatter_inventory(&position, &inventory);
             }
         })
     }
@@ -521,7 +511,7 @@ fn can_apply_custom_block_entity_data(
 /// Collects the component used by the beehive creative-break item round trip. This is the live
 /// `collectImplicitComponents` path (`BeehiveBlockEntity.java:317-321`).
 #[expect(clippy::too_many_lines)]
-pub(crate) async fn collect_components_from_block_entity(
+pub(crate) fn collect_components_from_block_entity(
     entity: &dyn BlockEntity,
 ) -> Vec<(
     pumpkin_data::data_component::DataComponent,
@@ -534,7 +524,12 @@ pub(crate) async fn collect_components_from_block_entity(
         // `EnchantingTableBlockEntity.collectImplicitComponents` exports CUSTOM_NAME
         // (`EnchantingTableBlockEntity.java:128-132`); the live caller is the creative
         // include-data pick-item path (`ServerGamePacketListenerImpl.java:715-723`).
-        let Some(name) = enchanting_table.custom_name.lock().await.clone() else {
+        let Some(name) = enchanting_table
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
             return Vec::new();
         };
         let name = serde_json::from_str::<pumpkin_util::text::TextComponent>(&name)
@@ -551,7 +546,11 @@ pub(crate) async fn collect_components_from_block_entity(
         // components after `removeComponentsFromTag` removes them from the raw tag
         // (`SkullBlockEntity.java:97-103`).
         let mut components = Vec::new();
-        let profile_value = skull.profile.lock().await.clone();
+        let profile_value = skull
+            .profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(profile) = profile_value {
             components.push((
                 pumpkin_data::data_component::DataComponent::Profile,
@@ -559,14 +558,22 @@ pub(crate) async fn collect_components_from_block_entity(
                     .map(|profile| Box::new(profile).to_dyn()),
             ));
         }
-        let note_block_sound_value = skull.note_block_sound.lock().await.clone();
+        let note_block_sound_value = skull
+            .note_block_sound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(sound) = note_block_sound_value {
             components.push((
                 pumpkin_data::data_component::DataComponent::NoteBlockSound,
                 Some(Box::new(NoteBlockSoundImpl { sound }).to_dyn()),
             ));
         }
-        let custom_name_value = skull.custom_name.lock().await.clone();
+        let custom_name_value = skull
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(name) = custom_name_value {
             let name = serde_json::from_str::<pumpkin_util::text::TextComponent>(&name)
                 .unwrap_or_else(|_| pumpkin_util::text::TextComponent::text(name));
@@ -586,7 +593,9 @@ pub(crate) async fn collect_components_from_block_entity(
         // (`CampfireBlockEntity.java:212-215`) for the creative include-data pick path.
         let mut items = Vec::new();
         for (slot, item) in campfire.items.iter().enumerate() {
-            let item = item.lock().await;
+            let item = item
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if !item.is_empty() {
                 items.push((slot as u8, item.clone()));
             }
@@ -604,14 +613,17 @@ pub(crate) async fn collect_components_from_block_entity(
         // `DecoratedPotBlockEntity.collectImplicitComponents` exports POT_DECORATIONS and
         // CONTAINER (`DecoratedPotBlockEntity.java:112-116`); the live collector is used by
         // the creative include-data pick-item path (`ServerGamePacketListenerImpl.java:699-709`).
-        return pot.collect_implicit_components().await;
+        return pot.collect_implicit_components();
     }
 
     if let Some(shulker) = entity
         .as_any()
         .downcast_ref::<shulker_box::ShulkerBoxBlockEntity>()
     {
-        let items = shulker.items.read().await;
+        let items = shulker
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let container = ContainerImpl {
             items: items
                 .iter()
@@ -655,7 +667,7 @@ pub(crate) async fn collect_components_from_block_entity(
     };
     vec![(
         pumpkin_data::data_component::DataComponent::Bees,
-        Some(Box::new(hive.bees_component().await).to_dyn()),
+        Some(Box::new(hive.bees_component()).to_dyn()),
     )]
 }
 
@@ -663,14 +675,14 @@ pub(crate) async fn collect_components_from_block_entity(
 /// `saveCustomOnly`, removes fields exported as implicit components, and stores the remainder as
 /// block-entity data (`ServerGamePacketListenerImpl.java:715-724`; `BlockEntity.java:141-151,
 /// 302-314`).
-pub(crate) async fn block_entity_data_component(
+pub(crate) fn block_entity_data_component(
     entity: &dyn BlockEntity,
 ) -> Option<(
     pumpkin_data::data_component::DataComponent,
     Option<Box<dyn DataComponentImpl>>,
 )> {
     let mut nbt = NbtCompound::new();
-    entity.write_nbt(&mut nbt).await;
+    entity.write_nbt(&mut nbt);
 
     // These fields are represented by the implicit components collected above. The removals
     // match the concrete vanilla overrides (`BeehiveBlockEntity.java:317-327`;
@@ -1017,12 +1029,10 @@ mod test {
     async fn furnace_contents_survive_a_chunk_round_trip() {
         let position = BlockPos::new(0, 100, 0);
         let furnace = Arc::new(FurnaceBlockEntity::new(position));
-        furnace
-            .set_stack(0, ItemStack::new(5, &Item::DIAMOND))
-            .await;
+        furnace.set_stack(0, ItemStack::new(5, &Item::DIAMOND));
 
         let mut nbt = NbtCompound::new();
-        furnace.write_internal(&mut nbt).await;
+        furnace.write_internal(&mut nbt);
 
         let inventory = block_entity_from_nbt(&nbt).and_then(BlockEntity::get_inventory);
         assert!(
@@ -1031,7 +1041,7 @@ mod test {
         );
 
         if let Some(inventory) = inventory {
-            let stack = inventory.get_stack(0).await;
+            let stack = inventory.get_stack(0);
             assert_eq!(stack.get_item().id, Item::DIAMOND.id);
             assert_eq!(stack.item_count, 5);
         }
@@ -1084,7 +1094,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn placed_block_entity_data_component_is_applied() {
+    fn placed_block_entity_data_component_is_applied() {
         // `BlockItem.updateCustomBlockEntityTag` loads the typed payload into the freshly
         // placed entity before the remaining placement callbacks (`BlockItem.java:76-80,
         // 148-170`).
@@ -1110,19 +1120,19 @@ mod test {
         let inventory = applied
             .get_inventory()
             .expect("chest block entity should expose its inventory");
-        let restored = inventory.get_stack(0).await;
+        let restored = inventory.get_stack(0);
         assert_eq!(restored.item.id, Item::DIAMOND.id);
         assert_eq!(restored.item_count, 5);
     }
 
     #[tokio::test]
-    async fn creative_pick_preserves_custom_block_entity_data() {
+    fn creative_pick_preserves_custom_block_entity_data() {
         // `addBlockDataToItem` stores the result of `saveCustomOnly` as block-entity data
         // (`ServerGamePacketListenerImpl.java:715-724`; `BlockEntity.java:141-151`).
         let entity = TestBlockBlockEntity::new(BlockPos::new(3, 64, -2));
-        entity.set_message("keep me".to_string()).await;
+        entity.set_message("keep me".to_string());
 
-        let Some((_, Some(component))) = super::block_entity_data_component(&entity).await else {
+        let Some((_, Some(component))) = super::block_entity_data_component(&entity) else {
             panic!("custom block-entity data should be serialized for pick-block");
         };
         let NbtTag::Compound(data) = component.write_data() else {
@@ -1132,7 +1142,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn placed_shelf_container_component_is_applied() {
+    fn placed_shelf_container_component_is_applied() {
         // `ShelfBlockEntity.applyImplicitComponents` copies `DataComponents.CONTAINER` into the
         // shelf slots (`ShelfBlockEntity.java:104-107`).
         let position = BlockPos::new(3, 64, -2);
@@ -1152,22 +1162,24 @@ mod test {
         let inventory = applied
             .get_inventory()
             .expect("shelf should expose its inventory");
-        assert!(inventory.get_stack(0).await.is_empty());
-        let slot = inventory.get_stack(1).await;
+        assert!(inventory.get_stack(0).is_empty());
+        let slot = inventory.get_stack(1);
         assert_eq!(slot.get_item().id, Item::DIAMOND.id);
         assert_eq!(slot.item_count, 3);
-        assert!(inventory.get_stack(2).await.is_empty());
+        assert!(inventory.get_stack(2).is_empty());
     }
 
     #[tokio::test]
-    async fn campfire_container_component_round_trips_without_raw_items() {
+    fn campfire_container_component_round_trips_without_raw_items() {
         // `CampfireBlockEntity` collects CONTAINER, applies it to its slots, and removes Items
         // from block-entity data (`CampfireBlockEntity.java:207-220`).
         let position = BlockPos::new(3, 64, -2);
         let campfire = super::campfire::CampfireBlockEntity::new(position);
-        *campfire.items[1].lock().await = ItemStack::new(1, &Item::BEEF);
+        *campfire.items[1]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ItemStack::new(1, &Item::BEEF);
 
-        let components = collect_components_from_block_entity(&campfire).await;
+        let components = collect_components_from_block_entity(&campfire);
         let container = components
             .iter()
             .find(|(id, _)| *id == DataComponent::Container)
@@ -1188,11 +1200,10 @@ mod test {
         )
         .expect("campfire container should rebuild the placed entity");
         let placed_inventory = placed.get_inventory().expect("placed campfire inventory");
-        let placed_item = placed_inventory.get_stack(1).await;
+        let placed_item = placed_inventory.get_stack(1);
         assert_eq!(placed_item.get_item().id, Item::BEEF.id);
 
-        let Some((_, Some(block_entity_data))) = block_entity_data_component(&campfire).await
-        else {
+        let Some((_, Some(block_entity_data))) = block_entity_data_component(&campfire) else {
             panic!("campfire cooking data should remain after Items is removed");
         };
         let NbtTag::Compound(block_entity_data) = block_entity_data.write_data() else {
@@ -1203,16 +1214,14 @@ mod test {
     }
 
     #[tokio::test]
-    async fn shulker_container_component_round_trips_without_raw_items() {
+    fn shulker_container_component_round_trips_without_raw_items() {
         // `BaseContainerBlockEntity.collectImplicitComponents`/`applyImplicitComponents`
         // (`BaseContainerBlockEntity.java:149-165`) carry shulker contents in CONTAINER.
         let position = BlockPos::new(3, 64, -2);
         let shulker = super::shulker_box::ShulkerBoxBlockEntity::new(position);
-        shulker
-            .set_stack(3, ItemStack::new(5, &Item::DIAMOND))
-            .await;
+        shulker.set_stack(3, ItemStack::new(5, &Item::DIAMOND));
 
-        let components = collect_components_from_block_entity(&shulker).await;
+        let components = collect_components_from_block_entity(&shulker);
         let container = components
             .iter()
             .find(|(id, _)| *id == DataComponent::Container)
@@ -1237,14 +1246,13 @@ mod test {
         let placed_item = placed
             .get_inventory()
             .expect("placed shulker inventory")
-            .get_stack(3)
-            .await;
+            .get_stack(3);
         assert_eq!(placed_item.get_item().id, Item::DIAMOND.id);
         assert_eq!(placed_item.item_count, 5);
     }
 
     #[tokio::test]
-    async fn placed_beehive_bees_component_is_applied() {
+    fn placed_beehive_bees_component_is_applied() {
         // `BeehiveBlockEntity.applyImplicitComponents` reads `DataComponents.BEES`
         // (`BeehiveBlockEntity.java:309-315`).
         let position = BlockPos::new(3, 64, -2);
@@ -1271,21 +1279,31 @@ mod test {
             .as_any()
             .downcast_ref::<BeehiveBlockEntity>()
             .expect("component application should preserve the hive type");
-        assert_eq!(hive.occupant_count().await, 1);
+        assert_eq!(hive.occupant_count(), 1);
     }
 
     #[tokio::test]
-    async fn skull_implicit_components_are_collected() {
+    fn skull_implicit_components_are_collected() {
         // `SkullBlockEntity.collectImplicitComponents` exports the three modeled components
         // (`SkullBlockEntity.java:90-95`).
         let entity = SkullBlockEntity::new(BlockPos::new(3, 64, -2));
         let mut profile = NbtCompound::new();
         profile.put_string("name", "Steve".to_string());
-        *entity.profile.lock().await = Some(profile);
-        *entity.note_block_sound.lock().await = Some("minecraft:block.note_block.harp".to_string());
-        *entity.custom_name.lock().await = Some("Skull".to_string());
+        *entity
+            .profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(profile);
+        *entity
+            .note_block_sound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some("minecraft:block.note_block.harp".to_string());
+        *entity
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some("Skull".to_string());
 
-        let components = collect_components_from_block_entity(&entity).await;
+        let components = collect_components_from_block_entity(&entity);
 
         assert_eq!(components.len(), 3);
         assert!(
@@ -1306,19 +1324,26 @@ mod test {
     }
 
     #[tokio::test]
-    async fn decorated_pot_implicit_components_are_collected() {
+    fn decorated_pot_implicit_components_are_collected() {
         // `DecoratedPotBlockEntity.collectImplicitComponents` exports the decoration and
         // one-slot container components (`DecoratedPotBlockEntity.java:112-116`).
         let entity = DecoratedPotBlockEntity::new(BlockPos::new(3, 64, -2));
-        *entity.sherds.lock().await = Some(vec![
+        *entity
+            .sherds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(vec![
             NbtTag::String("minecraft:brick".into()),
             NbtTag::String("minecraft:brick".into()),
             NbtTag::String("minecraft:brick".into()),
             NbtTag::String("minecraft:brick".into()),
         ]);
-        *entity.item.lock().await = Some(ItemStack::new(2, &Item::DIAMOND));
+        *entity
+            .item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(ItemStack::new(2, &Item::DIAMOND));
 
-        let components = collect_components_from_block_entity(&entity).await;
+        let components = collect_components_from_block_entity(&entity);
 
         assert_eq!(components.len(), 2);
         let decorations = components
@@ -1358,21 +1383,23 @@ mod test {
         );
         let placed_item = placed
             .get_item()
-            .await
             .expect("pot item should round-trip through the container component");
         assert_eq!(placed_item.get_item().id, Item::DIAMOND.id);
         assert_eq!(placed_item.item_count, 2);
     }
 
     #[tokio::test]
-    async fn enchanting_table_custom_name_components_round_trip() {
+    fn enchanting_table_custom_name_components_round_trip() {
         // EnchantingTableBlockEntity.collectImplicitComponents and applyImplicitComponents carry
         // CUSTOM_NAME (EnchantingTableBlockEntity.java:123-132).
         let position = BlockPos::new(3, 64, -2);
         let entity = super::enchanting_table::EnchantingTableBlockEntity::new(position);
-        *entity.custom_name.lock().await = Some("Arcane".to_string());
+        *entity
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some("Arcane".to_string());
 
-        let components = collect_components_from_block_entity(&entity).await;
+        let components = collect_components_from_block_entity(&entity);
         assert!(
             components
                 .iter()
@@ -1396,13 +1423,17 @@ mod test {
             .downcast_ref::<super::enchanting_table::EnchantingTableBlockEntity>()
             .expect("component application should preserve the enchanting table type");
         assert_eq!(
-            applied.custom_name.lock().await.as_deref(),
+            applied
+                .custom_name
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref(),
             Some("{\"text\":\"Placed\"}")
         );
     }
 
     #[tokio::test]
-    async fn placed_skull_profile_component_is_applied() {
+    fn placed_skull_profile_component_is_applied() {
         // `SkullBlockEntity.applyImplicitComponents` loads PROFILE into the placed entity
         // (`SkullBlockEntity.java:82-87`).
         let position = BlockPos::new(3, 64, -2);
@@ -1428,7 +1459,7 @@ mod test {
             skull
                 .profile
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .as_ref()
                 .and_then(|profile| profile.get_string("name")),
             Some("Steve")

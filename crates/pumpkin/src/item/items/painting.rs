@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -127,89 +126,89 @@ fn painting_survives(
 impl ItemBehaviour for PaintingItem {
     /// `HangingEntityItem.useOn` (`HangingEntityItem.java:34-77`) with
     /// `Painting.create` (`Painting.java:93-120`).
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // `HangingEntityItem.mayPlace` (`HangingEntityItem.java:79-81`) rejects the
-            // vertical faces that item frames accept.
-            if !face.is_horizontal() {
-                return;
-            }
-            let anchor = BlockPos(location.0 + face.to_offset());
-            let world = player.world();
-            if !world.is_in_height_limit(anchor.0.y) {
-                return;
-            }
-            // `HangingEntityItem.mayPlace` checks `Player.mayUseItemAt`
-            // (`HangingEntityItem.java:79-81`).
-            if !player.may_use_item_at(&anchor, face, item).await {
-                return;
-            }
+        _block: &Block,
+        _server: &Server,
+    ) {
+        // `HangingEntityItem.mayPlace` (`HangingEntityItem.java:79-81`) rejects the
+        // vertical faces that item frames accept.
+        if !face.is_horizontal() {
+            return;
+        }
+        let anchor = BlockPos(location.0 + face.to_offset());
+        let world = player.world();
+        if !world.is_in_height_limit(anchor.0.y) {
+            return;
+        }
+        // `HangingEntityItem.mayPlace` checks `Player.mayUseItemAt`
+        // (`HangingEntityItem.java:79-81`).
+        if !player.may_use_item_at(&anchor, face, item) {
+            return;
+        }
 
-            let border = world.worldborder.lock().await;
-            // `Painting.create`: keep the placeable variants that survive here, then the
-            // largest of those by area, then pick one at random.
-            let mut candidates: Vec<&PaintingVariantInfo> = placeable_variants()
-                .filter(|variant| {
-                    painting_survives(
-                        &world,
-                        anchor,
-                        face,
-                        variant.width_quads,
-                        variant.height_quads,
-                        &border,
-                    )
-                })
-                .collect();
-            let Some(largest_area) = candidates
-                .iter()
-                .map(|variant| variant.width_quads * variant.height_quads)
-                .max()
-            else {
-                return;
-            };
-            candidates.retain(|variant| variant.width_quads * variant.height_quads == largest_area);
-            drop(border);
-            let Some(chosen) = candidates.choose(&mut rand::rng()) else {
-                return;
-            };
-
-            let entity = Entity::new(
-                world.clone(),
-                Vector3::new(
-                    f64::from(anchor.0.x),
-                    f64::from(anchor.0.y),
-                    f64::from(anchor.0.z),
-                ),
-                &EntityType::PAINTING,
-            );
-            let painting = PaintingEntity::new(entity);
-            painting.set_placement(anchor, face, chosen.name);
-
-            // `Painting.playPlacementSound` (`Painting.java:181-184`).
-            let position = painting.get_entity().pos.load();
-            world.play_sound(Sound::EntityPaintingPlace, SoundCategory::Blocks, &position);
-            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                emit_game_event(
+        let border = world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // `Painting.create`: keep the placeable variants that survive here, then the
+        // largest of those by area, then pick one at random.
+        let mut candidates: Vec<&PaintingVariantInfo> = placeable_variants()
+            .filter(|variant| {
+                painting_survives(
                     &world,
-                    GameEvent::EntityPlace,
-                    position,
-                    GameEventContext::of_entity(player_arc),
+                    anchor,
+                    face,
+                    variant.width_quads,
+                    variant.height_quads,
+                    &border,
                 )
-                .await;
-            }
+            })
+            .collect();
+        let Some(largest_area) = candidates
+            .iter()
+            .map(|variant| variant.width_quads * variant.height_quads)
+            .max()
+        else {
+            return;
+        };
+        candidates.retain(|variant| variant.width_quads * variant.height_quads == largest_area);
+        drop(border);
+        let Some(chosen) = candidates.choose(&mut rand::rng()) else {
+            return;
+        };
 
-            world.spawn_entity(Arc::new(painting)).await;
-            item.decrement_unless_creative(player.gamemode.load(), 1);
-        })
+        let entity = Entity::new(
+            world.clone(),
+            Vector3::new(
+                f64::from(anchor.0.x),
+                f64::from(anchor.0.y),
+                f64::from(anchor.0.z),
+            ),
+            &EntityType::PAINTING,
+        );
+        let painting = PaintingEntity::new(entity);
+        painting.set_placement(anchor, face, chosen.name);
+
+        // `Painting.playPlacementSound` (`Painting.java:181-184`).
+        let position = painting.get_entity().pos.load();
+        world.play_sound(Sound::EntityPaintingPlace, SoundCategory::Blocks, &position);
+        if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+            emit_game_event(
+                &world,
+                GameEvent::EntityPlace,
+                position,
+                GameEventContext::of_entity(player_arc),
+            );
+        }
+
+        world.spawn_entity(Arc::new(painting));
+        item.decrement_unless_creative(player.gamemode.load(), 1);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

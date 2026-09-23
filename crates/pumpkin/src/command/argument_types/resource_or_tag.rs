@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::pin::Pin;
 
 use pumpkin_data::structures::StructureSet;
 use pumpkin_data::tag::{self, RegistryKey};
@@ -137,12 +136,12 @@ impl ArgumentType for ResourceOrTagKeyArgument {
         ResourceOrTag::from_string_reader(reader)
     }
 
-    fn list_suggestions<'a>(
-        &'a self,
-        _context: &'a CommandContext,
+    fn list_suggestions(
+        &self,
+        _context: &CommandContext,
         builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send + 'a>> {
-        Box::pin(async move { suggest_for_registry(&self.0, builder) })
+    ) -> Suggestions {
+        suggest_for_registry(&self.0, builder)
     }
 
     fn client_side_parser(&'_ self) -> JavaClientArgumentType {
@@ -263,12 +262,12 @@ impl ArgumentType for ResourceOrTagArgument {
         Ok(value)
     }
 
-    fn list_suggestions<'a>(
-        &'a self,
-        _context: &'a CommandContext,
+    fn list_suggestions(
+        &self,
+        _context: &CommandContext,
         builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send + 'a>> {
-        Box::pin(async move { suggest_for_registry(&self.0, builder) })
+    ) -> Suggestions {
+        suggest_for_registry(&self.0, builder)
     }
 
     fn client_side_parser(&'_ self) -> JavaClientArgumentType {

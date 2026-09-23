@@ -15,17 +15,17 @@ impl JavaClient {
                 player.world().clone().respawn_player(player, false).await;
 
                 {
-                    let screen_handler = player.current_screen_handler.lock().await;
-                    let mut screen_handler = screen_handler.lock().await;
-                    screen_handler.sync_state().await;
+                    let screen_handler = player.current_screen_handler.lock();
+                    let mut screen_handler = screen_handler.lock();
+                    screen_handler.sync_state();
                 };
 
                 // Restore abilities based on gamemode after respawn
                 {
-                    let mut abilities = player.abilities.lock().await;
+                    let mut abilities = player.abilities.lock();
                     abilities.set_for_gamemode(player.gamemode.load());
                 };
-                player.send_abilities_update().await;
+                player.send_abilities_update();
             }
             SClientCommand::REQUEST_STATS => {
                 // Request stats
@@ -35,8 +35,7 @@ impl JavaClient {
                 self.send_game_rule_values(player).await;
             }
             _ => {
-                self.kick(TextComponent::text("Invalid client status"))
-                    .await;
+                self.kick(TextComponent::text("Invalid client status"));
             }
         }
     }

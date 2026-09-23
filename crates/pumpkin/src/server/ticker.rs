@@ -32,13 +32,13 @@ impl Ticker {
 
             if manager.is_sprinting() {
                 manager.start_sprint_tick_work();
-                server.tick().await;
+                server.tick();
 
                 if manager.end_sprint_tick_work() {
                     manager.finish_tick_sprint(server);
                 }
             } else {
-                server.tick().await;
+                server.tick();
             }
 
             let tick_duration_nanos = tick_start_time.elapsed().as_nanos() as i64;
@@ -52,7 +52,7 @@ impl Ticker {
                 )
                 .await;
 
-            server.update_tick_times(tick_duration_nanos).await;
+            server.update_tick_times(tick_duration_nanos);
 
             let tick_interval = if manager.is_sprinting() {
                 Duration::ZERO

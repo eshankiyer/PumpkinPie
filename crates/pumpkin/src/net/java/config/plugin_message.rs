@@ -8,7 +8,7 @@ impl JavaClient {
             debug!("Got a client brand");
             match str::from_utf8(plugin_message.data) {
                 Ok(brand) => self.brand.store(Arc::new(Some(brand.to_string()))),
-                Err(e) => self.kick(TextComponent::text(e.to_string())).await,
+                Err(e) => self.kick(TextComponent::text(e.to_string())),
             }
         }
     }

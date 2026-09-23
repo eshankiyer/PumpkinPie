@@ -12,7 +12,7 @@ use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -177,7 +177,7 @@ impl PufferfishEntity {
         })
     }
 
-    async fn sting(&self, target: &dyn EntityBase) {
+    fn sting(&self, target: &dyn EntityBase) {
         let puff_state = self.puff_state.load(Relaxed);
         if puff_state == 0 {
             return;
@@ -187,30 +187,26 @@ impl PufferfishEntity {
         let world = entity.world.load();
         let pos = entity.pos.load();
 
-        let damaged = target
-            .damage_with_context(
-                target,
-                sting_damage(puff_state),
-                DamageType::MOB_ATTACK,
-                Some(pos),
-                Some(self as &dyn EntityBase),
-                Some(self as &dyn EntityBase),
-            )
-            .await;
+        let damaged = target.damage_with_context(
+            target,
+            sting_damage(puff_state),
+            DamageType::MOB_ATTACK,
+            Some(pos),
+            Some(self as &dyn EntityBase),
+            Some(self as &dyn EntityBase),
+        );
 
         if damaged {
             if let Some(living) = target.get_living_entity() {
-                living
-                    .add_effect(Effect {
-                        effect_type: &StatusEffect::POISON,
-                        duration: sting_poison_duration(puff_state),
-                        amplifier: 0,
-                        ambient: false,
-                        show_particles: true,
-                        show_icon: true,
-                        blend: false,
-                    })
-                    .await;
+                living.add_effect(Effect {
+                    effect_type: &StatusEffect::POISON,
+                    duration: sting_poison_duration(puff_state),
+                    amplifier: 0,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                });
             }
             world.play_sound(Sound::EntityPufferFishSting, SoundCategory::Neutral, &pos);
         }
@@ -219,7 +215,7 @@ impl PufferfishEntity {
     /// Pufferfish.java `aiStep`: contact-damages non-player `Mob`s within `boundingBox.inflate(0.3)`
     /// while puffed. Players are handled separately via `mob_player_collision`, which mirrors
     /// vanilla's `playerTouch` (invoked by the generic entity/player collision check).
-    async fn sting_nearby_mobs(&self) {
+    fn sting_nearby_mobs(&self) {
         if self.puff_state.load(Relaxed) == 0 {
             return;
         }
@@ -242,31 +238,21 @@ impl PufferfishEntity {
             .collect();
 
         for target in nearby {
-            self.sting(target.as_ref()).await;
+            self.sting(target.as_ref());
         }
     }
 }
 
 impl NBTStorage for PufferfishEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("PuffState", i32::from(self.puff_state.load(Relaxed)));
-        })
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_int("PuffState", i32::from(self.puff_state.load(Relaxed)));
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            let state = nbt.get_int("PuffState").unwrap_or(0).clamp(0, 2) as u8;
-            self.puff_state.store(state, Relaxed);
-        })
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        let state = nbt.get_int("PuffState").unwrap_or(0).clamp(0, 2) as u8;
+        self.puff_state.store(state, Relaxed);
     }
 }
 
@@ -275,54 +261,48 @@ impl Mob for PufferfishEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.send_puff_state(self.puff_state.load(Relaxed));
-        })
+    fn mob_init_data_tracker(&self) {
+        self.send_puff_state(self.puff_state.load(Relaxed));
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.mob_entity.living_entity.dead.load(Ordering::Relaxed) {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self.mob_entity.living_entity.dead.load(Ordering::Relaxed) {
+            return;
+        }
 
-            let threat_present = self.threat_nearby();
-            let (new_state, new_inflate, new_deflate, blow_up, blow_out) = advance_puff_state(
-                threat_present,
-                self.puff_state.load(Relaxed),
-                self.inflate_counter.load(Relaxed),
-                self.deflate_timer.load(Relaxed),
-            );
+        let threat_present = self.threat_nearby();
+        let (new_state, new_inflate, new_deflate, blow_up, blow_out) = advance_puff_state(
+            threat_present,
+            self.puff_state.load(Relaxed),
+            self.inflate_counter.load(Relaxed),
+            self.deflate_timer.load(Relaxed),
+        );
 
-            self.inflate_counter.store(new_inflate, Relaxed);
-            self.deflate_timer.store(new_deflate, Relaxed);
+        self.inflate_counter.store(new_inflate, Relaxed);
+        self.deflate_timer.store(new_deflate, Relaxed);
 
-            if new_state != self.puff_state.load(Relaxed) {
-                self.puff_state.store(new_state, Relaxed);
-                self.send_puff_state(new_state);
-            }
+        if new_state != self.puff_state.load(Relaxed) {
+            self.puff_state.store(new_state, Relaxed);
+            self.send_puff_state(new_state);
+        }
 
-            if blow_up || blow_out {
-                let entity = &self.mob_entity.living_entity.entity;
-                let world = entity.world.load();
-                let pos = entity.pos.load();
-                let sound = if blow_up {
-                    Sound::EntityPufferFishBlowUp
-                } else {
-                    Sound::EntityPufferFishBlowOut
-                };
-                world.play_sound(sound, SoundCategory::Neutral, &pos);
-            }
+        if blow_up || blow_out {
+            let entity = &self.mob_entity.living_entity.entity;
+            let world = entity.world.load();
+            let pos = entity.pos.load();
+            let sound = if blow_up {
+                Sound::EntityPufferFishBlowUp
+            } else {
+                Sound::EntityPufferFishBlowOut
+            };
+            world.play_sound(sound, SoundCategory::Neutral, &pos);
+        }
 
-            self.sting_nearby_mobs().await;
-        })
+        self.sting_nearby_mobs();
     }
 
-    fn mob_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.sting(&**player).await;
-        })
+    fn mob_player_collision(&self, player: &Arc<Player>) {
+        self.sting(&**player);
     }
 }
 

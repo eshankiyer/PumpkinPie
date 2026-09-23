@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+        Entity, EntityBase, NBTStorage,
         projectile::{ProjectileHit, ThrownItemEntity},
     },
     server::Server,
@@ -152,68 +152,56 @@ impl WitherSkullEntity {
 }
 
 impl NBTStorage for WitherSkullEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            nbt.put_bool("dangerous", self.is_dangerous());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("dangerous", self.is_dangerous());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.set_dangerous(nbt.get_bool("dangerous").unwrap_or(false));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.set_dangerous(nbt.get_bool("dangerous").unwrap_or(false));
     }
 }
 
 impl EntityBase for WitherSkullEntity {
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.get_entity().send_meta_data(
-                &[Metadata::new(
-                    tracked_data::wither_skull::DATA_DANGEROUS,
-                    self.is_dangerous(),
-                )],
-                None,
-            );
-        })
+    fn init_data_tracker(&self) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::wither_skull::DATA_DANGEROUS,
+                self.is_dangerous(),
+            )],
+            None,
+        );
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `AbstractHurtingProjectile.applyInertia`
-            // (`AbstractHurtingProjectile.java:102-127`): v' = (v + normalize(v) *
-            // accelerationPower) * inertia. `WitherSkull.getInertia`
-            // (`WitherSkull.java:41-44`) overrides the base 0.95F with 0.73F while the
-            // skull is `dangerous`; water always uses the liquid inertia 0.8F
-            // (`AbstractHurtingProjectile.java:159-161`), which the dangerous override
-            // does not touch.
-            let entity = self.get_entity();
-            let velocity = entity.velocity.load();
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        // `AbstractHurtingProjectile.applyInertia`
+        // (`AbstractHurtingProjectile.java:102-127`): v' = (v + normalize(v) *
+        // accelerationPower) * inertia. `WitherSkull.getInertia`
+        // (`WitherSkull.java:41-44`) overrides the base 0.95F with 0.73F while the
+        // skull is `dangerous`; water always uses the liquid inertia 0.8F
+        // (`AbstractHurtingProjectile.java:159-161`), which the dangerous override
+        // does not touch.
+        let entity = self.get_entity();
+        let velocity = entity.velocity.load();
 
-            let inertia = if entity.touching_water.load(Ordering::Relaxed) {
-                WATER_INERTIA
-            } else if self.is_dangerous() {
-                DANGEROUS_INERTIA
-            } else {
-                AIR_INERTIA
-            };
+        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+            WATER_INERTIA
+        } else if self.is_dangerous() {
+            DANGEROUS_INERTIA
+        } else {
+            AIR_INERTIA
+        };
 
-            // `Vec3::normalize()` already returns a zero vector for a zero-length input, so
-            // this needs no separate near-zero-speed guard - vanilla applies the inertia
-            // multiply unconditionally, even when velocity is (near) zero.
-            let norm = velocity.normalize();
-            let velocity = norm
-                .multiply(ACCELERATION_POWER, ACCELERATION_POWER, ACCELERATION_POWER)
-                .add(&velocity)
-                .multiply(inertia, inertia, inertia);
-            entity.velocity.store(velocity);
+        // `Vec3::normalize()` already returns a zero vector for a zero-length input, so
+        // this needs no separate near-zero-speed guard - vanilla applies the inertia
+        // multiply unconditionally, even when velocity is (near) zero.
+        let norm = velocity.normalize();
+        let velocity = norm
+            .multiply(ACCELERATION_POWER, ACCELERATION_POWER, ACCELERATION_POWER)
+            .add(&velocity)
+            .multiply(inertia, inertia, inertia);
+        entity.velocity.store(velocity);
 
-            self.thrown.process_tick(caller, server).await;
-        })
+        self.thrown.process_tick(caller, server);
     }
 
     fn get_entity(&self) -> &Entity {
@@ -232,69 +220,61 @@ impl EntityBase for WitherSkullEntity {
         self
     }
 
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let world = self.get_entity().world.load();
+    fn on_hit(&self, hit: ProjectileHit) {
+        let world = self.get_entity().world.load();
 
-            if let ProjectileHit::Entity { ref entity, .. } = hit {
-                let owner = self
-                    .thrown
-                    .owner_id
-                    .and_then(|id| world.get_entity_by_id(id));
-                let owner_living = owner.as_ref().and_then(|o| o.get_living_entity());
+        if let ProjectileHit::Entity { ref entity, .. } = hit {
+            let owner = self
+                .thrown
+                .owner_id
+                .and_then(|id| world.get_entity_by_id(id));
+            let owner_living = owner.as_ref().and_then(|o| o.get_living_entity());
 
-                let was_hurt = if let Some(owner_living) = owner_living {
-                    let hurt = entity
-                        .damage(self, OWNER_DAMAGE, DamageType::WITHER_SKULL)
-                        .await;
-                    if hurt && !entity.get_entity().is_alive() {
-                        owner_living.heal(OWNER_HEAL_ON_KILL);
+            let was_hurt = if let Some(owner_living) = owner_living {
+                let hurt = entity.damage(self, OWNER_DAMAGE, DamageType::WITHER_SKULL);
+                if hurt && !entity.get_entity().is_alive() {
+                    owner_living.heal(OWNER_HEAL_ON_KILL);
+                }
+                hurt
+            } else {
+                entity.damage(self, NO_OWNER_DAMAGE, DamageType::MAGIC)
+            };
+
+            if was_hurt && let Some(living) = entity.get_living_entity() {
+                let difficulty = world.level_info.load().difficulty;
+                let duration = wither_duration_ticks(difficulty);
+                if duration > 0 {
+                    let effect = Effect {
+                        effect_type: &StatusEffect::WITHER,
+                        duration,
+                        amplifier: WITHER_AMPLIFIER,
+                        ambient: false,
+                        show_particles: true,
+                        show_icon: true,
+                        blend: true,
+                    };
+                    if let Some(player) = entity.get_player() {
+                        player.send_effect(effect.clone());
                     }
-                    hurt
-                } else {
-                    entity
-                        .damage(self, NO_OWNER_DAMAGE, DamageType::MAGIC)
-                        .await
-                };
-
-                if was_hurt && let Some(living) = entity.get_living_entity() {
-                    let difficulty = world.level_info.load().difficulty;
-                    let duration = wither_duration_ticks(difficulty);
-                    if duration > 0 {
-                        let effect = Effect {
-                            effect_type: &StatusEffect::WITHER,
-                            duration,
-                            amplifier: WITHER_AMPLIFIER,
-                            ambient: false,
-                            show_particles: true,
-                            show_icon: true,
-                            blend: true,
-                        };
-                        if let Some(player) = entity.get_player() {
-                            player.send_effect(effect.clone()).await;
-                        }
-                        living.add_effect(effect).await;
-                    }
+                    living.add_effect(effect);
                 }
             }
+        }
 
-            let hit_pos = hit.hit_pos();
-            // Vanilla `WitherSkull.onHit` (WitherSkull.java:97) always explodes with
-            // `ExplosionInteraction.MOB`; the `mobGriefing` game rule is applied inside
-            // `World::get_block_interaction`, which demotes a MOB blast to `Keep`. A
-            // dangerous skull additionally caps destructible-block resistance at 0.8
-            // (`WitherSkull.getBlockExplosionResistance`, WitherSkull.java:50-55).
-            world
-                .explode_with_calculator(
-                    hit_pos,
-                    EXPLOSION_POWER,
-                    crate::world::ExplosionInteraction::Mob,
-                    Some(Arc::new(WitherSkullExplosionCalculator {
-                        dangerous: self.is_dangerous(),
-                    })),
-                )
-                .await;
-        })
+        let hit_pos = hit.hit_pos();
+        // Vanilla `WitherSkull.onHit` (WitherSkull.java:97) always explodes with
+        // `ExplosionInteraction.MOB`; the `mobGriefing` game rule is applied inside
+        // `World::get_block_interaction`, which demotes a MOB blast to `Keep`. A
+        // dangerous skull additionally caps destructible-block resistance at 0.8
+        // (`WitherSkull.getBlockExplosionResistance`, WitherSkull.java:50-55).
+        world.explode_with_calculator(
+            hit_pos,
+            EXPLOSION_POWER,
+            crate::world::ExplosionInteraction::Mob,
+            Some(Arc::new(WitherSkullExplosionCalculator {
+                dangerous: self.is_dangerous(),
+            })),
+        );
     }
 }
 

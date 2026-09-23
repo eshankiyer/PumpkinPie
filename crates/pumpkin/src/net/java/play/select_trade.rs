@@ -14,8 +14,8 @@ impl JavaClient {
             return;
         }
 
-        let screen_handler = player.current_screen_handler.lock().await;
-        let mut screen_handler = screen_handler.lock().await;
+        let screen_handler = player.current_screen_handler.lock();
+        let mut screen_handler = screen_handler.lock();
         if !screen_handler.can_use(player.as_ref()) {
             return;
         }
@@ -23,9 +23,7 @@ impl JavaClient {
             .as_any_mut()
             .downcast_mut::<MerchantScreenHandler>()
         {
-            merchant
-                .set_selected_offer(packet.selected_slot.0 as usize)
-                .await;
+            merchant.set_selected_offer(packet.selected_slot.0 as usize);
         }
     }
 }

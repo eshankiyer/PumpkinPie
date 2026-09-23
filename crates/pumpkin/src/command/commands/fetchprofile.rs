@@ -82,16 +82,16 @@ fn format_clickable_list(items: Vec<TextComponent>) -> TextComponent {
     root
 }
 
-async fn report_resolved_profile(
+fn report_resolved_profile(
     source: &CommandSource,
     profile: &GameProfile,
     message_id: &'static str,
     argument: TextComponent,
 ) {
-    report_resolved_profile_nbt(source, game_profile_to_nbt(profile), message_id, argument).await;
+    report_resolved_profile_nbt(source, game_profile_to_nbt(profile), message_id, argument);
 }
 
-async fn report_resolved_profile_nbt(
+fn report_resolved_profile_nbt(
     source: &CommandSource,
     encoded_profile_compound: NbtCompound,
     message_id: &'static str,
@@ -148,7 +148,7 @@ async fn report_resolved_profile_nbt(
 
     let msg = TextComponent::translate_cross(message_id, message_id, [argument, clickable]);
 
-    source.send_feedback(msg, false).await;
+    source.send_feedback(msg, false);
 }
 
 async fn fetch_profile_by_name_helper(server: &Server, name: &str) -> Option<GameProfile> {
@@ -156,7 +156,12 @@ async fn fetch_profile_by_name_helper(server: &Server, name: &str) -> Option<Gam
         return Some(player.gameprofile.clone());
     }
 
-    let cached_entry = server.data.user_cache.write().await.get_by_name(name);
+    let cached_entry = server
+        .data
+        .user_cache
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_by_name(name);
 
     let auth_config = server
         .advanced_config
@@ -178,7 +183,7 @@ async fn fetch_profile_by_name_helper(server: &Server, name: &str) -> Option<Gam
             .data
             .user_cache
             .write()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .upsert(uuid, resolved_name.clone());
         let auth_config_clone = server
             .advanced_config
@@ -223,7 +228,7 @@ async fn fetch_profile_by_name_helper(server: &Server, name: &str) -> Option<Gam
             .data
             .user_cache
             .write()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .upsert(uuid, name.to_string());
         return Some(profile);
     }
@@ -253,12 +258,17 @@ async fn fetch_profile_by_id_helper(server: &Server, id: Uuid) -> Option<GamePro
             .data
             .user_cache
             .write()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .upsert(profile.id, profile.name.clone());
         return Some(profile);
     }
 
-    let cached_entry = server.data.user_cache.write().await.get_by_uuid(id);
+    let cached_entry = server
+        .data
+        .user_cache
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_by_uuid(id);
     if let Some(entry) = cached_entry {
         return Some(GameProfile {
             id: entry.uuid,
@@ -274,111 +284,97 @@ async fn fetch_profile_by_id_helper(server: &Server, id: Uuid) -> Option<GamePro
 struct ResolveNameExecutor;
 
 impl CommandExecutor for ResolveNameExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let name = StringArgumentType::get(context, ARG_NAME)?;
-            let server = context.server().clone();
-            let source = context.source.clone();
-            let name_owned = name.to_string();
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let name = StringArgumentType::get(context, ARG_NAME)?;
+        let server = context.server().clone();
+        let source = context.source.clone();
+        let name_owned = name.to_string();
 
-            tokio::spawn(async move {
-                let name_component = TextComponent::text(name_owned.clone());
-                let result = fetch_profile_by_name_helper(&server, &name_owned).await;
-                match result {
-                    Some(profile) => {
-                        report_resolved_profile(
-                            &source,
-                            &profile,
-                            translation::java::COMMANDS_FETCHPROFILE_NAME_SUCCESS,
-                            name_component,
-                        )
-                        .await;
-                    }
-                    None => {
-                        source
-                            .send_error(TextComponent::translate_cross(
-                                translation::java::COMMANDS_FETCHPROFILE_NAME_FAILURE,
-                                translation::java::COMMANDS_FETCHPROFILE_NAME_FAILURE,
-                                [name_component],
-                            ))
-                            .await;
-                    }
+        tokio::spawn(async move {
+            let name_component = TextComponent::text(name_owned.clone());
+            let result = fetch_profile_by_name_helper(&server, &name_owned).await;
+            match result {
+                Some(profile) => {
+                    report_resolved_profile(
+                        &source,
+                        &profile,
+                        translation::java::COMMANDS_FETCHPROFILE_NAME_SUCCESS,
+                        name_component,
+                    );
                 }
-            });
+                None => {
+                    source.send_error(TextComponent::translate_cross(
+                        translation::java::COMMANDS_FETCHPROFILE_NAME_FAILURE,
+                        translation::java::COMMANDS_FETCHPROFILE_NAME_FAILURE,
+                        [name_component],
+                    ));
+                }
+            }
+        });
 
-            Ok(1)
-        })
+        Ok(1)
     }
 }
 
 struct ResolveIdExecutor;
 
 impl CommandExecutor for ResolveIdExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let id = UuidArgumentType::get(context, ARG_ID)?;
-            let server = context.server().clone();
-            let source = context.source.clone();
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let id = UuidArgumentType::get(context, ARG_ID)?;
+        let server = context.server().clone();
+        let source = context.source.clone();
 
-            tokio::spawn(async move {
-                let id_component = TextComponent::text(id.to_string());
-                let result = fetch_profile_by_id_helper(&server, id).await;
-                match result {
-                    Some(profile) => {
-                        report_resolved_profile(
-                            &source,
-                            &profile,
-                            translation::java::COMMANDS_FETCHPROFILE_ID_SUCCESS,
-                            id_component,
-                        )
-                        .await;
-                    }
-                    None => {
-                        source
-                            .send_error(TextComponent::translate_cross(
-                                translation::java::COMMANDS_FETCHPROFILE_ID_FAILURE,
-                                translation::java::COMMANDS_FETCHPROFILE_ID_FAILURE,
-                                [id_component],
-                            ))
-                            .await;
-                    }
+        tokio::spawn(async move {
+            let id_component = TextComponent::text(id.to_string());
+            let result = fetch_profile_by_id_helper(&server, id).await;
+            match result {
+                Some(profile) => {
+                    report_resolved_profile(
+                        &source,
+                        &profile,
+                        translation::java::COMMANDS_FETCHPROFILE_ID_SUCCESS,
+                        id_component,
+                    );
                 }
-            });
+                None => {
+                    source.send_error(TextComponent::translate_cross(
+                        translation::java::COMMANDS_FETCHPROFILE_ID_FAILURE,
+                        translation::java::COMMANDS_FETCHPROFILE_ID_FAILURE,
+                        [id_component],
+                    ));
+                }
+            }
+        });
 
-            Ok(1)
-        })
+        Ok(1)
     }
 }
 
 struct PrintForEntityExecutor;
 
 impl CommandExecutor for PrintForEntityExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let entity = EntityArgumentType::get_entity(context, ARG_ENTITY).await?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let entity = EntityArgumentType::get_entity(context, ARG_ENTITY)?;
 
-            if let Some(player) = entity.get_player() {
-                report_resolved_profile(
-                    &context.source,
-                    &player.gameprofile,
-                    translation::java::COMMANDS_FETCHPROFILE_ENTITY_SUCCESS,
-                    player.get_display_name().await,
-                )
-                .await;
-                Ok(1)
-            } else if let Some(mannequin) = entity.cast_any().downcast_ref::<MannequinEntity>() {
-                report_resolved_profile_nbt(
-                    &context.source,
-                    mannequin.get_profile().await.unwrap_or_default(),
-                    translation::java::COMMANDS_FETCHPROFILE_ENTITY_SUCCESS,
-                    entity.get_display_name().await,
-                )
-                .await;
-                Ok(1)
-            } else {
-                Err(NO_PROFILE_ERROR_TYPE.create_without_context(entity.get_display_name().await))
-            }
-        })
+        if let Some(player) = entity.get_player() {
+            report_resolved_profile(
+                &context.source,
+                &player.gameprofile,
+                translation::java::COMMANDS_FETCHPROFILE_ENTITY_SUCCESS,
+                player.get_display_name(),
+            );
+            Ok(1)
+        } else if let Some(mannequin) = entity.cast_any().downcast_ref::<MannequinEntity>() {
+            report_resolved_profile_nbt(
+                &context.source,
+                mannequin.get_profile().unwrap_or_default(),
+                translation::java::COMMANDS_FETCHPROFILE_ENTITY_SUCCESS,
+                entity.get_display_name(),
+            );
+            Ok(1)
+        } else {
+            Err(NO_PROFILE_ERROR_TYPE.create_without_context(entity.get_display_name()))
+        }
     }
 }
 

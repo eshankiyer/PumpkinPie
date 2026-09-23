@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::mob::Mob;
@@ -42,76 +42,70 @@ impl DefendTrustedTargetGoal {
 }
 
 impl Goal for DefendTrustedTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return false;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return false;
+        };
+        let world = mob.get_entity().world.load();
+
+        for uuid in fox.trusted_uuids() {
+            let Some(trusted) = world.get_entity_by_uuid(uuid) else {
+                continue;
             };
+            let Some(trusted_living) = trusted.get_living_entity() else {
+                continue;
+            };
+
+            let attacked_time = trusted_living.last_attacked_time.load(Relaxed);
+            if attacked_time == self.last_seen_attack_time {
+                continue;
+            }
+
+            let attacker_id = trusted_living.last_attacker_id.load(Relaxed);
+            if attacker_id == 0 {
+                continue;
+            }
+            let Some(attacker) = world.get_entity_by_id(attacker_id) else {
+                continue;
+            };
+            let Some(attacker_living) = attacker.get_living_entity() else {
+                continue;
+            };
+            if !attacker_living.is_part_of_game() {
+                continue;
+            }
+            if fox.trusts(attacker.get_entity().entity_uuid) {
+                continue;
+            }
+
+            self.last_seen_attack_time = attacked_time;
+            self.target = Some(attacker);
+            return true;
+        }
+
+        false
+    }
+
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
+
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
             let world = mob.get_entity().world.load();
-
-            for uuid in fox.trusted_uuids() {
-                let Some(trusted) = world.get_entity_by_uuid(uuid) else {
-                    continue;
-                };
-                let Some(trusted_living) = trusted.get_living_entity() else {
-                    continue;
-                };
-
-                let attacked_time = trusted_living.last_attacked_time.load(Relaxed);
-                if attacked_time == self.last_seen_attack_time {
-                    continue;
-                }
-
-                let attacker_id = trusted_living.last_attacker_id.load(Relaxed);
-                if attacker_id == 0 {
-                    continue;
-                }
-                let Some(attacker) = world.get_entity_by_id(attacker_id) else {
-                    continue;
-                };
-                let Some(attacker_living) = attacker.get_living_entity() else {
-                    continue;
-                };
-                if !attacker_living.is_part_of_game() {
-                    continue;
-                }
-                if fox.trusts(attacker.get_entity().entity_uuid) {
-                    continue;
-                }
-
-                self.last_seen_attack_time = attacked_time;
-                self.target = Some(attacker);
-                return true;
-            }
-
-            false
-        })
+            let pos = mob.get_entity().pos.load();
+            world.play_sound(Sound::EntityFoxAggro, SoundCategory::Neutral, &pos);
+            fox.set_defending(true);
+            fox.wake_up();
+        }
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.track_target_goal.should_continue(mob).await })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                let world = mob.get_entity().world.load();
-                let pos = mob.get_entity().pos.load();
-                world.play_sound(Sound::EntityFoxAggro, SoundCategory::Neutral, &pos);
-                fox.set_defending(true);
-                fox.wake_up();
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

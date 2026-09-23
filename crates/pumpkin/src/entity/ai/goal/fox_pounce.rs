@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use pumpkin_util::math::vector3::Vector3;
 
 use super::fox_util::fox_path_is_clear;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
 
@@ -32,115 +32,81 @@ impl FoxPounceGoal {
 }
 
 impl Goal for FoxPounceGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return false;
-            };
-            if !fox.is_fully_crouched() {
-                return false;
-            }
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return false;
+        };
+        if !fox.is_fully_crouched() {
+            return false;
+        }
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
 
-            let world = mob.get_entity().world.load();
-            let my_pos = mob.get_entity().pos.load();
-            let target_pos = target.get_entity().pos.load();
-            let clear = fox_path_is_clear(&world, my_pos, target_pos);
-            if !clear {
-                fox.set_is_crouching(false);
-                fox.set_is_interested(false);
-            }
-            clear
-        })
+        let world = mob.get_entity().world.load();
+        let my_pos = mob.get_entity().pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let clear = fox_path_is_clear(&world, my_pos, target_pos);
+        if !clear {
+            fox.set_is_crouching(false);
+            fox.set_is_interested(false);
+        }
+        clear
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return false;
-            };
-            if fox.is_faceplanted() {
-                return false;
-            }
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return false;
+        };
+        if fox.is_faceplanted() {
+            return false;
+        }
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
 
-            let entity = mob.get_entity();
-            let velocity = entity.velocity.load();
-            !(velocity.y * velocity.y < 0.05 && entity.on_ground.load(Relaxed))
-        })
+        let entity = mob.get_entity();
+        let velocity = entity.velocity.load();
+        !(velocity.y * velocity.y < 0.05 && entity.on_ground.load(Relaxed))
     }
 
     fn can_stop(&self) -> bool {
         false
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return;
-            };
-            fox.set_jumping(true);
-            fox.set_is_pouncing(true);
-            fox.set_is_interested(false);
+    fn start(&mut self, mob: &dyn Mob) {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return;
+        };
+        fox.set_jumping(true);
+        fox.set_is_pouncing(true);
+        fox.set_is_interested(false);
 
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            if let Some(target) = target {
-                mob.get_mob_entity()
-                    .look_control
-                    .lock()
-                    .unwrap()
-                    .look_at_entity(mob, &target);
-
-                let entity = mob.get_entity();
-                let my_pos = entity.pos.load();
-                let target_pos = target.get_entity().pos.load();
-                let dir = Vector3::new(
-                    target_pos.x - my_pos.x,
-                    target_pos.y - my_pos.y,
-                    target_pos.z - my_pos.z,
-                )
-                .normalize();
-                let velocity = entity.velocity.load();
-                entity.set_velocity(Vector3::new(
-                    velocity.x + dir.x * 0.8,
-                    velocity.y + 0.9,
-                    velocity.z + dir.z * 0.8,
-                ));
-            }
-
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.set_is_crouching(false);
-                fox.set_is_interested(false);
-                fox.set_is_pouncing(false);
-                fox.set_jumping(false);
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return;
-            };
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return;
-            };
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = target {
             mob.get_mob_entity()
                 .look_control
                 .lock()
@@ -150,24 +116,75 @@ impl Goal for FoxPounceGoal {
             let entity = mob.get_entity();
             let my_pos = entity.pos.load();
             let target_pos = target.get_entity().pos.load();
+            let dir = Vector3::new(
+                target_pos.x - my_pos.x,
+                target_pos.y - my_pos.y,
+                target_pos.z - my_pos.z,
+            )
+            .normalize();
+            let velocity = entity.velocity.load();
+            entity.set_velocity(Vector3::new(
+                velocity.x + dir.x * 0.8,
+                velocity.y + 0.9,
+                velocity.z + dir.z * 0.8,
+            ));
+        }
 
-            if my_pos.squared_distance_to_vec(&target_pos) <= POUNCE_RANGE_SQ {
-                mob.try_attack(target.as_ref()).await;
-                return;
-            }
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+    }
 
-            if entity.on_ground.load(Relaxed) {
-                let velocity = entity.velocity.load();
-                if velocity.y != 0.0 {
-                    let world = entity.world.load();
-                    let pos = entity.block_pos.load();
-                    if world.get_block_and_state(&pos).0 == &pumpkin_data::Block::SNOW {
-                        mob.get_mob_entity().target.lock().await.take();
-                        fox.set_faceplanted(true);
-                    }
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.set_is_crouching(false);
+            fox.set_is_interested(false);
+            fox.set_is_pouncing(false);
+            fox.set_jumping(false);
+        }
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return;
+        };
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity(mob, &target);
+
+        let entity = mob.get_entity();
+        let my_pos = entity.pos.load();
+        let target_pos = target.get_entity().pos.load();
+
+        if my_pos.squared_distance_to_vec(&target_pos) <= POUNCE_RANGE_SQ {
+            mob.try_attack(target.as_ref());
+            return;
+        }
+
+        if entity.on_ground.load(Relaxed) {
+            let velocity = entity.velocity.load();
+            if velocity.y != 0.0 {
+                let world = entity.world.load();
+                let pos = entity.block_pos.load();
+                if world.get_block_and_state(&pos).0 == &pumpkin_data::Block::SNOW {
+                    mob.get_mob_entity()
+                        .target
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .take();
+                    fox.set_faceplanted(true);
                 }
             }
-        })
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

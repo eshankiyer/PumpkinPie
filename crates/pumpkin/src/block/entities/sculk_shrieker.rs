@@ -21,8 +21,8 @@ use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
 
 use crate::block::blocks::sculk::sculk_shrieker::ShriekerListener;
 use crate::entity::mob::warden::{WardenEntity, apply_darkness_around};
@@ -134,13 +134,14 @@ impl BlockEntity for SculkShriekerBlockEntity {
     }
 
     /// `saveAdditional` (lines 81-86).
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_int("warning_level", *self.warning_level.lock().await);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int(
+            "warning_level",
+            *self
+                .warning_level
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -149,11 +150,9 @@ impl BlockEntity for SculkShriekerBlockEntity {
         Some(nbt)
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.ensure_listener_registered(world).await;
-            self.tick_vibration(world).await;
-        })
+    fn tick(&self, world: &Arc<World>) {
+        self.ensure_listener_registered(world);
+        self.tick_vibration(world);
     }
 
     /// `preRemoveSideEffects` (lines 133-138): a shrieker broken mid-shriek still responds.
@@ -167,9 +166,9 @@ impl BlockEntity for SculkShriekerBlockEntity {
     {
         Box::pin(async move {
             if self.shrieking_flag.load(Ordering::Acquire) {
-                self.try_respond(&world).await;
+                self.try_respond(&world);
             }
-            world.unregister_game_event_listener_at(&position).await;
+            world.unregister_game_event_listener_at(&position);
         })
     }
 
@@ -202,13 +201,17 @@ impl SculkShriekerBlockEntity {
 
     /// Returns the `Data.currentVibration != null` state checked by the vanilla listener before
     /// accepting another event (`VibrationSystem.java:210-218`).
-    pub(crate) async fn has_current_vibration(&self) -> bool {
-        self.vibration_data.lock().await.current_vibration.is_some()
+    pub(crate) fn has_current_vibration(&self) -> bool {
+        self.vibration_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .current_vibration
+            .is_some()
     }
 
     /// Queues a vibration for the block entity's tick, matching `VibrationSystem.Listener`
     /// delivery through `VibrationSystem.Ticker` (`VibrationSystem.java:300-315,342-361`).
-    pub(crate) async fn queue_vibration(
+    pub(crate) fn queue_vibration(
         &self,
         source_position: Vector3<f64>,
         source_entity: uuid::Uuid,
@@ -216,7 +219,10 @@ impl SculkShriekerBlockEntity {
     ) {
         let listener_position = self.position.to_centered_f64();
         let distance = (source_position - listener_position).length() as f32;
-        let mut data = self.vibration_data.lock().await;
+        let mut data = self
+            .vibration_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tick = data.tick;
         data.selector.add_candidate(
             VibrationInfo {
@@ -230,9 +236,12 @@ impl SculkShriekerBlockEntity {
         );
     }
 
-    async fn tick_vibration(&self, world: &Arc<World>) {
+    fn tick_vibration(&self, world: &Arc<World>) {
         let (due_source, data_changed) = {
-            let mut data = self.vibration_data.lock().await;
+            let mut data = self
+                .vibration_data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             data.tick = data.tick.saturating_add(1);
             let mut data_changed = if data.current_vibration.is_none()
                 && let Some(vibration) = data.selector.chosen_candidate(data.tick)
@@ -271,7 +280,10 @@ impl SculkShriekerBlockEntity {
             return;
         }
         let source = {
-            let mut data = self.vibration_data.lock().await;
+            let mut data = self
+                .vibration_data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             data.current_vibration.take().and_then(|vibration| {
                 (vibration.source_entity == Some(source_entity)).then_some(vibration)
             })
@@ -286,18 +298,18 @@ impl SculkShriekerBlockEntity {
         {
             // `onReceiveVibration` resolves the source entity before calling `tryShriek`
             // (`SculkShriekerBlockEntity.java:204-213`).
-            self.try_shriek(world, &player).await;
+            self.try_shriek(world, &player);
         }
     }
 
-    async fn ensure_listener_registered(&self, world: &Arc<World>) {
+    fn ensure_listener_registered(&self, world: &Arc<World>) {
         if self.listener_registered.swap(true, Ordering::AcqRel) {
             return;
         }
         let already_present = world
             .game_event_listeners
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .any(|listener| {
                 matches!(
@@ -306,9 +318,7 @@ impl SculkShriekerBlockEntity {
                 )
             });
         if !already_present {
-            world
-                .register_game_event_listener(Arc::new(ShriekerListener { pos: self.position }))
-                .await;
+            world.register_game_event_listener(Arc::new(ShriekerListener { pos: self.position }));
         }
     }
 
@@ -338,27 +348,31 @@ impl SculkShriekerBlockEntity {
     /// when the shrieker *can* respond but no warning could be issued (a warden is already
     /// nearby, or a nearby player is inside the 200-tick cooldown) nothing happens at all -
     /// not even a shriek.
-    pub async fn try_shriek(&self, world: &Arc<World>, player: &Arc<Player>) {
+    pub fn try_shriek(&self, world: &Arc<World>, player: &Arc<Player>) {
         if Self::shrieking_at(world, &self.position) {
             return;
         }
-        *self.warning_level.lock().await = 0;
-        if !self.can_respond(world) || self.try_to_warn(world, player).await {
-            self.shriek(world, player).await;
+        *self
+            .warning_level
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = 0;
+        if !self.can_respond(world) || self.try_to_warn(world, player) {
+            self.shriek(world, player);
         }
     }
 
     /// `tryToWarn` (lines 112-116).
-    async fn try_to_warn(&self, world: &Arc<World>, player: &Arc<Player>) -> bool {
+    fn try_to_warn(&self, world: &Arc<World>, player: &Arc<Player>) -> bool {
         match crate::entity::mob::warden::warden_spawn_tracker::try_warn(
             world,
             &self.position,
             player,
-        )
-        .await
-        {
+        ) {
             Some(warning_level) => {
-                *self.warning_level.lock().await = warning_level;
+                *self
+                    .warning_level
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = warning_level;
                 true
             }
             None => false,
@@ -366,7 +380,7 @@ impl SculkShriekerBlockEntity {
     }
 
     /// `shriek` (lines 118-125).
-    async fn shriek(&self, world: &Arc<World>, source: &Arc<Player>) {
+    fn shriek(&self, world: &Arc<World>, source: &Arc<Player>) {
         let (block, state) = world.get_block_and_state(&self.position);
         if block.id != BlockId::SCULK_SHRIEKER {
             return;
@@ -374,13 +388,11 @@ impl SculkShriekerBlockEntity {
         let mut props = SculkShriekerLikeProperties::from_state_id(state.id, block);
         props.shrieking = true;
         self.shrieking_flag.store(true, Ordering::Release);
-        world
-            .set_block_state(
-                &self.position,
-                props.to_state_id(block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        world.set_block_state(
+            &self.position,
+            props.to_state_id(block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
         world.schedule_block_tick(block, self.position, SHRIEKING_TICKS, TickPriority::Normal);
         world.sync_world_event(WorldEvent::ParticlesSculkShriek, self.position, 0);
 
@@ -390,26 +402,28 @@ impl SculkShriekerBlockEntity {
             GameEvent::Shriek,
             self.position.to_centered_f64(),
             crate::world::game_event::GameEventContext::of_entity(source),
-        )
-        .await;
+        );
     }
 
     /// `tryRespond` (lines 140-148): runs when the 90-tick shriek ends, not when it starts.
-    pub async fn try_respond(&self, world: &Arc<World>) {
+    pub fn try_respond(&self, world: &Arc<World>) {
         self.shrieking_flag.store(false, Ordering::Release);
         if !self.can_respond(world) {
             return;
         }
-        let warning_level = *self.warning_level.lock().await;
+        let warning_level = *self
+            .warning_level
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if warning_level <= 0 {
             return;
         }
 
-        if !self.try_summon_warden(world, warning_level).await {
+        if !self.try_summon_warden(world, warning_level) {
             self.play_warden_reply_sound(world, warning_level);
         }
 
-        apply_darkness_around(world, self.position.to_centered_f64(), DARKNESS_RADIUS).await;
+        apply_darkness_around(world, self.position.to_centered_f64(), DARKNESS_RADIUS);
     }
 
     /// `playWardenReplySound` (lines 150-160).
@@ -428,7 +442,7 @@ impl SculkShriekerBlockEntity {
 
     /// `trySummonWarden` (lines 162-169): `SpawnUtil.trySpawnMob(WARDEN, TRIGGERED, level,
     /// pos, 20, 5, 6, ON_TOP_OF_COLLIDER, false)`.
-    async fn try_summon_warden(&self, world: &Arc<World>, warning_level: i32) -> bool {
+    fn try_summon_warden(&self, world: &Arc<World>, warning_level: i32) -> bool {
         if warning_level < crate::entity::mob::warden::warden_spawn_tracker::MAX_WARNING_LEVEL {
             return false;
         }
@@ -452,7 +466,7 @@ impl SculkShriekerBlockEntity {
         ));
         // Started after the spawn so the pose metadata broadcast has an audience: nothing is
         // tracking the entity until `spawn_entity` returns.
-        world.spawn_entity(warden.clone()).await;
+        world.spawn_entity(warden.clone());
         warden.start_emerging();
         true
     }

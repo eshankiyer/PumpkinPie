@@ -1,9 +1,6 @@
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+use std::pin::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 use super::BlockEntity;
@@ -12,7 +9,7 @@ use crate::block::entities::sign::Text;
 use crate::world::World;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 pub struct HangingSignBlockEntity {
     pub front_text: Text,
@@ -33,10 +30,8 @@ impl BlockEntity for HangingSignBlockEntity {
 
     // Hanging signs inherit SignBlockEntity.tick, including its editor timeout
     // (`SignBlockEntity.java:265-275`).
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            tick_editor(world, self.position, &self.currently_editing_player).await;
-        })
+    fn tick(&self, world: &Arc<World>) {
+        tick_editor(world, self.position, &self.currently_editing_player);
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -63,15 +58,10 @@ impl BlockEntity for HangingSignBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put("front_text", self.front_text.clone());
-            nbt.put("back_text", self.back_text.clone());
-            nbt.put_bool("is_waxed", self.is_waxed.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put("front_text", self.front_text.clone());
+        nbt.put("back_text", self.back_text.clone());
+        nbt.put_bool("is_waxed", self.is_waxed.load(Ordering::Relaxed));
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

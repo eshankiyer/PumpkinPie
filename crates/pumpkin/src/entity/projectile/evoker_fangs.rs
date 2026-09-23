@@ -5,7 +5,7 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_util::math::vector3::Vector3;
 
-use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture};
+use crate::entity::{Entity, EntityBase, NBTStorage};
 use crate::server::Server;
 use crate::world::World;
 
@@ -70,7 +70,7 @@ impl EvokerFangsEntity {
         }
     }
 
-    async fn bite_nearby(&self, caller: &Arc<dyn EntityBase>) {
+    fn bite_nearby(&self, caller: &Arc<dyn EntityBase>) {
         let world = self.entity.world.load();
         let bb = self.entity.bounding_box.load().expand(0.2, 0.0, 0.2);
         let owner = self.owner_id.and_then(|id| world.get_entity_by_id(id));
@@ -93,71 +93,53 @@ impl EvokerFangsEntity {
             } else {
                 DamageType::MAGIC
             };
-            candidate
-                .damage_with_context(
-                    candidate.as_ref(),
-                    6.0,
-                    damage_type,
-                    None,
-                    owner.as_deref(),
-                    Some(caller.as_ref()),
-                )
-                .await;
+            candidate.damage_with_context(
+                candidate.as_ref(),
+                6.0,
+                damage_type,
+                None,
+                owner.as_deref(),
+                Some(caller.as_ref()),
+            );
         }
     }
 }
 
 impl NBTStorage for EvokerFangsEntity {
     /// Vanilla `EvokerFangs.addAdditionalSaveData` persists only the warmup counter.
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            nbt.put_int("Warmup", self.warmup_delay_ticks.load(Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_int("Warmup", self.warmup_delay_ticks.load(Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(warmup) = nbt.get_int("Warmup") {
-                self.warmup_delay_ticks.store(warmup, Relaxed);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        if let Some(warmup) = nbt.get_int("Warmup") {
+            self.warmup_delay_ticks.store(warmup, Relaxed);
+        }
     }
 }
 
 impl EntityBase for EvokerFangsEntity {
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let warmup = self.warmup_delay_ticks.fetch_sub(1, Relaxed) - 1;
-            if warmup < 0 {
-                // Vanilla: `ATTACK_TRIGGER_TICKS = 14` client-side counts down from `lifeTicks`
-                // after the spike starts; server damage instead fires 8 ticks after warmup ends.
-                if warmup == -8 {
-                    self.bite_nearby(caller).await;
-                }
-
-                if !self.sent_spike_event.swap(true, Relaxed) {
-                    self.entity.world.load().send_entity_status(
-                        &self.entity,
-                        EntityStatus::StartAttacking,
-                        None,
-                    );
-                }
-
-                if self.life_ticks.fetch_sub(1, Relaxed) - 1 < 0 {
-                    self.entity.remove().await;
-                }
+    fn tick(&self, caller: &Arc<dyn EntityBase>, _server: &Server) {
+        let warmup = self.warmup_delay_ticks.fetch_sub(1, Relaxed) - 1;
+        if warmup < 0 {
+            // Vanilla: `ATTACK_TRIGGER_TICKS = 14` client-side counts down from `lifeTicks`
+            // after the spike starts; server damage instead fires 8 ticks after warmup ends.
+            if warmup == -8 {
+                self.bite_nearby(caller);
             }
-        })
+
+            if !self.sent_spike_event.swap(true, Relaxed) {
+                self.entity.world.load().send_entity_status(
+                    &self.entity,
+                    EntityStatus::StartAttacking,
+                    None,
+                );
+            }
+
+            if self.life_ticks.fetch_sub(1, Relaxed) - 1 < 0 {
+                self.entity.remove();
+            }
+        }
     }
 
     fn get_entity(&self) -> &Entity {

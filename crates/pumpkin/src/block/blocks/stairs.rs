@@ -11,7 +11,6 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::BlockBehaviour;
-use crate::block::BlockFuture;
 use crate::block::OnNeighborUpdateArgs;
 use crate::block::OnPlaceArgs;
 use crate::block::RandomTickArgs;
@@ -24,91 +23,82 @@ type StairsProperties = pumpkin_data::block_properties::OakStairsLikeProperties;
 pub struct StairBlock;
 
 impl BlockBehaviour for StairBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut stair_props = StairsProperties::default(args.block);
-            stair_props.waterlogged = args.replacing.water_source();
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut stair_props = StairsProperties::default(args.block);
+        stair_props.waterlogged = args.replacing.water_source();
 
-            stair_props.facing = args.player.get_entity().get_horizontal_facing();
-            stair_props.half = match args.direction {
-                BlockDirection::Up => Half::Top,
-                BlockDirection::Down => Half::Bottom,
-                _ => match args.use_item_on.cursor_pos.y {
-                    0.0..0.5 => Half::Bottom,
-                    0.5..1.0 => Half::Top,
+        stair_props.facing = args.player.get_entity().get_horizontal_facing();
+        stair_props.half = match args.direction {
+            BlockDirection::Up => Half::Top,
+            BlockDirection::Down => Half::Bottom,
+            _ => match args.use_item_on.cursor_pos.y {
+                0.0..0.5 => Half::Bottom,
+                0.5..1.0 => Half::Top,
 
-                    // This cannot happen normally
-                    _ => Half::Bottom,
-                },
-            };
+                // This cannot happen normally
+                _ => Half::Bottom,
+            },
+        };
 
-            stair_props.shape = compute_stair_shape(
-                args.world,
-                args.position,
-                stair_props.facing,
-                stair_props.half,
-            );
+        stair_props.shape = compute_stair_shape(
+            args.world,
+            args.position,
+            stair_props.facing,
+            stair_props.half,
+        );
 
-            stair_props.to_state_id(args.block)
-        })
+        stair_props.to_state_id(args.block)
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut stair_props = StairsProperties::from_state_id(state_id, args.block);
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let mut stair_props = StairsProperties::from_state_id(state_id, args.block);
 
-            let new_shape = compute_stair_shape(
-                args.world,
+        let new_shape = compute_stair_shape(
+            args.world,
+            args.position,
+            stair_props.facing,
+            stair_props.half,
+        );
+
+        if stair_props.shape != new_shape {
+            stair_props.shape = new_shape;
+            args.world.set_block_state(
                 args.position,
-                stair_props.facing,
-                stair_props.half,
+                stair_props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
             );
-
-            if stair_props.shape != new_shape {
-                stair_props.shape = new_shape;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        stair_props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+        }
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // No tag gate needed: the oxidation_stages table below only contains the
-            // cut copper stair family, so this is a no-op for every other stair type.
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        // No tag gate needed: the oxidation_stages table below only contains the
+        // cut copper stair family, so this is a no-op for every other stair type.
 
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let stair_props = StairsProperties::from_state_id(current_state_id, args.block);
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let stair_props = StairsProperties::from_state_id(current_state_id, args.block);
 
-            let oxidation_stages = [
-                &Block::CUT_COPPER_STAIRS,
-                &Block::EXPOSED_CUT_COPPER_STAIRS,
-                &Block::WEATHERED_CUT_COPPER_STAIRS,
-                &Block::OXIDIZED_CUT_COPPER_STAIRS,
-            ];
+        let oxidation_stages = [
+            &Block::CUT_COPPER_STAIRS,
+            &Block::EXPOSED_CUT_COPPER_STAIRS,
+            &Block::WEATHERED_CUT_COPPER_STAIRS,
+            &Block::OXIDIZED_CUT_COPPER_STAIRS,
+        ];
 
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = StairsProperties::default(next_block);
-                    new_props.facing = stair_props.facing;
-                    new_props.half = stair_props.half;
-                    new_props.shape = stair_props.shape;
-                    new_props.waterlogged = stair_props.waterlogged;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = StairsProperties::default(next_block);
+                new_props.facing = stair_props.facing;
+                new_props.half = stair_props.half;
+                new_props.shape = stair_props.shape;
+                new_props.waterlogged = stair_props.waterlogged;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 
     fn rotate(

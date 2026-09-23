@@ -14,7 +14,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, defend_village_target::DefendVillageTargetGoal,
         golem_random_stroll_in_village::GolemRandomStrollInVillageGoal,
@@ -179,12 +179,12 @@ impl IronGolemEntity {
                                 let Some(anger) = mob.persistent_anger() else {
                                     return false;
                                 };
-                                if anger.is_angry_at(target.entity_uuid).await {
+                                if anger.is_angry_at(target.entity_uuid) {
                                     return true;
                                 }
                                 let universal_anger =
                                     world.level_info.load().game_rules.universal_anger;
-                                anger.is_angry_at_all_players(universal_anger).await
+                                anger.is_angry_at_all_players(universal_anger)
                             }
                         },
                     ),
@@ -238,25 +238,21 @@ impl IronGolemEntity {
 }
 
 impl NBTStorage for IronGolemEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            // `IronGolem.java:147`.
-            nbt.put_bool("PlayerCreated", self.player_created.load(Ordering::Relaxed));
-            self.persistent_anger.write_nbt(nbt).await;
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        // `IronGolem.java:147`.
+        nbt.put_bool("PlayerCreated", self.player_created.load(Ordering::Relaxed));
+        self.persistent_anger.write_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            // `IronGolem.java:154`: `getBooleanOr("PlayerCreated", false)`.
-            self.player_created.store(
-                nbt.get_bool("PlayerCreated").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.persistent_anger.read_nbt(nbt).await;
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        // `IronGolem.java:154`: `getBooleanOr("PlayerCreated", false)`.
+        self.player_created.store(
+            nbt.get_bool("PlayerCreated").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.persistent_anger.read_nbt(nbt);
     }
 }
 
@@ -293,176 +289,154 @@ impl Mob for IronGolemEntity {
     /// Vanilla `IronGolem.doHurtTarget` (`IronGolem.java:187-204`): a randomized damage roll
     /// plus a straight-up fling scaled by the target's knockback resistance, and the attack
     /// sound/animation event, replacing the generic flat-damage melee path.
-    fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            if living.dead.load(Ordering::Relaxed) {
-                return false;
-            }
+    fn try_attack(&self, target: &dyn EntityBase) -> bool {
+        let living = &self.mob_entity.living_entity;
+        if living.dead.load(Ordering::Relaxed) {
+            return false;
+        }
 
-            let entity = &living.entity;
-            let world = entity.world.load();
-            self.attack_animation_tick
-                .store(ATTACK_ANIMATION_TICKS, Ordering::Relaxed);
-            world.send_entity_status(entity, EntityStatus::StartAttacking, None);
+        let entity = &living.entity;
+        let world = entity.world.load();
+        self.attack_animation_tick
+            .store(ATTACK_ANIMATION_TICKS, Ordering::Relaxed);
+        world.send_entity_status(entity, EntityStatus::StartAttacking, None);
 
-            let base_attack_damage = living.get_attribute_value(&Attributes::ATTACK_DAMAGE) as f32;
-            let rand_int = if base_attack_damage as i32 > 0 {
-                rand::rng().random_range(0..base_attack_damage as i32)
-            } else {
-                0
-            };
-            let damage = attack_damage_roll(base_attack_damage, rand_int);
+        let base_attack_damage = living.get_attribute_value(&Attributes::ATTACK_DAMAGE) as f32;
+        let rand_int = if base_attack_damage as i32 > 0 {
+            rand::rng().random_range(0..base_attack_damage as i32)
+        } else {
+            0
+        };
+        let damage = attack_damage_roll(base_attack_damage, rand_int);
 
-            let caller = world.get_entity_by_id(entity.entity_id);
-            let damaged = target
-                .damage_with_context(
-                    target,
-                    damage,
-                    DamageType::MOB_ATTACK,
-                    Some(entity.pos.load()),
-                    caller.as_deref(),
-                    caller.as_deref(),
-                )
-                .await;
+        let caller = world.get_entity_by_id(entity.entity_id);
+        let damaged = target.damage_with_context(
+            target,
+            damage,
+            DamageType::MOB_ATTACK,
+            Some(entity.pos.load()),
+            caller.as_deref(),
+            caller.as_deref(),
+        );
 
-            if damaged {
-                let resistance = target.get_living_entity().map_or(0.0, |target_living| {
-                    target_living.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE)
-                });
-                let scale = (1.0 - resistance).max(0.0);
-                target
-                    .get_entity()
-                    .add_velocity(Vector3::new(0.0, 0.4 * scale, 0.0));
-            }
+        if damaged {
+            let resistance = target.get_living_entity().map_or(0.0, |target_living| {
+                target_living.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE)
+            });
+            let scale = (1.0 - resistance).max(0.0);
+            target
+                .get_entity()
+                .add_velocity(Vector3::new(0.0, 0.4 * scale, 0.0));
+        }
 
-            // `IronGolem.java:202`: played whether or not the hit landed.
-            world.play_sound(
-                Sound::EntityIronGolemAttack,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
+        // `IronGolem.java:202`: played whether or not the hit landed.
+        world.play_sound(
+            Sound::EntityIronGolemAttack,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
 
-            damaged
-        })
+        damaged
     }
 
     /// `IronGolem.hurtServer` (`IronGolem.java:206-215`) reads the crackiness tier before the
     /// hit; this snapshot lets `on_damage` do the same comparison afterwards.
-    fn pre_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        _source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            self.health_before_damage
-                .store(self.mob_entity.living_entity.health.load());
-            true
-        })
+    fn pre_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) -> bool {
+        self.health_before_damage
+            .store(self.mob_entity.living_entity.health.load());
+        true
     }
 
     /// `IronGolem.hurtServer` (`IronGolem.java:210-212`): crossing a crackiness threshold plays
     /// the golem's cracking sound on top of the normal hurt sound.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        _source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            let max_health = living.get_max_health();
-            let before = golem_crackiness(self.health_before_damage.load(), max_health);
-            let after = golem_crackiness(living.health.load(), max_health);
-            if before != after {
-                living.entity.play_sound(Sound::EntityIronGolemDamage);
-            }
-        })
+    fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {
+        let living = &self.mob_entity.living_entity;
+        let max_health = living.get_max_health();
+        let before = golem_crackiness(self.health_before_damage.load(), max_health);
+        let after = golem_crackiness(living.health.load(), max_health);
+        if before != after {
+            living.entity.play_sound(Sound::EntityIronGolemDamage);
+        }
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.persistent_anger.tick().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.persistent_anger.tick();
 
-            // Vanilla `NeutralMob.updatePersistentAnger` refreshes the timer whenever a target is
-            // present because IronGolem passes `stayAngryIfTargetPresent = true`
-            // (`NeutralMob.java:58-82`; `IronGolem.java:125-127`).
-            let current_target = self.mob_entity.target.lock().await.clone();
-            if let Some(target) = current_target {
-                let target_uuid = target.get_entity().entity_uuid;
-                if !self.persistent_anger.is_angry_at(target_uuid).await {
-                    self.persistent_anger.set_angry_at(Some(target_uuid)).await;
-                }
-                self.persistent_anger.start_timer();
+        // Vanilla `NeutralMob.updatePersistentAnger` refreshes the timer whenever a target is
+        // present because IronGolem passes `stayAngryIfTargetPresent = true`
+        // (`NeutralMob.java:58-82`; `IronGolem.java:125-127`).
+        let current_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = current_target {
+            let target_uuid = target.get_entity().entity_uuid;
+            if !self.persistent_anger.is_angry_at(target_uuid) {
+                self.persistent_anger.set_angry_at(Some(target_uuid));
             }
+            self.persistent_anger.start_timer();
+        }
 
-            let attack_tick = self.attack_animation_tick.load(Ordering::Relaxed);
-            if attack_tick > 0 {
-                self.attack_animation_tick.fetch_sub(1, Ordering::Relaxed);
-            }
+        let attack_tick = self.attack_animation_tick.load(Ordering::Relaxed);
+        if attack_tick > 0 {
+            self.attack_animation_tick.fetch_sub(1, Ordering::Relaxed);
+        }
 
-            let flower_tick = self.offer_flower_tick.load(Ordering::Relaxed);
-            if flower_tick > 0 {
-                self.offer_flower_tick.fetch_sub(1, Ordering::Relaxed);
-            }
-        })
+        let flower_tick = self.offer_flower_tick.load(Ordering::Relaxed);
+        if flower_tick > 0 {
+            self.offer_flower_tick.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let flag: u8 = u8::from(self.is_player_created());
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::iron_golem::FLAGS_ID,
-                    flag,
-                )],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let flag: u8 = u8::from(self.is_player_created());
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::iron_golem::FLAGS_ID,
+                flag,
+            )],
+            None,
+        );
     }
 
     /// Vanilla `IronGolem.mobInteract` (`IronGolem.java:259-276`): an iron ingot repairs the
     /// golem for 25 health. A golem already at full health consumes nothing and makes no sound.
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla runs `Mob.checkAndHandleImportantInteractions` (lead/nametag) before
-            // `mobInteract`, so an unleash always wins over the ingot branch.
-            if self
-                .get_mob_entity()
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-            {
-                return true;
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        // Vanilla runs `Mob.checkAndHandleImportantInteractions` (lead/nametag) before
+        // `mobInteract`, so an unleash always wins over the ingot branch.
+        if self
+            .get_mob_entity()
+            .mob_interact(player, item_stack, self.can_be_leashed())
+        {
+            return true;
+        }
+
+        if item_stack.item.id == Item::IRON_INGOT.id {
+            let living = &self.mob_entity.living_entity;
+            let health_before = living.health.load();
+            living.heal(IRON_INGOT_HEAL_AMOUNT);
+            if living.health.load() == health_before {
+                return false;
             }
 
-            if item_stack.item.id == Item::IRON_INGOT.id {
-                let living = &self.mob_entity.living_entity;
-                let health_before = living.health.load();
-                living.heal(IRON_INGOT_HEAL_AMOUNT);
-                if living.health.load() == health_before {
-                    return false;
-                }
+            let mut rng = rand::rng();
+            let pitch = 1.0 + (rng.random::<f32>() - rng.random::<f32>()) * 0.2;
+            let entity = &living.entity;
+            entity.world.load().play_sound_fine(
+                Sound::EntityIronGolemRepair,
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+                1.0,
+                pitch,
+            );
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            return true;
+        }
 
-                let mut rng = rand::rng();
-                let pitch = 1.0 + (rng.random::<f32>() - rng.random::<f32>()) * 0.2;
-                let entity = &living.entity;
-                entity.world.load().play_sound_fine(
-                    Sound::EntityIronGolemRepair,
-                    SoundCategory::Neutral,
-                    &entity.pos.load(),
-                    1.0,
-                    pitch,
-                );
-                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                return true;
-            }
-
-            false
-        })
+        false
     }
 }
 

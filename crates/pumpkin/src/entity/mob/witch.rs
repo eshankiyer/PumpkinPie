@@ -21,7 +21,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::attributes::{AttributeInstance, Modifier, ModifierOperation};
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         nearest_attackable_witch_target::NearestAttackableWitchTargetGoal,
@@ -119,38 +119,37 @@ impl WitchEntity {
     }
 
     /// Vanilla `Witch.aiStep`'s potion-drinking state machine (non-client only).
-    async fn tick_drinking(&self) {
+    fn tick_drinking(&self) {
         if self.is_drinking_potion() {
             // This is Java's `usingTime-- <= 0`: test the value before
             // decrementing so the zero-count tick reaches the finish path.
             if self.drink_ticks_remaining.fetch_sub(1, Relaxed) <= 0 {
                 self.drink_ticks_remaining.store(-1, Relaxed);
-                self.finish_drinking().await;
+                self.finish_drinking();
             }
             return;
         }
-        self.maybe_start_drinking().await;
+        self.maybe_start_drinking();
     }
 
     /// Vanilla: the `usingTime-- <= 0` branch -- clears the mainhand potion, applies its effects,
     /// and removes the drinking speed penalty.
-    async fn finish_drinking(&self) {
+    fn finish_drinking(&self) {
         let living = &self.mob_entity.living_entity;
         self.set_using_item(false);
         let item = living
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&EquipmentSlot::MAIN_HAND);
         living
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .put(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone());
         if item.item.registry_key == Item::POTION.registry_key {
             let effects = PotionContents::read_potion_effects(&item);
-            PotionContents::apply_effects_to(living, effects, 1.0, PotionApplicationSource::Normal)
-                .await;
+            PotionContents::apply_effects_to(living, effects, 1.0, PotionApplicationSource::Normal);
         }
         let mut attributes = living.attributes.write().unwrap();
         if let Some(speed) = attributes.get_mut(&Attributes::MOVEMENT_SPEED.id) {
@@ -160,21 +159,20 @@ impl WitchEntity {
 
     /// Vanilla: the `else` branch of the drinking state machine -- rolls the four candidate
     /// self-potion triggers in vanilla's exact priority order (only one can fire per tick).
-    async fn maybe_start_drinking(&self) {
+    fn maybe_start_drinking(&self) {
         let living = &self.mob_entity.living_entity;
         let mut roll = rand::random::<f32>();
-        let has_water_breathing = living
-            .get_effect(&StatusEffect::WATER_BREATHING)
-            .await
-            .is_some();
-        let has_fire_resistance = living
-            .get_effect(&StatusEffect::FIRE_RESISTANCE)
-            .await
-            .is_some();
-        let has_speed = living.get_effect(&StatusEffect::SPEED).await.is_some();
+        let has_water_breathing = living.get_effect(&StatusEffect::WATER_BREATHING).is_some();
+        let has_fire_resistance = living.get_effect(&StatusEffect::FIRE_RESISTANCE).is_some();
+        let has_speed = living.get_effect(&StatusEffect::SPEED).is_some();
         let health = living.health.load();
         let max_health = living.get_attribute_value(&Attributes::MAX_HEALTH) as f32;
-        let target = self.mob_entity.target.lock().await.clone();
+        let target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let target_dist_sq = target.as_ref().map(|t| {
             t.get_entity()
                 .pos
@@ -237,7 +235,7 @@ impl WitchEntity {
         living
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .put(&EquipmentSlot::MAIN_HAND, stack);
         self.drink_ticks_remaining.store(use_ticks, Relaxed);
         self.set_using_item(true);
@@ -277,26 +275,24 @@ impl Mob for WitchEntity {
 
     /// Vanilla: `Witch.aiStep` (non-client-only steps): heal-cooldown/attack-gate, the
     /// potion-drinking state machine, and the ambient particle-puff roll.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // Vanilla `Witch.aiStep` gates this entire state machine on `isAlive()`.
-            let living = &self.mob_entity.living_entity;
-            if living.dead.load(Relaxed)
-                || living.health.load() <= 0.0
-                || self.get_entity().is_removed()
-            {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        // Vanilla `Witch.aiStep` gates this entire state machine on `isAlive()`.
+        let living = &self.mob_entity.living_entity;
+        if living.dead.load(Relaxed)
+            || living.health.load() <= 0.0
+            || self.get_entity().is_removed()
+        {
+            return;
+        }
 
-            let cooldown = self.heal_cooldown.fetch_sub(1, Relaxed) - 1;
-            self.can_attack_players.store(cooldown <= 0, Relaxed);
+        let cooldown = self.heal_cooldown.fetch_sub(1, Relaxed) - 1;
+        self.can_attack_players.store(cooldown <= 0, Relaxed);
 
-            self.tick_drinking().await;
+        self.tick_drinking();
 
-            // Vanilla: `7.5E-4F` chance per tick to broadcast entity event 15 (ambient
-            // ground-particle puff, ornamental only -- no server-observable effect, so this is
-            // skipped as a scope reduction rather than wired to a client entity-status event.
-        })
+        // Vanilla: `7.5E-4F` chance per tick to broadcast entity event 15 (ambient
+        // ground-particle puff, ornamental only -- no server-observable effect, so this is
+        // skipped as a scope reduction rather than wired to a client entity-status event.
     }
 
     /// Vanilla: `Witch.getDamageAfterMagicAbsorb`'s `WITCH_RESISTANT_TO`-tag 85% reduction.

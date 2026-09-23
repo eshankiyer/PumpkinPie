@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, OnPlaceArgs, PlacedArgs,
+        BlockBehaviour, OnPlaceArgs, PlacedArgs,
         blocks::{skull_block::SkullBlock, skull_block::WallSkullBlock},
     },
     entity::{Entity, boss::wither::WitherEntity},
@@ -24,16 +24,14 @@ use crate::{
 pub struct WitherSkeletonSkullBlock;
 
 impl BlockBehaviour for WitherSkeletonSkullBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
         SkullBlock::on_place(&SkullBlock, args)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
-            args.world.add_block_entity(std::sync::Arc::new(entity));
-            check_spawn(args.world, args.position).await;
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
+        args.world.add_block_entity(std::sync::Arc::new(entity));
+        check_spawn(args.world, args.position);
     }
 }
 
@@ -49,7 +47,7 @@ impl BlockBehaviour for WitherWallSkullBlock {
     /// `WitherWallSkullBlock` inherits `WallSkullBlock` placement state and
     /// horizontal facing (`WallSkullBlock.java:41-58`; constructor selected by
     /// `WitherWallSkullBlock.java:20-22`).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
         WallSkullBlock::on_place(&WallSkullBlock, args)
     }
 
@@ -57,12 +55,10 @@ impl BlockBehaviour for WitherWallSkullBlock {
     /// (`WitherWallSkullBlock.java:24-27`). Pumpkin's placement lifecycle exposes
     /// this as `BlockBehaviour::placed`, so retain the wall skull block entity
     /// setup and run the spawn check immediately afterward.
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
-            args.world.add_block_entity(std::sync::Arc::new(entity));
-            check_spawn(args.world, args.position).await;
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
+        args.world.add_block_entity(std::sync::Arc::new(entity));
+        check_spawn(args.world, args.position);
     }
 }
 
@@ -134,7 +130,7 @@ pub fn can_spawn_mob(world: &crate::world::World, pos: &BlockPos, item_stack: &I
 /// `WitherSkullBlock.checkSpawn` (`WitherSkullBlock.java:42-82`): validates the placed skull,
 /// difficulty, height, and full pattern before clearing the pattern and spawning an invulnerable
 /// wither.
-pub async fn check_spawn(world: &Arc<crate::world::World>, pos: &BlockPos) {
+pub fn check_spawn(world: &Arc<crate::world::World>, pos: &BlockPos) {
     if !is_wither_skull(world.get_block(pos))
         || pos.0.y < world.min_y
         || world.level_info.load().difficulty == Difficulty::Peaceful
@@ -164,13 +160,11 @@ pub async fn check_spawn(world: &Arc<crate::world::World>, pos: &BlockPos) {
                 top_middle.down(),
             ];
             for pattern_pos in pattern {
-                world
-                    .set_block_state(
-                        &pattern_pos,
-                        Block::AIR.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
+                world.set_block_state(
+                    &pattern_pos,
+                    Block::AIR.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                );
                 world.sync_world_event(
                     WorldEvent::ParticlesDestroyBlock,
                     pattern_pos,
@@ -190,7 +184,7 @@ pub async fn check_spawn(world: &Arc<crate::world::World>, pos: &BlockPos) {
             );
             let wither = WitherEntity::new(entity);
             wither.make_invulnerable();
-            world.spawn_entity(wither).await;
+            world.spawn_entity(wither);
             return;
         }
     }

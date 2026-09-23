@@ -55,23 +55,16 @@ impl ArgumentConsumer for SoundCategoryArgumentConsumer {
         Box::pin(async move { result })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        _input: &'a str,
-    ) -> SuggestResult<'a> {
-        Box::pin(async move {
-            let categories = [
-                "master", "music", "record", "weather", "block", "hostile", "neutral", "player",
-                "ambient", "voice",
-            ];
-            let suggestions: Vec<CommandSuggestion> = categories
-                .iter()
-                .map(|cat| CommandSuggestion::new((*cat).to_string(), None))
-                .collect();
-            Ok(Some(suggestions))
-        })
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {
+        let categories = [
+            "master", "music", "record", "weather", "block", "hostile", "neutral", "player",
+            "ambient", "voice",
+        ];
+        let suggestions: Vec<CommandSuggestion> = categories
+            .iter()
+            .map(|cat| CommandSuggestion::new((*cat).to_string(), None))
+            .collect();
+        Ok(Some(suggestions))
     }
 }
 

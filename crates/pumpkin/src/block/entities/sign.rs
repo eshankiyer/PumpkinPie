@@ -1,16 +1,13 @@
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicI8, Ordering},
-    },
+use std::pin::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicI8, Ordering},
 };
 
 use super::BlockEntity;
 use crate::world::World;
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::math::position::BlockPos;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 pub use pumpkin_data::dye_color::DyeColor;
@@ -169,12 +166,14 @@ impl Text {
 
 /// Vanilla clears `playerWhoMayEdit` when the player disappears or leaves the four-block
 /// interaction range (`SignBlockEntity.java:260-275`).
-pub(crate) async fn tick_editor(
+pub(crate) fn tick_editor(
     world: &std::sync::Arc<World>,
     position: BlockPos,
     editor: &Mutex<Option<Uuid>>,
 ) {
-    let mut editor = editor.lock().await;
+    let mut editor = editor
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(player_id) = *editor else {
         return;
     };
@@ -196,13 +195,8 @@ impl BlockEntity for SignBlockEntity {
         self.position
     }
 
-    fn tick<'a>(
-        &'a self,
-        world: &'a std::sync::Arc<World>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            tick_editor(world, self.position, &self.currently_editing_player).await;
-        })
+    fn tick(&self, world: &std::sync::Arc<World>) {
+        tick_editor(world, self.position, &self.currently_editing_player);
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -229,15 +223,10 @@ impl BlockEntity for SignBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put("front_text", self.front_text.clone());
-            nbt.put("back_text", self.back_text.clone());
-            nbt.put_bool("is_waxed", self.is_waxed.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put("front_text", self.front_text.clone());
+        nbt.put("back_text", self.back_text.clone());
+        nbt.put_bool("is_waxed", self.is_waxed.load(Ordering::Relaxed));
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

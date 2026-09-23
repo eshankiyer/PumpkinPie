@@ -12,8 +12,7 @@ impl BedrockClient {
             self.kick(
                 DisconnectReason::Kicked,
                 "Cannot have zero or negative view distance!".to_string(),
-            )
-            .await;
+            );
             return;
         }
         let Some(server) = player.world().server.upgrade() else {
@@ -46,6 +45,6 @@ impl BedrockClient {
             "Player {} updated their render distance: {} -> {}.",
             player.gameprofile.name, old_view_distance, view_distance
         );
-        chunker::update_position(player).await;
+        chunker::update_position(player);
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering::Relaxed;
 
 use super::breed::BreedGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::{PandaEntity, TOTAL_UNHAPPY_TIME};
@@ -85,42 +85,40 @@ impl PandaBreedGoal {
 }
 
 impl Goal for PandaBreedGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
-                return false;
-            };
-            if !self.inner.can_start(mob).await || panda.get_unhappy_counter() != 0 {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
+            return false;
+        };
+        if !self.inner.can_start(mob) || panda.get_unhappy_counter() != 0 {
+            return false;
+        }
 
-            if Self::can_find_bamboo(mob) {
-                return true;
-            }
+        if Self::can_find_bamboo(mob) {
+            return true;
+        }
 
-            let tick_count = panda.get_mob_entity().tick_count.load(Relaxed);
-            if self.unhappy_cooldown <= tick_count {
-                panda.set_unhappy_counter(TOTAL_UNHAPPY_TIME);
-                self.unhappy_cooldown = tick_count + UNHAPPY_COOLDOWN_TICKS;
-                Self::point_look_goal_at_nearest_player(panda);
-            }
-            false
-        })
+        let tick_count = panda.get_mob_entity().tick_count.load(Relaxed);
+        if self.unhappy_cooldown <= tick_count {
+            panda.set_unhappy_counter(TOTAL_UNHAPPY_TIME);
+            self.unhappy_cooldown = tick_count + UNHAPPY_COOLDOWN_TICKS;
+            Self::point_look_goal_at_nearest_player(panda);
+        }
+        false
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

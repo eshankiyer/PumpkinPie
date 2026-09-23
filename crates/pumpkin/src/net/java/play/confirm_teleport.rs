@@ -7,7 +7,7 @@ impl JavaClient {
         player: &Player,
         confirm_teleport: SConfirmTeleport,
     ) {
-        let mut awaiting_teleport = player.awaiting_teleport.lock().await;
+        let mut awaiting_teleport = player.awaiting_teleport.lock();
         if teleport_confirm_action(
             awaiting_teleport.as_ref().map(|(id, _)| id.0),
             confirm_teleport.teleport_id.0,

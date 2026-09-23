@@ -10,8 +10,8 @@ use rand::RngExt;
 use crate::block::blocks::plant::crop::ravager_destroy_crop;
 use crate::block::blocks::plant::crop::{get_available_moisture, has_sufficient_light};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs, OnEntityCollisionArgs, OnPlaceArgs, RandomTickArgs,
+    BlockBehaviour, BonemealArgs, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    OnEntityCollisionArgs, OnPlaceArgs, RandomTickArgs,
 };
 use crate::world::World;
 
@@ -108,41 +108,32 @@ fn lower_half(
 }
 
 /// `PitcherCropBlock.grow`.
-async fn grow(
-    world: &Arc<World>,
-    lower_pos: &BlockPos,
-    lower_state_id: BlockStateId,
-    increase: u8,
-) {
+fn grow(world: &Arc<World>, lower_pos: &BlockPos, lower_state_id: BlockStateId, increase: u8) {
     let mut props = PitcherCropProperties::from_state_id(lower_state_id, &Block::PITCHER_CROP);
     let new_age = (props.age + increase).min(4);
     if !can_grow(world, lower_pos, props.age, new_age) {
         return;
     }
     props.age = new_age;
-    world
-        .set_block_state(
-            lower_pos,
-            props.to_state_id(&Block::PITCHER_CROP),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
+    world.set_block_state(
+        lower_pos,
+        props.to_state_id(&Block::PITCHER_CROP),
+        BlockFlags::NOTIFY_LISTENERS,
+    );
     if is_double(new_age) {
         let mut upper_props = props;
         upper_props.half = DoubleBlockHalf::Upper;
-        world
-            .set_block_state(
-                &lower_pos.up(),
-                upper_props.to_state_id(&Block::PITCHER_CROP),
-                BlockFlags::NOTIFY_ALL,
-            )
-            .await;
+        world.set_block_state(
+            &lower_pos.up(),
+            upper_props.to_state_id(&Block::PITCHER_CROP),
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 }
 
 impl BlockBehaviour for PitcherCropBlock {
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { ravager_destroy_crop(args.world, args.position, args.entity).await })
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        ravager_destroy_crop(args.world, args.position, args.entity)
     }
 
     fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
@@ -155,14 +146,12 @@ impl BlockBehaviour for PitcherCropBlock {
         )
     }
 
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some((lower_pos, lower_state_id)) =
-                lower_half(args.world, args.position, args.block, args.state_id)
-            {
-                grow(args.world, &lower_pos, lower_state_id, 1).await;
-            }
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        if let Some((lower_pos, lower_state_id)) =
+            lower_half(args.world, args.position, args.block, args.state_id)
+        {
+            grow(args.world, &lower_pos, lower_state_id, 1);
+        }
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -172,83 +161,74 @@ impl BlockBehaviour for PitcherCropBlock {
     }
 
     /// `PitcherCropBlock.getStateForPlacement`: always starts as the lower half, age 0.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { args.block.default_state.id })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        args.block.default_state.id
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = PitcherCropProperties::from_state_id(args.state_id, args.block);
-            if is_double(props.age) {
-                // Double-plant half consistency, same shape as `TallPlantBlock`.
-                let other_pos = match props.half {
-                    DoubleBlockHalf::Upper => args.position.down(),
-                    DoubleBlockHalf::Lower => args.position.up(),
-                };
-                let (other_block, other_state_id) = args.world.get_block_and_state_id(&other_pos);
-                if other_block == &Block::PITCHER_CROP {
-                    let other_props =
-                        PitcherCropProperties::from_state_id(other_state_id, other_block);
-                    let opposite_half = match props.half {
-                        DoubleBlockHalf::Upper => DoubleBlockHalf::Lower,
-                        DoubleBlockHalf::Lower => DoubleBlockHalf::Upper,
-                    };
-                    if other_props.half == opposite_half {
-                        return args.state_id;
-                    }
-                }
-                return Block::AIR.default_state.id;
-            }
-
-            if !can_survive(args.world, args.position) {
-                return Block::AIR.default_state.id;
-            }
-            args.state_id
-        })
-    }
-
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // Breaking either half removes the other, matching `DoublePlantBlock` behaviour
-            // (already established for the generic tall-plant blocks in `tall_plant.rs`).
-            let props = PitcherCropProperties::from_state_id(args.state.id, args.block);
-            if !is_double(props.age) {
-                return;
-            }
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let props = PitcherCropProperties::from_state_id(args.state_id, args.block);
+        if is_double(props.age) {
+            // Double-plant half consistency, same shape as `TallPlantBlock`.
             let other_pos = match props.half {
                 DoubleBlockHalf::Upper => args.position.down(),
                 DoubleBlockHalf::Lower => args.position.up(),
             };
-            let (other_block, _) = args.world.get_block_and_state_id(&other_pos);
+            let (other_block, other_state_id) = args.world.get_block_and_state_id(&other_pos);
             if other_block == &Block::PITCHER_CROP {
-                args.world
-                    .break_block(
-                        &other_pos,
-                        None,
-                        BlockFlags::SKIP_DROPS | BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
-                    )
-                    .await;
+                let other_props = PitcherCropProperties::from_state_id(other_state_id, other_block);
+                let opposite_half = match props.half {
+                    DoubleBlockHalf::Upper => DoubleBlockHalf::Lower,
+                    DoubleBlockHalf::Lower => DoubleBlockHalf::Upper,
+                };
+                if other_props.half == opposite_half {
+                    return args.state_id;
+                }
             }
-        })
+            return Block::AIR.default_state.id;
+        }
+
+        if !can_survive(args.world, args.position) {
+            return Block::AIR.default_state.id;
+        }
+        args.state_id
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let (block, state_id) = args.world.get_block_and_state_id(args.position);
-            let props = PitcherCropProperties::from_state_id(state_id, block);
-            // Only the lower half is randomly ticking, and only while still growing.
-            if !is_lower(block, props.half) || is_max_age(props.age) {
-                return;
-            }
-            let growth_speed = get_available_moisture(args.world, args.position, block).await;
-            let roll_max = (25.0 / growth_speed).floor() as i64;
-            if rand::rng().random_range(0..=roll_max.max(0)) == 0 {
-                grow(args.world, args.position, state_id, 1).await;
-            }
-        })
+    fn broken(&self, args: BrokenArgs<'_>) {
+        // Breaking either half removes the other, matching `DoublePlantBlock` behaviour
+        // (already established for the generic tall-plant blocks in `tall_plant.rs`).
+        let props = PitcherCropProperties::from_state_id(args.state.id, args.block);
+        if !is_double(props.age) {
+            return;
+        }
+        let other_pos = match props.half {
+            DoubleBlockHalf::Upper => args.position.down(),
+            DoubleBlockHalf::Lower => args.position.up(),
+        };
+        let (other_block, _) = args.world.get_block_and_state_id(&other_pos);
+        if other_block == &Block::PITCHER_CROP {
+            args.world.break_block(
+                &other_pos,
+                None,
+                BlockFlags::SKIP_DROPS | BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
+            );
+        }
+    }
+
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let (block, state_id) = args.world.get_block_and_state_id(args.position);
+        let props = PitcherCropProperties::from_state_id(state_id, block);
+        // Only the lower half is randomly ticking, and only while still growing.
+        if !is_lower(block, props.half) || is_max_age(props.age) {
+            return;
+        }
+        let growth_speed = get_available_moisture(args.world, args.position, block);
+        let roll_max = (25.0 / growth_speed).floor() as i64;
+        if rand::rng().random_range(0..=roll_max.max(0)) == 0 {
+            grow(args.world, args.position, state_id, 1);
+        }
     }
 }
 

@@ -804,7 +804,7 @@ pub fn apply_mob_effect_on_hit(
 ///
 /// The caller is responsible for the effect's *requirements* (`is_on_ground`, no vehicle) and
 /// for having a nonzero Frost Walker level on the boots.
-pub async fn apply_frost_walker(
+pub fn apply_frost_walker(
     world: &Arc<World>,
     position: Vector3<f64>,
     level: i32,
@@ -853,9 +853,7 @@ pub async fn apply_frost_walker(
                 {
                     continue;
                 }
-                let replaced = world
-                    .set_block_state(&pos, frosted_ice, BlockFlags::NOTIFY_ALL)
-                    .await;
+                let replaced = world.set_block_state(&pos, frosted_ice, BlockFlags::NOTIFY_ALL);
                 if replaced == frosted_ice {
                     continue;
                 }
@@ -871,8 +869,7 @@ pub async fn apply_frost_walker(
                         crate::world::game_event::GameEventContext::none,
                         crate::world::game_event::GameEventContext::of_entity,
                     ),
-                )
-                .await;
+                );
             }
         }
     }

@@ -182,7 +182,7 @@ impl PotionContents {
     }
 
     // PotionContents.java:154-164 applies every scaled effect when a consumable finishes.
-    pub async fn on_consume(target: &LivingEntity, stack: &ItemStack) {
+    pub fn on_consume(target: &LivingEntity, stack: &ItemStack) {
         // PotionContents.java:235-237 reads POTION_DURATION_SCALE from the consumed stack,
         // defaulting to 1.0 when the component is absent.
         let duration_scale = potion_duration_scale(stack);
@@ -194,12 +194,11 @@ impl PotionContents {
             PotionApplicationSource::Normal,
             1.0,
             false,
-        )
-        .await;
+        );
     }
 
     /// Apply instant or duration effects to a target living entity.
-    pub async fn apply_effects_to(
+    pub fn apply_effects_to(
         target: &LivingEntity,
         effects: Vec<PotionEffect>,
         scale: f32,
@@ -212,11 +211,10 @@ impl PotionContents {
             source,
             source.instant_scale(scale),
             true,
-        )
-        .await;
+        );
     }
 
-    async fn apply_effects_to_inner(
+    fn apply_effects_to_inner(
         target: &LivingEntity,
         effects: Vec<PotionEffect>,
         scale: f32,
@@ -236,13 +234,11 @@ impl PotionContents {
                 if LivingEntity::instant_effect_is_damage(effect_type, inverted) {
                     let amount = (6 * ((amplifier as i32) + 1)) as f32 * instant_scale;
 
-                    target
-                        .damage(
-                            target.get_entity(),
-                            amount,
-                            pumpkin_data::damage::DamageType::MAGIC,
-                        )
-                        .await;
+                    target.damage(
+                        target.get_entity(),
+                        amount,
+                        pumpkin_data::damage::DamageType::MAGIC,
+                    );
                 } else {
                     let amount = (4 * ((amplifier as i32) + 1)) as f32 * instant_scale;
                     target.heal(amount);
@@ -291,7 +287,7 @@ impl PotionContents {
                     show_icon,
                     blend: false,
                 };
-                target.add_effect(eff).await;
+                target.add_effect(eff);
             }
         }
     }

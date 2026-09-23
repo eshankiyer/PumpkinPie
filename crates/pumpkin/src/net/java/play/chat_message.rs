@@ -33,12 +33,12 @@ impl JavaClient {
             if err.is_kick()
                 && let Some(reason) = err.client_kick_reason()
             {
-                self.kick(TextComponent::text(reason)).await;
+                self.kick(TextComponent::text(reason));
             }
             return;
         }
 
-        if player.check_chat_spam(server).await {
+        if player.check_chat_spam(server) {
             return;
         }
 
@@ -75,7 +75,7 @@ impl JavaClient {
                         message, player.gameprofile.name.clone()
                     );
 
-                    world.broadcast_editioned(&je_packet, &be_packet).await;
+                    world.broadcast_editioned(&je_packet, &be_packet);
                 }
             }
         }}
@@ -124,7 +124,7 @@ impl JavaClient {
             }
 
             // Verify session expiry
-            if player.chat_session.lock().await.expires_at < now {
+            if player.chat_session.lock().expires_at < now {
                 return Err(ChatError::ExpiredPublicKey);
             }
 
@@ -134,7 +134,7 @@ impl JavaClient {
             }
 
             {
-                let mut cache = player.signature_cache.lock().await;
+                let mut cache = player.signature_cache.lock();
                 if !chat_message.acknowledged.is_empty() {
                     if cache
                         .last_seen_validator
@@ -160,7 +160,7 @@ impl JavaClient {
             // The client can bypass this check by sending 0
             if chat_message.checksum != 0 {
                 let checksum =
-                    polynomial_rolling_hash(player.signature_cache.lock().await.last_seen.as_ref());
+                    polynomial_rolling_hash(player.signature_cache.lock().last_seen.as_ref());
                 if checksum != chat_message.checksum {
                     return Err(ChatError::ChatValidationFailed);
                 }
@@ -191,13 +191,13 @@ impl JavaClient {
             if err.is_kick()
                 && let Some(reason) = err.client_kick_reason()
             {
-                self.kick(TextComponent::text(reason)).await;
+                self.kick(TextComponent::text(reason));
             }
             return;
         }
 
         // Update the chat session fields
-        *player.chat_session.lock().await = ChatSession::new(
+        *player.chat_session.lock() = ChatSession::new(
             session.session_id,
             session.expires_at,
             session.public_key.clone(),

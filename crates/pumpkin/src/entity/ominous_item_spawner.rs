@@ -14,11 +14,10 @@ use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::{CSetEntityMetadata, Metadata};
 use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, item::ItemEntity,
-    living::LivingEntity,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, item::ItemEntity, living::LivingEntity,
 };
 use crate::server::Server;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -92,8 +91,11 @@ impl OminousItemSpawnerEntity {
         spawn_item_after_ticks - TICKS_BEFORE_ABOUT_TO_SPAWN_SOUND
     }
 
-    pub async fn get_item(&self) -> ItemStack {
-        self.item.lock().await.clone()
+    pub fn get_item(&self) -> ItemStack {
+        self.item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// `OminousItemSpawner.addAdditionalSaveData` (`:120-127`): the stack is
@@ -134,9 +136,12 @@ impl OminousItemSpawnerEntity {
     /// power/uncertainty constants hardcoded per item. Until an item-side
     /// `create_dispense_config` / `as_projectile` pair exists, every stack takes
     /// the `ItemEntity` branch below.
-    async fn spawn_item(&self) {
+    fn spawn_item(&self) {
         let stack = {
-            let mut item = self.item.lock().await;
+            let mut item = self
+                .item
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if item.is_empty() {
                 return;
             }
@@ -165,7 +170,7 @@ impl OminousItemSpawnerEntity {
             velocity,
             0,
         ));
-        world.spawn_entity(spawned.clone()).await;
+        world.spawn_entity(spawned.clone());
 
         // `level.levelEvent(3021, blockPosition(), 1)` (`OminousItemSpawner.java:84`).
         world.sync_world_event(
@@ -179,29 +184,30 @@ impl OminousItemSpawnerEntity {
             GameEvent::EntityPlace,
             pos,
             GameEventContext::of_entity(spawned),
-        )
-        .await;
+        );
 
-        self.init_data_tracker().await;
+        self.init_data_tracker();
     }
 }
 
 impl NBTStorage for OminousItemSpawnerEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.write_nbt(nbt).await;
-            let item = self.item.lock().await;
-            Self::write_spawner_nbt(nbt, &item, self.spawn_item_after_ticks.load(Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.write_nbt(nbt);
+        let item = self
+            .item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Self::write_spawner_nbt(nbt, &item, self.spawn_item_after_ticks.load(Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.read_nbt_non_mut(nbt).await;
-            let (item, ticks) = Self::read_spawner_nbt(nbt);
-            *self.item.lock().await = item;
-            self.spawn_item_after_ticks.store(ticks, Relaxed);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.read_nbt_non_mut(nbt);
+        let (item, ticks) = Self::read_spawner_nbt(nbt);
+        *self
+            .item
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = item;
+        self.spawn_item_after_ticks.store(ticks, Relaxed);
     }
 }
 
@@ -209,71 +215,65 @@ impl EntityBase for OminousItemSpawnerEntity {
     /// `OminousItemSpawner.tick` / `tickServer` (`OminousItemSpawner.java:44-63`).
     /// The client half (`tickClient` `:65-69` and `addParticles` `:153-172`) is
     /// client-side only and has no server counterpart.
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `super.tick()` first: vanilla increments `tickCount` inside it,
-            // before `tickServer` compares against it.
-            self.entity.tick(caller, server).await;
-            let tick_count = self.tick_count.fetch_add(1, Relaxed) + 1;
-            let spawn_item_after_ticks = self.spawn_item_after_ticks.load(Relaxed);
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        // `super.tick()` first: vanilla increments `tickCount` inside it,
+        // before `tickServer` compares against it.
+        self.entity.tick(caller, server);
+        let tick_count = self.tick_count.fetch_add(1, Relaxed) + 1;
+        let spawn_item_after_ticks = self.spawn_item_after_ticks.load(Relaxed);
 
-            if tick_count == Self::about_to_spawn_sound_tick(spawn_item_after_ticks) {
-                // `level.playSound(null, blockPosition(), ..)` centers on the block.
-                self.entity.world.load().play_sound(
-                    Sound::BlockTrialSpawnerAboutToSpawnItem,
-                    SoundCategory::Neutral,
-                    &self.entity.block_pos.load().to_centered_f64(),
-                );
-            }
+        if tick_count == Self::about_to_spawn_sound_tick(spawn_item_after_ticks) {
+            // `level.playSound(null, blockPosition(), ..)` centers on the block.
+            self.entity.world.load().play_sound(
+                Sound::BlockTrialSpawnerAboutToSpawnItem,
+                SoundCategory::Neutral,
+                &self.entity.block_pos.load().to_centered_f64(),
+            );
+        }
 
-            if tick_count >= spawn_item_after_ticks {
-                self.spawn_item().await;
-                // `kill(level)` (`OminousItemSpawner.java:61`) is
-                // `Entity.kill` (`Entity.java:405-408`): remove, then fire
-                // `GameEvent.ENTITY_DIE` with this entity as the source. The
-                // default `EntityBase::kill` for non-living entities only
-                // removes, so the event is emitted here.
-                let world = self.entity.world.load();
-                let pos = self.entity.pos.load();
-                self.entity.remove().await;
-                emit_game_event(
-                    &world,
-                    GameEvent::EntityDie,
-                    pos,
-                    GameEventContext::of_entity(caller.clone()),
-                )
-                .await;
-            }
-        })
+        if tick_count >= spawn_item_after_ticks {
+            self.spawn_item();
+            // `kill(level)` (`OminousItemSpawner.java:61`) is
+            // `Entity.kill` (`Entity.java:405-408`): remove, then fire
+            // `GameEvent.ENTITY_DIE` with this entity as the source. The
+            // default `EntityBase::kill` for non-living entities only
+            // removes, so the event is emitted here.
+            let world = self.entity.world.load();
+            let pos = self.entity.pos.load();
+            self.entity.remove();
+            emit_game_event(
+                &world,
+                GameEvent::EntityDie,
+                pos,
+                GameEventContext::of_entity(caller.clone()),
+            );
+        }
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {
-            self.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::ominous_item_spawner::ITEM,
-                    &ItemStackSerializer::from(self.item.lock().await.clone()),
-                )],
-                None,
-            );
-        })
+    fn init_data_tracker(&self) {
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::ominous_item_spawner::ITEM,
+                &ItemStackSerializer::from(
+                    self.item
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone(),
+                ),
+            )],
+            None,
+        );
     }
 
     /// `Entity.kill` (`Entity.java:405-408`): remove, then fire
     /// `GameEvent.ENTITY_DIE`. The non-living default in `EntityBase::kill`
     /// only removes, so an outside kill would otherwise skip the event.
-    fn kill<'a>(&'a self, _caller: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let world = self.entity.world.load();
-            let pos = self.entity.pos.load();
-            self.entity.remove().await;
-            // No `Arc<dyn EntityBase>` available here, as in `ArmorStandEntity::kill`.
-            emit_game_event(&world, GameEvent::EntityDie, pos, GameEventContext::none()).await;
-        })
+    fn kill(&self, _caller: &dyn EntityBase) {
+        let world = self.entity.world.load();
+        let pos = self.entity.pos.load();
+        self.entity.remove();
+        // No `Arc<dyn EntityBase>` available here, as in `ArmorStandEntity::kill`.
+        emit_game_event(&world, GameEvent::EntityDie, pos, GameEventContext::none());
     }
 
     fn get_entity(&self) -> &Entity {
@@ -331,7 +331,12 @@ impl EntityBase for OminousItemSpawnerEntity {
             if client.version.load() >= CURRENT_MC_VERSION {
                 let metadata = Metadata::new(
                     pumpkin_data::tracked_data::ominous_item_spawner::ITEM,
-                    ItemStackSerializer::from(self.item.lock().await.clone()),
+                    ItemStackSerializer::from(
+                        self.item
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .clone(),
+                    ),
                 );
                 let mut data = Vec::new();
                 if metadata.write(&mut data, &client.version.load()).is_ok() {

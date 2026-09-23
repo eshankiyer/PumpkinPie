@@ -7,7 +7,7 @@ use pumpkin_data::attributes::Attributes;
 use rand::RngExt;
 
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture, to_goal_ticks};
+use crate::entity::ai::goal::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::mob::Mob;
 use crate::entity::mob::witch::WitchEntity;
@@ -40,7 +40,7 @@ impl NearestAttackableWitchTargetGoal {
         }
     }
 
-    async fn find_closest_player(&mut self, mob: &dyn Mob) {
+    fn find_closest_player(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let follow_range = mob_entity
             .living_entity
@@ -73,16 +73,13 @@ impl NearestAttackableWitchTargetGoal {
 
         self.target = None;
         for player in candidates {
-            if !TrackTargetGoal::is_allied(mob, player.as_ref()).await
+            if !TrackTargetGoal::is_allied(mob, player.as_ref())
                 && mob.can_attack(player.get_entity())
-                && self
-                    .target_predicate
-                    .test(
-                        &world,
-                        Some(&mob_entity.living_entity),
-                        &player.living_entity,
-                    )
-                    .await
+                && self.target_predicate.test(
+                    &world,
+                    Some(&mob_entity.living_entity),
+                    &player.living_entity,
+                )
             {
                 self.target = Some(player as Arc<dyn EntityBase>);
                 break;
@@ -92,38 +89,32 @@ impl NearestAttackableWitchTargetGoal {
 }
 
 impl Goal for NearestAttackableWitchTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(witch) = mob.cast_any().downcast_ref::<WitchEntity>() else {
-                return false;
-            };
-            if !witch.can_attack_players.load(Relaxed) {
-                return false;
-            }
-            if rand::rng().random_range(0..to_goal_ticks(RANDOM_INTERVAL)) != 0 {
-                return false;
-            }
-            self.find_closest_player(mob).await;
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(witch) = mob.cast_any().downcast_ref::<WitchEntity>() else {
+            return false;
+        };
+        if !witch.can_attack_players.load(Relaxed) {
+            return false;
+        }
+        if rand::rng().random_range(0..to_goal_ticks(RANDOM_INTERVAL)) != 0 {
+            return false;
+        }
+        self.find_closest_player(mob);
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.target = None;
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

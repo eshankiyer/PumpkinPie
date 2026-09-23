@@ -28,10 +28,10 @@ use crate::block::blocks::plant::wither_rose::WitherRoseBlock;
 use crate::block::entities::BlockEntity;
 use crate::block::entities::beehive::{BeehiveBlockEntity, bees_stay_in_hive, is_beehive};
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        Controls, Goal, GoalFuture, active_target::ActiveTargetGoal, breed::BreedGoal,
+        Controls, Goal, active_target::ActiveTargetGoal, breed::BreedGoal,
         follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
@@ -232,12 +232,12 @@ impl BeeEntity {
                                 let Some(anger) = mob.persistent_anger() else {
                                     return false;
                                 };
-                                if anger.is_angry_at(target.entity_uuid).await {
+                                if anger.is_angry_at(target.entity_uuid) {
                                     return true;
                                 }
                                 let universal_anger =
                                     world.level_info.load().game_rules.universal_anger;
-                                anger.is_angry_at_all_players(universal_anger).await
+                                anger.is_angry_at_all_players(universal_anger)
                             }
                         },
                     ),
@@ -456,18 +456,17 @@ impl BeeEntity {
     }
 
     /// `Bee.wantsToEnterHive`.
-    async fn wants_to_enter_hive(&self) -> bool {
+    fn wants_to_enter_hive(&self) -> bool {
         if self.stay_out_of_hive_countdown.load(Relaxed) > 0
             || self.pollinating.load(Relaxed)
             || self.has_stung()
-            || self.mob_entity.get_target().await.is_some()
+            || self.mob_entity.get_target().is_some()
         {
             return false;
         }
         let world = self.mob_entity.living_entity.entity.world.load();
-        let wants = self.has_nectar()
-            || self.is_tired_of_looking_for_nectar()
-            || bees_stay_in_hive(&world).await;
+        let wants =
+            self.has_nectar() || self.is_tired_of_looking_for_nectar() || bees_stay_in_hive(&world);
         wants && !self.is_hive_near_fire()
     }
 }
@@ -526,23 +525,23 @@ impl BeeAttackGoal {
 }
 
 impl Goal for BeeAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.can_sting() && self.melee.can_start(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.can_sting() && self.melee.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.can_sting() && self.melee.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.can_sting() && self.melee.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.melee.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.melee.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.melee.tick(mob)
     }
 
@@ -647,141 +646,136 @@ impl BeePollinateGoal {
         )
     }
 
-    async fn is_raining(mob: &dyn Mob) -> bool {
-        mob.get_entity().world.load().weather.lock().await.raining
+    fn is_raining(mob: &dyn Mob) -> bool {
+        mob.get_entity()
+            .world
+            .load()
+            .weather
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .raining
     }
 }
 
 impl Goal for BeePollinateGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            if bee.flower_cooldown.load(Relaxed) > 0 || bee.has_nectar() {
-                return false;
-            }
-            if Self::is_raining(mob).await {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        if bee.flower_cooldown.load(Relaxed) > 0 || bee.has_nectar() {
+            return false;
+        }
+        if Self::is_raining(mob) {
+            return false;
+        }
 
-            let Some(flower_pos) = Self::find_nearby_flower(mob) else {
-                bee.flower_cooldown.store(
-                    mob.get_random().random_range(
-                        MIN_FIND_FLOWER_RETRY_COOLDOWN..=MAX_FIND_FLOWER_RETRY_COOLDOWN,
-                    ),
-                    Relaxed,
-                );
-                return false;
-            };
+        let Some(flower_pos) = Self::find_nearby_flower(mob) else {
+            bee.flower_cooldown.store(
+                mob.get_random()
+                    .random_range(MIN_FIND_FLOWER_RETRY_COOLDOWN..=MAX_FIND_FLOWER_RETRY_COOLDOWN),
+                Relaxed,
+            );
+            return false;
+        };
 
-            bee.flower_pos.store(Some(flower_pos));
-            let pos = mob.get_entity().pos.load();
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-            navigator.set_progress(NavigatorGoal::new(
-                pos,
-                Self::flower_target(flower_pos),
-                1.2,
-            ));
-            true
-        })
+        bee.flower_pos.store(Some(flower_pos));
+        let pos = mob.get_entity().pos.load();
+        let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+        navigator.set_progress(NavigatorGoal::new(
+            pos,
+            Self::flower_target(flower_pos),
+            1.2,
+        ));
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            if !self.pollinating || bee.flower_pos.load().is_none() {
-                return false;
-            }
-            if Self::is_raining(mob).await {
-                return false;
-            }
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        if !self.pollinating || bee.flower_pos.load().is_none() {
+            return false;
+        }
+        if Self::is_raining(mob) {
+            return false;
+        }
+        if self.has_pollinated_long_enough() {
+            return mob.get_random().random::<f32>() < 0.2;
+        }
+        true
+    }
+
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.successful_pollinating_ticks = 0;
+        self.pollinating_ticks = 0;
+        self.last_sound_played_tick = 0;
+        self.pollinating = true;
+        if let Some(bee) = self.bee.upgrade() {
+            bee.pollinating.store(true, Relaxed);
+            bee.reset_ticks_without_nectar();
+        }
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(bee) = self.bee.upgrade() {
             if self.has_pollinated_long_enough() {
-                return mob.get_random().random::<f32>() < 0.2;
+                bee.set_has_nectar(true);
             }
-            true
-        })
+            bee.flower_cooldown
+                .store(COOLDOWN_BEFORE_LOCATING_NEW_FLOWER, Relaxed);
+            bee.pollinating.store(false, Relaxed);
+        }
+        self.pollinating = false;
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.successful_pollinating_ticks = 0;
-            self.pollinating_ticks = 0;
-            self.last_sound_played_tick = 0;
-            self.pollinating = true;
-            if let Some(bee) = self.bee.upgrade() {
-                bee.pollinating.store(true, Relaxed);
-                bee.reset_ticks_without_nectar();
-            }
-        })
-    }
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        let Some(flower_pos) = bee.flower_pos.load() else {
+            return;
+        };
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(bee) = self.bee.upgrade() {
-                if self.has_pollinated_long_enough() {
-                    bee.set_has_nectar(true);
-                }
-                bee.flower_cooldown
-                    .store(COOLDOWN_BEFORE_LOCATING_NEW_FLOWER, Relaxed);
-                bee.pollinating.store(false, Relaxed);
-            }
+        self.pollinating_ticks += 1;
+        if self.pollinating_ticks > MAX_POLLINATING_TICKS {
+            bee.drop_flower();
             self.pollinating = false;
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
-    }
+            bee.pollinating.store(false, Relaxed);
+            bee.flower_cooldown
+                .store(COOLDOWN_BEFORE_LOCATING_NEW_FLOWER, Relaxed);
+            return;
+        }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            let Some(flower_pos) = bee.flower_pos.load() else {
-                return;
-            };
-
-            self.pollinating_ticks += 1;
-            if self.pollinating_ticks > MAX_POLLINATING_TICKS {
-                bee.drop_flower();
-                self.pollinating = false;
-                bee.pollinating.store(false, Relaxed);
-                bee.flower_cooldown
-                    .store(COOLDOWN_BEFORE_LOCATING_NEW_FLOWER, Relaxed);
-                return;
+        let target = Self::flower_target(flower_pos);
+        let pos = mob.get_entity().pos.load();
+        if (target - pos).length() > 1.0 {
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            if navigator.is_idle() {
+                navigator.set_progress(NavigatorGoal::new(pos, target, 1.2));
             }
+            return;
+        }
 
-            let target = Self::flower_target(flower_pos);
-            let pos = mob.get_entity().pos.load();
-            if (target - pos).length() > 1.0 {
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                if navigator.is_idle() {
-                    navigator.set_progress(NavigatorGoal::new(pos, target, 1.2));
-                }
-                return;
-            }
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at(mob, target.x, target.y, target.z);
 
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap()
-                .look_at(mob, target.x, target.y, target.z);
-
-            self.successful_pollinating_ticks += 1;
-            if mob.get_random().random::<f32>() < 0.05
-                && self.successful_pollinating_ticks > self.last_sound_played_tick + 60
-            {
-                self.last_sound_played_tick = self.successful_pollinating_ticks;
-                let entity = mob.get_entity();
-                entity.world.load().play_sound(
-                    Sound::EntityBeePollinate,
-                    SoundCategory::Neutral,
-                    &entity.pos.load(),
-                );
-            }
-        })
+        self.successful_pollinating_ticks += 1;
+        if mob.get_random().random::<f32>() < 0.05
+            && self.successful_pollinating_ticks > self.last_sound_played_tick + 60
+        {
+            self.last_sound_played_tick = self.successful_pollinating_ticks;
+            let entity = mob.get_entity();
+            entity.world.load().play_sound(
+                Sound::EntityBeePollinate,
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+            );
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -806,53 +800,49 @@ impl BeeEnterHiveGoal {
 }
 
 impl Goal for BeeEnterHiveGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            let Some(hive_pos) = bee.hive_pos.load() else {
-                return false;
-            };
-            if !bee.wants_to_enter_hive().await || !bee.closer_than(hive_pos, HIVE_ENTER_DISTANCE) {
-                return false;
-            }
-            let Some(handle) = bee.get_beehive_block_entity() else {
-                return false;
-            };
-            let Some(hive) = as_hive(&handle) else {
-                return false;
-            };
-            if hive.is_full().await {
-                // Vanilla forgets a full hive outright rather than hovering at its mouth.
-                bee.hive_pos.store(None);
-                return false;
-            }
-            true
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        let Some(hive_pos) = bee.hive_pos.load() else {
+            return false;
+        };
+        if !bee.wants_to_enter_hive() || !bee.closer_than(hive_pos, HIVE_ENTER_DISTANCE) {
+            return false;
+        }
+        let Some(handle) = bee.get_beehive_block_entity() else {
+            return false;
+        };
+        let Some(hive) = as_hive(&handle) else {
+            return false;
+        };
+        if hive.is_full() {
+            // Vanilla forgets a full hive outright rather than hovering at its mouth.
+            bee.hive_pos.store(None);
+            return false;
+        }
+        true
     }
 
     /// `BeeEnterHiveGoal.canBeeContinueToUse` is unconditionally false: entering is a one-shot.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            let Some(handle) = bee.get_beehive_block_entity() else {
-                return;
-            };
-            let Some(hive) = as_hive(&handle) else {
-                return;
-            };
-            let world = mob.get_entity().world.load();
-            let flower_pos = bee.flower_pos.load();
-            let entity: Arc<dyn EntityBase> = bee;
-            hive.add_occupant(&world, &entity, flower_pos).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        let Some(handle) = bee.get_beehive_block_entity() else {
+            return;
+        };
+        let Some(hive) = as_hive(&handle) else {
+            return;
+        };
+        let world = mob.get_entity().world.load();
+        let flower_pos = bee.flower_pos.load();
+        let entity: Arc<dyn EntityBase> = bee;
+        hive.add_occupant(&world, &entity, flower_pos);
     }
 }
 
@@ -878,7 +868,7 @@ impl BeeLocateHiveGoal {
     }
 
     /// `BeeLocateHiveGoal.findNearbyHivesWithSpace`, sorted by squared distance as vanilla does.
-    async fn find_nearby_hives_with_space(bee: &BeeEntity) -> Vec<BlockPos> {
+    fn find_nearby_hives_with_space(bee: &BeeEntity) -> Vec<BlockPos> {
         let origin = bee.mob_entity.living_entity.entity.block_pos.load();
         let world = bee.mob_entity.living_entity.entity.world.load();
 
@@ -896,7 +886,7 @@ impl BeeLocateHiveGoal {
                     let Some(hive) = as_hive(&handle) else {
                         continue;
                     };
-                    if hive.is_full().await {
+                    if hive.is_full() {
                         continue;
                     }
                     let distance = i64::from(x) * i64::from(x)
@@ -916,41 +906,35 @@ impl BeeLocateHiveGoal {
 }
 
 impl Goal for BeeLocateHiveGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            bee.hive_cooldown.load(Relaxed) == 0
-                && !bee.has_hive()
-                && bee.wants_to_enter_hive().await
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        bee.hive_cooldown.load(Relaxed) == 0 && !bee.has_hive() && bee.wants_to_enter_hive()
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        bee.hive_cooldown
+            .store(COOLDOWN_BEFORE_LOCATING_NEW_HIVE, Relaxed);
+        let hives = Self::find_nearby_hives_with_space(&bee);
+        let Some(&first) = hives.first() else {
+            return;
+        };
+        for pos in &hives {
+            if !bee.is_hive_blacklisted(*pos) {
+                bee.hive_pos.store(Some(*pos));
                 return;
-            };
-            bee.hive_cooldown
-                .store(COOLDOWN_BEFORE_LOCATING_NEW_HIVE, Relaxed);
-            let hives = Self::find_nearby_hives_with_space(&bee).await;
-            let Some(&first) = hives.first() else {
-                return;
-            };
-            for pos in &hives {
-                if !bee.is_hive_blacklisted(*pos) {
-                    bee.hive_pos.store(Some(*pos));
-                    return;
-                }
             }
-            bee.clear_hive_blacklist();
-            bee.hive_pos.store(Some(first));
-        })
+        }
+        bee.clear_hive_blacklist();
+        bee.hive_pos.store(Some(first));
     }
 }
 
@@ -992,14 +976,14 @@ impl BeeGoToHiveGoal {
         bee.closer_than(hive_pos, HIVE_ENTER_DISTANCE)
     }
 
-    async fn can_use(bee: &BeeEntity) -> bool {
+    fn can_use(bee: &BeeEntity) -> bool {
         let Some(hive_pos) = bee.hive_pos.load() else {
             return false;
         };
         if bee.is_too_far_away(hive_pos) || Self::has_reached_target(bee, hive_pos) {
             return false;
         }
-        if !bee.wants_to_enter_hive().await {
+        if !bee.wants_to_enter_hive() {
             return false;
         }
         let world = bee.mob_entity.living_entity.entity.world.load();
@@ -1016,71 +1000,63 @@ impl BeeGoToHiveGoal {
 }
 
 impl Goal for BeeGoToHiveGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            Self::can_use(&bee).await
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        Self::can_use(&bee)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.travelling_ticks = 0;
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.travelling_ticks = 0;
+        self.ticks_stuck = 0;
+        self.best_distance = f64::MAX;
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.travelling_ticks = 0;
+        self.ticks_stuck = 0;
+        self.best_distance = f64::MAX;
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        let Some(hive_pos) = bee.hive_pos.load() else {
+            return;
+        };
+
+        self.travelling_ticks += 1;
+        if self.travelling_ticks > MAX_TRAVELLING_TICKS {
+            bee.drop_and_blacklist_hive();
+            return;
+        }
+
+        if bee.is_too_far_away(hive_pos) {
+            bee.drop_hive();
+            return;
+        }
+
+        let pos = mob.get_entity().pos.load();
+        let target = Self::hive_target(hive_pos);
+        let distance = (target - pos).length_squared();
+        if distance < self.best_distance {
+            self.best_distance = distance;
             self.ticks_stuck = 0;
-            self.best_distance = f64::MAX;
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.travelling_ticks = 0;
-            self.ticks_stuck = 0;
-            self.best_distance = f64::MAX;
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            let Some(hive_pos) = bee.hive_pos.load() else {
-                return;
-            };
-
-            self.travelling_ticks += 1;
-            if self.travelling_ticks > MAX_TRAVELLING_TICKS {
+        } else {
+            self.ticks_stuck += 1;
+            if self.ticks_stuck > TICKS_BEFORE_HIVE_DROP {
                 bee.drop_and_blacklist_hive();
                 return;
             }
+        }
 
-            if bee.is_too_far_away(hive_pos) {
-                bee.drop_hive();
-                return;
-            }
-
-            let pos = mob.get_entity().pos.load();
-            let target = Self::hive_target(hive_pos);
-            let distance = (target - pos).length_squared();
-            if distance < self.best_distance {
-                self.best_distance = distance;
-                self.ticks_stuck = 0;
-            } else {
-                self.ticks_stuck += 1;
-                if self.ticks_stuck > TICKS_BEFORE_HIVE_DROP {
-                    bee.drop_and_blacklist_hive();
-                    return;
-                }
-            }
-
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-            if navigator.is_idle() {
-                navigator.set_progress(NavigatorGoal::new(pos, target, 1.0));
-            }
-        })
+        let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+        if navigator.is_idle() {
+            navigator.set_progress(NavigatorGoal::new(pos, target, 1.0));
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -1118,62 +1094,58 @@ impl Animal for BeeEntity {
 }
 
 impl NBTStorage for BeeEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            self.persistent_anger.write_nbt(nbt).await;
-            if let Some(hive_pos) = self.hive_pos.load() {
-                nbt.put("hive_pos", block_pos_to_nbt(hive_pos));
-            }
-            if let Some(flower_pos) = self.flower_pos.load() {
-                nbt.put("flower_pos", block_pos_to_nbt(flower_pos));
-            }
-            nbt.put_bool("HasNectar", self.has_nectar());
-            nbt.put_bool("HasStung", self.has_stung());
-            nbt.put_int(
-                "TicksSincePollination",
-                self.ticks_without_nectar.load(Relaxed),
-            );
-            nbt.put_int(
-                "CannotEnterHiveTicks",
-                self.stay_out_of_hive_countdown.load(Relaxed),
-            );
-            nbt.put_int(
-                "CropsGrownSincePollination",
-                self.crops_grown_since_pollination.load(Relaxed),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        self.persistent_anger.write_nbt(nbt);
+        if let Some(hive_pos) = self.hive_pos.load() {
+            nbt.put("hive_pos", block_pos_to_nbt(hive_pos));
+        }
+        if let Some(flower_pos) = self.flower_pos.load() {
+            nbt.put("flower_pos", block_pos_to_nbt(flower_pos));
+        }
+        nbt.put_bool("HasNectar", self.has_nectar());
+        nbt.put_bool("HasStung", self.has_stung());
+        nbt.put_int(
+            "TicksSincePollination",
+            self.ticks_without_nectar.load(Relaxed),
+        );
+        nbt.put_int(
+            "CannotEnterHiveTicks",
+            self.stay_out_of_hive_countdown.load(Relaxed),
+        );
+        nbt.put_int(
+            "CropsGrownSincePollination",
+            self.crops_grown_since_pollination.load(Relaxed),
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt).await;
-            // Store the flag bits directly: the entity has no viewers yet during load, so the
-            // byte is published by `mob_init_data_tracker` instead of broadcast from here.
-            let mut flags = 0u8;
-            if nbt.get_bool("HasNectar").unwrap_or(false) {
-                flags |= FLAG_HAS_NECTAR;
-            }
-            if nbt.get_bool("HasStung").unwrap_or(false) {
-                flags |= FLAG_HAS_STUNG;
-            }
-            self.flags.store(flags, Relaxed);
-            self.ticks_without_nectar
-                .store(nbt.get_int("TicksSincePollination").unwrap_or(0), Relaxed);
-            self.stay_out_of_hive_countdown
-                .store(nbt.get_int("CannotEnterHiveTicks").unwrap_or(0), Relaxed);
-            self.crops_grown_since_pollination.store(
-                nbt.get_int("CropsGrownSincePollination").unwrap_or(0),
-                Relaxed,
-            );
-            self.hive_pos.store(block_pos_from_nbt(nbt, "hive_pos"));
-            self.flower_pos.store(block_pos_from_nbt(nbt, "flower_pos"));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        self.persistent_anger.read_nbt(nbt);
+        // Store the flag bits directly: the entity has no viewers yet during load, so the
+        // byte is published by `mob_init_data_tracker` instead of broadcast from here.
+        let mut flags = 0u8;
+        if nbt.get_bool("HasNectar").unwrap_or(false) {
+            flags |= FLAG_HAS_NECTAR;
+        }
+        if nbt.get_bool("HasStung").unwrap_or(false) {
+            flags |= FLAG_HAS_STUNG;
+        }
+        self.flags.store(flags, Relaxed);
+        self.ticks_without_nectar
+            .store(nbt.get_int("TicksSincePollination").unwrap_or(0), Relaxed);
+        self.stay_out_of_hive_countdown
+            .store(nbt.get_int("CannotEnterHiveTicks").unwrap_or(0), Relaxed);
+        self.crops_grown_since_pollination.store(
+            nbt.get_int("CropsGrownSincePollination").unwrap_or(0),
+            Relaxed,
+        );
+        self.hive_pos.store(block_pos_from_nbt(nbt, "hive_pos"));
+        self.flower_pos.store(block_pos_from_nbt(nbt, "flower_pos"));
     }
 }
 
@@ -1190,164 +1162,144 @@ impl Mob for BeeEntity {
         Some(&self.persistent_anger)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            // `Bee.mobInteract` consumes bee food and applies the flower's effect before generic
-            // animal interaction (`Bee.java:557-570`); `WitherRoseBlock.java:78-81` supplies it.
-            if item_stack.item.id == Item::WITHER_ROSE.id {
-                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                self.mob_entity
-                    .living_entity
-                    .add_effect(WitherRoseBlock::bee_interaction_effect())
-                    .await;
-                return true;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        // `Bee.mobInteract` consumes bee food and applies the flower's effect before generic
+        // animal interaction (`Bee.java:557-570`); `WitherRoseBlock.java:78-81` supplies it.
+        if item_stack.item.id == Item::WITHER_ROSE.id {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            self.mob_entity
+                .living_entity
+                .add_effect(WitherRoseBlock::bee_interaction_effect());
+            return true;
+        }
 
-            self.animal_interact(player, item_stack, Sound::EntityBeeLoop)
-                .await
-        })
+        self.animal_interact(player, item_stack, Sound::EntityBeeLoop)
     }
 
     /// `Bee.getBreedOffspring` (`Bee.java:604`): a plain new bee, no inherited state.
-    fn create_offspring<'a>(
-        &'a self,
-        _mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            Some(crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                Uuid::new_v4(),
-            ))
-        })
+    fn create_offspring(
+        &self,
+        _mate: &dyn EntityBase,
+        world: &Arc<World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        Some(crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            Uuid::new_v4(),
+        ))
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
+    fn mob_init_data_tracker(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::bee::FLAGS_ID,
+                self.flags.load(Relaxed) as i8,
+            )],
+            None,
+        );
+        if entity.age.load(Relaxed) < 0 {
             entity.send_meta_data(
-                &[Metadata::new(
-                    tracked_data::bee::FLAGS_ID,
-                    self.flags.load(Relaxed) as i8,
-                )],
+                &[Metadata::new(tracked_data::bee::DATA_BABY_ID, true)],
                 None,
             );
-            if entity.age.load(Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(tracked_data::bee::DATA_BABY_ID, true)],
-                    None,
-                );
-            }
-        })
+        }
     }
 
     /// `Bee.doHurtTarget`: the poison, the stung flag and the sting sound are all gated on the
     /// hit actually landing, which is what `Mob::try_attack` gates this hook on.
-    fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(living) = target.get_living_entity() {
-                living.add_stinger();
-                if let Some(duration) =
-                    poison_duration(self.get_entity().world.load().level_info.load().difficulty)
-                {
-                    living
-                        .add_effect(Effect {
-                            effect_type: &StatusEffect::POISON,
-                            duration,
-                            amplifier: 0,
-                            ambient: false,
-                            show_particles: true,
-                            show_icon: true,
-                            blend: false,
-                        })
-                        .await;
-                }
+    fn on_successful_attack(&self, target: &dyn EntityBase) {
+        if let Some(living) = target.get_living_entity() {
+            living.add_stinger();
+            if let Some(duration) =
+                poison_duration(self.get_entity().world.load().level_info.load().difficulty)
+            {
+                living.add_effect(Effect {
+                    effect_type: &StatusEffect::POISON,
+                    duration,
+                    amplifier: 0,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                });
             }
+        }
 
-            self.set_has_stung(true);
-            // `Bee.doHurtTarget` calls `stopBeingAngry`.
-            self.persistent_anger.stop_being_angry().await;
-            self.set_mob_target(None).await;
-            let entity = &self.mob_entity.living_entity.entity;
-            entity.world.load().play_sound(
-                Sound::EntityBeeSting,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        })
+        self.set_has_stung(true);
+        // `Bee.doHurtTarget` calls `stopBeingAngry`.
+        self.persistent_anger.stop_being_angry();
+        self.set_mob_target(None);
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.world.load().play_sound(
+            Sound::EntityBeeSting,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
     }
 
     /// `Bee.aiStep` and `Bee.customServerAiStep`.
-    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            if living.dead.load(Relaxed) {
-                return;
-            }
+    fn mob_tick(&self, caller: &Arc<dyn EntityBase>) {
+        let living = &self.mob_entity.living_entity;
+        if living.dead.load(Relaxed) {
+            return;
+        }
 
-            self.persistent_anger.tick().await;
-            // Simplified `NeutralMob.updatePersistentAnger(level, true)`, the same shape
-            // `polar_bear.rs` uses: adopt whatever target the revenge goal set as the anger
-            // target and (re)start the timer.
-            if let Some(target) = self.mob_entity.get_target().await {
-                let target_uuid = target.get_entity().entity_uuid;
-                if !self.persistent_anger.is_angry_at(target_uuid).await {
-                    self.persistent_anger.set_angry_at(Some(target_uuid)).await;
-                    self.persistent_anger.start_timer();
-                }
+        self.persistent_anger.tick();
+        // Simplified `NeutralMob.updatePersistentAnger(level, true)`, the same shape
+        // `polar_bear.rs` uses: adopt whatever target the revenge goal set as the anger
+        // target and (re)start the timer.
+        if let Some(target) = self.mob_entity.get_target() {
+            let target_uuid = target.get_entity().entity_uuid;
+            if !self.persistent_anger.is_angry_at(target_uuid) {
+                self.persistent_anger.set_angry_at(Some(target_uuid));
+                self.persistent_anger.start_timer();
             }
+        }
 
-            if self.stay_out_of_hive_countdown.load(Relaxed) > 0 {
-                self.stay_out_of_hive_countdown.fetch_sub(1, Relaxed);
-            }
+        if self.stay_out_of_hive_countdown.load(Relaxed) > 0 {
+            self.stay_out_of_hive_countdown.fetch_sub(1, Relaxed);
+        }
 
-            if self.flower_cooldown.load(Relaxed) > 0 {
-                self.flower_cooldown.fetch_sub(1, Relaxed);
-            }
+        if self.flower_cooldown.load(Relaxed) > 0 {
+            self.flower_cooldown.fetch_sub(1, Relaxed);
+        }
 
-            if self.hive_cooldown.load(Relaxed) > 0 {
-                self.hive_cooldown.fetch_sub(1, Relaxed);
-            }
+        if self.hive_cooldown.load(Relaxed) > 0 {
+            self.hive_cooldown.fetch_sub(1, Relaxed);
+        }
 
-            // `Bee.aiStep`: `if (this.tickCount % 20 == 0 && !this.isHiveValid()) hivePos = null`.
-            let tick_count = self.tick_count.fetch_add(1, Relaxed) + 1;
-            if tick_count % 20 == 0 && self.hive_pos.load().is_some() && !self.is_hive_valid() {
-                self.hive_pos.store(None);
-            }
+        // `Bee.aiStep`: `if (this.tickCount % 20 == 0 && !this.isHiveValid()) hivePos = null`.
+        let tick_count = self.tick_count.fetch_add(1, Relaxed) + 1;
+        if tick_count % 20 == 0 && self.hive_pos.load().is_some() && !self.is_hive_valid() {
+            self.hive_pos.store(None);
+        }
 
-            if living.is_in_water() {
-                self.under_water_ticks.fetch_add(1, Relaxed);
-            } else {
-                self.under_water_ticks.store(0, Relaxed);
-            }
+        if living.is_in_water() {
+            self.under_water_ticks.fetch_add(1, Relaxed);
+        } else {
+            self.under_water_ticks.store(0, Relaxed);
+        }
 
-            if self.under_water_ticks.load(Relaxed) > 20 {
-                caller.damage(caller.as_ref(), 1.0, DamageType::DROWN).await;
-            }
+        if self.under_water_ticks.load(Relaxed) > 20 {
+            caller.damage(caller.as_ref(), 1.0, DamageType::DROWN);
+        }
 
-            if self.has_stung() {
-                let time_since_sting = self.time_since_sting.fetch_add(1, Relaxed) + 1;
-                if time_since_sting % 5 == 0
-                    && rand::rng().random_range(0..sting_death_roll_bound(time_since_sting)) == 0
-                {
-                    let health = living.health.load();
-                    caller
-                        .damage(caller.as_ref(), health, DamageType::GENERIC)
-                        .await;
-                }
+        if self.has_stung() {
+            let time_since_sting = self.time_since_sting.fetch_add(1, Relaxed) + 1;
+            if time_since_sting % 5 == 0
+                && rand::rng().random_range(0..sting_death_roll_bound(time_since_sting)) == 0
+            {
+                let health = living.health.load();
+                caller.damage(caller.as_ref(), health, DamageType::GENERIC);
             }
+        }
 
-            if !self.has_nectar() {
-                self.ticks_without_nectar.fetch_add(1, Relaxed);
-            }
-        })
+        if !self.has_nectar() {
+            self.ticks_without_nectar.fetch_add(1, Relaxed);
+        }
     }
 }
 
@@ -1436,41 +1388,45 @@ impl BeeValidateHiveGoal {
 }
 
 impl Goal for BeeValidateHiveGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            if bee_is_angry(&bee) {
-                return false;
-            }
-            let world = bee.mob_entity.living_entity.entity.world.load();
-            let game_time = world.level_time.lock().await.world_age;
-            game_time > self.last_validate_tick + self.cooldown
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        if bee_is_angry(&bee) {
+            return false;
+        }
+        let world = bee.mob_entity.living_entity.entity.world.load();
+        let game_time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
+        game_time > self.last_validate_tick + self.cooldown
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            let world = bee.mob_entity.living_entity.entity.world.load();
-            // `ValidateHiveGoal.start`'s `level().isLoaded(hivePos)` guard: an unloaded chunk
-            // reads as having no block entity, which would make the bee forget a perfectly good
-            // hive it has simply flown out of render distance of.
-            if let Some(hive_pos) = bee.hive_pos.load()
-                && world.is_loaded(&hive_pos)
-                && !bee.is_hive_valid()
-            {
-                bee.drop_hive();
-            }
-            self.last_validate_tick = world.level_time.lock().await.world_age;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        let world = bee.mob_entity.living_entity.entity.world.load();
+        // `ValidateHiveGoal.start`'s `level().isLoaded(hivePos)` guard: an unloaded chunk
+        // reads as having no block entity, which would make the bee forget a perfectly good
+        // hive it has simply flown out of render distance of.
+        if let Some(hive_pos) = bee.hive_pos.load()
+            && world.is_loaded(&hive_pos)
+            && !bee.is_hive_valid()
+        {
+            bee.drop_hive();
+        }
+        self.last_validate_tick = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
     }
 }
 
@@ -1494,42 +1450,46 @@ impl BeeValidateFlowerGoal {
 }
 
 impl Goal for BeeValidateFlowerGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            if bee_is_angry(&bee) {
-                return false;
-            }
-            let world = bee.mob_entity.living_entity.entity.world.load();
-            let game_time = world.level_time.lock().await.world_age;
-            game_time > self.last_validate_tick + self.cooldown
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        if bee_is_angry(&bee) {
+            return false;
+        }
+        let world = bee.mob_entity.living_entity.entity.world.load();
+        let game_time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
+        game_time > self.last_validate_tick + self.cooldown
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            let world = bee.mob_entity.living_entity.entity.world.load();
-            // `ValidateFlowerGoal.start`'s `level().isLoaded(savedFlowerPos)` guard, for the
-            // same reason as the hive validator above.
-            if let Some(flower_pos) = bee.flower_pos.load()
-                && world.is_loaded(&flower_pos)
-            {
-                let (block, state) = world.get_block_and_state(&flower_pos);
-                if !attracts_bees(block, state) {
-                    bee.drop_flower();
-                }
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        let world = bee.mob_entity.living_entity.entity.world.load();
+        // `ValidateFlowerGoal.start`'s `level().isLoaded(savedFlowerPos)` guard, for the
+        // same reason as the hive validator above.
+        if let Some(flower_pos) = bee.flower_pos.load()
+            && world.is_loaded(&flower_pos)
+        {
+            let (block, state) = world.get_block_and_state(&flower_pos);
+            if !attracts_bees(block, state) {
+                bee.drop_flower();
             }
-            self.last_validate_tick = world.level_time.lock().await.world_age;
-        })
+        }
+        self.last_validate_tick = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
     }
 }
 
@@ -1568,72 +1528,64 @@ impl BeeGoToKnownFlowerGoal {
 }
 
 impl Goal for BeeGoToKnownFlowerGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            Self::can_use(&bee)
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        Self::can_use(&bee)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.can_start(mob)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.travelling_ticks = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.travelling_ticks = 0;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.travelling_ticks = 0;
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.travelling_ticks = 0;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            let Some(flower_pos) = bee.flower_pos.load() else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        let Some(flower_pos) = bee.flower_pos.load() else {
+            return;
+        };
 
-            self.travelling_ticks += 1;
-            if self.travelling_ticks > MAX_FLOWER_TRAVELLING_TICKS {
-                bee.drop_flower();
-                return;
-            }
+        self.travelling_ticks += 1;
+        if self.travelling_ticks > MAX_FLOWER_TRAVELLING_TICKS {
+            bee.drop_flower();
+            return;
+        }
 
-            let mut navigator = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !navigator.is_idle() {
-                return;
-            }
-            if bee.is_too_far_away(flower_pos) {
-                drop(navigator);
-                bee.drop_flower();
-                return;
-            }
-            let pos = mob.get_entity().pos.load();
-            let target = Vector3::new(
-                f64::from(flower_pos.0.x) + 0.5,
-                f64::from(flower_pos.0.y) + 0.5,
-                f64::from(flower_pos.0.z) + 0.5,
-            );
-            navigator.set_progress(NavigatorGoal::new(pos, target, 1.0));
-        })
+        let mut navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !navigator.is_idle() {
+            return;
+        }
+        if bee.is_too_far_away(flower_pos) {
+            drop(navigator);
+            bee.drop_flower();
+            return;
+        }
+        let pos = mob.get_entity().pos.load();
+        let target = Vector3::new(
+            f64::from(flower_pos.0.x) + 0.5,
+            f64::from(flower_pos.0.y) + 0.5,
+            f64::from(flower_pos.0.z) + 0.5,
+        );
+        navigator.set_progress(NavigatorGoal::new(pos, target, 1.0));
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -1702,46 +1654,40 @@ impl BeeGrowCropGoal {
 }
 
 impl Goal for BeeGrowCropGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return false;
-            };
-            Self::can_use(&bee)
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(bee) = self.bee.upgrade() else {
+            return false;
+        };
+        Self::can_use(&bee)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.can_start(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(bee) = self.bee.upgrade() else {
-                return;
-            };
-            if rand::rng().random_range(0..self.get_tick_count(GROW_CHANCE)) != 0 {
-                return;
-            }
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(bee) = self.bee.upgrade() else {
+            return;
+        };
+        if rand::rng().random_range(0..self.get_tick_count(GROW_CHANCE)) != 0 {
+            return;
+        }
 
-            let entity = mob.get_entity();
-            let world = entity.world.load_full();
-            let origin = entity.block_pos.load();
-            for i in 1..=2 {
-                let below = origin.down_height(i);
-                let (block, state_id) = world.get_block_and_state_id(&below);
-                if !block.has_tag(&tag::Block::MINECRAFT_BEE_GROWABLES) {
-                    continue;
-                }
-                let Some(grown) = Self::grown_state(block, state_id) else {
-                    continue;
-                };
-                world
-                    .set_block_state(&below, grown, BlockFlags::NOTIFY_ALL)
-                    .await;
-                bee.increment_crops_grown_since_pollination();
+        let entity = mob.get_entity();
+        let world = entity.world.load_full();
+        let origin = entity.block_pos.load();
+        for i in 1..=2 {
+            let below = origin.down_height(i);
+            let (block, state_id) = world.get_block_and_state_id(&below);
+            if !block.has_tag(&tag::Block::MINECRAFT_BEE_GROWABLES) {
+                continue;
             }
-        })
+            let Some(grown) = Self::grown_state(block, state_id) else {
+                continue;
+            };
+            world.set_block_state(&below, grown, BlockFlags::NOTIFY_ALL);
+            bee.increment_crops_grown_since_pollination();
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

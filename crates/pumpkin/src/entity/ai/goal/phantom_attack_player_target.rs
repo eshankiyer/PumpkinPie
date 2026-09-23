@@ -8,7 +8,7 @@
 use std::sync::{Arc, Weak};
 
 use crate::entity::EntityBase;
-use crate::entity::ai::goal::{Goal, GoalFuture, to_goal_ticks};
+use crate::entity::ai::goal::{Goal, to_goal_ticks};
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::mob::Mob;
 use crate::entity::mob::phantom::PhantomEntity;
@@ -51,91 +51,82 @@ fn sort_players_by_height_descending(players: &mut [Arc<Player>]) {
 }
 
 impl Goal for PhantomAttackPlayerTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.next_scan_tick > 0 {
-                self.next_scan_tick -= 1;
-                return false;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.next_scan_tick > 0 {
+            self.next_scan_tick -= 1;
+            return false;
+        }
+        self.next_scan_tick = to_goal_ticks(60);
+
+        let Some(phantom) = self.phantom.upgrade() else {
+            return false;
+        };
+        let entity = &phantom.mob_entity.living_entity.entity;
+        let world = entity.world.load_full();
+        let pos = entity.pos.load();
+        let search_box = entity.bounding_box.load().expand(16.0, 64.0, 16.0);
+
+        let attack_targeting =
+            TargetPredicate::create_attackable().set_base_max_distance(ATTACK_RANGE);
+        let default_targeting = TargetPredicate::create_attackable();
+
+        let mut candidates: Vec<Arc<Player>> = Vec::new();
+        for player in world.get_nearby_players(pos, CANDIDATE_SEARCH_RADIUS) {
+            if !search_box.intersects(&player.get_entity().bounding_box.load()) {
+                continue;
             }
-            self.next_scan_tick = to_goal_ticks(60);
-
-            let Some(phantom) = self.phantom.upgrade() else {
-                return false;
-            };
-            let entity = &phantom.mob_entity.living_entity.entity;
-            let world = entity.world.load_full();
-            let pos = entity.pos.load();
-            let search_box = entity.bounding_box.load().expand(16.0, 64.0, 16.0);
-
-            let attack_targeting =
-                TargetPredicate::create_attackable().set_base_max_distance(ATTACK_RANGE);
-            let default_targeting = TargetPredicate::create_attackable();
-
-            let mut candidates: Vec<Arc<Player>> = Vec::new();
-            for player in world.get_nearby_players(pos, CANDIDATE_SEARCH_RADIUS) {
-                if !search_box.intersects(&player.get_entity().bounding_box.load()) {
-                    continue;
-                }
-                if attack_targeting
-                    .test(
-                        &world,
-                        Some(&phantom.mob_entity.living_entity),
-                        &player.living_entity,
-                    )
-                    .await
-                {
-                    candidates.push(player);
-                }
+            if attack_targeting.test(
+                &world,
+                Some(&phantom.mob_entity.living_entity),
+                &player.living_entity,
+            ) {
+                candidates.push(player);
             }
+        }
 
-            if candidates.is_empty() {
-                return false;
+        if candidates.is_empty() {
+            return false;
+        }
+
+        sort_players_by_height_descending(&mut candidates);
+
+        for player in candidates {
+            if default_targeting.test(
+                &world,
+                Some(&phantom.mob_entity.living_entity),
+                &player.living_entity,
+            ) {
+                let _ = mob;
+                phantom.set_mob_target(Some(player as Arc<dyn EntityBase>));
+                return true;
             }
+        }
 
-            sort_players_by_height_descending(&mut candidates);
-
-            for player in candidates {
-                if default_targeting
-                    .test(
-                        &world,
-                        Some(&phantom.mob_entity.living_entity),
-                        &player.living_entity,
-                    )
-                    .await
-                {
-                    let _ = mob;
-                    phantom
-                        .set_mob_target(Some(player as Arc<dyn EntityBase>))
-                        .await;
-                    return true;
-                }
-            }
-
-            false
-        })
+        false
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(phantom) = self.phantom.upgrade() else {
-                return false;
-            };
-            let target = phantom.mob_entity.target.lock().await.clone();
-            let Some(target) = target else {
-                return false;
-            };
-            let Some(target_living) = target.get_living_entity() else {
-                return false;
-            };
-            let world = phantom.mob_entity.living_entity.entity.world.load_full();
-            TargetPredicate::create_attackable()
-                .test(
-                    &world,
-                    Some(&phantom.mob_entity.living_entity),
-                    target_living,
-                )
-                .await
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(phantom) = self.phantom.upgrade() else {
+            return false;
+        };
+        let target = phantom
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            return false;
+        };
+        let Some(target_living) = target.get_living_entity() else {
+            return false;
+        };
+        let world = phantom.mob_entity.living_entity.entity.world.load_full();
+        TargetPredicate::create_attackable().test(
+            &world,
+            Some(&phantom.mob_entity.living_entity),
+            target_living,
+        )
     }
 }
 

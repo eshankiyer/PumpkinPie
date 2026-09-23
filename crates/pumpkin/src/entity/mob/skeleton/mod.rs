@@ -14,7 +14,7 @@ use pumpkin_data::{
 use pumpkin_util::Difficulty;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, flee_sun::FleeSunGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -213,14 +213,24 @@ impl SkeletonEntityBase {
         mob_arc
     }
 
-    pub async fn reassess_weapon_goal(&self, mob: &dyn Mob) {
+    pub fn reassess_weapon_goal(&self, mob: &dyn Mob) {
         let main_hand = {
-            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.get(&EquipmentSlot::MAIN_HAND)
         };
         let main_is_bow = main_hand.item.registry_key == Item::BOW.registry_key;
         let off_hand = {
-            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.get(&EquipmentSlot::OFF_HAND)
         };
         let is_bow = main_is_bow || off_hand.item.registry_key == Item::BOW.registry_key;
@@ -230,8 +240,8 @@ impl SkeletonEntityBase {
         }
 
         let mut goals = crate::entity::mob::MutexTakeGuard::new(&self.mob_entity.goals_selector);
-        goals.remove_goal::<RangedBowAttackGoal>(mob).await;
-        goals.remove_goal::<MeleeAttackGoal>(mob).await;
+        goals.remove_goal::<RangedBowAttackGoal>(mob);
+        goals.remove_goal::<MeleeAttackGoal>(mob);
         if is_bow {
             let entity = &self.mob_entity.living_entity.entity;
             let interval = attack_interval(
@@ -263,11 +273,11 @@ impl SkeletonEntityBase {
 }
 
 impl NBTStorage for SkeletonEntityBase {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
         self.mob_entity.living_entity.write_nbt(nbt)
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
         self.mob_entity.living_entity.read_nbt_non_mut(nbt)
     }
 }
@@ -280,52 +290,56 @@ impl Mob for SkeletonEntityBase {
     /// Vanilla: `AbstractSkeleton.populateDefaultEquipmentSlots` (super's armor roll, then a
     /// bow in the main hand). Upstream plugin-facing hook; natural spawns are equipped through
     /// `equipment::equip_mob_on_spawn`'s registry instead, which does not call this.
-    fn populate_default_equipment_slots<'a>(
-        &'a self,
-        _world: &'a Arc<World>,
-        difficulty: &'a RegionalDifficulty,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // Default armor slots (super.populateDefaultEquipmentSlots)
-            if rand::random::<f32>()
-                < MobEntity::MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier
-            {
-                let mut armor_type = rand::random_range(0..3);
-                for _ in 1..=3 {
-                    if rand::random::<f32>() < MobEntity::WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
-                        armor_type += 1;
-                    }
-                }
-
-                let partial_chance = if difficulty.base_difficulty == Difficulty::Hard {
-                    0.1f32
-                } else {
-                    0.25f32
-                };
-
-                let living = &self.mob_entity.living_entity;
-                let mut equipment = living.entity_equipment.lock().await;
-                let mut first = true;
-
-                for slot in &MobEntity::EQUIPMENT_POPULATION_ORDER {
-                    let current = equipment.get(slot);
-                    if !first && rand::random::<f32>() < partial_chance {
-                        break;
-                    }
-                    first = false;
-                    if current.is_empty()
-                        && let Some(item) = MobEntity::get_equipment_for_slot(slot, armor_type)
-                    {
-                        equipment.put(slot, ItemStack::new(1, item));
-                    }
+    fn populate_default_equipment_slots(
+        &self,
+        _world: &Arc<World>,
+        difficulty: &RegionalDifficulty,
+    ) {
+        // Default armor slots (super.populateDefaultEquipmentSlots)
+        if rand::random::<f32>()
+            < MobEntity::MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier
+        {
+            let mut armor_type = rand::random_range(0..3);
+            for _ in 1..=3 {
+                if rand::random::<f32>() < MobEntity::WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
+                    armor_type += 1;
                 }
             }
 
-            // AbstractSkeleton sets BOW on MAIN_HAND
+            let partial_chance = if difficulty.base_difficulty == Difficulty::Hard {
+                0.1f32
+            } else {
+                0.25f32
+            };
+
             let living = &self.mob_entity.living_entity;
-            let mut equipment = living.entity_equipment.lock().await;
-            equipment.put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, &Item::BOW));
-        })
+            let mut equipment = living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut first = true;
+
+            for slot in &MobEntity::EQUIPMENT_POPULATION_ORDER {
+                let current = equipment.get(slot);
+                if !first && rand::random::<f32>() < partial_chance {
+                    break;
+                }
+                first = false;
+                if current.is_empty()
+                    && let Some(item) = MobEntity::get_equipment_for_slot(slot, armor_type)
+                {
+                    equipment.put(slot, ItemStack::new(1, item));
+                }
+            }
+        }
+
+        // AbstractSkeleton sets BOW on MAIN_HAND
+        let living = &self.mob_entity.living_entity;
+        let mut equipment = living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        equipment.put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, &Item::BOW));
     }
 }
 

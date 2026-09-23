@@ -13,7 +13,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, breed::BreedGoal,
         leap_at_target::LeapAtTargetGoal, look_at_entity::LookAtEntityGoal,
@@ -163,22 +163,18 @@ impl OcelotEntity {
 }
 
 impl NBTStorage for OcelotEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            nbt.put_bool("Trusting", self.is_trusting.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_bool("Trusting", self.is_trusting.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            if let Some(trusting) = nbt.get_bool("Trusting") {
-                self.is_trusting.store(trusting, Ordering::Relaxed);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(trusting) = nbt.get_bool("Trusting") {
+            self.is_trusting.store(trusting, Ordering::Relaxed);
+        }
     }
 }
 
@@ -198,76 +194,65 @@ impl Mob for OcelotEntity {
 
     /// Vanilla `Ocelot.customServerAiStep` (`Ocelot.java:116-133`) is byte-identical to
     /// `Cat.customServerAiStep`, so both share one implementation.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            crate::entity::passive::cat::feline_pose_step(self).await;
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        crate::entity::passive::cat::feline_pose_step(self);
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::ocelot::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::ocelot::TRUSTING,
-                    self.is_trusting.load(Ordering::Relaxed),
+                    pumpkin_data::tracked_data::ocelot::BABY_ID,
+                    true,
                 )],
                 None,
             );
-        })
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::ocelot::TRUSTING,
+                self.is_trusting.load(Ordering::Relaxed),
+            )],
+            None,
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let is_food = self.is_food(item_stack);
-            let dist_sqr = self
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&player.get_entity().pos.load());
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let is_food = self.is_food(item_stack);
+        let dist_sqr = self
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&player.get_entity().pos.load());
 
-            if !self.is_trusting() && is_food && dist_sqr < 9.0 {
-                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        if !self.is_trusting() && is_food && dist_sqr < 9.0 {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
-                let mut rng = rand::rng();
-                if rng.random_range(0..3) == 0 {
-                    self.set_trusting(true);
-                    self.get_entity().world.load().send_entity_status(
-                        self.get_entity(),
-                        EntityStatus::TrustingSucceeded,
-                        Some(ActorEventID::TamingSucceeded),
-                    );
-                } else {
-                    self.get_entity().world.load().send_entity_status(
-                        self.get_entity(),
-                        EntityStatus::TrustingFailed,
-                        Some(ActorEventID::TamingFailed),
-                    );
-                }
-
-                return true;
+            let mut rng = rand::rng();
+            if rng.random_range(0..3) == 0 {
+                self.set_trusting(true);
+                self.get_entity().world.load().send_entity_status(
+                    self.get_entity(),
+                    EntityStatus::TrustingSucceeded,
+                    Some(ActorEventID::TamingSucceeded),
+                );
+            } else {
+                self.get_entity().world.load().send_entity_status(
+                    self.get_entity(),
+                    EntityStatus::TrustingFailed,
+                    Some(ActorEventID::TamingFailed),
+                );
             }
 
-            self.animal_interact(
-                player,
-                item_stack,
-                pumpkin_data::sound::Sound::EntityOcelotAmbient,
-            )
-            .await
-        })
+            return true;
+        }
+
+        self.animal_interact(
+            player,
+            item_stack,
+            pumpkin_data::sound::Sound::EntityOcelotAmbient,
+        )
     }
 }

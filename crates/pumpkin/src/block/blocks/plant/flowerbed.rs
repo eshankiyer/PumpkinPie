@@ -9,7 +9,7 @@ use pumpkin_world::world::BlockFlags;
 use crate::block::blocks::plant::PlantBlockBase;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, CanPlaceAtArgs, CanUpdateAtArgs,
+    BlockBehaviour, BlockMetadata, BonemealArgs, CanPlaceAtArgs, CanUpdateAtArgs,
     GetStateForNeighborUpdateArgs, OnPlaceArgs,
 };
 
@@ -38,24 +38,19 @@ impl BlockBehaviour for FlowerbedBlock {
 
     /// `FlowerBedBlock.performBonemeal` (`FlowerBedBlock.java:94-102`) adds one segment up to
     /// four, then drops one flower-bed item when the block is already full.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let mut props = PinkPetalsLikeProperties::from_state_id(args.state_id, args.block);
-            if props.flower_amount < 4 {
-                props.flower_amount += 1;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
-            } else if let Some(item) = Item::from_id(args.block.item_id) {
-                args.world
-                    .drop_stack(args.position, ItemStack::new(1, item))
-                    .await;
-            }
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let mut props = PinkPetalsLikeProperties::from_state_id(args.state_id, args.block);
+        if props.flower_amount < 4 {
+            props.flower_amount += 1;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
+        } else if let Some(item) = Item::from_id(args.block.item_id) {
+            args.world
+                .drop_stack(args.position, ItemStack::new(1, item));
+        }
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -67,23 +62,20 @@ impl BlockBehaviour for FlowerbedBlock {
         Segmented::can_update_at(self, args)
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
         Segmented::on_place(self, args)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 }
 

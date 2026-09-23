@@ -138,10 +138,10 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<DisplayTransformation> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            let translation = d.get_translation().await;
-            let scale = d.get_scale().await;
-            let left_rot = d.get_left_rotation().await;
-            let right_rot = d.get_right_rotation().await;
+            let translation = d.get_translation();
+            let scale = d.get_scale();
+            let left_rot = d.get_left_rotation();
+            let right_rot = d.get_right_rotation();
 
             Ok(DisplayTransformation {
                 translation: Vector3f {
@@ -206,28 +206,24 @@ impl HostDisplayEntity for PluginHostState {
                 transformation.translation.x,
                 transformation.translation.y,
                 transformation.translation.z,
-            ))
-            .await;
+            ));
             d.set_scale(Vector3::new(
                 transformation.scale.x,
                 transformation.scale.y,
                 transformation.scale.z,
-            ))
-            .await;
+            ));
             d.set_left_rotation([
                 transformation.left_rotation.x,
                 transformation.left_rotation.y,
                 transformation.left_rotation.z,
                 transformation.left_rotation.w,
-            ])
-            .await;
+            ]);
             d.set_right_rotation([
                 transformation.right_rotation.x,
                 transformation.right_rotation.y,
                 transformation.right_rotation.z,
                 transformation.right_rotation.w,
-            ])
-            .await;
+            ]);
         }
         Ok(())
     }
@@ -328,7 +324,7 @@ impl HostDisplayEntity for PluginHostState {
     async fn get_view_range(&mut self, display: Resource<DisplayEntity>) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_view_range().await)
+            Ok(d.get_view_range())
         } else {
             Ok(1.0)
         }
@@ -341,7 +337,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<()> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            d.set_view_range(range).await;
+            d.set_view_range(range);
         }
         Ok(())
     }
@@ -352,7 +348,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_shadow_radius().await)
+            Ok(d.get_shadow_radius())
         } else {
             Ok(0.0)
         }
@@ -365,7 +361,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<()> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            d.set_shadow_radius(radius).await;
+            d.set_shadow_radius(radius);
         }
         Ok(())
     }
@@ -376,7 +372,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_shadow_strength().await)
+            Ok(d.get_shadow_strength())
         } else {
             Ok(1.0)
         }
@@ -389,7 +385,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<()> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            d.set_shadow_strength(strength).await;
+            d.set_shadow_strength(strength);
         }
         Ok(())
     }
@@ -400,7 +396,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_display_width().await)
+            Ok(d.get_display_width())
         } else {
             Ok(0.0)
         }
@@ -413,7 +409,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<()> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            d.set_display_width(width).await;
+            d.set_display_width(width);
         }
         Ok(())
     }
@@ -424,7 +420,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_display_height().await)
+            Ok(d.get_display_height())
         } else {
             Ok(0.0)
         }
@@ -437,7 +433,7 @@ impl HostDisplayEntity for PluginHostState {
     ) -> wasmtime::Result<()> {
         let display_res = self.get_display_entity_res(&display)?;
         if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            d.set_display_height(height).await;
+            d.set_display_height(height);
         }
         Ok(())
     }
@@ -611,7 +607,7 @@ impl HostItemDisplayEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalItemDisplayEntity>()
         {
-            let item = i.get_item().await;
+            let item = i.get_item();
             if *item.item == pumpkin_data::item::Item::AIR || item.item_count == 0 {
                 Ok(None)
             } else {
@@ -635,11 +631,11 @@ impl HostItemDisplayEntity for PluginHostState {
             .downcast_ref::<InternalItemDisplayEntity>()
         {
             let stack = if let Some(item_res_val) = item {
-                self.get_item_stack(&item_res_val)?.lock().await.clone()
+                self.get_item_stack(&item_res_val)?.lock().clone()
             } else {
                 pumpkin_data::item_stack::ItemStack::new(0, &pumpkin_data::item::Item::AIR)
             };
-            i.set_item(stack).await;
+            i.set_item(stack);
         }
         Ok(())
     }
@@ -728,7 +724,7 @@ impl HostTextDisplayEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalTextDisplayEntity>()
         {
-            let text = t.get_text().await;
+            let text = t.get_text();
             self.add_text_component(text)
         } else {
             self.add_text_component(pumpkin_util::text::TextComponent::text(""))
@@ -747,7 +743,7 @@ impl HostTextDisplayEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalTextDisplayEntity>()
         {
-            t.set_text(text_val).await;
+            t.set_text(text_val);
         }
         Ok(())
     }
@@ -999,7 +995,7 @@ impl HostInteractionEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
         {
-            Ok(i.get_width().await)
+            Ok(i.get_width())
         } else {
             Ok(1.0)
         }
@@ -1016,7 +1012,7 @@ impl HostInteractionEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
         {
-            i.set_width(width).await;
+            i.set_width(width);
         }
         Ok(())
     }
@@ -1031,7 +1027,7 @@ impl HostInteractionEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
         {
-            Ok(i.get_height().await)
+            Ok(i.get_height())
         } else {
             Ok(1.0)
         }
@@ -1048,7 +1044,7 @@ impl HostInteractionEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
         {
-            i.set_height(height).await;
+            i.set_height(height);
         }
         Ok(())
     }
@@ -1091,7 +1087,7 @@ impl HostInteractionEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
         {
-            let action = i.get_last_attacker().await;
+            let action = i.get_last_attacker();
             Ok(action.map(|a| Uuid::to_wit(&a.player)))
         } else {
             Ok(None)
@@ -1108,7 +1104,7 @@ impl HostInteractionEntity for PluginHostState {
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
         {
-            let action = i.get_target().await;
+            let action = i.get_target();
             Ok(action.map(|a| Uuid::to_wit(&a.player)))
         } else {
             Ok(None)

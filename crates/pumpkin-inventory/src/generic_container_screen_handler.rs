@@ -16,17 +16,14 @@ use pumpkin_world::inventory::Inventory;
 
 use crate::{
     player::player_inventory::PlayerInventory,
-    screen_handler::{
-        InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
-        ScreenHandlerFuture,
-    },
+    screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour},
     slot::NormalSlot,
 };
 
 /// Creates a generic 9x3 container (single chest).
 ///
 /// Used for single chests, ender chests, and similar containers.
-pub async fn create_generic_9x3(
+pub fn create_generic_9x3(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
@@ -39,13 +36,12 @@ pub async fn create_generic_9x3(
         3,
         9,
     )
-    .await
 }
 
 /// Creates a generic 9x6 container (double chest).
 ///
 /// Used for double chests and similar large containers.
-pub async fn create_generic_9x6(
+pub fn create_generic_9x6(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
@@ -58,13 +54,12 @@ pub async fn create_generic_9x6(
         6,
         9,
     )
-    .await
 }
 
 /// Creates a generic 3x3 container.
 ///
 /// Used for dispensers, droppers, and similar containers.
-pub async fn create_generic_3x3(
+pub fn create_generic_3x3(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
@@ -77,11 +72,10 @@ pub async fn create_generic_3x3(
         3,
         3,
     )
-    .await
 }
 
 /// Creates a crafter container (9 slots, 3x3 layout).
-pub async fn create_crafter_3x3(
+pub fn create_crafter_3x3(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
@@ -94,13 +88,12 @@ pub async fn create_crafter_3x3(
         3,
         3,
     )
-    .await
 }
 
 /// Creates a hopper container (5 slots).
 ///
 /// Hoppers have a single row of 5 slots.
-pub async fn create_hopper(
+pub fn create_hopper(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
@@ -113,7 +106,6 @@ pub async fn create_hopper(
         1,
         5,
     )
-    .await
 }
 
 /// Generic container screen handler.
@@ -141,7 +133,7 @@ impl GenericContainerScreenHandler {
     /// - `inventory` - The container's inventory
     /// - `rows` - Number of rows in the container
     /// - `columns` - Number of columns in the container
-    async fn new(
+    fn new(
         screen_type: WindowType,
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
@@ -157,7 +149,7 @@ impl GenericContainerScreenHandler {
         };
 
         // TODO: Add player entity as a parameter
-        inventory.on_open().await;
+        inventory.on_open();
 
         handler.add_inventory_slots();
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
@@ -213,11 +205,9 @@ impl ScreenHandler for GenericContainerScreenHandler {
         &mut self.behaviour
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            self.inventory.on_close().await;
-        })
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        self.inventory.on_close();
     }
 
     /// Quick move logic for generic containers.
@@ -230,52 +220,40 @@ impl ScreenHandler for GenericContainerScreenHandler {
     /// `ShulkerBoxMenu.java:46-50`) and the literal `9` of
     /// `DispenserMenu.java:51-55`. It is *not* `rows * 9`: hoppers are 1x5 and
     /// dispensers/droppers/crafters are 3x3.
-    fn quick_move<'a>(
-        &'a mut self,
-        _player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            let mut stack_left = ItemStack::EMPTY.clone();
-            // Assuming bounds check passed for slot_index by caller or within quick_move spec
-            let slot = self.get_behaviour().slots[slot_index as usize].clone();
-            let container_size = self.container_slot_count();
+    fn quick_move(&mut self, _player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack_left = ItemStack::EMPTY.clone();
+        // Assuming bounds check passed for slot_index by caller or within quick_move spec
+        let slot = self.get_behaviour().slots[slot_index as usize].clone();
+        let container_size = self.container_slot_count();
 
-            if slot.has_stack().await {
-                let mut slot_stack = slot.get_stack().await;
-                stack_left = slot_stack.clone();
+        if slot.has_stack() {
+            let mut slot_stack = slot.get_stack();
+            stack_left = slot_stack.clone();
 
-                if slot_index < container_size {
-                    // Move from inventory to player area (end)
-                    if !self
-                        .insert_item(
-                            &mut slot_stack,
-                            container_size,
-                            self.get_behaviour().slots.len() as i32,
-                            true,
-                        )
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if !self
-                    .insert_item(&mut slot_stack, 0, container_size, false)
-                    .await
-                {
-                    // Move from player area to inventory (start)
+            if slot_index < container_size {
+                // Move from inventory to player area (end)
+                if !self.insert_item(
+                    &mut slot_stack,
+                    container_size,
+                    self.get_behaviour().slots.len() as i32,
+                    true,
+                ) {
                     return ItemStack::EMPTY.clone();
                 }
-
-                // Check the resulting state of the slot stack after insert_item
-                if slot_stack.is_empty() {
-                    slot.set_stack(ItemStack::EMPTY.clone()).await;
-                } else {
-                    slot.set_stack(slot_stack).await;
-                }
+            } else if !self.insert_item(&mut slot_stack, 0, container_size, false) {
+                // Move from player area to inventory (start)
+                return ItemStack::EMPTY.clone();
             }
 
-            stack_left
-        })
+            // Check the resulting state of the slot stack after insert_item
+            if slot_stack.is_empty() {
+                slot.set_stack(ItemStack::EMPTY.clone());
+            } else {
+                slot.set_stack(slot_stack);
+            }
+        }
+
+        stack_left
     }
 }
 
@@ -290,7 +268,7 @@ mod tests {
         CSetPlayerInventory, CSetSelectedSlot,
     };
     use pumpkin_world::inventory::SimpleInventory;
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
 
     use crate::{
         entity_equipment::EntityEquipment,
@@ -326,15 +304,11 @@ mod tests {
             };
             access.accepts_block(block) && self.in_range
         }
-        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) {}
         fn get_inventory(&self) -> Arc<PlayerInventory> {
             self.inventory.clone()
         }
-        fn play_sound(&self, _sound: Sound) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn play_sound(&self, _sound: Sound) {}
         fn has_infinite_materials(&self) -> bool {
             false
         }
@@ -344,72 +318,31 @@ mod tests {
         fn experience_level(&self) -> i32 {
             0
         }
-        fn add_experience_levels(&self, _levels: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn add_experience_levels(&self, _levels: i32) {}
         fn enchantment_seed(&self) -> i32 {
             0
         }
-        fn set_enchantment_seed(&self, _seed: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
-        fn enqueue_inventory_packet<'a>(
-            &'a self,
-            _packet: &'a CSetContainerContent,
+        fn set_enchantment_seed(&self, _seed: i32) {}
+        fn enqueue_inventory_packet(
+            &self,
+            _packet: &CSetContainerContent,
             _window_type: Option<WindowType>,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        ) {
         }
-        fn enqueue_slot_packet<'a>(
-            &'a self,
-            _packet: &'a CSetContainerSlot,
+        fn enqueue_slot_packet(
+            &self,
+            _packet: &CSetContainerSlot,
             _window_type: Option<WindowType>,
             _total_slots: usize,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        ) {
         }
-        fn enqueue_cursor_packet<'a>(
-            &'a self,
-            _packet: &'a CSetCursorItem,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-        fn enqueue_property_packet<'a>(
-            &'a self,
-            _packet: &'a CSetContainerProperty,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-        fn enqueue_slot_set_packet<'a>(
-            &'a self,
-            _packet: &'a CSetPlayerInventory,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-        fn enqueue_set_held_item_packet<'a>(
-            &'a self,
-            _packet: &'a CSetSelectedSlot,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-        fn enqueue_equipment_change<'a>(
-            &'a self,
-            _slot: &'a EquipmentSlot,
-            _stack: &'a ItemStack,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-        fn award_experience(&self, _amount: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
-        fn increment_stat(
-            &self,
-            _category: StatisticCategory,
-            _stat_id: i32,
-            _amount: i32,
-        ) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn enqueue_cursor_packet(&self, _packet: &CSetCursorItem) {}
+        fn enqueue_property_packet(&self, _packet: &CSetContainerProperty) {}
+        fn enqueue_slot_set_packet(&self, _packet: &CSetPlayerInventory) {}
+        fn enqueue_set_held_item_packet(&self, _packet: &CSetSelectedSlot) {}
+        fn enqueue_equipment_change(&self, _slot: &EquipmentSlot, _stack: &ItemStack) {}
+        fn award_experience(&self, _amount: i32) {}
+        fn increment_stat(&self, _category: StatisticCategory, _stat_id: i32, _amount: i32) {}
     }
 
     fn player_inventory() -> Arc<PlayerInventory> {
@@ -423,7 +356,7 @@ mod tests {
     /// Vanilla uses `container.getContainerSize()`: `HopperMenu.java:45-48`,
     /// `ShulkerBoxMenu.java:46-50`, and the literal `9` of `DispenserMenu.java:51`.
     #[tokio::test]
-    async fn container_boundary_matches_container_size() {
+    fn container_boundary_matches_container_size() {
         for (rows, columns, expected) in [
             (3u8, 9u8, 27i32),
             (6, 9, 54),
@@ -440,8 +373,7 @@ mod tests {
                 )),
                 rows,
                 columns,
-            )
-            .await;
+            );
             assert_eq!(handler.container_slot_count(), expected);
             assert_eq!(
                 handler.get_behaviour().slots.len() as i32,
@@ -451,7 +383,7 @@ mod tests {
         }
     }
 
-    async fn handler_for(
+    fn handler_for(
         window: WindowType,
         rows: u8,
         columns: u8,
@@ -471,8 +403,7 @@ mod tests {
             inventory.clone(),
             rows,
             columns,
-        )
-        .await;
+        );
         let player = TestPlayer {
             inventory: player_inventory,
             block_at: Some(&pumpkin_data::Block::CHEST),
@@ -484,42 +415,35 @@ mod tests {
     /// Regression: with the old `rows * 9` boundary a hopper treated player
     /// slots 5..9 as container slots, so shift-clicking them did nothing useful.
     #[tokio::test]
-    async fn hopper_quick_move_from_player_reaches_container() {
-        let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5).await;
+    fn hopper_quick_move_from_player_reaches_container() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5);
         // First player slot of a 5-slot hopper screen is index 5.
         let player_slot = 5;
         handler.get_behaviour().slots[player_slot as usize]
-            .set_stack(ItemStack::new(4, &Item::STONE))
-            .await;
+            .set_stack(ItemStack::new(4, &Item::STONE));
 
-        handler.quick_move(&player, player_slot).await;
+        handler.quick_move(&player, player_slot);
 
-        assert_eq!(inventory.get_stack(0).await.item_count, 4);
+        assert_eq!(inventory.get_stack(0).item_count, 4);
         assert!(
             handler.get_behaviour().slots[player_slot as usize]
                 .get_stack()
-                .await
                 .is_empty()
         );
     }
 
     #[tokio::test]
-    async fn hopper_quick_move_from_container_reaches_player() {
-        let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5).await;
-        inventory
-            .set_stack(0, ItemStack::new(4, &Item::STONE))
-            .await;
+    fn hopper_quick_move_from_container_reaches_player() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5);
+        inventory.set_stack(0, ItemStack::new(4, &Item::STONE));
 
-        handler.quick_move(&player, 0).await;
+        handler.quick_move(&player, 0);
 
-        assert!(inventory.get_stack(0).await.is_empty());
+        assert!(inventory.get_stack(0).is_empty());
         // insert_item(.., from_last = true) fills the last player slot first.
         let last = handler.get_behaviour().slots.len() - 1;
         assert_eq!(
-            handler.get_behaviour().slots[last]
-                .get_stack()
-                .await
-                .item_count,
+            handler.get_behaviour().slots[last].get_stack().item_count,
             4
         );
     }
@@ -527,50 +451,43 @@ mod tests {
     /// Regression: with the old boundary a 3x3 dispenser treated player slots
     /// 9..27 as container slots and shifted items into other player slots.
     #[tokio::test]
-    async fn dispenser_quick_move_from_player_reaches_container() {
-        let (mut handler, inventory, player) = handler_for(WindowType::Generic3x3, 3, 3).await;
+    fn dispenser_quick_move_from_player_reaches_container() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Generic3x3, 3, 3);
         let player_slot = 9;
         handler.get_behaviour().slots[player_slot as usize]
-            .set_stack(ItemStack::new(7, &Item::STONE))
-            .await;
+            .set_stack(ItemStack::new(7, &Item::STONE));
 
-        handler.quick_move(&player, player_slot).await;
+        handler.quick_move(&player, player_slot);
 
-        assert_eq!(inventory.get_stack(0).await.item_count, 7);
+        assert_eq!(inventory.get_stack(0).item_count, 7);
     }
 
     #[tokio::test]
-    async fn dispenser_quick_move_from_container_reaches_player() {
-        let (mut handler, inventory, player) = handler_for(WindowType::Generic3x3, 3, 3).await;
-        inventory
-            .set_stack(8, ItemStack::new(7, &Item::STONE))
-            .await;
+    fn dispenser_quick_move_from_container_reaches_player() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Generic3x3, 3, 3);
+        inventory.set_stack(8, ItemStack::new(7, &Item::STONE));
 
-        handler.quick_move(&player, 8).await;
+        handler.quick_move(&player, 8);
 
-        assert!(inventory.get_stack(8).await.is_empty());
+        assert!(inventory.get_stack(8).is_empty());
         let last = handler.get_behaviour().slots.len() - 1;
         assert_eq!(
-            handler.get_behaviour().slots[last]
-                .get_stack()
-                .await
-                .item_count,
+            handler.get_behaviour().slots[last].get_stack().item_count,
             7
         );
     }
 
     /// The 9-column chest shapes were already correct; prove the fix keeps them so.
     #[tokio::test]
-    async fn chest_quick_move_unchanged() {
-        let (mut handler, inventory, player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+    fn chest_quick_move_unchanged() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Generic9x3, 3, 9);
         let player_slot = 27;
         handler.get_behaviour().slots[player_slot as usize]
-            .set_stack(ItemStack::new(5, &Item::STONE))
-            .await;
+            .set_stack(ItemStack::new(5, &Item::STONE));
 
-        handler.quick_move(&player, player_slot).await;
+        handler.quick_move(&player, player_slot);
 
-        assert_eq!(inventory.get_stack(0).await.item_count, 5);
+        assert_eq!(inventory.get_stack(0).item_count, 5);
     }
 
     /// Regression for the stale-menu hole: `ScreenHandler::can_use` used to return
@@ -579,8 +496,8 @@ mod tests {
     /// `ChestMenu.stillValid` (`ChestMenu.java:70-72`) ->
     /// `Container.stillValidBlockEntity` (`Container.java:94-101`).
     #[tokio::test]
-    async fn chest_menu_is_invalid_once_the_player_walks_away() {
-        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+    fn chest_menu_is_invalid_once_the_player_walks_away() {
+        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9);
 
         assert!(handler.can_use(&player));
 
@@ -592,8 +509,8 @@ mod tests {
     /// only the range check (`Container.java:94-101`). Swapping the block underneath
     /// must therefore not, by itself, invalidate the menu here.
     #[tokio::test]
-    async fn chest_menu_access_is_range_only() {
-        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+    fn chest_menu_access_is_range_only() {
+        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9);
 
         player.block_at = Some(&pumpkin_data::Block::STONE);
         assert!(handler.can_use(&player));
@@ -611,8 +528,8 @@ mod tests {
     /// opened by an entity (a minecart chest) have no block position and must not be
     /// closed by this check.
     #[tokio::test]
-    async fn menu_without_a_backing_position_stays_valid() {
-        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+    fn menu_without_a_backing_position_stays_valid() {
+        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9);
 
         player.block_at = None;
         player.in_range = false;

@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
@@ -91,14 +91,17 @@ const CROSSBOW_RANGE: f64 = 8.0;
 
 /// `PiglinAi.isWearingSafeArmor` (PiglinAi.java:648-656): true when ANY of the four armor
 /// slots holds an item in the `minecraft:piglin_safe_armor` tag (the four gold pieces).
-pub(crate) async fn is_wearing_safe_armor(living: &crate::entity::living::LivingEntity) -> bool {
+pub(crate) fn is_wearing_safe_armor(living: &crate::entity::living::LivingEntity) -> bool {
     const ARMOR_SLOTS: [EquipmentSlot; 4] = [
         EquipmentSlot::HEAD,
         EquipmentSlot::CHEST,
         EquipmentSlot::LEGS,
         EquipmentSlot::FEET,
     ];
-    let equipment = living.entity_equipment.lock().await;
+    let equipment = living
+        .entity_equipment
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     ARMOR_SLOTS.iter().any(|slot| {
         equipment
             .get(slot)
@@ -117,14 +120,14 @@ pub(crate) async fn is_wearing_safe_armor(living: &crate::entity::living::Living
 /// against a fully gold-armoured player. Here that path is `on_damage` ->
 /// `piglin_shared::retaliate_and_alert_piglins`, which sets the target directly and never
 /// consults this goal.
-async fn player_not_wearing_gold(target: TargetData, world: Arc<World>) -> bool {
+fn player_not_wearing_gold(target: TargetData, world: Arc<World>) -> bool {
     let Some(entity) = world.get_entity_by_id(target.entity_id) else {
         return false;
     };
     let Some(living) = entity.get_living_entity() else {
         return false;
     };
-    !is_wearing_safe_armor(living).await
+    !is_wearing_safe_armor(living)
 }
 
 /// Represents a Piglin.
@@ -196,7 +199,7 @@ pub struct PiglinEntity {
     /// `Piglin.DATA_IS_DANCING`.
     is_dancing: AtomicBool,
     /// `Piglin.inventory`, the 8-slot `SimpleContainer` (NBT `Inventory`).
-    pub inventory: tokio::sync::Mutex<Vec<ItemStack>>,
+    pub inventory: std::sync::Mutex<Vec<ItemStack>>,
 }
 
 impl PiglinEntity {
@@ -226,7 +229,7 @@ impl PiglinEntity {
             cannot_hunt: cannot_hunt.clone(),
             is_charging_crossbow: AtomicBool::new(false),
             is_dancing: AtomicBool::new(false),
-            inventory: tokio::sync::Mutex::new(Vec::new()),
+            inventory: std::sync::Mutex::new(Vec::new()),
         };
         let mob_arc = Arc::new(piglin);
         // `AbstractPiglin.applyOpenDoorsAbility` (`AbstractPiglin.java:43-47`).
@@ -381,7 +384,7 @@ impl PiglinEntity {
                 false,
                 Some(move |target: TargetData, world: Arc<World>| {
                     let player_gate = player_gate.clone();
-                    async move { !player_gate() && player_not_wearing_gold(target, world).await }
+                    async move { !player_gate() && player_not_wearing_gold(target, world) }
                 }),
             )),
         );
@@ -518,8 +521,11 @@ impl PiglinEntity {
     }
 
     /// `Piglin.addToInventory` (`Piglin.java:134-137`): returns what did not fit.
-    pub async fn add_to_inventory(&self, item: ItemStack) -> Option<ItemStack> {
-        let mut inventory = self.inventory.lock().await;
+    pub fn add_to_inventory(&self, item: ItemStack) -> Option<ItemStack> {
+        let mut inventory = self
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if inventory.len() < Self::INVENTORY_SIZE {
             inventory.push(item);
             None
@@ -531,8 +537,13 @@ impl PiglinEntity {
     /// `inventory.removeAllItems().forEach(this::spawnAtLocation)`, shared by
     /// `Piglin.dropCustomDeathLoot` (`Piglin.java:129-132`) and `Piglin.finishConversion`
     /// (`Piglin.java:279-283`).
-    pub async fn drop_inventory(&self) {
-        let items = std::mem::take(&mut *self.inventory.lock().await);
+    pub fn drop_inventory(&self) {
+        let items = std::mem::take(
+            &mut *self
+                .inventory
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load_full();
         let pos = entity.pos.load();
@@ -540,7 +551,7 @@ impl PiglinEntity {
             if !item.is_empty() {
                 let item_entity =
                     ItemEntity::new(Entity::new(world.clone(), pos, &EntityType::ITEM), item);
-                world.spawn_entity(Arc::new(item_entity)).await;
+                world.spawn_entity(Arc::new(item_entity));
             }
         }
     }
@@ -572,8 +583,13 @@ impl PiglinEntity {
     /// `PiglinAi.holdInOffhand` (`PiglinAi.java:362-368`) followed by `admireGoldItem`
     /// (`PiglinAi.java:805-807`): drop whatever the offhand already held, equip the new stack,
     /// and start the 119-tick admire countdown that `PiglinAdmireGoal` pays out.
-    async fn hold_in_offhand_and_admire(&self, stack: ItemStack) {
-        let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+    fn hold_in_offhand_and_admire(&self, stack: ItemStack) {
+        let mut equipment = self
+            .mob_entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let previous = equipment.put(&EquipmentSlot::OFF_HAND, stack.clone());
         drop(equipment);
         if !previous.is_empty() {
@@ -583,8 +599,7 @@ impl PiglinEntity {
                 .entity
                 .world
                 .load()
-                .drop_stack(&pos, previous)
-                .await;
+                .drop_stack(&pos, previous);
         }
         self.mob_entity
             .living_entity
@@ -604,56 +619,55 @@ impl PiglinEntity {
 
 impl NBTStorage for PiglinEntity {
     /// `AbstractPiglin.addAdditionalSaveData` (`AbstractPiglin.java:65-70`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.zombification.write_nbt(nbt);
-            // `Piglin.addAdditionalSaveData` (`Piglin.java:107-112`).
-            nbt.put_bool("IsBaby", self.is_baby());
-            nbt.put_bool("CannotHunt", !self.can_hunt());
-            let items: Vec<NbtTag> = self
-                .inventory
-                .lock()
-                .await
-                .iter()
-                .filter(|item| !item.is_empty())
-                .map(|item| {
-                    let mut item_nbt = NbtCompound::new();
-                    item.write_item_stack(&mut item_nbt);
-                    NbtTag::Compound(item_nbt)
-                })
-                .collect();
-            nbt.put_list("Inventory", items);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.zombification.write_nbt(nbt);
+        // `Piglin.addAdditionalSaveData` (`Piglin.java:107-112`).
+        nbt.put_bool("IsBaby", self.is_baby());
+        nbt.put_bool("CannotHunt", !self.can_hunt());
+        let items: Vec<NbtTag> = self
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|item| !item.is_empty())
+            .map(|item| {
+                let mut item_nbt = NbtCompound::new();
+                item.write_item_stack(&mut item_nbt);
+                NbtTag::Compound(item_nbt)
+            })
+            .collect();
+        nbt.put_list("Inventory", items);
     }
 
     /// `AbstractPiglin.readAdditionalSaveData` (`AbstractPiglin.java:72-78`). The
     /// immunity flag is synced because vanilla holds it in `DATA_IMMUNE_TO_ZOMBIFICATION`
     /// (`AbstractPiglin.java:26-28`), which `setImmuneToZombification` writes through.
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.zombification.read_nbt(nbt);
-            // `Piglin.readAdditionalSaveData` (`Piglin.java:115-120`). The baby flag is carried
-            // by the entity age here (see `is_adult`), so `IsBaby` is only written.
-            self.set_cannot_hunt(nbt.get_bool("CannotHunt").unwrap_or(false));
-            let items: Vec<ItemStack> = nbt
-                .get_list("Inventory")
-                .unwrap_or_default()
-                .iter()
-                .filter_map(NbtTag::extract_compound)
-                .filter_map(ItemStack::read_item_stack)
-                .take(Self::INVENTORY_SIZE)
-                .collect();
-            *self.inventory.lock().await = items;
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
-                    self.zombification.is_immune(),
-                )],
-                None,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.zombification.read_nbt(nbt);
+        // `Piglin.readAdditionalSaveData` (`Piglin.java:115-120`). The baby flag is carried
+        // by the entity age here (see `is_adult`), so `IsBaby` is only written.
+        self.set_cannot_hunt(nbt.get_bool("CannotHunt").unwrap_or(false));
+        let items: Vec<ItemStack> = nbt
+            .get_list("Inventory")
+            .unwrap_or_default()
+            .iter()
+            .filter_map(NbtTag::extract_compound)
+            .filter_map(ItemStack::read_item_stack)
+            .take(Self::INVENTORY_SIZE)
+            .collect();
+        *self
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = items;
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+                self.zombification.is_immune(),
+            )],
+            None,
+        );
     }
 }
 
@@ -663,23 +677,21 @@ impl Mob for PiglinEntity {
     }
 
     /// `AbstractPiglin`/`Piglin.defineSynchedData`.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let mut meta = vec![Metadata::new(
-                tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
-                self.zombification.is_immune(),
-            )];
-            if self.is_charging_crossbow() {
-                meta.push(Metadata::new(
-                    tracked_data::piglin::DATA_IS_CHARGING_CROSSBOW,
-                    true,
-                ));
-            }
-            if self.is_dancing() {
-                meta.push(Metadata::new(tracked_data::piglin::DATA_IS_DANCING, true));
-            }
-            self.get_entity().send_meta_data(&meta, None);
-        })
+    fn mob_init_data_tracker(&self) {
+        let mut meta = vec![Metadata::new(
+            tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+            self.zombification.is_immune(),
+        )];
+        if self.is_charging_crossbow() {
+            meta.push(Metadata::new(
+                tracked_data::piglin::DATA_IS_CHARGING_CROSSBOW,
+                true,
+            ));
+        }
+        if self.is_dancing() {
+            meta.push(Metadata::new(tracked_data::piglin::DATA_IS_DANCING, true));
+        }
+        self.get_entity().send_meta_data(&meta, None);
     }
 
     fn as_crossbow_attack_mob(&self) -> Option<&dyn CrossbowAttackMob> {
@@ -692,22 +704,20 @@ impl Mob for PiglinEntity {
 
     /// The inventory half of `Piglin.dropCustomDeathLoot` (`Piglin.java:129-132`), gated like
     /// the rest of `dropAllDeathLoot` by `mob_drops`.
-    fn on_mob_death<'a>(&'a self, _cause: Option<&'a dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self
-                .mob_entity
-                .living_entity
-                .entity
-                .world
-                .load()
-                .level_info
-                .load()
-                .game_rules
-                .mob_drops
-            {
-                self.drop_inventory().await;
-            }
-        })
+    fn on_mob_death(&self, _cause: Option<&dyn EntityBase>) {
+        if self
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .level_info
+            .load()
+            .game_rules
+            .mob_drops
+        {
+            self.drop_inventory();
+        }
     }
 
     /// Vanilla `Piglin.canUseNonMeleeWeapon` (`Piglin.java:352-356`) permits crossbows and
@@ -803,28 +813,21 @@ impl Mob for PiglinEntity {
     /// handing an adult, non-admiring, non-locked-out piglin a gold ingot starts
     /// admiring. Ground-item pickup (`isLovedItem`/broader `piglin_loved` tag) is not
     /// implemented -- see `piglin_admire.rs` module doc.
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let is_gold_ingot = item_stack.item.id == Item::GOLD_INGOT.id;
-            let admiring_disabled = self.admiring_disabled_ticks.load(Ordering::Relaxed) > 0;
-            let already_admiring = self.admiring_ticks.load(Ordering::Relaxed) > 0;
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let is_gold_ingot = item_stack.item.id == Item::GOLD_INGOT.id;
+        let admiring_disabled = self.admiring_disabled_ticks.load(Ordering::Relaxed) > 0;
+        let already_admiring = self.admiring_ticks.load(Ordering::Relaxed) > 0;
 
-            if !is_gold_ingot || admiring_disabled || already_admiring || !self.is_adult() {
-                return self
-                    .mob_entity
-                    .mob_interact(player, item_stack, self.can_be_leashed())
-                    .await;
-            }
+        if !is_gold_ingot || admiring_disabled || already_admiring || !self.is_adult() {
+            return self
+                .mob_entity
+                .mob_interact(player, item_stack, self.can_be_leashed());
+        }
 
-            let taken = ItemStack::new(1, &Item::GOLD_INGOT);
-            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-            self.hold_in_offhand_and_admire(taken).await;
-            true
-        })
+        let taken = ItemStack::new(1, &Item::GOLD_INGOT);
+        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        self.hold_in_offhand_and_admire(taken);
+        true
     }
 
     /// `PiglinAi.wasHurtBy` (PiglinAi.java:556-587), simplified: cancels admiring,
@@ -833,149 +836,148 @@ impl Mob for PiglinEntity {
     /// (100-tick flee instead of retaliating) and the hoglin-outnumbered retreat
     /// branch -- both need per-mob-type special-casing beyond this goal-based
     /// approximation of `maybeRetaliate`.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(source) = source
-                && source.get_entity().entity_type.id == EntityType::PIGLIN.id
-            {
-                // vanilla: `if (!(attacker instanceof Piglin))` guards the whole method.
-                return;
-            }
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        if let Some(source) = source
+            && source.get_entity().entity_type.id == EntityType::PIGLIN.id
+        {
+            // vanilla: `if (!(attacker instanceof Piglin))` guards the whole method.
+            return;
+        }
 
-            self.admiring_ticks.store(0, Ordering::Relaxed);
-            // `wasHurtBy` also erases `CELEBRATE_LOCATION`/`DANCING` (`PiglinAi.java:560-561`).
-            self.set_dancing(false);
-            // A ground pickup taken this tick but not yet equipped is cancelled too, so a
-            // piglin hit in the same tick it grabbed gold does not start admiring anyway.
-            self.pending_offhand
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
+        self.admiring_ticks.store(0, Ordering::Relaxed);
+        // `wasHurtBy` also erases `CELEBRATE_LOCATION`/`DANCING` (`PiglinAi.java:560-561`).
+        self.set_dancing(false);
+        // A ground pickup taken this tick but not yet equipped is cancelled too, so a
+        // piglin hit in the same tick it grabbed gold does not start admiring anyway.
+        self.pending_offhand
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
 
-            // `cancelAdmiring` (PiglinAi.java:401-406): drop the offhand item instead
-            // of silently voiding it.
-            let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
-            let dropped = equipment.put(&EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone());
-            drop(equipment);
-            if !dropped.is_empty() {
-                let pos = self.mob_entity.living_entity.entity.block_pos.load();
-                self.mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .drop_stack(&pos, dropped)
-                    .await;
-                self.mob_entity
-                    .living_entity
-                    .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone())]);
-            }
+        // `cancelAdmiring` (PiglinAi.java:401-406): drop the offhand item instead
+        // of silently voiding it.
+        let mut equipment = self
+            .mob_entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dropped = equipment.put(&EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone());
+        drop(equipment);
+        if !dropped.is_empty() {
+            let pos = self.mob_entity.living_entity.entity.block_pos.load();
+            self.mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .drop_stack(&pos, dropped);
+            self.mob_entity
+                .living_entity
+                .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone())]);
+        }
 
-            let attacker_is_player =
-                source.is_some_and(|s| s.get_entity().entity_type.id == EntityType::PLAYER.id);
-            if attacker_is_player {
-                self.admiring_disabled_ticks
-                    .store(ADMIRING_DISABLED_TICKS, Ordering::Relaxed);
-            }
+        let attacker_is_player =
+            source.is_some_and(|s| s.get_entity().entity_type.id == EntityType::PLAYER.id);
+        if attacker_is_player {
+            self.admiring_disabled_ticks
+                .store(ADMIRING_DISABLED_TICKS, Ordering::Relaxed);
+        }
 
-            if let Some(source) = source {
-                piglin_shared::retaliate_and_alert_piglins(self, source).await;
-            }
-        })
+        if let Some(source) = source {
+            piglin_shared::retaliate_and_alert_piglins(self, source);
+        }
     }
 
     /// Decrements the admiring-disabled lockout every tick, matching the passive
     /// expiry of vanilla's `ADMIRING_DISABLED` memory. Must run independently of
     /// `PiglinAdmireGoal` since the goal isn't running while admiring is disabled.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let remaining = self.admiring_disabled_ticks.load(Ordering::Relaxed);
-            if remaining > 0 {
-                self.admiring_disabled_ticks
-                    .store(remaining - 1, Ordering::Relaxed);
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let remaining = self.admiring_disabled_ticks.load(Ordering::Relaxed);
+        if remaining > 0 {
+            self.admiring_disabled_ticks
+                .store(remaining - 1, Ordering::Relaxed);
+        }
 
-            // The equip half of `PiglinAi.pickUpItem`'s `isLovedItem` branch
-            // (`PiglinAi.java:348-351`), deferred out of the synchronous `on_item_pickup`.
-            let picked_up = self
-                .pending_offhand
+        // The equip half of `PiglinAi.pickUpItem`'s `isLovedItem` branch
+        // (`PiglinAi.java:348-351`), deferred out of the synchronous `on_item_pickup`.
+        let picked_up = self
+            .pending_offhand
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(stack) = picked_up {
+            self.hold_in_offhand_and_admire(stack);
+        }
+
+        // `HUNTED_RECENTLY`'s expiry, plus `PiglinAi.dontKillAnyMoreHoglinsForAWhile`
+        // (`StartHuntingHoglin.java:23`).
+        //
+        // Vanilla arms the cooldown the moment the hunt starts: `StartHuntingHoglin` is a
+        // one-shot behavior, and the hunt then lives on in the `ATTACK_TARGET` memory. That
+        // does not transfer. `TrackTargetGoal::should_continue` re-runs the target predicate
+        // every tick, so arming on acquisition would fail the predicate on the very next
+        // tick and drop the hoglin immediately. The cooldown is therefore armed when the
+        // hunt ENDS -- the hoglin dies, or the target is lost -- which still produces the
+        // 30-120 second spacing between hunts the vanilla constant exists for.
+        let (has_target, targeting_hoglin) = {
+            let target = self
+                .mob_entity
+                .target
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            if let Some(stack) = picked_up {
-                self.hold_in_offhand_and_admire(stack).await;
-            }
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (
+                target.is_some(),
+                target
+                    .as_ref()
+                    .is_some_and(|t| t.get_entity().entity_type.id == EntityType::HOGLIN.id),
+            )
+        };
+        // Sampled for `wants_to_pick_up_item`'s `ATTACK_TARGET` check; see the field doc.
+        self.has_attack_target.store(has_target, Ordering::Relaxed);
+        let was_hunting = self
+            .hunting_hoglin
+            .swap(targeting_hoglin, Ordering::Relaxed);
 
-            // `HUNTED_RECENTLY`'s expiry, plus `PiglinAi.dontKillAnyMoreHoglinsForAWhile`
-            // (`StartHuntingHoglin.java:23`).
-            //
-            // Vanilla arms the cooldown the moment the hunt starts: `StartHuntingHoglin` is a
-            // one-shot behavior, and the hunt then lives on in the `ATTACK_TARGET` memory. That
-            // does not transfer. `TrackTargetGoal::should_continue` re-runs the target predicate
-            // every tick, so arming on acquisition would fail the predicate on the very next
-            // tick and drop the hoglin immediately. The cooldown is therefore armed when the
-            // hunt ENDS -- the hoglin dies, or the target is lost -- which still produces the
-            // 30-120 second spacing between hunts the vanilla constant exists for.
-            let (has_target, targeting_hoglin) = {
-                let target = self.mob_entity.target.lock().await;
-                (
-                    target.is_some(),
-                    target
-                        .as_ref()
-                        .is_some_and(|t| t.get_entity().entity_type.id == EntityType::HOGLIN.id),
-                )
-            };
-            // Sampled for `wants_to_pick_up_item`'s `ATTACK_TARGET` check; see the field doc.
-            self.has_attack_target.store(has_target, Ordering::Relaxed);
-            let was_hunting = self
-                .hunting_hoglin
-                .swap(targeting_hoglin, Ordering::Relaxed);
+        let hunted = self.hunted_recently_ticks.load(Ordering::Relaxed);
+        if hunted > 0 {
+            self.hunted_recently_ticks
+                .store(hunted - 1, Ordering::Relaxed);
+        } else if was_hunting && !targeting_hoglin {
+            self.hunted_recently_ticks.store(
+                self.get_random()
+                    .random_range(TIME_BETWEEN_HUNTS_MIN..=TIME_BETWEEN_HUNTS_MAX),
+                Ordering::Relaxed,
+            );
+        }
 
-            let hunted = self.hunted_recently_ticks.load(Ordering::Relaxed);
-            if hunted > 0 {
-                self.hunted_recently_ticks
-                    .store(hunted - 1, Ordering::Relaxed);
-            } else if was_hunting && !targeting_hoglin {
-                self.hunted_recently_ticks.store(
-                    self.get_random()
-                        .random_range(TIME_BETWEEN_HUNTS_MIN..=TIME_BETWEEN_HUNTS_MAX),
-                    Ordering::Relaxed,
+        // `AbstractPiglin.customServerAiStep` (`AbstractPiglin.java:80-96`).
+        if self.zombification.tick(&self.mob_entity) {
+            if self
+                .mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .level_info
+                .load()
+                .difficulty
+                != Difficulty::Peaceful
+            {
+                zombification::play_converted_sound(
+                    &self.mob_entity,
+                    Sound::EntityPiglinConvertedToZombified,
                 );
             }
-
-            // `AbstractPiglin.customServerAiStep` (`AbstractPiglin.java:80-96`).
-            if self.zombification.tick(&self.mob_entity) {
-                if self
-                    .mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .level_info
-                    .load()
-                    .difficulty
-                    != Difficulty::Peaceful
-                {
-                    zombification::play_converted_sound(
-                        &self.mob_entity,
-                        Sound::EntityPiglinConvertedToZombified,
-                    );
-                }
-                // `Piglin.finishConversion` (`Piglin.java:279-283`) empties the inventory first.
-                self.drop_inventory().await;
-                zombification::convert_to(
-                    &self.mob_entity,
-                    &EntityType::ZOMBIFIED_PIGLIN,
-                    true,
-                    ZombifiedPiglinEntity::new,
-                )
-                .await;
-            }
-        })
+            // `Piglin.finishConversion` (`Piglin.java:279-283`) empties the inventory first.
+            self.drop_inventory();
+            zombification::convert_to(
+                &self.mob_entity,
+                &EntityType::ZOMBIFIED_PIGLIN,
+                true,
+                ZombifiedPiglinEntity::new,
+            );
+        }
     }
 }
 

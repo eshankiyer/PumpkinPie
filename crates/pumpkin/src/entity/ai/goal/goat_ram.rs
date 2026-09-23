@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::Arc;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::predicate::EntityPredicate;
 use crate::entity::{EntityBase, mob::Mob};
@@ -92,7 +92,7 @@ impl GoatRamGoal {
         }
     }
 
-    async fn find_ram_target(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    fn find_ram_target(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let self_entity = mob.get_entity();
         let self_uuid = self_entity.entity_uuid;
         let pos = self_entity.pos.load();
@@ -114,10 +114,7 @@ impl GoatRamGoal {
             if !candidate.get_entity().is_alive() {
                 continue;
             }
-            if !EntityPredicate::ExceptCreativeOrSpectator
-                .test(candidate.get_entity())
-                .await
-            {
+            if !EntityPredicate::ExceptCreativeOrSpectator.test(candidate.get_entity()) {
                 continue;
             }
 
@@ -202,7 +199,7 @@ impl GoatRamGoal {
 
     /// Handles a tick while sprinting at the target. Returns the phase to keep running (or
     /// `None` if the ram connected, timed out, or the target died this tick).
-    async fn tick_charging(
+    fn tick_charging(
         &mut self,
         mob: &dyn Mob,
         target: Arc<dyn EntityBase>,
@@ -219,12 +216,12 @@ impl GoatRamGoal {
         let dist_sq = mob_pos.squared_distance_to_vec(&target_pos);
 
         if dist_sq <= RAM_HIT_RANGE_SQ {
-            let damage_accepted = mob.try_attack(target.as_ref()).await;
+            let damage_accepted = mob.try_attack(target.as_ref());
             // The ordinary damage path already performs `applyItemBlocking`; its false result
             // identifies a fully blocked ram hit, which `RamTarget` uses to halve knockback.
             // (`RamTarget.java:78-93`; `LivingEntity.java:1200-1202`, `1308-1345`.)
             let target_blocking = match target.get_living_entity() {
-                Some(living) => living.is_blocking().await,
+                Some(living) => living.is_blocking(),
                 None => false,
             };
             let blocking_factor = ram_blocking_factor(damage_accepted, target_blocking);
@@ -274,72 +271,62 @@ impl Default for GoatRamGoal {
 }
 
 impl Goal for GoatRamGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.cooldown = (self.cooldown - 1).max(0);
-            if self.cooldown > 0 {
-                return false;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.cooldown = (self.cooldown - 1).max(0);
+        if self.cooldown > 0 {
+            return false;
+        }
+
+        let Some(target) = Self::find_ram_target(mob) else {
+            return false;
+        };
+
+        self.phase = Some(RamPhase::Preparing {
+            target,
+            ticks_left: RAM_PREPARE_TIME,
+        });
+        true
+    }
+
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        match &self.phase {
+            Some(RamPhase::Preparing { target, .. } | RamPhase::Charging { target, .. }) => {
+                target.get_entity().is_alive()
             }
+            None => false,
+        }
+    }
 
-            let Some(target) = Self::find_ram_target(mob).await else {
-                return false;
-            };
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+    }
 
-            self.phase = Some(RamPhase::Preparing {
+    fn stop(&mut self, mob: &dyn Mob) {
+        // If we still hold a phase here, the goal was interrupted (target died, or a
+        // higher-priority goal preempted us) rather than finishing naturally through
+        // `finish`, so roll a cooldown now -- vanilla always resets RAM_COOLDOWN_TICKS
+        // whenever the ram behavior stops without a successful `finishRam` call.
+        if self.phase.take().is_some() {
+            self.cooldown = mob.get_random().random_range(TIME_BETWEEN_RAMS);
+        }
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(phase) = self.phase.take() else {
+            return;
+        };
+
+        self.phase = match phase {
+            RamPhase::Preparing { target, ticks_left } => {
+                self.tick_preparing(mob, target, ticks_left)
+            }
+            RamPhase::Charging {
                 target,
-                ticks_left: RAM_PREPARE_TIME,
-            });
-            true
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            match &self.phase {
-                Some(RamPhase::Preparing { target, .. } | RamPhase::Charging { target, .. }) => {
-                    target.get_entity().is_alive()
-                }
-                None => false,
-            }
-        })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // If we still hold a phase here, the goal was interrupted (target died, or a
-            // higher-priority goal preempted us) rather than finishing naturally through
-            // `finish`, so roll a cooldown now -- vanilla always resets RAM_COOLDOWN_TICKS
-            // whenever the ram behavior stops without a successful `finishRam` call.
-            if self.phase.take().is_some() {
-                self.cooldown = mob.get_random().random_range(TIME_BETWEEN_RAMS);
-            }
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(phase) = self.phase.take() else {
-                return;
-            };
-
-            self.phase = match phase {
-                RamPhase::Preparing { target, ticks_left } => {
-                    self.tick_preparing(mob, target, ticks_left)
-                }
-                RamPhase::Charging {
-                    target,
-                    direction,
-                    timeout,
-                } => self.tick_charging(mob, target, direction, timeout).await,
-            };
-        })
+                direction,
+                timeout,
+            } => self.tick_charging(mob, target, direction, timeout),
+        };
     }
 
     fn should_run_every_tick(&self) -> bool {

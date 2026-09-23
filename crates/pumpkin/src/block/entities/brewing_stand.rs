@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::{
     Arc, Mutex as StdMutex,
     atomic::AtomicI32,
@@ -19,7 +18,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::inventory::{Inventory, sync_read_items_from_nbt, sync_write_items_to_nbt};
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 
 pub struct BrewingStandBlockEntity {
     pub position: BlockPos,
@@ -71,7 +70,7 @@ impl BrewingStandBlockEntity {
     }
 
     /// Check if any potion slot has a valid recipe with the ingredient
-    async fn is_brewable(&self, ingredient: &ItemStack) -> bool {
+    fn is_brewable(&self, ingredient: &ItemStack) -> bool {
         if ingredient.is_empty() {
             return false;
         }
@@ -79,7 +78,10 @@ impl BrewingStandBlockEntity {
         let ingredient_id = ingredient.get_item().id;
 
         // Check potion recipes (water bottle -> potions, potion upgrades, etc.)
-        let items = self.items.read().await;
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for slot_idx in 0..3usize {
             let slot = &items[slot_idx];
             if slot.is_empty() {
@@ -141,12 +143,15 @@ impl BrewingStandBlockEntity {
     }
 
     /// Perform brewing on all valid potion slots
-    async fn do_brew(&self, world: &Arc<crate::world::World>, ingredient: &ItemStack) {
+    fn do_brew(&self, world: &Arc<crate::world::World>, ingredient: &ItemStack) {
         let ingredient_id = ingredient.get_item().id;
 
         // Apply recipes to each slot
         for slot_idx in 0..3usize {
-            let items = self.items.read().await;
+            let items = self
+                .items
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let slot = &items[slot_idx];
             if slot.is_empty() {
                 continue;
@@ -213,7 +218,7 @@ impl BrewingStandBlockEntity {
 
             // Update the slot using set_stack if a recipe was applied
             if let Some(new_stack) = new_stack_opt {
-                self.set_stack(slot_idx, new_stack).await;
+                self.set_stack(slot_idx, new_stack);
             }
         }
 
@@ -222,20 +227,23 @@ impl BrewingStandBlockEntity {
             self.fuel.load(std::sync::atomic::Ordering::Relaxed) as u8,
         );
         if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire(&server, &mut event).await;
+            server.plugin_manager.fire_blocking(&server, &mut event);
         }
         if event.cancelled {
             return;
         }
 
         // Consume ingredient and preserve the vanilla crafting remainder behavior.
-        let mut items = self.items.write().await;
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let remainder = Self::apply_ingredient_remainder(&mut items[3]);
         self.mark_dirty();
         drop(items);
 
         if let Some(remainder) = remainder {
-            world.drop_stack(&self.position, remainder).await;
+            world.drop_stack(&self.position, remainder);
         }
 
         // Play sound at the center of the block
@@ -261,7 +269,10 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
 
     fn is_empty(&self) -> pumpkin_world::inventory::InventoryFuture<'_, bool> {
         Box::pin(async move {
-            let items = self.items.read().await;
+            let items = self
+                .items
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             for slot in items.iter() {
                 if !slot.is_empty() {
                     return false;
@@ -273,7 +284,10 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
 
     fn get_stack(&self, slot: usize) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
         Box::pin(async move {
-            let items = self.items.read().await;
+            let items = self
+                .items
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             items[slot].clone()
         })
     }
@@ -283,7 +297,10 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         slot: usize,
     ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
         Box::pin(async move {
-            let mut items = self.items.write().await;
+            let mut items = self
+                .items
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
             self.mark_dirty();
             removed
@@ -296,7 +313,10 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         amount: u8,
     ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
         Box::pin(async move {
-            let mut items = self.items.write().await;
+            let mut items = self
+                .items
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let taken = if items[slot].item_count <= amount {
                 std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone())
             } else {
@@ -316,7 +336,10 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         stack: ItemStack,
     ) -> pumpkin_world::inventory::InventoryFuture<'_, ()> {
         Box::pin(async move {
-            let mut items = self.items.write().await;
+            let mut items = self
+                .items
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             items[slot] = stack;
             self.mark_dirty();
         })
@@ -346,7 +369,12 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
     ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
         Box::pin(async move {
             self.is_valid_slot_for(slot, stack)
-                && (slot > 2 || self.items.read().await[slot].is_empty())
+                && (slot > 2
+                    || self
+                        .items
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
+                        .is_empty())
         })
     }
 
@@ -369,7 +397,12 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
             // slot; that part needs to read the slot, so it cannot live in the sync
             // `is_valid_slot_for`.
             self.is_valid_slot_for(slot, stack)
-                && (slot > 2 || self.items.read().await[slot].is_empty())
+                && (slot > 2
+                    || self
+                        .items
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
+                        .is_empty())
         })
     }
 
@@ -406,12 +439,13 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
 }
 
 impl pumpkin_world::inventory::Clearable for BrewingStandBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            items.fill_with(|| ItemStack::EMPTY.clone());
-            self.mark_dirty();
-        })
+    fn clear(&self) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items.fill_with(|| ItemStack::EMPTY.clone());
+        self.mark_dirty();
     }
 }
 
@@ -480,18 +514,13 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
         entity
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Persist brew state
-            nbt.put_short("BrewTime", self.brew_time.load(Ordering::Relaxed) as i16);
-            nbt.put_byte("Fuel", self.fuel.load(Ordering::Relaxed) as i8);
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        // Persist brew state
+        nbt.put_short("BrewTime", self.brew_time.load(Ordering::Relaxed) as i16);
+        nbt.put_byte("Fuel", self.fuel.load(Ordering::Relaxed) as i8);
 
-            // Save inventory contents to NBT
-            self.write_inventory_nbt(nbt, true).await;
-        })
+        // Save inventory contents to NBT
+        self.write_inventory_nbt(nbt, true);
     }
 
     fn get_inventory(self: Arc<Self>) -> Option<Arc<dyn Inventory>> {
@@ -519,123 +548,127 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
         self
     }
 
-    fn tick<'a>(
-        &'a self,
-        world: &'a Arc<crate::world::World>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Refill fuel counter from fuel item if needed
-            let fuel_refilled = if self.fuel.load(Ordering::Relaxed) <= 0 {
-                let mut items = self.items.write().await;
-                if !items[4].is_empty()
-                    && items[4]
-                        .get_item()
-                        .has_tag(&tag::Item::MINECRAFT_BREWING_FUEL)
-                {
-                    let mut fuel_event = crate::plugin::api::events::inventory::brewing_stand_fuel::BrewingStandFuelEvent::new(
+    fn tick(&self, world: &Arc<crate::world::World>) {
+        // Refill fuel counter from fuel item if needed
+        let fuel_refilled = if self.fuel.load(Ordering::Relaxed) <= 0 {
+            let mut items = self
+                .items
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !items[4].is_empty()
+                && items[4]
+                    .get_item()
+                    .has_tag(&tag::Item::MINECRAFT_BREWING_FUEL)
+            {
+                let mut fuel_event = crate::plugin::api::events::inventory::brewing_stand_fuel::BrewingStandFuelEvent::new(
                         self.position,
                         20,
                     );
-                    if let Some(server) = world.server.upgrade() {
-                        server.plugin_manager.fire(&server, &mut fuel_event).await;
-                    }
-                    if fuel_event.cancelled {
-                        false
-                    } else {
-                        self.fuel
-                            .store(fuel_event.fuel_power as i32, Ordering::Relaxed);
-                        items[4].decrement(1);
-                        true
-                    }
-                } else {
+                if let Some(server) = world.server.upgrade() {
+                    server
+                        .plugin_manager
+                        .fire_blocking(&server, &mut fuel_event);
+                }
+                if fuel_event.cancelled {
                     false
+                } else {
+                    self.fuel
+                        .store(fuel_event.fuel_power as i32, Ordering::Relaxed);
+                    items[4].decrement(1);
+                    true
                 }
             } else {
                 false
-            };
+            }
+        } else {
+            false
+        };
 
-            // Get current ingredient and check brewing state
-            let ingredient = self.items.read().await[3].clone();
-            let brewable = self.is_brewable(&ingredient).await;
-            let is_brewing = self.brew_time.load(Ordering::Relaxed) > 0;
+        // Get current ingredient and check brewing state
+        let ingredient = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)[3]
+            .clone();
+        let brewable = self.is_brewable(&ingredient);
+        let is_brewing = self.brew_time.load(Ordering::Relaxed) > 0;
 
-            // Handle brewing state machine
-            if is_brewing {
-                // Decrement brew time
-                let new_brew_time = self.brew_time.fetch_sub(1, Ordering::Relaxed) - 1;
-                let is_done_brewing = new_brew_time == 0;
+        // Handle brewing state machine
+        if is_brewing {
+            // Decrement brew time
+            let new_brew_time = self.brew_time.fetch_sub(1, Ordering::Relaxed) - 1;
+            let is_done_brewing = new_brew_time == 0;
 
-                if is_done_brewing && brewable {
-                    // Brewing complete
-                    self.do_brew(world, &ingredient).await;
-                } else if !brewable || !self.ingredient_matches(&ingredient) {
-                    // Cancel brewing
-                    self.brew_time.store(0, Ordering::Relaxed);
-                    self.mark_dirty();
-                } else {
-                    // Continue brewing
-                    self.mark_dirty();
-                }
-            } else if brewable && self.fuel.load(Ordering::Relaxed) > 0 {
-                // Start new brewing cycle
-                self.fuel.fetch_sub(1, Ordering::Relaxed);
-                self.brew_time.store(400, Ordering::Relaxed);
-                *self
-                    .ingredient_item
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                    Some(ingredient.get_item());
+            if is_done_brewing && brewable {
+                // Brewing complete
+                self.do_brew(world, &ingredient);
+            } else if !brewable || !self.ingredient_matches(&ingredient) {
+                // Cancel brewing
+                self.brew_time.store(0, Ordering::Relaxed);
                 self.mark_dirty();
-            } else if fuel_refilled {
-                // Mark dirty if fuel was refilled to update fuel indicator
+            } else {
+                // Continue brewing
                 self.mark_dirty();
             }
+        } else if brewable && self.fuel.load(Ordering::Relaxed) > 0 {
+            // Start new brewing cycle
+            self.fuel.fetch_sub(1, Ordering::Relaxed);
+            self.brew_time.store(400, Ordering::Relaxed);
+            *self
+                .ingredient_item
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ingredient.get_item());
+            self.mark_dirty();
+        } else if fuel_refilled {
+            // Mark dirty if fuel was refilled to update fuel indicator
+            self.mark_dirty();
+        }
 
-            // Ensure clients are notified when potion slot contents (and their data) change.
-            // Compute current presence bits for the three bottle slots
-            let items_guard = self.items.read().await;
-            let current = Self::potion_bits(items_guard.as_slice());
-            drop(items_guard);
+        // Ensure clients are notified when potion slot contents (and their data) change.
+        // Compute current presence bits for the three bottle slots
+        let items_guard = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = Self::potion_bits(items_guard.as_slice());
+        drop(items_guard);
 
-            // If potion presence changed, update last_potion_count and update block state so clients
-            let mut needs_update = false;
-            {
-                let mut last_guard = self
-                    .last_potion_count
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if last_guard.as_ref() != Some(&current) {
-                    *last_guard = Some(current);
-                    needs_update = true;
-                }
+        // If potion presence changed, update last_potion_count and update block state so clients
+        let mut needs_update = false;
+        {
+            let mut last_guard = self
+                .last_potion_count
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if last_guard.as_ref() != Some(&current) {
+                *last_guard = Some(current);
+                needs_update = true;
             }
+        }
 
-            if needs_update {
-                // Update the block state properties for the brewing stand to reflect bottle presence
-                let world = world.clone();
-                let (block, state) = world.get_block_and_state(&self.position);
-                // Use generated block properties helper to produce a new state id with the bits set
-                let mut props =
-                    pumpkin_data::block_properties::BrewingStandLikeProperties::from_state_id(
-                        state.id, block,
-                    );
-                // Generated field names use raw identifiers for clarity
-                props.r#has_bottle_0 = current[0];
-                props.r#has_bottle_1 = current[1];
-                props.r#has_bottle_2 = current[2];
+        if needs_update {
+            // Update the block state properties for the brewing stand to reflect bottle presence
+            let world = world.clone();
+            let (block, state) = world.get_block_and_state(&self.position);
+            // Use generated block properties helper to produce a new state id with the bits set
+            let mut props =
+                pumpkin_data::block_properties::BrewingStandLikeProperties::from_state_id(
+                    state.id, block,
+                );
+            // Generated field names use raw identifiers for clarity
+            props.r#has_bottle_0 = current[0];
+            props.r#has_bottle_1 = current[1];
+            props.r#has_bottle_2 = current[2];
 
-                world
-                    .set_block_state(
-                        &self.position,
-                        props.to_state_id(block),
-                        crate::world::BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
+            world.set_block_state(
+                &self.position,
+                props.to_state_id(block),
+                crate::world::BlockFlags::NOTIFY_ALL,
+            );
 
-                // Also mark dirty so inventory/container updates are sent to open screens
-                self.mark_dirty();
-            }
-        })
+            // Also mark dirty so inventory/container updates are sent to open screens
+            self.mark_dirty();
+        }
     }
 
     fn to_property_delegate(self: Arc<Self>) -> Option<Arc<dyn PropertyDelegate>> {

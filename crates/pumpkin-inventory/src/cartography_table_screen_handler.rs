@@ -3,10 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::player::player_inventory::PlayerInventory;
-use crate::screen_handler::{
-    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
-};
-use crate::slot::{BoxFuture, PredicateSlot, Slot};
+use crate::screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour};
+use crate::slot::{PredicateSlot, Slot};
 
 use pumpkin_data::data_component_impl::{
     DataComponentImpl, MapIdImpl, MapPostProcessing, MapPostProcessingImpl,
@@ -82,9 +80,9 @@ impl CartographyTableScreenHandler {
     /// `CartographyTableMenu.slotsChanged`/`setupResultSlot` (`CartographyTableMenu.java:97-141`)
     /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:111-139`) puts a
     /// marked result in the output for scaling/locking, or two copies for map duplication.
-    async fn update_result(&self) {
-        let map = self.input_inventory.get_stack(0).await;
-        let additional = self.input_inventory.get_stack(1).await;
+    fn update_result(&self) {
+        let map = self.input_inventory.get_stack(0);
+        let additional = self.input_inventory.get_stack(1);
         let result = if map.get_data_component::<MapIdImpl>().is_some() {
             if additional.item == &Item::PAPER {
                 let mut result = map.copy_with_count(1);
@@ -120,7 +118,7 @@ impl CartographyTableScreenHandler {
         } else {
             ItemStack::EMPTY.clone()
         };
-        self.output_inventory.set_stack(0, result).await;
+        self.output_inventory.set_stack(0, result);
     }
 }
 
@@ -155,31 +153,21 @@ impl Slot for CartographyResultSlot {
         self.id.store(id as u8, Ordering::Relaxed);
     }
 
-    fn can_insert<'a>(&'a self, _stack: &'a ItemStack) -> BoxFuture<'a, bool> {
-        // `CartographyTableMenu`'s result slot rejects every placed stack
-        // (`CartographyTableMenu.java:61-65`).
-        Box::pin(async { false })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.output_inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.output_inventory.mark_dirty();
     }
 
-    fn on_take_item<'a>(
-        &'a self,
-        player: &'a dyn InventoryPlayer,
-        _stack: &'a ItemStack,
-    ) -> BoxFuture<'a, ()> {
-        Box::pin(async move {
-            // `CartographyTableMenu` removes one stack from both inputs before playing the
-            // take-result sound (`CartographyTableMenu.java:67-79`).
-            self.input_inventory.remove_stack_specific(0, 1).await;
-            self.input_inventory.remove_stack_specific(1, 1).await;
-            player.play_sound(Sound::UiCartographyTableTakeResult).await;
-            self.mark_dirty().await;
-        })
+    fn on_take_item(&self, player: &dyn InventoryPlayer, _stack: &ItemStack) {
+        // `CartographyTableMenu` removes one stack from both inputs before playing the
+        // take-result sound (`CartographyTableMenu.java:67-79`).
+        self.input_inventory.remove_stack_specific(0, 1);
+        self.input_inventory.remove_stack_specific(1, 1);
+        player.play_sound(Sound::UiCartographyTableTakeResult);
+        self.mark_dirty();
     }
 }
 
@@ -209,53 +197,47 @@ impl ScreenHandler for CartographyTableScreenHandler {
         self
     }
 
-    fn on_slot_click<'a>(
-        &'a mut self,
+    fn on_slot_click(
+        &mut self,
         slot_index: i32,
         button: i32,
         action_type: SlotActionType,
-        player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            if slot_index == 2
-                && matches!(
-                    action_type,
-                    SlotActionType::Pickup | SlotActionType::QuickMove
-                )
-            {
-                let mut result = self.output_inventory.get_stack(0).await;
-                player.process_item_stack_after_crafting(&mut result).await;
-                self.output_inventory.set_stack(0, result).await;
-            }
-            if action_type == SlotActionType::PickupAll && button == 0 {
-                // `canTakeItemForPickAll` excludes slots backed by the result container
-                // (`CartographyTableMenu.java:143-146`). The shared handler has no per-slot
-                // pickup-all predicate, so exclude this result while it performs the scan.
-                self.output_inventory.remove_stack(0).await;
-                self.internal_on_slot_click(slot_index, button, action_type, player)
-                    .await;
-                self.update_result().await;
-                return;
-            }
-            self.internal_on_slot_click(slot_index, button, action_type, player)
-                .await;
-            // Vanilla invokes `slotsChanged` from both input containers' `setChanged`
-            // callbacks (`CartographyTableMenu.java:27-39, 97-109`). The existing screen
-            // handler has no inventory listener, so refresh after every live click instead.
-            self.update_result().await;
-        })
+        player: &dyn InventoryPlayer,
+    ) {
+        if slot_index == 2
+            && matches!(
+                action_type,
+                SlotActionType::Pickup | SlotActionType::QuickMove
+            )
+        {
+            let mut result = self.output_inventory.get_stack(0);
+            player.process_item_stack_after_crafting(&mut result);
+            self.output_inventory.set_stack(0, result);
+        }
+        if action_type == SlotActionType::PickupAll && button == 0 {
+            // `canTakeItemForPickAll` excludes slots backed by the result container
+            // (`CartographyTableMenu.java:143-146`). The shared handler has no per-slot
+            // pickup-all predicate, so exclude this result while it performs the scan.
+            self.output_inventory.remove_stack(0);
+            self.internal_on_slot_click(slot_index, button, action_type, player);
+            self.update_result();
+            return;
+        }
+        self.internal_on_slot_click(slot_index, button, action_type, player);
+        // Vanilla invokes `slotsChanged` from both input containers' `setChanged`
+        // callbacks (`CartographyTableMenu.java:27-39, 97-109`). The existing screen
+        // handler has no inventory listener, so refresh after every live click instead.
+        self.update_result();
     }
 
     /// `CartographyTableMenu.removed` (`CartographyTableMenu.java:198-203`): the input slots
     /// (map + paper/glass pane/map) are dropped back to the player on close, not left in the
     /// table. The result slot is a `ResultContainer` that is never itself serialized, matching
     /// `resultContainer.removeItemNoUpdate(2)`.
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            let input_inventory: Arc<dyn Inventory> = self.input_inventory.clone();
-            self.drop_inventory(player, input_inventory).await;
-        })
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        let input_inventory: Arc<dyn Inventory> = self.input_inventory.clone();
+        self.drop_inventory(player, input_inventory);
     }
 
     /// `CartographyTableMenu.quickMoveStack` (`CartographyTableMenu.java:149-196`).
@@ -264,82 +246,65 @@ impl ScreenHandler for CartographyTableScreenHandler {
     /// `CartographyTableMenu.java:155-162` and its input consumption at `:67-80`. The result is
     /// processed before the move through `ItemStack.onCraftedBy` (`ItemStack.java:722-725`)
     /// and `Item.onCraftedBy` (`Item.java:292-297`).
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ScreenHandlerFuture<'a, ItemStack> {
-        Box::pin(async move {
-            let mut stack = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
-            let total_slots = self.get_behaviour().slots.len() as i32;
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
+        let total_slots = self.get_behaviour().slots.len() as i32;
 
-            if let Some(slot) = slot {
-                let mut slot_stack = slot.get_cloned_stack().await;
-                if !slot_stack.is_empty() {
-                    stack = slot_stack.clone();
+        if let Some(slot) = slot {
+            let mut slot_stack = slot.get_cloned_stack();
+            if !slot_stack.is_empty() {
+                stack = slot_stack.clone();
 
-                    if slot_index == 2 {
-                        // Result slot: move to the full player inventory.
-                        if !self
-                            .insert_item(&mut slot_stack, INV_SLOT_START, total_slots, true)
-                            .await
+                if slot_index == 2 {
+                    // Result slot: move to the full player inventory.
+                    if !self.insert_item(&mut slot_stack, INV_SLOT_START, total_slots, true) {
+                        return ItemStack::EMPTY.clone();
+                    }
+                    // `CartographyTableMenu`'s result-slot `onTake` consumes one item from
+                    // each input (`CartographyTableMenu.java:67-80`).
+                    slot.on_take_item(player, &stack);
+                } else if slot_index != 0 && slot_index != 1 {
+                    if slot_stack.get_data_component::<MapIdImpl>().is_some() {
+                        if !self.insert_item(&mut slot_stack, 0, 1, false) {
+                            return ItemStack::EMPTY.clone();
+                        }
+                    } else if !may_place_additional(&slot_stack) {
+                        if (INV_SLOT_START..INV_SLOT_END).contains(&slot_index) {
+                            if !self.insert_item(
+                                &mut slot_stack,
+                                USE_ROW_SLOT_START,
+                                USE_ROW_SLOT_END,
+                                false,
+                            ) {
+                                return ItemStack::EMPTY.clone();
+                            }
+                        } else if (USE_ROW_SLOT_START..USE_ROW_SLOT_END).contains(&slot_index)
+                            && !self.insert_item(
+                                &mut slot_stack,
+                                INV_SLOT_START,
+                                INV_SLOT_END,
+                                false,
+                            )
                         {
                             return ItemStack::EMPTY.clone();
                         }
-                        // `CartographyTableMenu`'s result-slot `onTake` consumes one item from
-                        // each input (`CartographyTableMenu.java:67-80`).
-                        slot.on_take_item(player, &stack).await;
-                    } else if slot_index != 0 && slot_index != 1 {
-                        if slot_stack.get_data_component::<MapIdImpl>().is_some() {
-                            if !self.insert_item(&mut slot_stack, 0, 1, false).await {
-                                return ItemStack::EMPTY.clone();
-                            }
-                        } else if !may_place_additional(&slot_stack) {
-                            if (INV_SLOT_START..INV_SLOT_END).contains(&slot_index) {
-                                if !self
-                                    .insert_item(
-                                        &mut slot_stack,
-                                        USE_ROW_SLOT_START,
-                                        USE_ROW_SLOT_END,
-                                        false,
-                                    )
-                                    .await
-                                {
-                                    return ItemStack::EMPTY.clone();
-                                }
-                            } else if (USE_ROW_SLOT_START..USE_ROW_SLOT_END).contains(&slot_index)
-                                && !self
-                                    .insert_item(
-                                        &mut slot_stack,
-                                        INV_SLOT_START,
-                                        INV_SLOT_END,
-                                        false,
-                                    )
-                                    .await
-                            {
-                                return ItemStack::EMPTY.clone();
-                            }
-                        } else if !self.insert_item(&mut slot_stack, 1, 2, false).await {
-                            return ItemStack::EMPTY.clone();
-                        }
-                    } else if !self
-                        .insert_item(&mut slot_stack, INV_SLOT_START, total_slots, false)
-                        .await
-                    {
+                    } else if !self.insert_item(&mut slot_stack, 1, 2, false) {
                         return ItemStack::EMPTY.clone();
                     }
+                } else if !self.insert_item(&mut slot_stack, INV_SLOT_START, total_slots, false) {
+                    return ItemStack::EMPTY.clone();
+                }
 
-                    if slot_stack.is_empty() {
-                        slot.set_stack(ItemStack::EMPTY.clone()).await;
-                    } else {
-                        slot.set_stack(slot_stack).await;
-                    }
+                if slot_stack.is_empty() {
+                    slot.set_stack(ItemStack::EMPTY.clone());
+                } else {
+                    slot.set_stack(slot_stack);
                 }
             }
-            self.update_result().await;
-            stack
-        })
+        }
+        self.update_result();
+        stack
     }
 }
 
@@ -356,7 +321,7 @@ mod tests {
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_world::inventory::Inventory;
     use std::sync::Arc;
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
 
     fn handler() -> CartographyTableScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -369,20 +334,19 @@ mod tests {
     /// `CartographyTableMenu.setupResultSlot` copies a map with count two when the second input
     /// is another map (`CartographyTableMenu.java:125-133`).
     #[tokio::test]
-    async fn map_copy_refreshes_the_result() {
+    fn map_copy_refreshes_the_result() {
         let handler = handler();
         let mut map = ItemStack::new(1, &Item::FILLED_MAP);
         map.patch
             .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
-        handler.input_inventory.set_stack(0, map).await;
+        handler.input_inventory.set_stack(0, map);
         handler
             .input_inventory
-            .set_stack(1, ItemStack::new(1, &Item::MAP))
-            .await;
+            .set_stack(1, ItemStack::new(1, &Item::MAP));
 
-        handler.update_result().await;
+        handler.update_result();
 
-        let result = handler.output_inventory.get_stack(0).await;
+        let result = handler.output_inventory.get_stack(0);
         assert_eq!(result.item.id, Item::FILLED_MAP.id);
         assert_eq!(result.item_count, 2);
         assert_eq!(
@@ -394,20 +358,19 @@ mod tests {
     /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:116-123`) marks
     /// paper and glass-pane results for `MapItem.onCraftedPostProcess`.
     #[tokio::test]
-    async fn map_transform_refreshes_the_result_with_post_processing() {
+    fn map_transform_refreshes_the_result_with_post_processing() {
         let handler = handler();
         let mut map = ItemStack::new(1, &Item::FILLED_MAP);
         map.patch
             .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
-        handler.input_inventory.set_stack(0, map).await;
+        handler.input_inventory.set_stack(0, map);
         handler
             .input_inventory
-            .set_stack(1, ItemStack::new(1, &Item::PAPER))
-            .await;
+            .set_stack(1, ItemStack::new(1, &Item::PAPER));
 
-        handler.update_result().await;
+        handler.update_result();
 
-        let result = handler.output_inventory.get_stack(0).await;
+        let result = handler.output_inventory.get_stack(0);
         assert_eq!(
             result
                 .get_data_component::<MapPostProcessingImpl>()

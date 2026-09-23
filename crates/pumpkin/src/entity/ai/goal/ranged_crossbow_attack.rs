@@ -9,7 +9,7 @@ use pumpkin_util::Hand;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture};
+use crate::entity::ai::goal::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::projectile::arrow::{ArrowEntity, ArrowPickup};
@@ -66,13 +66,13 @@ impl RangedCrossbowAttackGoal {
 
     /// `ProjectileUtil.getWeaponHoldingHand(mob, Items.CROSSBOW)`: the main hand if it holds a
     /// crossbow, otherwise the off hand. `None` when neither hand does (`Mob.isHolding`).
-    async fn crossbow_hand(mob: &dyn Mob) -> Option<(Hand, ItemStack)> {
+    fn crossbow_hand(mob: &dyn Mob) -> Option<(Hand, ItemStack)> {
         let equipment = mob
             .get_mob_entity()
             .living_entity
             .entity_equipment
             .lock()
-            .await;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let main = equipment.get(&EquipmentSlot::MAIN_HAND);
         if main.item.id == Item::CROSSBOW.id {
             return Some((Hand::Right, main));
@@ -82,14 +82,14 @@ impl RangedCrossbowAttackGoal {
     }
 
     /// `isValidTarget() && isHoldingCrossbow()`.
-    async fn can_use(mob: &dyn Mob) -> bool {
+    fn can_use(mob: &dyn Mob) -> bool {
         mob.get_mob_entity()
             .target
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .is_some_and(|target| target.get_entity().is_alive())
-            && Self::crossbow_hand(mob).await.is_some()
+            && Self::crossbow_hand(mob).is_some()
     }
 
     fn play_sound(mob: &dyn Mob, sound: Sound) {
@@ -101,7 +101,7 @@ impl RangedCrossbowAttackGoal {
     }
 
     /// `CrossbowAttackMob.performCrossbowAttack(body, 1.6F)` -> `CrossbowItem.performShooting`.
-    async fn shoot(mob: &dyn Mob, target: &dyn EntityBase) {
+    fn shoot(mob: &dyn Mob, target: &dyn EntityBase) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
 
@@ -112,7 +112,7 @@ impl RangedCrossbowAttackGoal {
                 CROSSBOW_POWER as f32,
             );
         if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire(&server, &mut event).await;
+            server.plugin_manager.fire_blocking(&server, &mut event);
         }
         if event.cancelled {
             return;
@@ -149,7 +149,7 @@ impl RangedCrossbowAttackGoal {
             CROSSBOW_POWER,
             divergence,
         );
-        world.spawn_entity(Arc::new(arrow)).await;
+        world.spawn_entity(Arc::new(arrow));
 
         world.play_sound(
             Sound::ItemCrossbowShoot,
@@ -164,147 +164,146 @@ impl RangedCrossbowAttackGoal {
 }
 
 impl Goal for RangedCrossbowAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::can_use(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::can_use(mob)
     }
 
     /// `isValidTarget() && (canUse() || !navigation.isDone()) && isHoldingCrossbow()`, which
     /// reduces to `canUse()`.
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::can_use(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        Self::can_use(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.state = CrossbowState::Uncharged;
+    fn start(&mut self, mob: &dyn Mob) {
+        self.state = CrossbowState::Uncharged;
+        self.see_time = 0;
+        self.attack_delay = 0;
+        self.update_path_delay = 0;
+        self.charge_ticks = 0;
+        mob.get_mob_entity().set_attacking(true);
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        let mob_entity = mob.get_mob_entity();
+        mob_entity.set_attacking(false);
+        mob_entity.set_target(None);
+        self.see_time = 0;
+        if mob_entity.living_entity.is_using_item() {
+            mob_entity.living_entity.clear_active_hand();
+            mob.set_charging_crossbow(false);
+        }
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let mob_entity = mob.get_mob_entity();
+        let entity = mob.get_entity();
+
+        let has_line_of_sight = mob_entity.has_line_of_sight(target.as_ref());
+        let had_line_of_sight = self.see_time > 0;
+        if has_line_of_sight != had_line_of_sight {
             self.see_time = 0;
-            self.attack_delay = 0;
-            self.update_path_delay = 0;
-            self.charge_ticks = 0;
-            mob.get_mob_entity().set_attacking(true);
-        })
-    }
+        }
+        if has_line_of_sight {
+            self.see_time += 1;
+        } else {
+            self.see_time -= 1;
+        }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            mob_entity.set_attacking(false);
-            mob_entity.set_target(None).await;
-            self.see_time = 0;
-            if mob_entity.living_entity.is_using_item() {
-                mob_entity.living_entity.clear_active_hand().await;
-                mob.set_charging_crossbow(false);
-            }
-        })
-    }
+        let target_pos = target.get_entity().pos.load();
+        let distance_squared = entity.pos.load().squared_distance_to_vec(&target_pos);
+        let needs_to_move = (distance_squared > self.attack_radius_sqr || self.see_time < 5)
+            && self.attack_delay == 0;
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return;
-            };
-            let mob_entity = mob.get_mob_entity();
-            let entity = mob.get_entity();
-
-            let has_line_of_sight = mob_entity.has_line_of_sight(target.as_ref()).await;
-            let had_line_of_sight = self.see_time > 0;
-            if has_line_of_sight != had_line_of_sight {
-                self.see_time = 0;
-            }
-            if has_line_of_sight {
-                self.see_time += 1;
-            } else {
-                self.see_time -= 1;
-            }
-
-            let target_pos = target.get_entity().pos.load();
-            let distance_squared = entity.pos.load().squared_distance_to_vec(&target_pos);
-            let needs_to_move = (distance_squared > self.attack_radius_sqr || self.see_time < 5)
-                && self.attack_delay == 0;
-
-            if needs_to_move {
-                self.update_path_delay -= 1;
-                if self.update_path_delay <= 0 {
-                    // `canRun()`: full speed only while uncharged.
-                    let speed = if self.state == CrossbowState::Uncharged {
-                        self.speed_modifier
-                    } else {
-                        self.speed_modifier * 0.5
-                    };
-                    mob_entity
-                        .navigator
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .set_progress(NavigatorGoal {
-                            current_progress: entity.pos.load(),
-                            destination: target_pos,
-                            speed,
-                        });
-                    // `PATHFINDING_DELAY_RANGE = TimeUtil.rangeOfSeconds(1, 2)`: [20, 40].
-                    self.update_path_delay = mob.get_random().random_range(20..=40);
-                }
-            } else {
-                self.update_path_delay = 0;
+        if needs_to_move {
+            self.update_path_delay -= 1;
+            if self.update_path_delay <= 0 {
+                // `canRun()`: full speed only while uncharged.
+                let speed = if self.state == CrossbowState::Uncharged {
+                    self.speed_modifier
+                } else {
+                    self.speed_modifier * 0.5
+                };
                 mob_entity
                     .navigator
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .stop();
+                    .set_progress(NavigatorGoal {
+                        current_progress: entity.pos.load(),
+                        destination: target_pos,
+                        speed,
+                    });
+                // `PATHFINDING_DELAY_RANGE = TimeUtil.rangeOfSeconds(1, 2)`: [20, 40].
+                self.update_path_delay = mob.get_random().random_range(20..=40);
             }
-
+        } else {
+            self.update_path_delay = 0;
             mob_entity
-                .look_control
+                .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at_entity_with_range(&target, 30.0, 30.0);
+                .stop();
+        }
 
-            match self.state {
-                CrossbowState::Uncharged => {
-                    if !needs_to_move && let Some((hand, stack)) = Self::crossbow_hand(mob).await {
-                        mob_entity
-                            .living_entity
-                            .set_active_hand(hand, stack, i32::MAX)
-                            .await;
-                        self.state = CrossbowState::Charging;
-                        self.charge_ticks = 0;
-                        mob.set_charging_crossbow(true);
-                    }
-                }
-                CrossbowState::Charging => {
-                    if !mob_entity.living_entity.is_using_item() {
-                        self.state = CrossbowState::Uncharged;
-                    }
+        mob_entity
+            .look_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .look_at_entity_with_range(&target, 30.0, 30.0);
 
-                    self.charge_ticks += 1;
-                    if self.charge_ticks == LOADING_START_TICKS {
-                        Self::play_sound(mob, Sound::ItemCrossbowLoadingStart);
-                    } else if self.charge_ticks == LOADING_MIDDLE_TICKS {
-                        Self::play_sound(mob, Sound::ItemCrossbowLoadingMiddle);
-                    }
-                    if self.charge_ticks >= CHARGE_DURATION_TICKS {
-                        // `releaseUsingItem` -> `CrossbowItem.releaseUsing` loads the crossbow
-                        // and plays the loading-end sound.
-                        mob_entity.living_entity.clear_active_hand().await;
-                        Self::play_sound(mob, Sound::ItemCrossbowLoadingEnd);
-                        self.state = CrossbowState::Charged;
-                        self.attack_delay = 20 + mob.get_random().random_range(0..20);
-                        mob.set_charging_crossbow(false);
-                    }
-                }
-                CrossbowState::Charged => {
-                    self.attack_delay -= 1;
-                    if self.attack_delay == 0 {
-                        self.state = CrossbowState::ReadyToAttack;
-                    }
-                }
-                CrossbowState::ReadyToAttack => {
-                    if has_line_of_sight {
-                        Self::shoot(mob, target.as_ref()).await;
-                        self.state = CrossbowState::Uncharged;
-                    }
+        match self.state {
+            CrossbowState::Uncharged => {
+                if !needs_to_move && let Some((hand, stack)) = Self::crossbow_hand(mob) {
+                    mob_entity
+                        .living_entity
+                        .set_active_hand(hand, stack, i32::MAX);
+                    self.state = CrossbowState::Charging;
+                    self.charge_ticks = 0;
+                    mob.set_charging_crossbow(true);
                 }
             }
-        })
+            CrossbowState::Charging => {
+                if !mob_entity.living_entity.is_using_item() {
+                    self.state = CrossbowState::Uncharged;
+                }
+
+                self.charge_ticks += 1;
+                if self.charge_ticks == LOADING_START_TICKS {
+                    Self::play_sound(mob, Sound::ItemCrossbowLoadingStart);
+                } else if self.charge_ticks == LOADING_MIDDLE_TICKS {
+                    Self::play_sound(mob, Sound::ItemCrossbowLoadingMiddle);
+                }
+                if self.charge_ticks >= CHARGE_DURATION_TICKS {
+                    // `releaseUsingItem` -> `CrossbowItem.releaseUsing` loads the crossbow
+                    // and plays the loading-end sound.
+                    mob_entity.living_entity.clear_active_hand();
+                    Self::play_sound(mob, Sound::ItemCrossbowLoadingEnd);
+                    self.state = CrossbowState::Charged;
+                    self.attack_delay = 20 + mob.get_random().random_range(0..20);
+                    mob.set_charging_crossbow(false);
+                }
+            }
+            CrossbowState::Charged => {
+                self.attack_delay -= 1;
+                if self.attack_delay == 0 {
+                    self.state = CrossbowState::ReadyToAttack;
+                }
+            }
+            CrossbowState::ReadyToAttack => {
+                if has_line_of_sight {
+                    Self::shoot(mob, target.as_ref());
+                    self.state = CrossbowState::Uncharged;
+                }
+            }
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 use pumpkin_data::entity::MobCategory;
@@ -115,57 +115,47 @@ impl Default for ArmadilloCurlUpGoal {
 }
 
 impl Goal for ArmadilloCurlUpGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla: `ArmadilloBallUp.checkExtraStartConditions` requires being grounded.
-            if !mob.get_entity().on_ground.load(Relaxed) {
-                return false;
-            }
-            Self::is_threatened(mob)
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // Vanilla: `ArmadilloBallUp.checkExtraStartConditions` requires being grounded.
+        if !mob.get_entity().on_ground.load(Relaxed) {
+            return false;
+        }
+        Self::is_threatened(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // Stay curled for at least MIN_CURL_TICKS even if the threat leaves immediately,
-            // mirroring vanilla's ROLLING/SCARED animation-duration gating.
-            self.ticks_curled < MIN_CURL_TICKS || Self::is_threatened(mob)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        // Stay curled for at least MIN_CURL_TICKS even if the threat leaves immediately,
+        // mirroring vanilla's ROLLING/SCARED animation-duration gating.
+        self.ticks_curled < MIN_CURL_TICKS || Self::is_threatened(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_curled = 0;
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
+    fn start(&mut self, mob: &dyn Mob) {
+        self.ticks_curled = 0;
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
 
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            world.play_sound(
-                Sound::EntityArmadilloRoll,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        })
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        world.play_sound(
+            Sound::EntityArmadilloRoll,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            world.play_sound(
-                Sound::EntityArmadilloUnrollFinish,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        world.play_sound(
+            Sound::EntityArmadilloUnrollFinish,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_curled += 1;
-            // Keep the armadillo from being pushed/navigating away while curled.
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.ticks_curled += 1;
+        // Keep the armadillo from being pushed/navigating away while curled.
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
     fn should_run_every_tick(&self) -> bool {

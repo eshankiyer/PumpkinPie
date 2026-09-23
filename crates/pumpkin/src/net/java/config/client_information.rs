@@ -27,8 +27,7 @@ impl JavaClient {
         if client_information.view_distance <= 0 {
             self.kick(TextComponent::text(
                 "Cannot have zero or negative view distance!",
-            ))
-            .await;
+            ));
             return;
         }
 
@@ -49,8 +48,7 @@ impl JavaClient {
                 server_listing: client_information.server_listing,
             }));
         } else {
-            self.kick(TextComponent::text("Invalid hand or chat type"))
-                .await;
+            self.kick(TextComponent::text("Invalid hand or chat type"));
         }
     }
 }

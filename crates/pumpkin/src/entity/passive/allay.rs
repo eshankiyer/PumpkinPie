@@ -43,7 +43,7 @@
 //
 // - The main-hand item is mirrored into a plain `std::sync::Mutex<ItemStack>`. Vanilla reads
 //   it via `getItemInHand`, but `Mob::wants_to_pick_up_item` is a synchronous trait method and
-//   `LivingEntity::entity_equipment` is behind a `tokio::sync::Mutex`, so the sync mirror is
+//   `LivingEntity::entity_equipment` is behind a `std::sync::Mutex`, so the sync mirror is
 //   what `wantsToPickUp` and `canPickUpLoot` consult. Every write goes to both. An external
 //   equipment write (`/item replace`) would desync the mirror; vanilla blocks dispensers from
 //   this slot anyway (`canDispenserEquipIntoSlot`, `Allay.java:271-274`).
@@ -341,7 +341,7 @@ impl AllayEntity {
             .living_entity
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .put(&EquipmentSlot::MAIN_HAND, stack);
     }
 
@@ -361,17 +361,17 @@ impl AllayEntity {
     }
 
     /// `Allay.duplicateAllay`
-    async fn duplicate(&self) {
+    fn duplicate(&self) {
         let world = self.mob_entity.living_entity.entity.world.load_full();
         let pos = self.mob_entity.living_entity.entity.pos.load();
         let new_entity = Entity::new(world.clone(), pos, &EntityType::ALLAY);
         let clone = Self::new(new_entity);
         clone.reset_duplication_cooldown();
         self.reset_duplication_cooldown();
-        world.spawn_entity(clone).await;
+        world.spawn_entity(clone);
     }
 
-    async fn register_listeners_once(&self) {
+    fn register_listeners_once(&self) {
         if self.listener_registered.swap(true, Ordering::Relaxed) {
             return;
         }
@@ -379,10 +379,10 @@ impl AllayEntity {
         let jukebox_listener = self.jukebox_listener.lock().unwrap().clone();
         let world = self.mob_entity.living_entity.entity.world.load();
         if let Some(listener) = vibration_listener {
-            world.register_game_event_listener(listener).await;
+            world.register_game_event_listener(listener);
         }
         if let Some(listener) = jukebox_listener {
-            world.register_game_event_listener(listener).await;
+            world.register_game_event_listener(listener);
         }
     }
 }
@@ -539,107 +539,99 @@ impl Mob for AllayEntity {
         self.inventory.lock().unwrap().split(1)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.register_listeners_once().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.register_listeners_once();
 
-            // `AllayAi.updateActivity` (`AllayAi.java:92-94`), called from
-            // `Allay.customServerAiStep` right after the brain ticks.
-            self.brain()
-                .set_active_activity_to_first_valid(&[Activity::Idle]);
+        // `AllayAi.updateActivity` (`AllayAi.java:92-94`), called from
+        // `Allay.customServerAiStep` right after the brain ticks.
+        self.brain()
+            .set_active_activity_to_first_valid(&[Activity::Idle]);
 
-            let age = self
-                .mob_entity
-                .living_entity
-                .entity
-                .age
-                .load(Ordering::Relaxed);
+        let age = self
+            .mob_entity
+            .living_entity
+            .entity
+            .age
+            .load(Ordering::Relaxed);
 
-            // `Allay.aiStep`: heal 1 HP every 10 ticks while alive.
-            if age % 10 == 0 && self.mob_entity.living_entity.entity.is_alive() {
-                self.mob_entity.living_entity.heal(1.0);
+        // `Allay.aiStep`: heal 1 HP every 10 ticks while alive.
+        if age % 10 == 0 && self.mob_entity.living_entity.entity.is_alive() {
+            self.mob_entity.living_entity.heal(1.0);
+        }
+
+        // `Allay.aiStep`'s `shouldStopDancing` check runs every 20 ticks.
+        if self.is_dancing() && age % 20 == 0 {
+            let pos = self.mob_entity.living_entity.entity.pos.load();
+            if self.should_stop_dancing(pos) {
+                self.set_dancing(false);
+                *self.jukebox_pos.lock().unwrap() = None;
             }
+        }
 
-            // `Allay.aiStep`'s `shouldStopDancing` check runs every 20 ticks.
-            if self.is_dancing() && age % 20 == 0 {
-                let pos = self.mob_entity.living_entity.entity.pos.load();
-                if self.should_stop_dancing(pos) {
-                    self.set_dancing(false);
-                    *self.jukebox_pos.lock().unwrap() = None;
-                }
-            }
-
-            // `Allay.updateDuplicationCooldown`
-            if self.duplication_cooldown.load(Ordering::Relaxed) > 0 {
-                self.duplication_cooldown.fetch_sub(1, Ordering::Relaxed);
-            }
-        })
+        // `Allay.updateDuplicationCooldown`
+        if self.duplication_cooldown.load(Ordering::Relaxed) > 0 {
+            self.duplication_cooldown.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let world = self.mob_entity.living_entity.entity.world.load_full();
-            let held = self.item_in_hand.lock().unwrap().clone();
-            let my_pos = self.mob_entity.living_entity.entity.pos.load();
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let world = self.mob_entity.living_entity.entity.world.load_full();
+        let held = self.item_in_hand.lock().unwrap().clone();
+        let my_pos = self.mob_entity.living_entity.entity.pos.load();
 
-            // `Allay.mobInteract`, dancing + DUPLICATES_ALLAYS + canDuplicate branch.
-            if self.is_dancing()
-                && item_stack
-                    .item
-                    .has_tag(&tag::Item::MINECRAFT_DUPLICATES_ALLAYS)
-                && !self.is_on_duplication_cooldown()
-            {
-                self.duplicate().await;
-                world.play_sound(
-                    Sound::BlockAmethystBlockChime,
-                    SoundCategory::Neutral,
-                    &my_pos,
-                );
-                item_stack.decrement(1);
-                return true;
-            }
+        // `Allay.mobInteract`, dancing + DUPLICATES_ALLAYS + canDuplicate branch.
+        if self.is_dancing()
+            && item_stack
+                .item
+                .has_tag(&tag::Item::MINECRAFT_DUPLICATES_ALLAYS)
+            && !self.is_on_duplication_cooldown()
+        {
+            self.duplicate();
+            world.play_sound(
+                Sound::BlockAmethystBlockChime,
+                SoundCategory::Neutral,
+                &my_pos,
+            );
+            item_stack.decrement(1);
+            return true;
+        }
 
-            // Empty-handed Allay + player holding an item: give it to the Allay.
-            if held.is_empty() && !item_stack.is_empty() {
-                self.set_item_in_hand(item_stack.copy_with_count(1)).await;
-                item_stack.decrement(1);
-                world.play_sound(Sound::EntityAllayItemGiven, SoundCategory::Neutral, &my_pos);
-                self.brain()
-                    .set::<LikedPlayerMemory>(player.get_entity().entity_uuid);
-                return true;
-            }
+        // Empty-handed Allay + player holding an item: give it to the Allay.
+        if held.is_empty() && !item_stack.is_empty() {
+            self.set_item_in_hand(item_stack.copy_with_count(1)).await;
+            item_stack.decrement(1);
+            world.play_sound(Sound::EntityAllayItemGiven, SoundCategory::Neutral, &my_pos);
+            self.brain()
+                .set::<LikedPlayerMemory>(player.get_entity().entity_uuid);
+            return true;
+        }
 
-            // Allay holding an item + player empty-handed: take it back, and release whatever
-            // the Allay had already collected (`Allay.java:306-308`).
-            if !held.is_empty() && item_stack.is_empty() {
-                self.set_item_in_hand(ItemStack::EMPTY.clone()).await;
-                world.play_sound(Sound::EntityAllayItemTaken, SoundCategory::Neutral, &my_pos);
-                self.brain().erase::<LikedPlayerMemory>();
+        // Allay holding an item + player empty-handed: take it back, and release whatever
+        // the Allay had already collected (`Allay.java:306-308`).
+        if !held.is_empty() && item_stack.is_empty() {
+            self.set_item_in_hand(ItemStack::EMPTY.clone()).await;
+            world.play_sound(Sound::EntityAllayItemTaken, SoundCategory::Neutral, &my_pos);
+            self.brain().erase::<LikedPlayerMemory>();
 
-                let collected = std::mem::replace(
-                    &mut *self.inventory.lock().unwrap(),
-                    ItemStack::EMPTY.clone(),
-                );
-                if !collected.is_empty() {
-                    let mut collected = collected;
-                    if !player.inventory.insert_stack_anywhere(&mut collected).await {
-                        player.drop_item(collected).await;
-                    }
+            let collected = std::mem::replace(
+                &mut *self.inventory.lock().unwrap(),
+                ItemStack::EMPTY.clone(),
+            );
+            if !collected.is_empty() {
+                let mut collected = collected;
+                if !player.inventory.insert_stack_anywhere(&mut collected) {
+                    player.drop_item(collected);
                 }
-
-                let mut taken = held;
-                if !player.inventory.insert_stack_anywhere(&mut taken).await {
-                    player.drop_item(taken).await;
-                }
-                return true;
             }
 
-            false
-        })
+            let mut taken = held;
+            if !player.inventory.insert_stack_anywhere(&mut taken) {
+                player.drop_item(taken);
+            }
+            return true;
+        }
+
+        false
     }
 }
 

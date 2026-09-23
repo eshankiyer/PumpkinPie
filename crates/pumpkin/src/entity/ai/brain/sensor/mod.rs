@@ -17,7 +17,7 @@ pub type SensorFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 /// `Sensor<E>` (`sensing/Sensor.java:13-64`).
 ///
 /// Unlike [`super::behavior::Behavior`] this is async, because reading nearby entities and
-/// their item stacks in Pumpkin goes through `tokio::sync::Mutex`. Implementations MUST copy
+/// their item stacks in Pumpkin goes through `std::sync::Mutex`. Implementations MUST copy
 /// what they need out of the world first and only then take the brain's memory lock: the
 /// memory guard is a `std::sync::Mutex` guard and must never be held across an `.await`.
 pub trait Sensor: Send {

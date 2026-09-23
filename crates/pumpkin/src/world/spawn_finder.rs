@@ -61,7 +61,7 @@ const OVERWORLD_SPAWN_TARGETS: [[SpawnParameterRange; 7]; 2] = [
 ///
 /// This deliberately runs only for a fresh world. Existing level data, player
 /// respawns, and explicit `/setworldspawn` positions use their existing paths.
-pub async fn find_initial_world_spawn(world: &World) -> BlockPos {
+pub fn find_initial_world_spawn(world: &World) -> BlockPos {
     let spawn_position = find_initial_spawn_position(world);
     let spawn_chunk = Vector2::new(spawn_position.0.x >> 4, spawn_position.0.z >> 4);
     let mut height = initial_spawn_height(world);
@@ -226,14 +226,19 @@ const fn flat_spawn_height(min_y: i32, dimension_height: i32, layer_count: i32) 
 /// returning the first position with a solid, unobstructed floor. Falls back
 /// to a vertical walk from `suggestion` (`fixupSpawnHeight`) if no candidate
 /// succeeds, matching vanilla's own fallback and its Adventure-mode shortcut.
-pub async fn find_safe_world_spawn(world: &World, suggestion: BlockPos) -> Vector3<f64> {
+pub fn find_safe_world_spawn(world: &World, suggestion: BlockPos) -> Vector3<f64> {
     let adventure_mode = if let Some(server) = world.server.upgrade() {
-        server.defaultgamemode.lock().await.gamemode == GameMode::Adventure
+        server
+            .defaultgamemode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .gamemode
+            == GameMode::Adventure
     } else {
         false
     };
     if adventure_mode {
-        load_spawn_chunk(world, suggestion).await;
+        load_spawn_chunk(world, suggestion);
         return fixup_spawn_height(world, suggestion);
     }
 
@@ -241,7 +246,10 @@ pub async fn find_safe_world_spawn(world: &World, suggestion: BlockPos) -> Vecto
     let mut radius = i32::try_from(respawn_radius.max(0)).unwrap_or(i32::MAX);
 
     let dist_to_border = {
-        let border = world.worldborder.lock().await;
+        let border = world
+            .worldborder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         border
             .distance_to_border(f64::from(suggestion.0.x), f64::from(suggestion.0.z))
             .floor() as i32
@@ -277,11 +285,11 @@ pub async fn find_safe_world_spawn(world: &World, suggestion: BlockPos) -> Vecto
         }
     }
 
-    load_spawn_chunk(world, suggestion).await;
+    load_spawn_chunk(world, suggestion);
     fixup_spawn_height(world, suggestion)
 }
 
-async fn load_spawn_chunk(world: &World, suggestion: BlockPos) {
+fn load_spawn_chunk(world: &World, suggestion: BlockPos) {
     world
         .level
         .get_or_fetch_chunk(

@@ -154,7 +154,7 @@ impl boss_bar::HostBossBar for PluginHostState {
         >,
     > {
         let title = {
-            let bossbar = self.get_bossbar_res(&res)?.provider.lock().await;
+            let bossbar = self.get_bossbar_res(&res)?.provider.lock();
             bossbar.bossbar.title.clone()
         };
         self.add_text_component(title)
@@ -169,14 +169,12 @@ impl boss_bar::HostBossBar for PluginHostState {
         >,
     ) -> wasmtime::Result<()> {
         let title = self.get_text_provider(&title)?;
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         pbb.bossbar.title = title.clone();
         if let Some(server) = pbb.server.upgrade() {
             for uuid in &pbb.players {
                 if let Some(player) = server.get_player_by_uuid(*uuid) {
-                    player
-                        .update_bossbar_title(&pbb.bossbar.uuid, title.clone())
-                        .await;
+                    player.update_bossbar_title(&pbb.bossbar.uuid, title.clone());
                 }
             }
         }
@@ -184,19 +182,17 @@ impl boss_bar::HostBossBar for PluginHostState {
     }
 
     async fn get_health(&mut self, res: Resource<BossBar>) -> wasmtime::Result<f32> {
-        let pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let pbb = self.get_bossbar_res(&res)?.provider.lock();
         Ok(pbb.bossbar.health)
     }
 
     async fn set_health(&mut self, res: Resource<BossBar>, health: f32) -> wasmtime::Result<()> {
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         pbb.bossbar.health = health;
         if let Some(server) = pbb.server.upgrade() {
             for uuid in &pbb.players {
                 if let Some(player) = server.get_player_by_uuid(*uuid) {
-                    player
-                        .update_bossbar_health(&pbb.bossbar.uuid, health)
-                        .await;
+                    player.update_bossbar_health(&pbb.bossbar.uuid, health);
                 }
             }
         }
@@ -204,24 +200,22 @@ impl boss_bar::HostBossBar for PluginHostState {
     }
 
     async fn get_color(&mut self, res: Resource<BossBar>) -> wasmtime::Result<WitColor> {
-        let pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let pbb = self.get_bossbar_res(&res)?.provider.lock();
         Ok(to_wit_color(pbb.bossbar.color))
     }
 
     async fn set_color(&mut self, res: Resource<BossBar>, color: WitColor) -> wasmtime::Result<()> {
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         pbb.bossbar.color = from_wit_color(color);
         if let Some(server) = pbb.server.upgrade() {
             for uuid in &pbb.players {
                 if let Some(player) = server.get_player_by_uuid(*uuid) {
-                    player
-                        .update_bossbar_style(
-                            &pbb.bossbar.uuid,
-                            pbb.bossbar.color,
-                            pbb.bossbar.division,
-                            pbb.bossbar.flags,
-                        )
-                        .await;
+                    player.update_bossbar_style(
+                        &pbb.bossbar.uuid,
+                        pbb.bossbar.color,
+                        pbb.bossbar.division,
+                        pbb.bossbar.flags,
+                    );
                 }
             }
         }
@@ -229,7 +223,7 @@ impl boss_bar::HostBossBar for PluginHostState {
     }
 
     async fn get_division(&mut self, res: Resource<BossBar>) -> wasmtime::Result<WitDivision> {
-        let pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let pbb = self.get_bossbar_res(&res)?.provider.lock();
         Ok(to_wit_division(pbb.bossbar.division))
     }
 
@@ -238,19 +232,17 @@ impl boss_bar::HostBossBar for PluginHostState {
         res: Resource<BossBar>,
         division: WitDivision,
     ) -> wasmtime::Result<()> {
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         pbb.bossbar.division = from_wit_division(division);
         if let Some(server) = pbb.server.upgrade() {
             for uuid in &pbb.players {
                 if let Some(player) = server.get_player_by_uuid(*uuid) {
-                    player
-                        .update_bossbar_style(
-                            &pbb.bossbar.uuid,
-                            pbb.bossbar.color,
-                            pbb.bossbar.division,
-                            pbb.bossbar.flags,
-                        )
-                        .await;
+                    player.update_bossbar_style(
+                        &pbb.bossbar.uuid,
+                        pbb.bossbar.color,
+                        pbb.bossbar.division,
+                        pbb.bossbar.flags,
+                    );
                 }
             }
         }
@@ -258,7 +250,7 @@ impl boss_bar::HostBossBar for PluginHostState {
     }
 
     async fn get_metadata(&mut self, res: Resource<BossBar>) -> wasmtime::Result<WitMetadata> {
-        let pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let pbb = self.get_bossbar_res(&res)?.provider.lock();
         Ok(to_wit_metadata(pbb.bossbar.flags))
     }
 
@@ -267,14 +259,12 @@ impl boss_bar::HostBossBar for PluginHostState {
         res: Resource<BossBar>,
         metadata: WitMetadata,
     ) -> wasmtime::Result<()> {
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         pbb.bossbar.flags = from_wit_metadata(metadata);
         if let Some(server) = pbb.server.upgrade() {
             for uuid in &pbb.players {
                 if let Some(player) = server.get_player_by_uuid(*uuid) {
-                    player
-                        .update_bossbar_flags(&pbb.bossbar.uuid, pbb.bossbar.flags)
-                        .await;
+                    player.update_bossbar_flags(&pbb.bossbar.uuid, pbb.bossbar.flags);
                 }
             }
         }
@@ -292,7 +282,7 @@ impl boss_bar::HostBossBar for PluginHostState {
         >,
     > {
         let players = {
-            let pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+            let pbb = self.get_bossbar_res(&res)?.provider.lock();
             pbb.players.clone()
         };
 
@@ -317,13 +307,13 @@ impl boss_bar::HostBossBar for PluginHostState {
             crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::player::Player,
         >,
     ) -> wasmtime::Result<()> {
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         let player = player_from_resource(self, &player)?;
         let uuid = player.gameprofile.id;
 
         if !pbb.players.contains(&uuid) {
             pbb.players.push(uuid);
-            player.send_bossbar(&pbb.bossbar).await;
+            player.send_bossbar(&pbb.bossbar);
         }
         Ok(())
     }
@@ -335,23 +325,23 @@ impl boss_bar::HostBossBar for PluginHostState {
             crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::player::Player,
         >,
     ) -> wasmtime::Result<()> {
-        let mut pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let mut pbb = self.get_bossbar_res(&res)?.provider.lock();
         let player = player_from_resource(self, &player)?;
         let uuid = player.gameprofile.id;
 
         if let Some(idx) = pbb.players.iter().position(|&x| x == uuid) {
             pbb.players.remove(idx);
-            player.remove_bossbar(pbb.bossbar.uuid).await;
+            player.remove_bossbar(pbb.bossbar.uuid);
         }
         Ok(())
     }
 
     async fn remove_all(&mut self, res: Resource<BossBar>) -> wasmtime::Result<()> {
-        let pbb = self.get_bossbar_res(&res)?.provider.lock().await;
+        let pbb = self.get_bossbar_res(&res)?.provider.lock();
         if let Some(server) = pbb.server.upgrade() {
             for uuid in &pbb.players {
                 if let Some(player) = server.get_player_by_uuid(*uuid) {
-                    player.remove_bossbar(pbb.bossbar.uuid).await;
+                    player.remove_bossbar(pbb.bossbar.uuid);
                 }
             }
         }

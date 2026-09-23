@@ -7,7 +7,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::equipment::{
     RegionalDifficulty, clear_enchantments, enchant_item_from_mob_spawn_equipment,
 };
@@ -58,11 +58,7 @@ impl SkeletonTrapGoal {
     /// `SkeletonTrapGoal.createHorse`/`createSkeleton`). `difficulty` is the trap
     /// horse's own regional difficulty, which vanilla reuses for every skeleton it
     /// spawns regardless of where the extra horses land.
-    async fn spawn_mounted_skeleton(
-        mob: &dyn Mob,
-        pos: Vector3<f64>,
-        difficulty: &RegionalDifficulty,
-    ) {
+    fn spawn_mounted_skeleton(mob: &dyn Mob, pos: Vector3<f64>, difficulty: &RegionalDifficulty) {
         let world = mob.get_entity().world.load();
 
         let horse = crate::entity::r#type::from_type(
@@ -78,14 +74,11 @@ impl SkeletonTrapGoal {
             uuid::Uuid::new_v4(),
         );
 
-        world.spawn_entity(horse.clone()).await;
-        world.spawn_entity(skeleton.clone()).await;
-        Self::finalize_skeleton_equipment(&skeleton, difficulty).await;
+        world.spawn_entity(horse.clone());
+        world.spawn_entity(skeleton.clone());
+        Self::finalize_skeleton_equipment(&skeleton, difficulty);
 
-        horse
-            .get_entity()
-            .add_passenger(horse.clone(), skeleton)
-            .await;
+        horse.get_entity().add_passenger(horse.clone(), skeleton);
     }
 
     /// Vanilla `SkeletonTrapGoal.createSkeleton`'s equipment finishing
@@ -94,11 +87,11 @@ impl SkeletonTrapGoal {
     /// main hand and head exactly like vanilla `SkeletonTrapGoal.enchant`
     /// (`SkeletonTrapGoal.java:95-102`). Must run *after* `spawn_entity` so both
     /// the spawn equipment and the client's initial equipment broadcast already exist.
-    async fn finalize_skeleton_equipment(
+    fn finalize_skeleton_equipment(
         skeleton: &Arc<dyn EntityBase>,
         difficulty: &RegionalDifficulty,
     ) {
-        Self::ensure_helmet(skeleton).await;
+        Self::ensure_helmet(skeleton);
 
         let Some(living) = skeleton.get_living_entity() else {
             return;
@@ -106,7 +99,10 @@ impl SkeletonTrapGoal {
 
         let mut changes = Vec::new();
         {
-            let mut equipment = living.entity_equipment.lock().await;
+            let mut equipment = living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut rng = rand::rng();
             for slot in [EquipmentSlot::MAIN_HAND, EquipmentSlot::HEAD] {
                 // Vanilla `SkeletonTrapGoal.enchant`: reset the component to
@@ -126,19 +122,19 @@ impl SkeletonTrapGoal {
         living.send_equipment_changes(&changes);
     }
 
-    async fn ensure_helmet(skeleton: &Arc<dyn EntityBase>) {
+    fn ensure_helmet(skeleton: &Arc<dyn EntityBase>) {
         if let Some(living) = skeleton.get_living_entity() {
             let head_empty = living
                 .entity_equipment
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(&EquipmentSlot::HEAD)
                 .is_empty();
             if head_empty {
                 living
                     .entity_equipment
                     .lock()
-                    .await
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::IRON_HELMET));
             }
         }
@@ -146,82 +142,77 @@ impl SkeletonTrapGoal {
 }
 
 impl Goal for SkeletonTrapGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return false;
-            };
-            if !horse.is_trap() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(horse) = self.horse.upgrade() else {
+            return false;
+        };
+        if !horse.is_trap() {
+            return false;
+        }
 
-            let pos = mob.get_entity().pos.load();
-            let world = mob.get_entity().world.load();
-            world.get_closest_player(pos, TRIGGER_RANGE).is_some()
-        })
+        let pos = mob.get_entity().pos.load();
+        let world = mob.get_entity().world.load();
+        world.get_closest_player(pos, TRIGGER_RANGE).is_some()
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return;
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(horse) = self.horse.upgrade() else {
+            return;
+        };
+        // Vanilla: `this.horse.setTrap(false); this.horse.setTamed(true); this.horse.setAge(0);`
+        // Pumpkin's generic "tamed" concept (`MobEntity::is_tamed`) is owner-uuid-based and
+        // has no "tamed but ownerless" state to set here, so only the trap flag and age are
+        // reset.
+        horse.set_trap(false);
+        mob.get_entity()
+            .age
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+
+        let pos = mob.get_entity().pos.load();
+        let world = mob.get_entity().world.load();
+
+        // Vanilla: `LightningBolt` marked `setVisualOnly(true)` -- a cosmetic strike, no
+        // actual lightning damage/fire wiring is attempted here.
+        let bolt = crate::entity::r#type::from_type(
+            &EntityType::LIGHTNING_BOLT,
+            pos,
+            &world,
+            uuid::Uuid::new_v4(),
+        );
+        world.spawn_entity(bolt);
+
+        // Vanilla `SkeletonTrapGoal.tick` (`SkeletonTrapGoal.java:34`): the
+        // difficulty is captured once at the trap horse's position and reused for
+        // every skeleton the trap spawns.
+        let difficulty = RegionalDifficulty::at(&world, pos);
+
+        // Mount a skeleton on the triggering horse itself.
+        let skeleton = crate::entity::r#type::from_type(
+            &EntityType::SKELETON,
+            pos,
+            &world,
+            uuid::Uuid::new_v4(),
+        );
+        world.spawn_entity(skeleton.clone());
+        Self::finalize_skeleton_equipment(&skeleton, &difficulty);
+
+        if let Some(self_arc) = world.get_entity_by_id(mob.get_entity().entity_id) {
+            self_arc
+                .get_entity()
+                .add_passenger(self_arc.clone(), skeleton);
+        }
+
+        for _ in 0..EXTRA_HORSE_COUNT {
+            let (dx, dz) = {
+                let mut rng = mob.get_random();
+                (
+                    rng.random_range(-1.1485..=1.1485),
+                    rng.random_range(-1.1485..=1.1485),
+                )
             };
-            // Vanilla: `this.horse.setTrap(false); this.horse.setTamed(true); this.horse.setAge(0);`
-            // Pumpkin's generic "tamed" concept (`MobEntity::is_tamed`) is owner-uuid-based and
-            // has no "tamed but ownerless" state to set here, so only the trap flag and age are
-            // reset.
-            horse.set_trap(false);
-            mob.get_entity()
-                .age
-                .store(0, std::sync::atomic::Ordering::Relaxed);
-
-            let pos = mob.get_entity().pos.load();
-            let world = mob.get_entity().world.load();
-
-            // Vanilla: `LightningBolt` marked `setVisualOnly(true)` -- a cosmetic strike, no
-            // actual lightning damage/fire wiring is attempted here.
-            let bolt = crate::entity::r#type::from_type(
-                &EntityType::LIGHTNING_BOLT,
-                pos,
-                &world,
-                uuid::Uuid::new_v4(),
-            );
-            world.spawn_entity(bolt).await;
-
-            // Vanilla `SkeletonTrapGoal.tick` (`SkeletonTrapGoal.java:34`): the
-            // difficulty is captured once at the trap horse's position and reused for
-            // every skeleton the trap spawns.
-            let difficulty = RegionalDifficulty::at(&world, pos);
-
-            // Mount a skeleton on the triggering horse itself.
-            let skeleton = crate::entity::r#type::from_type(
-                &EntityType::SKELETON,
-                pos,
-                &world,
-                uuid::Uuid::new_v4(),
-            );
-            world.spawn_entity(skeleton.clone()).await;
-            Self::finalize_skeleton_equipment(&skeleton, &difficulty).await;
-
-            if let Some(self_arc) = world.get_entity_by_id(mob.get_entity().entity_id) {
-                self_arc
-                    .get_entity()
-                    .add_passenger(self_arc.clone(), skeleton)
-                    .await;
-            }
-
-            for _ in 0..EXTRA_HORSE_COUNT {
-                let (dx, dz) = {
-                    let mut rng = mob.get_random();
-                    (
-                        rng.random_range(-1.1485..=1.1485),
-                        rng.random_range(-1.1485..=1.1485),
-                    )
-                };
-                let spawn_pos = Vector3::new(pos.x + dx, pos.y, pos.z + dz);
-                Self::spawn_mounted_skeleton(mob, spawn_pos, &difficulty).await;
-            }
-        })
+            let spawn_pos = Vector3::new(pos.x + dx, pos.y, pos.z + dz);
+            Self::spawn_mounted_skeleton(mob, spawn_pos, &difficulty);
+        }
     }
 
     fn controls(&self) -> Controls {

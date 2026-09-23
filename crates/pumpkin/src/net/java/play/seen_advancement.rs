@@ -9,7 +9,6 @@ impl JavaClient {
                 player
                     .advancements
                     .lock()
-                    .await
                     .set_selected_tab(advancement)
                     .await;
             }

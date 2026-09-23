@@ -1,5 +1,4 @@
 use super::{Controls, Goal};
-use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
 use crate::entity::mob::Mob;
 use crate::entity::predicate::EntityPredicate;
@@ -105,7 +104,7 @@ impl LookAtEntityGoal {
                             return false;
                         };
                         let predicate = EntityPredicate::Rides(mob_arc.get_entity());
-                        predicate.test(target_entity.get_entity()).await
+                        predicate.test(target_entity.get_entity())
                     } else {
                         // MobEntity is destroyed
                         false
@@ -118,34 +117,56 @@ impl LookAtEntityGoal {
 }
 
 impl Goal for LookAtEntityGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            if mob.get_random().random::<f32>() >= self.chance {
-                return false;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if mob.get_random().random::<f32>() >= self.chance {
+            return false;
+        }
+
+        let mob_entity = mob.get_mob_entity();
+
+        {
+            let mob_target = mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if mob_target.is_some() {
+                self.target.clone_from(&mob_target);
             }
+        }
 
-            let mob_entity = mob.get_mob_entity();
+        let world = mob_entity.living_entity.entity.world.load();
+        let mut mob_pos = mob_entity.living_entity.entity.pos.load();
+        mob_pos.y += mob_entity.living_entity.entity.get_eye_height();
 
-            {
-                let mob_target = mob_entity.target.lock().await;
-                if mob_target.is_some() {
-                    self.target.clone_from(&mob_target);
-                }
-            }
-
-            let world = mob_entity.living_entity.entity.world.load();
-            let mut mob_pos = mob_entity.living_entity.entity.pos.load();
-            mob_pos.y += mob_entity.living_entity.entity.get_eye_height();
-
-            let mut candidates: Vec<Arc<dyn EntityBase>> = match self.target_type {
-                Some(target_type) if *target_type == EntityType::PLAYER => world
-                    .players
-                    .load()
-                    .iter()
-                    .cloned()
-                    .map(|p: Arc<Player>| p as Arc<dyn EntityBase>)
-                    .collect(),
-                Some(target_type) => world
+        let mut candidates: Vec<Arc<dyn EntityBase>> = match self.target_type {
+            Some(target_type) if *target_type == EntityType::PLAYER => world
+                .players
+                .load()
+                .iter()
+                .cloned()
+                .map(|p: Arc<Player>| p as Arc<dyn EntityBase>)
+                .collect(),
+            Some(target_type) => world
+                .get_entities_at_box(&mob_entity.living_entity.entity.bounding_box.load().expand(
+                    self.range.into(),
+                    3.0,
+                    self.range.into(),
+                ))
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.get_entity().entity_type == target_type
+                        && candidate.get_entity().entity_id
+                            != mob_entity.living_entity.entity.entity_id
+                })
+                .collect(),
+            // Vanilla `Mob.class`: any mob, players excluded (Player is not a Mob subclass).
+            // The self-exclusion must happen here, inside the search: `get_closest_entity_where`
+            // returns a single nearest match, and this mob itself (at ~0 distance) would
+            // otherwise always win over any other candidate, leaving `target_predicate.test`'s
+            // later `ptr::eq` self-check to reject the only candidate found every time.
+            None => {
+                let own_id = mob_entity.living_entity.entity.entity_id;
+                world
                     .get_entities_at_box(
                         &mob_entity.living_entity.entity.bounding_box.load().expand(
                             self.range.into(),
@@ -155,113 +176,80 @@ impl Goal for LookAtEntityGoal {
                     )
                     .into_iter()
                     .filter(|candidate| {
-                        candidate.get_entity().entity_type == target_type
-                            && candidate.get_entity().entity_id
-                                != mob_entity.living_entity.entity.entity_id
+                        candidate.get_entity().entity_id != own_id && candidate.get_mob().is_some()
                     })
-                    .collect(),
-                // Vanilla `Mob.class`: any mob, players excluded (Player is not a Mob subclass).
-                // The self-exclusion must happen here, inside the search: `get_closest_entity_where`
-                // returns a single nearest match, and this mob itself (at ~0 distance) would
-                // otherwise always win over any other candidate, leaving `target_predicate.test`'s
-                // later `ptr::eq` self-check to reject the only candidate found every time.
-                None => {
-                    let own_id = mob_entity.living_entity.entity.entity_id;
-                    world
-                        .get_entities_at_box(
-                            &mob_entity.living_entity.entity.bounding_box.load().expand(
-                                self.range.into(),
-                                3.0,
-                                self.range.into(),
-                            ),
-                        )
-                        .into_iter()
-                        .filter(|candidate| {
-                            candidate.get_entity().entity_id != own_id
-                                && candidate.get_mob().is_some()
-                        })
-                        .collect()
-                }
-            };
-
-            candidates.sort_by(|a, b| {
-                let a_distance = a.get_entity().pos.load().squared_distance_to_vec(&mob_pos);
-                let b_distance = b.get_entity().pos.load().squared_distance_to_vec(&mob_pos);
-                a_distance.total_cmp(&b_distance)
-            });
-
-            // Vanilla runs candidates through the goal's `TargetingConditions`, which rejects
-            // entities that are not part of the game (spectators) or out of range. It does so
-            // while selecting the nearest entity, so a rejected nearest candidate must not hide a
-            // farther valid candidate.
-            self.target = None;
-            for candidate in candidates {
-                if let Some(living) = candidate.get_living_entity()
-                    && self
-                        .target_predicate
-                        .test(&world, Some(&mob_entity.living_entity), living)
-                        .await
-                {
-                    self.target = Some(candidate);
-                    break;
-                }
+                    .collect()
             }
+        };
 
-            self.target.is_some()
-        })
-    }
+        candidates.sort_by(|a, b| {
+            let a_distance = a.get_entity().pos.load().squared_distance_to_vec(&mob_pos);
+            let b_distance = b.get_entity().pos.load().squared_distance_to_vec(&mob_pos);
+            a_distance.total_cmp(&b_distance)
+        });
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let mob_entity = mob.get_mob_entity();
-            if let Some(target) = &self.target {
-                if !target.get_entity().is_alive() {
-                    return false;
-                }
-                let mob_pos = mob_entity.living_entity.entity.pos.load();
-                let target_pos = target.get_entity().pos.load();
-                if mob_pos.squared_distance_to_vec(&target_pos) as f32 > (self.range * self.range) {
-                    return false;
-                }
-                return self.look_time > 0;
-            }
-            false
-        })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.look_time = self.get_tick_count(40 + mob.get_random().random_range(0..40));
-        })
-    }
-
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.target = None;
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            let mob_entity = mob.get_mob_entity();
-            if let Some(target) = &self.target
-                && target.get_entity().is_alive()
+        // Vanilla runs candidates through the goal's `TargetingConditions`, which rejects
+        // entities that are not part of the game (spectators) or out of range. It does so
+        // while selecting the nearest entity, so a rejected nearest candidate must not hide a
+        // farther valid candidate.
+        self.target = None;
+        for candidate in candidates {
+            if let Some(living) = candidate.get_living_entity()
+                && self
+                    .target_predicate
+                    .test(&world, Some(&mob_entity.living_entity), living)
             {
-                let target_entity = target.get_entity();
-                let target_pos = target_entity.pos.load();
-                let look_y = if self.look_forward {
-                    mob_entity.living_entity.entity.get_eye_y()
-                } else {
-                    target_entity.get_eye_y()
-                };
-                mob_entity
-                    .look_control
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .look_at(mob, target_pos.x, look_y, target_pos.z);
-                self.look_time -= 1;
+                self.target = Some(candidate);
+                break;
             }
-        })
+        }
+
+        self.target.is_some()
+    }
+
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        if let Some(target) = &self.target {
+            if !target.get_entity().is_alive() {
+                return false;
+            }
+            let mob_pos = mob_entity.living_entity.entity.pos.load();
+            let target_pos = target.get_entity().pos.load();
+            if mob_pos.squared_distance_to_vec(&target_pos) as f32 > (self.range * self.range) {
+                return false;
+            }
+            return self.look_time > 0;
+        }
+        false
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        self.look_time = self.get_tick_count(40 + mob.get_random().random_range(0..40));
+    }
+
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let mob_entity = mob.get_mob_entity();
+        if let Some(target) = &self.target
+            && target.get_entity().is_alive()
+        {
+            let target_entity = target.get_entity();
+            let target_pos = target_entity.pos.load();
+            let look_y = if self.look_forward {
+                mob_entity.living_entity.entity.get_eye_y()
+            } else {
+                target_entity.get_eye_y()
+            };
+            mob_entity
+                .look_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .look_at(mob, target_pos.x, look_y, target_pos.z);
+            self.look_time -= 1;
+        }
     }
 
     fn controls(&self) -> Controls {

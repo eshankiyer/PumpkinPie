@@ -14,7 +14,7 @@ use rand::RngExt;
 use uuid::Uuid;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         ambient_stand::AmbientStandGoal, follow_parent::FollowParentGoal,
         horse_breed::HorseBreedGoal, look_around::RandomLookAroundGoal,
@@ -140,7 +140,7 @@ impl NBTStorage for HorseEntity {
         nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
     ) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.mob_entity.living_entity.write_nbt(nbt);
             self.write_animal_nbt(nbt);
             self.write_horse_nbt(nbt);
             nbt.put_int(
@@ -155,7 +155,7 @@ impl NBTStorage for HorseEntity {
         nbt: &'a pumpkin_nbt::compound::NbtCompound,
     ) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt);
             self.read_animal_nbt(nbt);
             self.read_horse_nbt(nbt);
             if let Some(packed) = nbt.get_int("Variant") {
@@ -215,7 +215,7 @@ impl Mob for HorseEntity {
     }
 
     // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
-    fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
+    fn can_jump(&self) -> bool {
         AbstractHorse::can_jump_now(self)
     }
 
@@ -239,126 +239,118 @@ impl Mob for HorseEntity {
         AbstractHorse::on_elastic_leash_pull(self);
     }
 
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
         AbstractHorse::custom_travel(self, caller)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
         AbstractHorse::tick_horse_ai(self)
     }
 
-    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+    fn has_controlling_passenger(&self) -> bool {
         AbstractHorse::has_saddled_player_passenger(self)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.abstract_horse_mob_interact(player, item_stack)
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.sync_type_variant();
-        })
+    fn mob_init_data_tracker(&self) {
+        self.sync_type_variant();
     }
 
     /// `Horse.getBreedOffspring`: Horse+Donkey -> Mule is handled generically by
     /// `HorseBreedGoal`/`horse_family_offspring`; Horse+Horse -> Horse with inherited
     /// variant/markings (`Horse.java:199-217`) is genuinely Horse-specific and implemented here.
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            Uuid::new_v4(),
+        );
 
-            let mate_horse = mate.cast_any().downcast_ref::<Self>();
-            let baby_horse = baby.cast_any().downcast_ref::<Self>();
+        let mate_horse = mate.cast_any().downcast_ref::<Self>();
+        let baby_horse = baby.cast_any().downcast_ref::<Self>();
 
-            let mut random = rand::rng();
-            let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
-                m.get_mob_entity()
+        let mut random = rand::rng();
+        let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
+            m.get_mob_entity()
+                .living_entity
+                .get_attribute_base(&Attributes::MAX_HEALTH)
+        });
+
+        if let (Some(mate_horse), Some(baby_horse)) = (mate_horse, baby_horse) {
+            let select_skin = random.random_range(0..9);
+            let variant = if select_skin < 4 {
+                self.variant()
+            } else if select_skin < 8 {
+                mate_horse.variant()
+            } else {
+                random.random_range(0..VARIANT_COUNT)
+            };
+
+            let select_marking = random.random_range(0..5);
+            let markings = if select_marking < 2 {
+                self.markings()
+            } else if select_marking < 4 {
+                mate_horse.markings()
+            } else {
+                random.random_range(0..MARKINGS_COUNT)
+            };
+
+            baby_horse.set_variant_and_markings(variant, markings);
+        }
+
+        if let Some(baby_mob) = baby.get_mob() {
+            apply_offspring_attribute(
+                baby_mob,
+                &Attributes::MAX_HEALTH,
+                self.mob_entity
                     .living_entity
-                    .get_attribute_base(&Attributes::MAX_HEALTH)
-            });
-
-            if let (Some(mate_horse), Some(baby_horse)) = (mate_horse, baby_horse) {
-                let select_skin = random.random_range(0..9);
-                let variant = if select_skin < 4 {
-                    self.variant()
-                } else if select_skin < 8 {
-                    mate_horse.variant()
-                } else {
-                    random.random_range(0..VARIANT_COUNT)
-                };
-
-                let select_marking = random.random_range(0..5);
-                let markings = if select_marking < 2 {
-                    self.markings()
-                } else if select_marking < 4 {
-                    mate_horse.markings()
-                } else {
-                    random.random_range(0..MARKINGS_COUNT)
-                };
-
-                baby_horse.set_variant_and_markings(variant, markings);
-            }
-
-            if let Some(baby_mob) = baby.get_mob() {
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MAX_HEALTH,
-                    self.mob_entity
+                    .get_attribute_base(&Attributes::MAX_HEALTH),
+                mate_max_health,
+                MIN_HEALTH,
+                MAX_HEALTH,
+                &mut random,
+            );
+            apply_offspring_attribute(
+                baby_mob,
+                &Attributes::JUMP_STRENGTH,
+                self.mob_entity
+                    .living_entity
+                    .get_attribute_base(&Attributes::JUMP_STRENGTH),
+                mate.get_mob().map_or(MIN_JUMP_STRENGTH, |m| {
+                    m.get_mob_entity()
                         .living_entity
-                        .get_attribute_base(&Attributes::MAX_HEALTH),
-                    mate_max_health,
-                    MIN_HEALTH,
-                    MAX_HEALTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::JUMP_STRENGTH,
-                    self.mob_entity
+                        .get_attribute_base(&Attributes::JUMP_STRENGTH)
+                }),
+                MIN_JUMP_STRENGTH,
+                MAX_JUMP_STRENGTH,
+                &mut random,
+            );
+            apply_offspring_attribute(
+                baby_mob,
+                &Attributes::MOVEMENT_SPEED,
+                self.mob_entity
+                    .living_entity
+                    .get_attribute_base(&Attributes::MOVEMENT_SPEED),
+                mate.get_mob().map_or(MIN_MOVEMENT_SPEED, |m| {
+                    m.get_mob_entity()
                         .living_entity
-                        .get_attribute_base(&Attributes::JUMP_STRENGTH),
-                    mate.get_mob().map_or(MIN_JUMP_STRENGTH, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::JUMP_STRENGTH)
-                    }),
-                    MIN_JUMP_STRENGTH,
-                    MAX_JUMP_STRENGTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MOVEMENT_SPEED,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::MOVEMENT_SPEED),
-                    mate.get_mob().map_or(MIN_MOVEMENT_SPEED, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::MOVEMENT_SPEED)
-                    }),
-                    MIN_MOVEMENT_SPEED,
-                    MAX_MOVEMENT_SPEED,
-                    &mut random,
-                );
-            }
+                        .get_attribute_base(&Attributes::MOVEMENT_SPEED)
+                }),
+                MIN_MOVEMENT_SPEED,
+                MAX_MOVEMENT_SPEED,
+                &mut random,
+            );
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 }

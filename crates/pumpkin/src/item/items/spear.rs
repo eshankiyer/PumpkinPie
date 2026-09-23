@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use pumpkin_data::attributes::Attributes;
@@ -12,7 +11,7 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -237,13 +236,16 @@ impl SpearItem {
     /// `LivingEntity.wasRecentlyStabbed` + `rememberStabbedEntity`
     /// (`LivingEntity.java:2871-2883`) in one step: returns whether the target is still on
     /// cooldown, and records this tick as the latest stab when it is not.
-    async fn was_recently_stabbed_then_remember(
+    fn was_recently_stabbed_then_remember(
         &self,
         attacker_id: i32,
         target_id: i32,
         game_time: u64,
     ) -> bool {
-        let mut map = self.recent_stabs.lock().await;
+        let mut map = self
+            .recent_stabs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         map.retain(|_, last| game_time.saturating_sub(*last) < CONTACT_COOLDOWN_TICKS);
 
         if let Some(last) = map.get(&(attacker_id, target_id))
@@ -277,269 +279,255 @@ impl ItemBehaviour for SpearItem {
     /// and plays its use sound. There is no throw and no charged release - a spear is a braced
     /// lance, and all of its effect is produced per-tick while held (`ItemStack.onUseTick`,
     /// `ItemStack.java:1100-1103`).
-    fn normal_use<'a>(
-        &'a self,
-        item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let Some(params) = params_for(item.id) else {
-                return;
-            };
+    fn normal_use(&self, item: &Item, player: &Player) {
+        let Some(params) = params_for(item.id) else {
+            return;
+        };
 
-            // `KineticWeapon.makeSound` (`KineticWeapon.java:86-91`) plays at the user, for
-            // everyone, at volume and pitch 1.0.
-            player
-                .world()
-                .play_sound(params.use_sound, SoundCategory::Players, &player.position());
-        })
+        // `KineticWeapon.makeSound` (`KineticWeapon.java:86-91`) plays at the user, for
+        // everyone, at volume and pitch 1.0.
+        player
+            .world()
+            .play_sound(params.use_sound, SoundCategory::Players, &player.position());
     }
 
     /// `ItemStack.onUseTick` -> `KineticWeapon.damageEntities`
     /// (`ItemStack.java:1100-1103`, `KineticWeapon.java:101-146`).
     #[expect(clippy::too_many_lines)]
-    fn on_use_tick<'a>(
-        &'a self,
-        stack: &'a ItemStack,
-        player: &'a Player,
-        remaining_use_ticks: i32,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let Some(params) = params_for(stack.item.id) else {
+    fn on_use_tick(&self, stack: &ItemStack, player: &Player, remaining_use_ticks: i32) {
+        let Some(params) = params_for(stack.item.id) else {
+            return;
+        };
+
+        // `KineticWeapon.java:102-104`.
+        let ticks_used = USE_DURATION - remaining_use_ticks;
+        if ticks_used < params.delay_ticks {
+            return;
+        }
+        let ticks_used = ticks_used - params.delay_ticks;
+
+        let world = player.world();
+        let entity = player.get_entity();
+        // `ProjectileUtil.getHitEntitiesAlong` uses the attacker's head look angle
+        // (`ProjectileUtil.java:38-45`), including for the kinetic-weapon sweep.
+        let look = player.get_head_look_angle();
+
+        // `KineticWeapon.getMotion` (`KineticWeapon.java:78-84`): the attacker's known
+        // speed in blocks per second, projected onto the look vector
+        // (`KineticWeapon.java:105-106`). `Entity.getKnownSpeed` is the per-tick position
+        // delta (`Entity.java:4007-4009`).
+        let attacker_speed = look.dot(&(entity.get_known_speed() * TICKS_PER_SECOND));
+
+        // `AttackRange.effectiveMinRange`/`effectiveMaxRange`
+        // (`AttackRange.java:88-102`): a player uses the creative pair in creative mode
+        // and the survival pair otherwise, with no `mobFactor` applied.
+        // `LivingEntity.getAttackRangeWith` supplies the component or its interaction-range
+        // default (`LivingEntity.java:2230-2233`; `AttackRange.java:55-59`).
+        let attack_range = player.living_entity.get_attack_range_with(stack);
+        let creative = player.gamemode.load() == GameMode::Creative;
+        let (min_reach, max_reach, margin) = if creative {
+            (
+                f64::from(attack_range.min_creative_reach),
+                f64::from(attack_range.max_creative_reach),
+                f64::from(attack_range.hitbox_margin),
+            )
+        } else {
+            (
+                f64::from(attack_range.min_reach),
+                f64::from(attack_range.max_reach),
+                f64::from(attack_range.hitbox_margin),
+            )
+        };
+
+        // `ProjectileUtil.getHitEntitiesAlong` (`ProjectileUtil.java:38-47`): the sweep
+        // runs from `eye + look * minRange` to `eye + look * (maxRange + max(0, movement
+        // projected on look))`, so a moving attacker reaches further ahead.
+        let eye = player.eye_position();
+        let movement_component = look.dot(&entity.get_known_speed()).max(0.0);
+        let from = eye + look * min_reach;
+        let mut to = eye + look * (max_reach + movement_component);
+
+        // `ProjectileUtil.java:96-102`: the sweep is clipped at the first solid block, and
+        // is abandoned entirely when that block is nearer than the sweep's own start.
+        if let Some((hit_pos, _)) = world.raycast(eye, to, async |pos, world_inner| {
+            !world_inner.get_block_state(pos).is_air()
+        }) {
+            let hit = Vector3::new(
+                f64::from(hit_pos.0.x) + 0.5,
+                f64::from(hit_pos.0.y) + 0.5,
+                f64::from(hit_pos.0.z) + 0.5,
+            );
+            if eye.squared_distance_to_vec(&hit) < eye.squared_distance_to_vec(&from) {
                 return;
-            };
-
-            // `KineticWeapon.java:102-104`.
-            let ticks_used = USE_DURATION - remaining_use_ticks;
-            if ticks_used < params.delay_ticks {
-                return;
             }
-            let ticks_used = ticks_used - params.delay_ticks;
+            to = hit;
+        }
 
-            let world = player.world();
-            let entity = player.get_entity();
-            // `ProjectileUtil.getHitEntitiesAlong` uses the attacker's head look angle
-            // (`ProjectileUtil.java:38-45`), including for the kinetic-weapon sweep.
-            let look = player.get_head_look_angle();
+        // `KineticWeapon.java:109`: the *base* attribute value, deliberately excluding the
+        // weapon's own attack-damage modifier, which the spear's kinetic damage replaces.
+        let base_damage = player
+            .living_entity
+            .get_attribute_base(&Attributes::ATTACK_DAMAGE);
 
-            // `KineticWeapon.getMotion` (`KineticWeapon.java:78-84`): the attacker's known
-            // speed in blocks per second, projected onto the look vector
-            // (`KineticWeapon.java:105-106`). `Entity.getKnownSpeed` is the per-tick position
-            // delta (`Entity.java:4007-4009`).
-            let attacker_speed = look.dot(&(entity.get_known_speed() * TICKS_PER_SECOND));
+        // `ProjectileUtil.java:104`: search box around the whole sweep, inflated by 1.0.
+        let search = BoundingBox {
+            min: Vector3::new(
+                from.x.min(to.x) - margin,
+                from.y.min(to.y) - margin,
+                from.z.min(to.z) - margin,
+            ),
+            max: Vector3::new(
+                from.x.max(to.x) + margin,
+                from.y.max(to.y) + margin,
+                from.z.max(to.z) + margin,
+            ),
+        }
+        .expand_all(1.0);
 
-            // `AttackRange.effectiveMinRange`/`effectiveMaxRange`
-            // (`AttackRange.java:88-102`): a player uses the creative pair in creative mode
-            // and the survival pair otherwise, with no `mobFactor` applied.
-            // `LivingEntity.getAttackRangeWith` supplies the component or its interaction-range
-            // default (`LivingEntity.java:2230-2233`; `AttackRange.java:55-59`).
-            let attack_range = player.living_entity.get_attack_range_with(stack);
-            let creative = player.gamemode.load() == GameMode::Creative;
-            let (min_reach, max_reach, margin) = if creative {
-                (
-                    f64::from(attack_range.min_creative_reach),
-                    f64::from(attack_range.max_creative_reach),
-                    f64::from(attack_range.hitbox_margin),
-                )
-            } else {
-                (
-                    f64::from(attack_range.min_reach),
-                    f64::from(attack_range.max_reach),
-                    f64::from(attack_range.hitbox_margin),
-                )
-            };
+        let attacker_id = entity.entity_id;
+        let attacker_root_id = entity.root_vehicle_id();
+        let mut candidates: Vec<Arc<dyn EntityBase>> = Vec::new();
+        world.extend_entities_in_box_where(&mut candidates, 64, search, |candidate| {
+            // `PiercingWeapon.canHitEntity` (`PiercingWeapon.java:61-73`), reduced to the
+            // parts that can be checked without awaiting: never the attacker, a dead entity,
+            // or an entity invulnerable to piercing weapons.
+            candidate.get_entity().entity_id != attacker_id
+                && candidate.get_entity().is_alive()
+                && !candidate.is_invulnerable_to_piercing_weapon()
+        });
 
-            // `ProjectileUtil.getHitEntitiesAlong` (`ProjectileUtil.java:38-47`): the sweep
-            // runs from `eye + look * minRange` to `eye + look * (maxRange + max(0, movement
-            // projected on look))`, so a moving attacker reaches further ahead.
-            let eye = player.eye_position();
-            let movement_component = look.dot(&entity.get_known_speed()).max(0.0);
-            let from = eye + look * min_reach;
-            let mut to = eye + look * (max_reach + movement_component);
+        let game_time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age
+            .unsigned_abs();
+        let mut affected = false;
 
-            // `ProjectileUtil.java:96-102`: the sweep is clipped at the first solid block, and
-            // is abandoned entirely when that block is nearer than the sweep's own start.
-            if let Some((hit_pos, _)) = world
-                .raycast(eye, to, async |pos, world_inner| {
-                    !world_inner.get_block_state(pos).is_air()
-                })
-                .await
-            {
-                let hit = Vector3::new(
-                    f64::from(hit_pos.0.x) + 0.5,
-                    f64::from(hit_pos.0.y) + 0.5,
-                    f64::from(hit_pos.0.z) + 0.5,
-                );
-                if eye.squared_distance_to_vec(&hit) < eye.squared_distance_to_vec(&from) {
-                    return;
-                }
-                to = hit;
+        for target in candidates {
+            let target_entity = target.get_entity();
+            // `PiercingWeapon.canHitEntity` (`PiercingWeapon.java:71-73`) excludes a target
+            // sharing the attacker's root vehicle, including nested passengers.
+            if target_entity.root_vehicle_id() == attacker_root_id {
+                continue;
+            }
+            // Vanilla widens each candidate's box by its pick radius and clips the
+            // segment against it; the hitbox margin plays that role here.
+            let hitbox = target_entity.bounding_box.load().expand_all(margin);
+            if !segment_intersects_box(from, to, &hitbox) {
+                continue;
             }
 
-            // `KineticWeapon.java:109`: the *base* attribute value, deliberately excluding the
-            // weapon's own attack-damage modifier, which the spear's kinetic damage replaces.
-            let base_damage = player
-                .living_entity
-                .get_attribute_base(&Attributes::ATTACK_DAMAGE);
-
-            // `ProjectileUtil.java:104`: search box around the whole sweep, inflated by 1.0.
-            let search = BoundingBox {
-                min: Vector3::new(
-                    from.x.min(to.x) - margin,
-                    from.y.min(to.y) - margin,
-                    from.z.min(to.z) - margin,
-                ),
-                max: Vector3::new(
-                    from.x.max(to.x) + margin,
-                    from.y.max(to.y) + margin,
-                    from.z.max(to.z) + margin,
-                ),
+            // `KineticWeapon.java:121-123`.
+            if self.was_recently_stabbed_then_remember(
+                attacker_id,
+                target_entity.entity_id,
+                game_time,
+            ) {
+                continue;
             }
-            .expand_all(1.0);
 
-            let attacker_id = entity.entity_id;
-            let attacker_root_id = entity.root_vehicle_id().await;
-            let mut candidates: Vec<Arc<dyn EntityBase>> = Vec::new();
-            world.extend_entities_in_box_where(&mut candidates, 64, search, |candidate| {
-                // `PiercingWeapon.canHitEntity` (`PiercingWeapon.java:61-73`), reduced to the
-                // parts that can be checked without awaiting: never the attacker, a dead entity,
-                // or an entity invulnerable to piercing weapons.
-                candidate.get_entity().entity_id != attacker_id
-                    && candidate.get_entity().is_alive()
-                    && !candidate.is_invulnerable_to_piercing_weapon()
-            });
+            // `KineticWeapon.java:124-125`: closing speed, never negative.
+            let target_speed = look.dot(&(target_entity.get_known_speed() * TICKS_PER_SECOND));
+            let relative_speed = (attacker_speed - target_speed).max(0.0);
 
-            let game_time = world.level_time.lock().await.world_age.unsigned_abs();
-            let mut affected = false;
+            // `KineticWeapon.java:126-131`.
+            let deals_dismount = params.dismount.test(
+                ticks_used,
+                attacker_speed,
+                relative_speed,
+                PLAYER_ACTION_FACTOR,
+            );
+            let deals_knockback = params.knockback.test(
+                ticks_used,
+                attacker_speed,
+                relative_speed,
+                PLAYER_ACTION_FACTOR,
+            );
+            let deals_damage = params.damage.test(
+                ticks_used,
+                attacker_speed,
+                relative_speed,
+                PLAYER_ACTION_FACTOR,
+            );
 
-            for target in candidates {
-                let target_entity = target.get_entity();
-                // `PiercingWeapon.canHitEntity` (`PiercingWeapon.java:71-73`) excludes a target
-                // sharing the attacker's root vehicle, including nested passengers.
-                if target_entity.root_vehicle_id().await == attacker_root_id {
-                    continue;
-                }
-                // Vanilla widens each candidate's box by its pick radius and clips the
-                // segment against it; the hitbox margin plays that role here.
-                let hitbox = target_entity.bounding_box.load().expand_all(margin);
-                if !segment_intersects_box(from, to, &hitbox) {
-                    continue;
-                }
+            if !(deals_dismount || deals_knockback || deals_damage) {
+                continue;
+            }
 
-                // `KineticWeapon.java:121-123`.
-                if self
-                    .was_recently_stabbed_then_remember(
-                        attacker_id,
-                        target_entity.entity_id,
-                        game_time,
-                    )
-                    .await
-                {
-                    continue;
-                }
+            // `KineticWeapon.java:133`: the closing speed, not the attacker's own speed,
+            // is what the multiplier scales, and it is floored before being added.
+            let damage_dealt = base_damage + (relative_speed * params.damage_multiplier).floor();
 
-                // `KineticWeapon.java:124-125`: closing speed, never negative.
-                let target_speed = look.dot(&(target_entity.get_known_speed() * TICKS_PER_SECOND));
-                let relative_speed = (attacker_speed - target_speed).max(0.0);
-
-                // `KineticWeapon.java:126-131`.
-                let deals_dismount = params.dismount.test(
-                    ticks_used,
-                    attacker_speed,
-                    relative_speed,
-                    PLAYER_ACTION_FACTOR,
-                );
-                let deals_knockback = params.knockback.test(
-                    ticks_used,
-                    attacker_speed,
-                    relative_speed,
-                    PLAYER_ACTION_FACTOR,
-                );
-                let deals_damage = params.damage.test(
-                    ticks_used,
-                    attacker_speed,
-                    relative_speed,
-                    PLAYER_ACTION_FACTOR,
-                );
-
-                if !(deals_dismount || deals_knockback || deals_damage) {
-                    continue;
-                }
-
-                // `KineticWeapon.java:133`: the closing speed, not the attacker's own speed,
-                // is what the multiplier scales, and it is floored before being added.
-                let damage_dealt =
-                    base_damage + (relative_speed * params.damage_multiplier).floor();
-
-                // `LivingEntity.stabAttack` (`LivingEntity.java:2889-2930`). A dismount is a
-                // server-side state change, so route it through the vehicle's existing
-                // passenger-removal path just as `target.stopRiding()` does in vanilla
-                // (`LivingEntity.java:2912-2915`).
-                if deals_dismount {
-                    let vehicle = target_entity.vehicle.lock().await.clone();
-                    if let Some(vehicle) = vehicle {
-                        vehicle
-                            .get_entity()
-                            .remove_passenger(target_entity.entity_id)
-                            .await;
-                        affected = true;
-                    }
-                }
-
-                if deals_damage {
-                    let attacker = world.get_entity_by_id(attacker_id);
-                    let dealt = target
-                        .damage_with_context(
-                            target.as_ref(),
-                            damage_dealt as f32,
-                            DamageType::SPEAR,
-                            Some(entity.pos.load()),
-                            attacker.as_deref(),
-                            attacker.as_deref(),
-                        )
+            // `LivingEntity.stabAttack` (`LivingEntity.java:2889-2930`). A dismount is a
+            // server-side state change, so route it through the vehicle's existing
+            // passenger-removal path just as `target.stopRiding()` does in vanilla
+            // (`LivingEntity.java:2912-2915`).
+            if deals_dismount {
+                let vehicle = target_entity
+                    .vehicle
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                if let Some(vehicle) = vehicle {
+                    vehicle
+                        .get_entity()
+                        .remove_passenger(target_entity.entity_id)
                         .await;
-                    affected |= dealt;
-                }
-
-                if deals_knockback {
-                    // `LivingEntity.causeExtraKnockback` (`LivingEntity.java:2734-2748`) is
-                    // called twice by `stabAttack`: once at a flat 0.4, once at the
-                    // attacker's own `ATTACK_KNOCKBACK`, both directed along the attacker's
-                    // facing (`sin(yaw)`, `-cos(yaw)`).
-                    let yaw_rad = f64::from(player.get_entity().yaw.load().to_radians());
-                    let (dir_x, dir_z) = (yaw_rad.sin(), -yaw_rad.cos());
-                    if let Some(living) = target.get_living_entity() {
-                        living.knockback_with_resistance(BASE_STAB_KNOCKBACK, dir_x, dir_z);
-                        let extra = player
-                            .living_entity
-                            .get_attribute_value(&Attributes::ATTACK_KNOCKBACK);
-                        if extra > 0.0 {
-                            living.knockback_with_resistance(extra, dir_x, dir_z);
-                        }
-                    }
                     affected = true;
                 }
+            }
 
-                // `LivingEntity.stabAttack` (`LivingEntity.java:2917-2919`):
-                // `weaponItem.hurtEnemy(livingTarget, this)` runs for every *living* target the
-                // stab reached, whether or not the damage branch landed. Spears carry
-                // `Weapon { item_damage_per_attack: 1 }`, so each such target costs one point
-                // of durability.
-                if target.get_living_entity().is_some()
-                    && player.gamemode.load() != GameMode::Creative
-                {
-                    player.damage_held_item(1).await;
+            if deals_damage {
+                let attacker = world.get_entity_by_id(attacker_id);
+                let dealt = target.damage_with_context(
+                    target.as_ref(),
+                    damage_dealt as f32,
+                    DamageType::SPEAR,
+                    Some(entity.pos.load()),
+                    attacker.as_deref(),
+                    attacker.as_deref(),
+                );
+                affected |= dealt;
+            }
+
+            if deals_knockback {
+                // `LivingEntity.causeExtraKnockback` (`LivingEntity.java:2734-2748`) is
+                // called twice by `stabAttack`: once at a flat 0.4, once at the
+                // attacker's own `ATTACK_KNOCKBACK`, both directed along the attacker's
+                // facing (`sin(yaw)`, `-cos(yaw)`).
+                let yaw_rad = f64::from(player.get_entity().yaw.load().to_radians());
+                let (dir_x, dir_z) = (yaw_rad.sin(), -yaw_rad.cos());
+                if let Some(living) = target.get_living_entity() {
+                    living.knockback_with_resistance(BASE_STAB_KNOCKBACK, dir_x, dir_z);
+                    let extra = player
+                        .living_entity
+                        .get_attribute_value(&Attributes::ATTACK_KNOCKBACK);
+                    if extra > 0.0 {
+                        living.knockback_with_resistance(extra, dir_x, dir_z);
+                    }
                 }
+                affected = true;
             }
 
-            // `LivingEntity.onKineticHit` (`LivingEntity.java:2156-2164`) plays the hit sound,
-            // rate-limited to `KineticWeapon.HIT_FEEDBACK_TICKS`. That limiter lives on the
-            // entity in vanilla; the contact cooldown above is the same 10 ticks and already
-            // gates every path that reaches here, so the sound cannot repeat faster either.
-            if affected {
-                world.play_sound(params.hit_sound, SoundCategory::Players, &player.position());
+            // `LivingEntity.stabAttack` (`LivingEntity.java:2917-2919`):
+            // `weaponItem.hurtEnemy(livingTarget, this)` runs for every *living* target the
+            // stab reached, whether or not the damage branch landed. Spears carry
+            // `Weapon { item_damage_per_attack: 1 }`, so each such target costs one point
+            // of durability.
+            if target.get_living_entity().is_some() && player.gamemode.load() != GameMode::Creative
+            {
+                player.damage_held_item(1);
             }
-        })
+        }
+
+        // `LivingEntity.onKineticHit` (`LivingEntity.java:2156-2164`) plays the hit sound,
+        // rate-limited to `KineticWeapon.HIT_FEEDBACK_TICKS`. That limiter lives on the
+        // entity in vanilla; the contact cooldown above is the same 10 ticks and already
+        // gates every path that reaches here, so the sound cannot repeat faster either.
+        if affected {
+            world.play_sound(params.hit_sound, SoundCategory::Players, &player.position());
+        }
     }
 
     /// `Item.getUseDuration` (`Item.java:310-316`).
@@ -682,24 +670,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn contact_cooldown_blocks_a_repeat_stab_then_expires() {
+    fn contact_cooldown_blocks_a_repeat_stab_then_expires() {
         // `LivingEntity.wasRecentlyStabbed` (`LivingEntity.java:2871-2877`) with
         // `contactCooldownTicks = 10` (`Item.java:505`).
         let item = SpearItem::new();
-        assert!(!item.was_recently_stabbed_then_remember(1, 2, 100).await);
-        assert!(item.was_recently_stabbed_then_remember(1, 2, 105).await);
-        assert!(item.was_recently_stabbed_then_remember(1, 2, 109).await);
+        assert!(!item.was_recently_stabbed_then_remember(1, 2, 100));
+        assert!(item.was_recently_stabbed_then_remember(1, 2, 105));
+        assert!(item.was_recently_stabbed_then_remember(1, 2, 109));
         // Exactly `allowedTime` later is no longer "recent": the check is `< allowedTime`.
-        assert!(!item.was_recently_stabbed_then_remember(1, 2, 110).await);
+        assert!(!item.was_recently_stabbed_then_remember(1, 2, 110));
     }
 
     #[tokio::test]
-    async fn contact_cooldown_is_tracked_per_target() {
+    fn contact_cooldown_is_tracked_per_target() {
         let item = SpearItem::new();
-        assert!(!item.was_recently_stabbed_then_remember(1, 2, 100).await);
+        assert!(!item.was_recently_stabbed_then_remember(1, 2, 100));
         // A different target is unaffected by the first one's cooldown.
-        assert!(!item.was_recently_stabbed_then_remember(1, 3, 100).await);
+        assert!(!item.was_recently_stabbed_then_remember(1, 3, 100));
         // As is a different attacker.
-        assert!(!item.was_recently_stabbed_then_remember(9, 2, 100).await);
+        assert!(!item.was_recently_stabbed_then_remember(9, 2, 100));
     }
 }

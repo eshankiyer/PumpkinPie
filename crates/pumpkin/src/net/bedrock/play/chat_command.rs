@@ -9,7 +9,7 @@ impl BedrockClient {
         packet: SCommandRequest<'_>,
     ) {
         player.update_last_action_time();
-        if player.check_chat_spam(server).await {
+        if player.check_chat_spam(server) {
             return;
         }
         let player_clone = player.clone();
@@ -33,9 +33,9 @@ impl BedrockClient {
                 server.spawn_task(async move {
                     let dispatcher = server_clone.command_dispatcher.load();
                     dispatcher.handle_command(
-                        &player_clone.get_command_source(&server_clone).await,
+                        &player_clone.get_command_source(&server_clone),
                         &command_clone
-                    ).await;
+                    );
                 });
 
                 if server.advanced_config.commands.log_console {

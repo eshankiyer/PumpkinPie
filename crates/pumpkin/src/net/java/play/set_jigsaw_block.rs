@@ -23,15 +23,11 @@ impl JavaClient {
 
             // `JigsawBlockEntity` applies these packet fields through its setters
             // (`ServerGamePacketListenerImpl.java:940-952`; `JigsawBlockEntity.java:78-104`).
-            jigsaw_block.set_name(jigsaw.name.to_string()).await;
-            *jigsaw_block.target.lock().await = jigsaw.target.to_string();
-            jigsaw_block.set_pool(jigsaw.pool.to_string()).await;
-            jigsaw_block
-                .set_final_state(jigsaw.final_state.to_string())
-                .await;
-            jigsaw_block
-                .set_joint(JigsawJointType::from_str(jigsaw.joint))
-                .await;
+            jigsaw_block.set_name(jigsaw.name.to_string());
+            *jigsaw_block.target.lock() = jigsaw.target.to_string();
+            jigsaw_block.set_pool(jigsaw.pool.to_string());
+            jigsaw_block.set_final_state(jigsaw.final_state.to_string());
+            jigsaw_block.set_joint(JigsawJointType::from_str(jigsaw.joint));
             jigsaw_block.set_selection_priority(jigsaw.selection_priority.0);
             jigsaw_block.set_placement_priority(jigsaw.placement_priority.0);
             jigsaw_block.dirty.store(true, Ordering::Relaxed);

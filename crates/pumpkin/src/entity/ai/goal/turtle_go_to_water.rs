@@ -6,7 +6,7 @@ use pumpkin_data::Block;
 use pumpkin_util::math::position::{BlockPos, BlockPosIterator};
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::{
     ageable::AgeableMob, ai::pathfinder::NavigatorGoal, mob::Mob, passive::turtle::TurtleEntity,
 };
@@ -71,78 +71,67 @@ impl TurtleGoToWaterGoal {
 }
 
 impl Goal for TurtleGoToWaterGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.scan_cooldown > 0 {
-                self.scan_cooldown -= 1;
-                return false;
-            }
-            self.scan_cooldown = to_goal_ticks(
-                MIN_SCAN_INTERVAL + mob.get_random().random_range(0..MIN_SCAN_INTERVAL),
-            );
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.scan_cooldown > 0 {
+            self.scan_cooldown -= 1;
+            return false;
+        }
+        self.scan_cooldown =
+            to_goal_ticks(MIN_SCAN_INTERVAL + mob.get_random().random_range(0..MIN_SCAN_INTERVAL));
 
-            let Some(turtle) = self.turtle.upgrade() else {
-                return false;
-            };
+        let Some(turtle) = self.turtle.upgrade() else {
+            return false;
+        };
 
-            let entity = mob.get_entity();
-            if entity
-                .touching_water
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
-                return false;
-            }
-            if !turtle.is_baby() && (turtle.has_egg() || turtle.is_going_home()) {
-                return false;
-            }
+        let entity = mob.get_entity();
+        if entity
+            .touching_water
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return false;
+        }
+        if !turtle.is_baby() && (turtle.has_egg() || turtle.is_going_home()) {
+            return false;
+        }
 
-            let Some(target) = Self::find_water(mob) else {
-                return false;
-            };
-            self.target = Some(target);
-            true
-        })
+        let Some(target) = Self::find_water(mob) else {
+            return false;
+        };
+        self.target = Some(target);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            !entity
-                .touching_water
-                .load(std::sync::atomic::Ordering::Relaxed)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        !entity
+            .touching_water
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.recalc_cooldown = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.recalc_cooldown = 0;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+        navigator.stop();
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = self.target else {
+            return;
+        };
+
+        if self.recalc_cooldown <= 0 {
+            self.recalc_cooldown = RECALC_INTERVAL;
+            let my_pos = mob.get_entity().pos.load();
+            let dest = target.to_f64();
             let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-            navigator.stop();
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = self.target else {
-                return;
-            };
-
-            if self.recalc_cooldown <= 0 {
-                self.recalc_cooldown = RECALC_INTERVAL;
-                let my_pos = mob.get_entity().pos.load();
-                let dest = target.to_f64();
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(my_pos, dest, self.speed));
-            } else {
-                self.recalc_cooldown -= 1;
-            }
-        })
+            navigator.set_progress(NavigatorGoal::new(my_pos, dest, self.speed));
+        } else {
+            self.recalc_cooldown -= 1;
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

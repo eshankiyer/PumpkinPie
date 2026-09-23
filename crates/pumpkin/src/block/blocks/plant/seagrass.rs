@@ -7,7 +7,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     blocks::plant::PlantBlockBase,
 };
 use pumpkin_data::block_properties::{
@@ -30,41 +30,33 @@ impl BlockBehaviour for SeaGrassBlock {
 
     /// `SeagrassBlock.performBonemeal` (`SeagrassBlock.java:90-97`) replaces the short
     /// seagrass with a lower and upper tall-seagrass half.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let lower = Block::TALL_SEAGRASS.default_state.id;
-            let mut upper = TallSeagrassLikeProperties::default(&Block::TALL_SEAGRASS);
-            upper.half = DoubleBlockHalf::Upper;
-            args.world
-                .set_block_state(args.position, lower, BlockFlags::NOTIFY_NEIGHBORS)
-                .await;
-            args.world
-                .set_block_state(
-                    &args.position.up(),
-                    upper.to_state_id(&Block::TALL_SEAGRASS),
-                    BlockFlags::NOTIFY_NEIGHBORS,
-                )
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let lower = Block::TALL_SEAGRASS.default_state.id;
+        let mut upper = TallSeagrassLikeProperties::default(&Block::TALL_SEAGRASS);
+        upper.half = DoubleBlockHalf::Upper;
+        args.world
+            .set_block_state(args.position, lower, BlockFlags::NOTIFY_NEIGHBORS);
+        args.world.set_block_state(
+            &args.position.up(),
+            upper.to_state_id(&Block::TALL_SEAGRASS),
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 }
 
@@ -85,7 +77,7 @@ impl PlantBlockBase for SeaGrassBlock {
         false
     }
     #[allow(clippy::unused_async_trait_impl)]
-    async fn get_state_for_neighbor_update(
+    fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,
         block_pos: &BlockPos,

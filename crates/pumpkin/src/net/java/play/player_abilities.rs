@@ -9,7 +9,7 @@ impl JavaClient {
         server: &Arc<Server>,
     ) {
         let (flying, allow_flying) = {
-            let abilities = player.abilities.lock().await;
+            let abilities = player.abilities.lock();
             (abilities.flying, abilities.allow_flying)
         };
 
@@ -23,10 +23,10 @@ impl JavaClient {
                     if event.is_flying {
                         player.living_entity.fall_distance.store(0.0);
                     }
-                    player.abilities.lock().await.flying = event.is_flying;
+                    player.abilities.lock().flying = event.is_flying;
                 }
                 'cancelled: {
-                    player.send_abilities_update().await;
+                    player.send_abilities_update();
                 }
             }}
         }

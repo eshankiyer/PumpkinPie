@@ -11,7 +11,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::AgeableMob,
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal,
@@ -133,40 +133,36 @@ impl crate::entity::ageable::AgeableMob for ChickenEntity {
 }
 
 impl NBTStorage for ChickenEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_int("EggLayTime", self.egg_lay_time.load(Ordering::Relaxed));
-            let variant_str = match self.variant.load(Ordering::Relaxed) {
-                0 => "minecraft:cold",
-                2 => "minecraft:warm",
-                _ => "minecraft:temperate",
-            };
-            nbt.put_string("variant", variant_str.to_string());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_int("EggLayTime", self.egg_lay_time.load(Ordering::Relaxed));
+        let variant_str = match self.variant.load(Ordering::Relaxed) {
+            0 => "minecraft:cold",
+            2 => "minecraft:warm",
+            _ => "minecraft:temperate",
+        };
+        nbt.put_string("variant", variant_str.to_string());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            self.egg_lay_time
-                .store(nbt.get_int("EggLayTime").unwrap_or(6000), Ordering::Relaxed);
-            if let Some(variant_str) = nbt.get_string("variant") {
-                let variant = match variant_str
-                    .strip_prefix("minecraft:")
-                    .unwrap_or(variant_str)
-                {
-                    "cold" => 0,
-                    "warm" => 2,
-                    _ => 1,
-                };
-                self.variant.store(variant, Ordering::Relaxed);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        self.egg_lay_time
+            .store(nbt.get_int("EggLayTime").unwrap_or(6000), Ordering::Relaxed);
+        if let Some(variant_str) = nbt.get_string("variant") {
+            let variant = match variant_str
+                .strip_prefix("minecraft:")
+                .unwrap_or(variant_str)
+            {
+                "cold" => 0,
+                "warm" => 2,
+                _ => 1,
+            };
+            self.variant.store(variant, Ordering::Relaxed);
+        }
     }
 }
 
@@ -196,115 +192,107 @@ impl Mob for ChickenEntity {
 
     /// Vanilla `Chicken.getBreedOffspring` (Chicken.java:178): the chick takes one of its
     /// parents' variants at random.
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                uuid::Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            uuid::Uuid::new_v4(),
+        );
 
-            if let Some(mate_chicken) = mate.cast_any().downcast_ref::<Self>() {
-                // Normalize through the same table write_nbt uses so an unset parent
-                // contributes temperate rather than the raw sentinel.
-                let normalize = |v: u8| match v {
-                    0 => chicken_variant::COLD,
-                    2 => chicken_variant::WARM,
-                    _ => chicken_variant::TEMPERATE,
-                };
-                let picked = if rand::rng().random_bool(0.5) {
-                    normalize(self.variant.load(Ordering::Relaxed))
-                } else {
-                    normalize(mate_chicken.variant.load(Ordering::Relaxed))
-                };
-                if let Some(chick) = baby.cast_any().downcast_ref::<Self>() {
-                    chick.variant.store(picked, Ordering::Relaxed);
-                }
+        if let Some(mate_chicken) = mate.cast_any().downcast_ref::<Self>() {
+            // Normalize through the same table write_nbt uses so an unset parent
+            // contributes temperate rather than the raw sentinel.
+            let normalize = |v: u8| match v {
+                0 => chicken_variant::COLD,
+                2 => chicken_variant::WARM,
+                _ => chicken_variant::TEMPERATE,
+            };
+            let picked = if rand::rng().random_bool(0.5) {
+                normalize(self.variant.load(Ordering::Relaxed))
+            } else {
+                normalize(mate_chicken.variant.load(Ordering::Relaxed))
+            };
+            if let Some(chick) = baby.cast_any().downcast_ref::<Self>() {
+                chick.variant.store(picked, Ordering::Relaxed);
             }
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
 
-            // `Chicken.finalizeSpawn` (Chicken.java:188): roll the variant from the spawn
-            // biome once, before first sync. A value already settled by NBT restore,
-            // `mob_set_variant_name` or `create_offspring` is kept as-is.
-            if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
-                let world = entity.world.load();
-                let pos = entity.block_pos.load();
-                let variant = chicken_variant::select_spawn_variant(world.get_biome(&pos));
-                self.variant.store(variant, Ordering::Relaxed);
-            }
+        // `Chicken.finalizeSpawn` (Chicken.java:188): roll the variant from the spawn
+        // biome once, before first sync. A value already settled by NBT restore,
+        // `mob_set_variant_name` or `create_offspring` is kept as-is.
+        if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
+            let world = entity.world.load();
+            let pos = entity.block_pos.load();
+            let variant = chicken_variant::select_spawn_variant(world.get_biome(&pos));
+            self.variant.store(variant, Ordering::Relaxed);
+        }
 
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[pumpkin_protocol::java::client::play::Metadata::new(
-                        pumpkin_data::tracked_data::chicken::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
                 &[pumpkin_protocol::java::client::play::Metadata::new(
-                    pumpkin_data::tracked_data::chicken::VARIANT,
-                    VarInt(self.variant.load(Ordering::Relaxed) as i32),
+                    pumpkin_data::tracked_data::chicken::BABY_ID,
+                    true,
                 )],
                 None,
             );
-        })
+        }
+        entity.send_meta_data(
+            &[pumpkin_protocol::java::client::play::Metadata::new(
+                pumpkin_data::tracked_data::chicken::VARIANT,
+                VarInt(self.variant.load(Ordering::Relaxed) as i32),
+            )],
+            None,
+        );
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async {
-            if self.mob_entity.living_entity.dead.load(Relaxed) {
-                return;
-            }
-            let entity = &self.mob_entity.living_entity.entity;
-            let current_velocity = entity.velocity.load();
-            let on_ground = entity.on_ground.load(Ordering::Relaxed);
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self.mob_entity.living_entity.dead.load(Relaxed) {
+            return;
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        let current_velocity = entity.velocity.load();
+        let on_ground = entity.on_ground.load(Ordering::Relaxed);
 
-            // TODO: move velocity logic to physics tick when implemented
-            if (!on_ground) && current_velocity.y < 0.0 {
-                entity.set_velocity(current_velocity.multiply(1.0, 0.6, 1.0));
+        // TODO: move velocity logic to physics tick when implemented
+        if (!on_ground) && current_velocity.y < 0.0 {
+            entity.set_velocity(current_velocity.multiply(1.0, 0.6, 1.0));
+        }
+        if self.egg_lay_time.fetch_sub(1, Ordering::Relaxed) <= 1 {
+            let next_time = rand::rng().random_range(6000..12000);
+            let world = entity.world.load_full();
+            let pos = entity.block_pos.load();
+            let mut drop_event =
+                crate::plugin::api::events::entity::entity_drop_item::EntityDropItemEvent::new(
+                    entity.entity_id,
+                    "minecraft:egg".to_string(),
+                    1,
+                );
+            if let Some(server) = world.server.upgrade() {
+                server
+                    .plugin_manager
+                    .fire_blocking(&server, &mut drop_event);
             }
-            if self.egg_lay_time.fetch_sub(1, Ordering::Relaxed) <= 1 {
-                let next_time = rand::rng().random_range(6000..12000);
-                let world = entity.world.load_full();
-                let pos = entity.block_pos.load();
-                let mut drop_event =
-                    crate::plugin::api::events::entity::entity_drop_item::EntityDropItemEvent::new(
-                        entity.entity_id,
-                        "minecraft:egg".to_string(),
-                        1,
-                    );
-                if let Some(server) = world.server.upgrade() {
-                    server.plugin_manager.fire(&server, &mut drop_event).await;
-                }
-                if !drop_event.cancelled {
-                    world.drop_stack(&pos, ItemStack::new(1, &Item::EGG)).await;
-                }
-                self.egg_lay_time.store(next_time, Ordering::Relaxed);
+            if !drop_event.cancelled {
+                world.drop_stack(&pos, ItemStack::new(1, &Item::EGG));
             }
-        })
+            self.egg_lay_time.store(next_time, Ordering::Relaxed);
+        }
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         use super::animal::Animal;
         self.animal_interact(player, item_stack, Sound::EntityChickenAmbient)
     }

@@ -18,10 +18,10 @@ impl JavaClient {
         let sneaking = interact.sneaking;
         let player_entity = &player.get_entity();
         if player_entity.is_sneaking() != sneaking {
-            player_entity.set_sneaking(sneaking).await;
+            player_entity.set_sneaking(sneaking);
         }
         let Ok(action) = ActionType::try_from(interact.r#type.0) else {
-            self.kick(TextComponent::text("Invalid action type")).await;
+            self.kick(TextComponent::text("Invalid action type"));
             return;
         };
 
@@ -66,12 +66,11 @@ impl JavaClient {
                         ActionType::Attack => {
                             let config = &server.advanced_config.pvp;
                             if entity_id.0 == player.entity_id() {
-                                self.kick(TextComponent::translate_cross(translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, [],))
-                                .await;
+                                self.kick(TextComponent::translate_cross(translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, [],));
                                 return;
                             }
 
-                            let main_hand = player.inventory().held_item().await;
+                            let main_hand = player.inventory().held_item();
                             // `Player.isWithinAttackRange` uses the held weapon's attack range
                             // for attack interactions (`Player.java:2010-2012`).
                             if !player.is_within_attack_range(
@@ -122,7 +121,7 @@ impl JavaClient {
                                     return;
                                 }
                             }
-                            let mut stack = player.inventory().held_item().await;
+                            let mut stack = player.inventory().held_item();
                             let original_stack = stack.clone();
                             let creative = player.gamemode.load() == GameMode::Creative;
                             // CuredZombieVillager fires when conversion actually completes
@@ -133,10 +132,10 @@ impl JavaClient {
                             if target_entity.entity_type.resource_name == "zombie_villager"
                                 && stack.item.registry_key == "golden_apple"
                             {
-                                player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::CuredZombieVillager).await;
+                                player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::CuredZombieVillager);
                             }
 
-                            let interacted = event.target.interact(player, &mut stack).await;
+                            let interacted = event.target.interact(player, &mut stack);
                             if interacted {
                                 if creative {
                                     // `Player.interactOn` restores a creative stack's count
@@ -154,13 +153,12 @@ impl JavaClient {
                                 }
                                 server
                                     .item_registry
-                                    .use_on_entity(&mut stack, player, event.target)
-                                    .await;
+                                    .use_on_entity(&mut stack, player, event.target);
                                 if creative {
                                     stack = original_stack;
                                 }
                             }
-                            player.inventory().set_held_item(stack).await;
+                            player.inventory().set_held_item(stack);
                         }
                     }
                 }
@@ -178,8 +176,7 @@ impl JavaClient {
                             player.entity_id(),
                             event.entity_id
                         );
-                        self.kick(TextComponent::translate_cross(translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, [],))
-                        .await;
+                        self.kick(TextComponent::translate_cross(translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, [],));
                     }
                 }
             }}

@@ -5,7 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_util::GameMode;
 
 use super::track_target::TrackTargetGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 use crate::entity::passive::iron_golem::IronGolemEntity;
@@ -58,88 +58,81 @@ const fn should_defend_against(reputation: i32, gamemode: GameMode) -> bool {
 }
 
 impl Goal for DefendVillageTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.potential_target = None;
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.potential_target = None;
 
-            // `IronGolem.canAttack`'s player-created gate (`IronGolem.java:136-141`) applies
-            // to every player target this goal could ever pick, so check it once up front
-            // rather than per-candidate.
-            let player_created = mob
-                .cast_any()
-                .downcast_ref::<IronGolemEntity>()
-                .is_some_and(|golem| golem.player_created.load(Ordering::Relaxed));
-            if player_created {
-                return false;
-            }
+        // `IronGolem.canAttack`'s player-created gate (`IronGolem.java:136-141`) applies
+        // to every player target this goal could ever pick, so check it once up front
+        // rather than per-candidate.
+        let player_created = mob
+            .cast_any()
+            .downcast_ref::<IronGolemEntity>()
+            .is_some_and(|golem| golem.player_created.load(Ordering::Relaxed));
+        if player_created {
+            return false;
+        }
 
-            let mob_entity = mob.get_mob_entity();
-            let entity = &mob_entity.living_entity.entity;
-            let world = entity.world.load();
+        let mob_entity = mob.get_mob_entity();
+        let entity = &mob_entity.living_entity.entity;
+        let world = entity.world.load();
 
-            let grow = entity.bounding_box.load().expand(10.0, 8.0, 10.0);
+        let grow = entity.bounding_box.load().expand(10.0, 8.0, 10.0);
 
-            let villagers: Vec<Arc<dyn EntityBase>> = world
-                .get_entities_at_box(&grow)
-                .into_iter()
-                .filter(|e| {
-                    e.get_entity().is_alive() && e.get_entity().entity_type == &EntityType::VILLAGER
-                })
-                .collect();
-            if villagers.is_empty() {
-                return false;
-            }
+        let villagers: Vec<Arc<dyn EntityBase>> = world
+            .get_entities_at_box(&grow)
+            .into_iter()
+            .filter(|e| {
+                e.get_entity().is_alive() && e.get_entity().entity_type == &EntityType::VILLAGER
+            })
+            .collect();
+        if villagers.is_empty() {
+            return false;
+        }
 
-            let players: Vec<Arc<Player>> = world
-                .get_players_at_box(&grow)
-                .into_iter()
-                .filter(|p| p.get_entity().is_alive())
-                .collect();
-            if players.is_empty() {
-                return false;
-            }
+        let players: Vec<Arc<Player>> = world
+            .get_players_at_box(&grow)
+            .into_iter()
+            .filter(|p| p.get_entity().is_alive())
+            .collect();
+        if players.is_empty() {
+            return false;
+        }
 
-            // Vanilla iterates every (villager, player) pair and keeps overwriting
-            // `potentialTarget` on each match, so the *last* qualifying player in
-            // iteration order wins, not the first (`DefendVillageTargetGoal.java:33-42`).
-            let mut potential_target: Option<Arc<Player>> = None;
-            for villager_entity in &villagers {
-                let Some(villager) = villager_entity.cast_any().downcast_ref::<VillagerEntity>()
-                else {
-                    continue;
-                };
-                for player in &players {
-                    let reputation = villager
-                        .gossips
-                        .lock()
-                        .await
-                        .get_reputation(player.gameprofile.id, |_| true);
-                    if should_defend_against(reputation, player.gamemode.load()) {
-                        potential_target = Some(player.clone());
-                    }
+        // Vanilla iterates every (villager, player) pair and keeps overwriting
+        // `potentialTarget` on each match, so the *last* qualifying player in
+        // iteration order wins, not the first (`DefendVillageTargetGoal.java:33-42`).
+        let mut potential_target: Option<Arc<Player>> = None;
+        for villager_entity in &villagers {
+            let Some(villager) = villager_entity.cast_any().downcast_ref::<VillagerEntity>() else {
+                continue;
+            };
+            for player in &players {
+                let reputation = villager
+                    .gossips
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_reputation(player.gameprofile.id, |_| true);
+                if should_defend_against(reputation, player.gamemode.load()) {
+                    potential_target = Some(player.clone());
                 }
             }
+        }
 
-            self.potential_target = potential_target.map(|player| player as Arc<dyn EntityBase>);
-            self.potential_target.is_some()
-        })
+        self.potential_target = potential_target.map(|player| player as Arc<dyn EntityBase>);
+        self.potential_target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.potential_target.take()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.potential_target.take());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

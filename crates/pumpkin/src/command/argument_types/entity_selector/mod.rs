@@ -65,11 +65,8 @@ pub struct EntitySelector {
 impl EntitySelector {
     /// Returns an [`Err`] if a [`CommandSource`] does not have permission to use
     /// this entity selector.
-    pub async fn check_permissions(
-        &self,
-        source: &CommandSource,
-    ) -> Result<(), CommandSyntaxError> {
-        if self.uses_selector_variable && !source.has_permission(ENTITY_SELECTOR_PERMISSION).await {
+    pub fn check_permissions(&self, source: &CommandSource) -> Result<(), CommandSyntaxError> {
+        if self.uses_selector_variable && !source.has_permission(ENTITY_SELECTOR_PERMISSION) {
             Err(SELECTORS_NOT_ALLOWED_ERROR_TYPE.create_without_context())
         } else {
             Ok(())
@@ -85,11 +82,11 @@ impl EntitySelector {
     }
 
     /// Tries to find a single entity represented by this selector.
-    pub async fn find_single_entity(
+    pub fn find_single_entity(
         &self,
         source: &CommandSource,
     ) -> Result<Arc<dyn EntityBase>, CommandSyntaxError> {
-        let list = self.find_entities(source).await?;
+        let list = self.find_entities(source)?;
         match list.as_slice() {
             [] => Err(entity::NO_ENTITIES_ERROR_TYPE.create_without_context()),
             [entity] => Ok(entity.clone()),
@@ -98,14 +95,13 @@ impl EntitySelector {
     }
 
     /// Tries to find any entities represented by this selector. If none are found, an empty `Vec` will still be returned.
-    pub async fn find_entities(
+    pub fn find_entities(
         &self,
         source: &CommandSource,
     ) -> Result<Vec<Arc<dyn EntityBase>>, CommandSyntaxError> {
-        self.check_permissions(source).await?;
+        self.check_permissions(source)?;
         if !self.includes_entities {
             self.find_players(source)
-                .await
                 .map(|v| v.into_iter().map(|p| p as Arc<dyn EntityBase>).collect())
         } else if let Some(name) = self.player_name.as_ref() {
             // Try to get the player by name.
@@ -163,11 +159,11 @@ impl EntitySelector {
     }
 
     /// Tries to find a single player represented by this selector.
-    pub async fn find_single_player(
+    pub fn find_single_player(
         &self,
         source: &CommandSource,
     ) -> Result<Arc<Player>, CommandSyntaxError> {
-        let mut list = self.find_players(source).await?;
+        let mut list = self.find_players(source)?;
         if list.len() == 1 {
             list.pop()
                 .ok_or_else(|| entity::NO_PLAYERS_ERROR_TYPE.create_without_context())
@@ -177,11 +173,11 @@ impl EntitySelector {
     }
 
     /// Tries to find any players represented by this selector.
-    pub async fn find_players(
+    pub fn find_players(
         &self,
         source: &CommandSource,
     ) -> Result<Vec<Arc<Player>>, CommandSyntaxError> {
-        self.check_permissions(source).await?;
+        self.check_permissions(source)?;
         if let Some(name) = self.player_name.as_ref() {
             // Try to get the player by name.
             let player = source
@@ -296,12 +292,12 @@ impl EntitySelector {
 /// `ComponentUtils.formatList`, whose `DEFAULT_SEPARATOR` is a plain `", "`
 /// (`ComponentUtils.java:19`) used between every pair of names, including the last -
 /// there is no "and" before the final entry.
-pub async fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
+pub fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
     if entities.is_empty() {
         return TextComponent::empty();
     }
     if entities.len() == 1 {
-        return entities[0].get_display_name().await;
+        return entities[0].get_display_name();
     }
 
     let mut result = TextComponent::empty();
@@ -309,7 +305,7 @@ pub async fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
         if i > 0 {
             result = result.add_child(TextComponent::text(", "));
         }
-        result = result.add_child(entity.get_display_name().await);
+        result = result.add_child(entity.get_display_name());
     }
     result
 }

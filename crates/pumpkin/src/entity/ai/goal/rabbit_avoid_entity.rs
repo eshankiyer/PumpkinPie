@@ -1,7 +1,7 @@
 use std::sync::Weak;
 
 use super::avoid_entity::AvoidEntityGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::rabbit::{RabbitEntity, RabbitVariant};
 use pumpkin_data::entity::{EntityType, MobCategory};
@@ -51,32 +51,30 @@ impl RabbitAvoidEntityGoal {
 }
 
 impl Goal for RabbitAvoidEntityGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let is_evil = self
-                .rabbit
-                .upgrade()
-                .is_some_and(|r| r.get_variant() == RabbitVariant::Evil);
-            if is_evil {
-                return false;
-            }
-            self.inner.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let is_evil = self
+            .rabbit
+            .upgrade()
+            .is_some_and(|r| r.get_variant() == RabbitVariant::Evil);
+        if is_evil {
+            return false;
+        }
+        self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

@@ -10,7 +10,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::map_decoration::MapDecorationType;
 use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 pub struct MapManager {
     pub maps: DashMap<i32, Arc<Mutex<MapData>>>,
@@ -54,7 +54,7 @@ impl MapManager {
 ///
 /// `MapItem.onCraftedPostProcess` (`MapItem.java:289-303`) creates a fresh saved map for
 /// SCALE or LOCK and replaces the result's map id.
-pub async fn process_crafted_map(stack: &mut ItemStack, world: &Arc<World>) {
+pub fn process_crafted_map(stack: &mut ItemStack, world: &Arc<World>) {
     let Some(processing) = stack
         .get_data_component::<MapPostProcessingImpl>()
         .map(|value| value.processing)
@@ -78,7 +78,9 @@ pub async fn process_crafted_map(stack: &mut ItemStack, world: &Arc<World>) {
     let Some(source) = server.map_manager.get_map(map_id) else {
         return;
     };
-    let source = source.lock().await;
+    let source = source
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let new_data = match processing {
         MapPostProcessing::Lock => source.locked_copy(),
         MapPostProcessing::Scale => source.scaled(),

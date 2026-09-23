@@ -12,9 +12,7 @@ impl JavaClient {
         if let Some(block_entity) = player.world().get_block_entity(&pos)
             && let Some(jigsaw_block) = block_entity.as_any().downcast_ref::<JigsawBlockEntity>()
         {
-            jigsaw_block
-                .generate(&player.world(), generate.levels.0, generate.keep_jigsaws)
-                .await;
+            jigsaw_block.generate(&player.world(), generate.levels.0, generate.keep_jigsaws);
         }
     }
 }

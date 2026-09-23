@@ -15,14 +15,14 @@ use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::generation::structure::template::{BlockStateResolver, PaletteEntry};
 use pumpkin_world::world::BlockFlags;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, atomic::Ordering};
-use tokio::sync::Mutex;
 
 use crate::block::blocks::falling::FallingBlock;
 use crate::block::entities::{block_entity_from_nbt, has_block_block_entity};
 use crate::{
-    entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity},
+    entity::{Entity, EntityBase, NBTStorage, living::LivingEntity},
     server::Server,
     world::World,
 };
@@ -104,27 +104,25 @@ impl FallingEntity {
     }
 
     /// Replaced the current Block and Spawns a new Falling one
-    pub async fn replace_spawn(world: &Arc<World>, position: BlockPos, block_state: BlockStateId) {
-        Self::replace_spawn_hurting(world, position, block_state, None).await;
+    pub fn replace_spawn(world: &Arc<World>, position: BlockPos, block_state: BlockStateId) {
+        Self::replace_spawn_hurting(world, position, block_state, None);
     }
 
     /// Same as [`Self::replace_spawn`], but optionally opts the spawned instance into crushing
     /// living entities (`setHurtsEntities`) *before* it is handed to the world, so the tick loop
     /// can never observe the entity without its damage parameters set.
-    pub async fn replace_spawn_hurting(
+    pub fn replace_spawn_hurting(
         world: &Arc<World>,
         position: BlockPos,
         block_state: BlockStateId,
         hurts_entities: Option<(f32, i32)>,
     ) {
         // Replace the original block, TODO: use fluid state
-        world
-            .set_block_state(
-                &position,
-                Block::AIR.default_state.id,
-                BlockFlags::NOTIFY_ALL,
-            )
-            .await;
+        world.set_block_state(
+            &position,
+            Block::AIR.default_state.id,
+            BlockFlags::NOTIFY_ALL,
+        );
 
         let spawn_position = position.0.to_f64().add_raw(0.5, 0.0, 0.5);
         let entity = Entity::new(world.clone(), spawn_position, &EntityType::FALLING_BLOCK);
@@ -136,7 +134,7 @@ impl FallingEntity {
         if let Some((damage_per_distance, damage_max)) = hurts_entities {
             entity.set_hurts_entities(damage_per_distance, damage_max);
         }
-        world.spawn_entity(entity).await;
+        world.spawn_entity(entity);
     }
 
     /// The item form of the block this falling entity carries, matching vanilla's
@@ -146,9 +144,9 @@ impl FallingEntity {
         Item::from_id(block.item_id)
     }
 
-    async fn drop_carried_item(&self, world: &Arc<World>, pos: &BlockPos) {
+    fn drop_carried_item(&self, world: &Arc<World>, pos: &BlockPos) {
         if let Some(item) = self.carried_item() {
-            world.drop_stack(pos, ItemStack::new(1, item)).await;
+            world.drop_stack(pos, ItemStack::new(1, item));
         }
     }
 
@@ -160,7 +158,7 @@ impl FallingEntity {
     /// current bounding box, then (anvils only) rolls the chip/damage/destroy progression.
     /// Called once per landing tick; `fall_distance` is the accumulated fall distance already
     /// consumed (reset) by the caller.
-    async fn crush_and_progress(&self, world: &Arc<World>, fall_distance: f64) {
+    fn crush_and_progress(&self, world: &Arc<World>, fall_distance: f64) {
         if !self.hurt_entities.load(Ordering::Relaxed) {
             return;
         }
@@ -204,9 +202,7 @@ impl FallingEntity {
             {
                 continue;
             }
-            candidate
-                .damage(candidate.as_ref(), damage, damage_type)
-                .await;
+            candidate.damage(candidate.as_ref(), damage, damage_type);
         }
 
         if is_anvil && damage > 0.0 {
@@ -231,12 +227,7 @@ impl FallingEntity {
     /// aftermath after a falling entity cannot place itself. The three server-visible block
     /// implementations in this registry are covered here: anvil and speleothem landing
     /// sounds, plus the brushable block-break event and particles.
-    async fn call_on_broken_after_fall(
-        &self,
-        world: &Arc<World>,
-        pos: &BlockPos,
-        block: &'static Block,
-    ) {
+    fn call_on_broken_after_fall(&self, world: &Arc<World>, pos: &BlockPos, block: &'static Block) {
         // `AnvilBlock.onBrokenAfterFall`/`SpeleothemBlock.onBrokenAfterFall`
         // (`AnvilBlock.java:94-98`, `SpeleothemBlock.java:245-249`) both gate the landing
         // sound behind `!entity.isSilent()`; `BrushableBlock.onBrokenAfterFall`
@@ -274,15 +265,14 @@ impl FallingEntity {
                     f64::midpoint(bounding_box.min.z, bounding_box.max.z),
                 ),
                 crate::world::game_event::GameEventContext::none(),
-            )
-            .await;
+            );
         }
     }
 
     /// Resolves what happens once the falling block has settled onto solid ground: either it
     /// gets placed (successfully or replaced by a solidified variant) or it breaks and drops.
     #[allow(clippy::too_many_arguments)]
-    async fn handle_landing(
+    fn handle_landing(
         &self,
         server: &Server,
         world: &Arc<World>,
@@ -295,9 +285,8 @@ impl FallingEntity {
     ) {
         let entity = &self.entity;
         if self.cancel_drop.load(Ordering::Relaxed) {
-            self.call_on_broken_after_fall(world, pos, falling_block)
-                .await;
-            entity.remove().await;
+            self.call_on_broken_after_fall(world, pos, falling_block);
+            entity.remove();
             return;
         }
 
@@ -336,120 +325,125 @@ impl FallingEntity {
                 falling_state_id,
                 current_state,
             );
-            world
-                .set_block_state(pos, final_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+            world.set_block_state(pos, final_state_id, BlockFlags::NOTIFY_ALL);
             Self::play_land_sound(world, pos, falling_block);
-            entity.remove().await;
+            entity.remove();
 
-            let stored_block_data = self.block_data.lock().await.take();
+            let stored_block_data = self
+                .block_data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             if let Some(block_data) = stored_block_data
                 && has_block_block_entity(Block::from_state_id(final_state_id))
                 && let Some(block_entity) = world.get_block_entity(pos)
             {
                 let mut merged = NbtCompound::new();
-                block_entity.write_internal(&mut merged).await;
+                block_entity.write_internal(&mut merged);
                 merged.child_tags.extend(block_data.child_tags);
                 if let Some(new_entity) = block_entity_from_nbt(&merged) {
                     world.add_block_entity(new_entity);
                 }
             }
         } else {
-            self.call_on_broken_after_fall(world, pos, falling_block)
-                .await;
-            entity.remove().await;
+            self.call_on_broken_after_fall(world, pos, falling_block);
+            entity.remove();
             if self.drop_item.load(Ordering::Relaxed) && Self::entity_drops_enabled(world) {
-                self.drop_carried_item(world, pos).await;
+                self.drop_carried_item(world, pos);
             }
         }
     }
 }
 
 impl NBTStorage for FallingEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = self.block_state_id.load();
-            let block = Block::from_state_id(state_id);
-            let mut block_state_compound = NbtCompound::new();
-            block_state_compound.put_string("Name", format!("minecraft:{}", block.name));
-            if let Some(properties) = block.properties(state_id) {
-                let props = properties.to_props();
-                if !props.is_empty() {
-                    let mut properties_compound = NbtCompound::new();
-                    for (key, value) in props {
-                        properties_compound.put_string(key, value.to_string());
-                    }
-                    block_state_compound.put_compound("Properties", properties_compound);
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let state_id = self.block_state_id.load();
+        let block = Block::from_state_id(state_id);
+        let mut block_state_compound = NbtCompound::new();
+        block_state_compound.put_string("Name", format!("minecraft:{}", block.name));
+        if let Some(properties) = block.properties(state_id) {
+            let props = properties.to_props();
+            if !props.is_empty() {
+                let mut properties_compound = NbtCompound::new();
+                for (key, value) in props {
+                    properties_compound.put_string(key, value.to_string());
                 }
+                block_state_compound.put_compound("Properties", properties_compound);
             }
-            nbt.put_compound("BlockState", block_state_compound);
+        }
+        nbt.put_compound("BlockState", block_state_compound);
 
-            nbt.put_int("Time", self.time.load(Ordering::Relaxed));
-            nbt.put_bool("DropItem", self.drop_item.load(Ordering::Relaxed));
-            nbt.put_bool("HurtEntities", self.hurt_entities.load(Ordering::Relaxed));
-            nbt.put_float("FallHurtAmount", self.fall_damage_per_distance.load());
-            nbt.put_int("FallHurtMax", self.fall_damage_max.load(Ordering::Relaxed));
-            if let Some(block_data) = &*self.block_data.lock().await {
-                nbt.put_compound("TileEntityData", block_data.clone());
-            }
-            nbt.put_bool("CancelDrop", self.cancel_drop.load(Ordering::Relaxed));
-        })
+        nbt.put_int("Time", self.time.load(Ordering::Relaxed));
+        nbt.put_bool("DropItem", self.drop_item.load(Ordering::Relaxed));
+        nbt.put_bool("HurtEntities", self.hurt_entities.load(Ordering::Relaxed));
+        nbt.put_float("FallHurtAmount", self.fall_damage_per_distance.load());
+        nbt.put_int("FallHurtMax", self.fall_damage_max.load(Ordering::Relaxed));
+        if let Some(block_data) = &*self
+            .block_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            nbt.put_compound("TileEntityData", block_data.clone());
+        }
+        nbt.put_bool("CancelDrop", self.cancel_drop.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(block_state_compound) = nbt.get_compound("BlockState")
-                && let Some(name) = block_state_compound.get_string("Name")
-            {
-                let properties = block_state_compound.get_compound("Properties").map_or_else(
-                    Vec::new,
-                    |props_compound| {
-                        props_compound
-                            .child_tags
-                            .iter()
-                            .filter_map(|(key, value)| {
-                                if let pumpkin_nbt::tag::NbtTag::String(v) = value {
-                                    Some((key.to_string(), v.to_string()))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect()
-                    },
-                );
-                let entry = PaletteEntry::with_properties(name.to_string(), properties);
-                if let Some(state) = BlockStateResolver::resolve_simple(&entry) {
-                    self.block_state_id.store(state.id);
-                    self.entity
-                        .data
-                        .store(i32::from(state.id.as_u16()), Ordering::Relaxed);
-                }
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        if let Some(block_state_compound) = nbt.get_compound("BlockState")
+            && let Some(name) = block_state_compound.get_string("Name")
+        {
+            let properties = block_state_compound.get_compound("Properties").map_or_else(
+                Vec::new,
+                |props_compound| {
+                    props_compound
+                        .child_tags
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            if let pumpkin_nbt::tag::NbtTag::String(v) = value {
+                                Some((key.to_string(), v.to_string()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                },
+            );
+            let entry = PaletteEntry::with_properties(name.to_string(), properties);
+            if let Some(state) = BlockStateResolver::resolve_simple(&entry) {
+                self.block_state_id.store(state.id);
+                self.entity
+                    .data
+                    .store(i32::from(state.id.as_u16()), Ordering::Relaxed);
             }
+        }
 
-            self.time
-                .store(nbt.get_int("Time").unwrap_or(0), Ordering::Relaxed);
-            self.drop_item
-                .store(nbt.get_bool("DropItem").unwrap_or(true), Ordering::Relaxed);
-            let default_hurt_entities = Block::from_state_id(self.block_state_id.load())
-                .has_tag(&tag::Block::MINECRAFT_ANVIL);
-            self.hurt_entities.store(
-                nbt.get_bool("HurtEntities")
-                    .unwrap_or(default_hurt_entities),
-                Ordering::Relaxed,
-            );
-            self.fall_damage_per_distance
-                .store(nbt.get_float("FallHurtAmount").unwrap_or(0.0));
-            self.fall_damage_max.store(
-                nbt.get_int("FallHurtMax")
-                    .unwrap_or(DEFAULT_FALL_DAMAGE_MAX),
-                Ordering::Relaxed,
-            );
-            *self.block_data.lock().await = nbt.get_compound("TileEntityData").cloned();
-            self.cancel_drop.store(
-                nbt.get_bool("CancelDrop").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-        })
+        self.time
+            .store(nbt.get_int("Time").unwrap_or(0), Ordering::Relaxed);
+        self.drop_item
+            .store(nbt.get_bool("DropItem").unwrap_or(true), Ordering::Relaxed);
+        let default_hurt_entities =
+            Block::from_state_id(self.block_state_id.load()).has_tag(&tag::Block::MINECRAFT_ANVIL);
+        self.hurt_entities.store(
+            nbt.get_bool("HurtEntities")
+                .unwrap_or(default_hurt_entities),
+            Ordering::Relaxed,
+        );
+        self.fall_damage_per_distance
+            .store(nbt.get_float("FallHurtAmount").unwrap_or(0.0));
+        self.fall_damage_max.store(
+            nbt.get_int("FallHurtMax")
+                .unwrap_or(DEFAULT_FALL_DAMAGE_MAX),
+            Ordering::Relaxed,
+        );
+        *self
+            .block_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            nbt.get_compound("TileEntityData").cloned();
+        self.cancel_drop.store(
+            nbt.get_bool("CancelDrop").unwrap_or(false),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -464,102 +458,92 @@ impl EntityBase for FallingEntity {
         false
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.entity;
-            self.time.fetch_add(1, Ordering::Relaxed);
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        let entity = &self.entity;
+        self.time.fetch_add(1, Ordering::Relaxed);
 
-            let original_velo = entity.velocity.load();
-            let mut velo = original_velo;
-            velo.y -= self.get_gravity();
+        let original_velo = entity.velocity.load();
+        let mut velo = original_velo;
+        velo.y -= self.get_gravity();
 
-            entity.velocity.store(velo);
+        entity.velocity.store(velo);
 
-            let y_before = entity.pos.load().y;
-            entity.move_entity(caller, velo).await;
-            entity.tick_block_collisions(caller, server).await;
-            let fell = y_before - entity.pos.load().y;
-            if fell > 0.0 {
-                self.fall_distance.store(self.fall_distance.load() + fell);
-            } else {
-                self.fall_distance.store(0.0);
-            }
+        let y_before = entity.pos.load().y;
+        entity.move_entity(caller, velo);
+        entity.tick_block_collisions(caller, server);
+        let fell = y_before - entity.pos.load().y;
+        if fell > 0.0 {
+            self.fall_distance.store(self.fall_distance.load() + fell);
+        } else {
+            self.fall_distance.store(0.0);
+        }
 
-            let world = entity.world.load();
-            let pos = entity.block_pos.load();
-            let on_ground = entity.on_ground.load(Ordering::Relaxed);
+        let world = entity.world.load();
+        let pos = entity.block_pos.load();
+        let on_ground = entity.on_ground.load(Ordering::Relaxed);
 
-            if on_ground {
-                let fall_distance = self.fall_distance.swap(0.0);
-                self.crush_and_progress(&world, fall_distance).await;
-            }
+        if on_ground {
+            let fall_distance = self.fall_distance.swap(0.0);
+            self.crush_and_progress(&world, fall_distance);
+        }
 
-            let falling_state_id = self.block_state_id.load();
-            let falling_block = Block::from_state_id(falling_state_id);
-            let is_concrete =
-                crate::block::blocks::falling::concrete_for_powder(falling_block).is_some();
-            let pos_state = world.get_block_state(&pos);
-            // Approximates vanilla's `isStuckInWater`; the two-step clip-based fast-fall check
-            // (`ClipContext` scan for concrete moving faster than 1 block/tick) is not ported.
-            let is_stuck_in_water = is_concrete && pos_state.is_waterlogged();
+        let falling_state_id = self.block_state_id.load();
+        let falling_block = Block::from_state_id(falling_state_id);
+        let is_concrete =
+            crate::block::blocks::falling::concrete_for_powder(falling_block).is_some();
+        let pos_state = world.get_block_state(&pos);
+        // Approximates vanilla's `isStuckInWater`; the two-step clip-based fast-fall check
+        // (`ClipContext` scan for concrete moving faster than 1 block/tick) is not ported.
+        let is_stuck_in_water = is_concrete && pos_state.is_waterlogged();
 
-            if !on_ground && !is_stuck_in_water {
-                let time = self.time.load(Ordering::Relaxed);
-                let outside_world = pos.0.y <= world.get_bottom_y() || pos.0.y > world.get_top_y();
-                if (time > 100 && outside_world) || time > 600 {
-                    if self.drop_item.load(Ordering::Relaxed) && Self::entity_drops_enabled(&world)
-                    {
-                        self.drop_carried_item(&world, &pos).await;
-                    }
-                    entity.remove().await;
-                    return;
+        if !on_ground && !is_stuck_in_water {
+            let time = self.time.load(Ordering::Relaxed);
+            let outside_world = pos.0.y <= world.get_bottom_y() || pos.0.y > world.get_top_y();
+            if (time > 100 && outside_world) || time > 600 {
+                if self.drop_item.load(Ordering::Relaxed) && Self::entity_drops_enabled(&world) {
+                    self.drop_carried_item(&world, &pos);
                 }
-            } else {
-                entity.velocity.store(velo.multiply(0.7, -0.5, 0.7));
-                let current_state = world.get_block_state(&pos);
-                if Block::from_state_id(current_state.id) != &Block::MOVING_PISTON {
-                    self.handle_landing(
-                        server,
-                        &world,
-                        &pos,
-                        falling_state_id,
-                        falling_block,
-                        current_state,
-                        is_concrete,
-                        is_stuck_in_water,
-                    )
-                    .await;
-                    return;
-                }
+                entity.remove();
+                return;
             }
-
-            // `FallingBlockEntity.tick` uses the inherited `Entity.getAirDrag` (`Entity.java:1529-1531`).
-            let air_drag = entity.get_air_drag();
-            entity
-                .velocity
-                .store(velo.multiply(air_drag, air_drag, air_drag));
-
-            if entity.velocity_dirty.swap(false, Ordering::SeqCst) {
-                entity.send_pos_rot();
-                entity.send_velocity();
+        } else {
+            entity.velocity.store(velo.multiply(0.7, -0.5, 0.7));
+            let current_state = world.get_block_state(&pos);
+            if Block::from_state_id(current_state.id) != &Block::MOVING_PISTON {
+                self.handle_landing(
+                    server,
+                    &world,
+                    &pos,
+                    falling_state_id,
+                    falling_block,
+                    current_state,
+                    is_concrete,
+                    is_stuck_in_water,
+                );
+                return;
             }
-        })
+        }
+
+        // `FallingBlockEntity.tick` uses the inherited `Entity.getAirDrag` (`Entity.java:1529-1531`).
+        let air_drag = entity.get_air_drag();
+        entity
+            .velocity
+            .store(velo.multiply(air_drag, air_drag, air_drag));
+
+        if entity.velocity_dirty.swap(false, Ordering::SeqCst) {
+            entity.send_pos_rot();
+            entity.send_velocity();
+        }
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::falling_block::START_POS,
-                    self.get_start_pos(),
-                )],
-                None,
-            );
-        })
+    fn init_data_tracker(&self) {
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::falling_block::START_POS,
+                self.get_start_pos(),
+            )],
+            None,
+        );
     }
 
     fn get_entity(&self) -> &Entity {
@@ -584,13 +568,8 @@ impl EntityBase for FallingEntity {
     /// anvil damage-stage roll) is not implemented. `hurt_entities`/`fall_damage_per_distance`/
     /// `fall_damage_max` are still tracked and persisted so a follow-up has the state to build
     /// on; this is a known, reported gap, not something this override should attempt to guess.
-    fn damage<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
-        _amount: f32,
-        _damage_type: DamageType,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move { false })
+    fn damage(&self, _caller: &dyn EntityBase, _amount: f32, _damage_type: DamageType) -> bool {
+        false
     }
 
     fn get_gravity(&self) -> f64 {

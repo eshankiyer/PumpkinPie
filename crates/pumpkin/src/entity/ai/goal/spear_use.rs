@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use pumpkin_data::data_component_impl::KineticWeaponImpl;
@@ -126,8 +126,12 @@ impl SpearUseGoal {
         })
     }
 
-    async fn able_to_attack(mob: &dyn Mob) -> bool {
-        let target = mob.get_mob_entity().target.lock().await;
+    fn able_to_attack(mob: &dyn Mob) -> bool {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(target) = target.as_ref() else {
             return false;
         };
@@ -136,7 +140,7 @@ impl SpearUseGoal {
         }
 
         let living_entity = &mob.get_mob_entity().living_entity;
-        let held_item = living_entity.held_item(&living_entity.entity).await;
+        let held_item = living_entity.held_item(&living_entity.entity);
         held_item
             .get_data_component::<KineticWeaponImpl>()
             .is_some()
@@ -155,13 +159,23 @@ impl SpearUseGoal {
         mob.get_mob_entity().navigator.lock().unwrap().is_idle()
     }
 
-    async fn charge_speed_modifier(mob: &dyn Mob) -> f64 {
+    fn charge_speed_modifier(mob: &dyn Mob) -> f64 {
         // Vanilla `SpearUseGoal` reads the root vehicle's `Mob.chargeSpeedModifier`
         // (`SpearUseGoal.java:84-98`). Follow the existing vehicle links to preserve that
         // lookup for mounted spear users.
-        let mut vehicle = mob.get_entity().vehicle.lock().await.clone();
+        let mut vehicle = mob
+            .get_entity()
+            .vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         while let Some(current) = vehicle {
-            let next = current.get_entity().vehicle.lock().await.clone();
+            let next = current
+                .get_entity()
+                .vehicle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
             if next.is_none() {
                 return current.get_mob().map_or(1.0, |vehicle_mob| {
                     f64::from(vehicle_mob.charge_speed_modifier())
@@ -243,120 +257,113 @@ impl SpearUseGoal {
 }
 
 impl Goal for SpearUseGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::able_to_attack(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::able_to_attack(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            match &self.state {
-                Some(state) if !state.done => Self::able_to_attack(mob).await,
-                _ => false,
-            }
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        match &self.state {
+            Some(state) if !state.done => Self::able_to_attack(mob),
+            _ => false,
+        }
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().set_attacking(true);
-            self.state = Some(SpearState::new());
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().set_attacking(true);
+        self.state = Some(SpearState::new());
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-            mob.get_mob_entity().set_attacking(false);
-            self.state = None;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        mob.get_mob_entity().set_attacking(false);
+        self.state = None;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return;
-            };
-            let Some(state) = self.state.as_mut() else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
 
-            let mob_pos = mob.get_entity().pos.load();
-            let target_pos = target.get_entity().pos.load();
-            let target_dist_sq = mob_pos.squared_distance_to_vec(&target_pos);
-            let charge_speed_modifier = Self::charge_speed_modifier(mob).await;
-            let mount_distance = if mob.get_entity().has_vehicle().await {
-                2.0
-            } else {
-                0.0
-            };
+        let mob_pos = mob.get_entity().pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let target_dist_sq = mob_pos.squared_distance_to_vec(&target_pos);
+        let charge_speed_modifier = Self::charge_speed_modifier(mob);
+        let mount_distance = if mob.get_entity().has_vehicle() {
+            2.0
+        } else {
+            0.0
+        };
 
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 30.0, 30.0);
 
-            if state.not_engaged_yet() {
-                if target_dist_sq > self.approach_distance_sq {
-                    Self::move_to(
-                        mob,
-                        target_pos,
-                        charge_speed_modifier * self.repositioning_speed,
-                    );
-                    return;
-                }
-                state.start_engagement(ENGAGE_TICKS);
-            }
-
-            if state.tick_and_check_engagement() {
-                if mob
-                    .get_mob_entity()
-                    .is_in_attack_range(target.as_ref())
-                    .await
-                {
-                    mob.get_mob_entity().living_entity.swing_hand().await;
-                    mob.try_attack(target.as_ref()).await;
-                }
-
-                let distance = target_dist_sq.sqrt();
-                state.away_pos = Self::find_position_away(
+        if state.not_engaged_yet() {
+            if target_dist_sq > self.approach_distance_sq {
+                Self::move_to(
                     mob,
-                    &target_pos,
-                    (MIN_COOLDOWN_DISTANCE + mount_distance - distance).max(0.0),
-                    (MAX_COOLDOWN_DISTANCE + mount_distance - distance).max(1.0),
+                    target_pos,
+                    charge_speed_modifier * self.repositioning_speed,
                 );
-                state.fleeing_time = 1;
+                return;
+            }
+            state.start_engagement(ENGAGE_TICKS);
+        }
+
+        if state.tick_and_check_engagement() {
+            if mob.get_mob_entity().is_in_attack_range(target.as_ref()) {
+                mob.get_mob_entity().living_entity.swing_hand();
+                mob.try_attack(target.as_ref());
             }
 
-            if !state.tick_and_check_fleeing() {
-                if let Some(away_pos) = state.away_pos {
-                    Self::move_to(
+            let distance = target_dist_sq.sqrt();
+            state.away_pos = Self::find_position_away(
+                mob,
+                &target_pos,
+                (MIN_COOLDOWN_DISTANCE + mount_distance - distance).max(0.0),
+                (MAX_COOLDOWN_DISTANCE + mount_distance - distance).max(1.0),
+            );
+            state.fleeing_time = 1;
+        }
+
+        if !state.tick_and_check_fleeing() {
+            if let Some(away_pos) = state.away_pos {
+                Self::move_to(
+                    mob,
+                    away_pos,
+                    charge_speed_modifier * self.repositioning_speed,
+                );
+                if Self::navigator_idle(mob) {
+                    if state.fleeing_time > 0 {
+                        state.done = true;
+                        return;
+                    }
+                    state.away_pos = None;
+                }
+            } else {
+                Self::move_to(mob, target_pos, charge_speed_modifier * self.charging_speed);
+                if target_dist_sq < self.target_in_range_radius_sq || Self::navigator_idle(mob) {
+                    let distance = target_dist_sq.sqrt();
+                    state.away_pos = Self::find_position_away(
                         mob,
-                        away_pos,
-                        charge_speed_modifier * self.repositioning_speed,
+                        &target_pos,
+                        (MIN_REPOSITION_DISTANCE + mount_distance - distance).max(0.0),
+                        (MAX_REPOSITION_DISTANCE + mount_distance - distance).max(1.0),
                     );
-                    if Self::navigator_idle(mob) {
-                        if state.fleeing_time > 0 {
-                            state.done = true;
-                            return;
-                        }
-                        state.away_pos = None;
-                    }
-                } else {
-                    Self::move_to(mob, target_pos, charge_speed_modifier * self.charging_speed);
-                    if target_dist_sq < self.target_in_range_radius_sq || Self::navigator_idle(mob)
-                    {
-                        let distance = target_dist_sq.sqrt();
-                        state.away_pos = Self::find_position_away(
-                            mob,
-                            &target_pos,
-                            (MIN_REPOSITION_DISTANCE + mount_distance - distance).max(0.0),
-                            (MAX_REPOSITION_DISTANCE + mount_distance - distance).max(1.0),
-                        );
-                    }
                 }
             }
-        })
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -135,7 +135,7 @@ pub fn oxidation_level_of(block: &Block) -> Option<u8> {
 /// * `state_converter` - Function to convert the target block and preserve properties
 ///
 /// Returns true if the block was oxidized, false otherwise
-pub async fn try_oxidize_copper(
+pub fn try_oxidize_copper(
     world: &Arc<World>,
     position: &BlockPos,
     current_block: &Block,
@@ -176,9 +176,7 @@ pub async fn try_oxidize_copper(
 
     // Apply oxidation with converted state
     let new_state_id = state_converter(next_block);
-    world
-        .set_block_state(position, new_state_id, BlockFlags::NOTIFY_LISTENERS)
-        .await;
+    world.set_block_state(position, new_state_id, BlockFlags::NOTIFY_LISTENERS);
 }
 
 /// Get the oxidation level for a block if it's in the given family.

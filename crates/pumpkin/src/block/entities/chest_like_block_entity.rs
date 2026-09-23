@@ -24,7 +24,7 @@ macro_rules! impl_block_entity_for_chest {
 
                 let mut chest = Self {
                     position,
-                    items: tokio::sync::RwLock::new(std::array::from_fn(|_| ItemStack::EMPTY.clone())),
+                    items: std::sync::RwLock::new(std::array::from_fn(|_| ItemStack::EMPTY.clone())),
                     dirty: std::sync::atomic::AtomicBool::new(false),
                     viewers: $crate::block::viewer::ViewerCountTracker::new(),
                     loot_table: StdMutex::new(loot_table_key),
@@ -65,7 +65,7 @@ macro_rules! impl_block_entity_for_chest {
                         }
                     } else {
                         // Loot has already been generated, so persist the actual items.
-                        self.write_inventory_nbt(nbt, true).await;
+                        self.write_inventory_nbt(nbt, true);
                     }
                 })
             }
@@ -80,8 +80,7 @@ macro_rules! impl_block_entity_for_chest {
                         self,
                         world,
                         &self.position,
-                    )
-                    .await;
+                    );
                 })
             }
 
@@ -139,7 +138,10 @@ macro_rules! impl_inventory_for_chest {
 
             fn is_empty(&self) -> pumpkin_world::inventory::InventoryFuture<'_, bool> {
                 Box::pin(async move {
-                    let items = self.items.read().await;
+                    let items = self
+                        .items
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items.iter().all(|s| s.is_empty())
                 })
             }
@@ -149,7 +151,10 @@ macro_rules! impl_inventory_for_chest {
                 slot: usize,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
                 Box::pin(async move {
-                    let items = self.items.read().await;
+                    let items = self
+                        .items
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items[slot].clone()
                 })
             }
@@ -159,7 +164,10 @@ macro_rules! impl_inventory_for_chest {
                 slot: usize,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
                     self.mark_dirty();
                     removed
@@ -172,7 +180,10 @@ macro_rules! impl_inventory_for_chest {
                 amount: u8,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let res = if !items[slot].is_empty() && amount > 0 {
                         items[slot].split(amount)
                     } else {
@@ -189,7 +200,10 @@ macro_rules! impl_inventory_for_chest {
                 stack: ItemStack,
             ) -> pumpkin_world::inventory::InventoryFuture<'_, ()> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items[slot] = stack;
                     self.mark_dirty();
                 })
@@ -227,7 +241,10 @@ macro_rules! impl_clearable_for_chest {
                 &self,
             ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
                 Box::pin(async move {
-                    let mut items = self.items.write().await;
+                    let mut items = self
+                        .items
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     items.fill_with(|| ItemStack::EMPTY.clone());
                     <$struct_name as pumpkin_world::inventory::Inventory>::mark_dirty(self);
                 })
@@ -254,8 +271,7 @@ macro_rules! impl_viewer_count_listener_for_chest {
                     self.play_sound(
                         world,
                         $crate::block::blocks::chests::chest_sound_for_block(block, true),
-                    )
-                    .await;
+                    );
                 })
             }
 
@@ -269,8 +285,7 @@ macro_rules! impl_viewer_count_listener_for_chest {
                     self.play_sound(
                         world,
                         $crate::block::blocks::chests::chest_sound_for_block(block, false),
-                    )
-                    .await;
+                    );
                 })
             }
 
@@ -283,24 +298,22 @@ macro_rules! impl_viewer_count_listener_for_chest {
             ) -> $crate::block::viewer::ViewerFuture<'a, ()> {
                 Box::pin(async move {
                     // Trigger block animation
-                    world
-                        .add_synced_block_event(
-                            *position,
-                            Self::LID_ANIMATION_EVENT_TYPE,
-                            new as u8,
-                        )
-                        .await;
+                    world.add_synced_block_event(
+                        *position,
+                        Self::LID_ANIMATION_EVENT_TYPE,
+                        new as u8,
+                    );
 
                     // Update neighbors for redstone signal when viewer count changes
                     // This is controlled by the EMITS_REDSTONE constant on the struct
                     if Self::EMITS_REDSTONE && old != new {
                         // Update direct neighbors
-                        world.clone().update_neighbors(position, None).await;
+                        world.clone().update_neighbors(position, None);
 
                         // Also update neighbors of the block below (strongly powered block)
                         // This ensures redstone components adjacent to the block below are notified
                         let below_pos = position.down();
-                        world.clone().update_neighbors(&below_pos, None).await;
+                        world.clone().update_neighbors(&below_pos, None);
                     }
                 })
             }
@@ -329,7 +342,7 @@ macro_rules! impl_chest_helper_methods {
 
                 Self {
                     position,
-                    items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+                    items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
                     dirty: AtomicBool::new(false),
                     viewers: $crate::block::viewer::ViewerCountTracker::new(),
                     loot_table: StdMutex::new(None),
@@ -337,7 +350,7 @@ macro_rules! impl_chest_helper_methods {
                 }
             }
 
-            async fn play_sound(
+            fn play_sound(
                 &self,
                 world: &Arc<$crate::world::World>,
                 sound: pumpkin_data::sound::Sound,

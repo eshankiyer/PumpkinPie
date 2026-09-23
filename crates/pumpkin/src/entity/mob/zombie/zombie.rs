@@ -14,7 +14,7 @@ use crate::entity::mob::zombie::{
     ZombieEntityBase, drowned::DrownedEntity, try_spawn_reinforcements,
 };
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     mob::{Mob, MobEntity},
 };
 use crate::world::World;
@@ -62,7 +62,7 @@ impl ZombieEntity {
 
     /// `Zombie::setCanBreakDoors` (`Zombie.java:156-170`), minus the `navigation.canNavigateGround`
     /// guard (Pumpkin's `BreakDoorGoal`/`InteractWithDoorGoal` have no equivalent gate either).
-    async fn set_can_break_doors(&self, can_break_doors: bool) {
+    fn set_can_break_doors(&self, can_break_doors: bool) {
         let new_value = i8::from(can_break_doors);
         let previous = self.can_break_doors.swap(new_value, Ordering::Relaxed);
         if previous == new_value || (previous == CAN_BREAK_DOORS_UNDECIDED && !can_break_doors) {
@@ -85,7 +85,7 @@ impl ZombieEntity {
                 let mut guard = self.entity.mob_entity.goals_selector.lock().unwrap();
                 std::mem::take(&mut *guard)
             };
-            goal_selector.remove_goal::<BreakDoorGoal>(self).await;
+            goal_selector.remove_goal::<BreakDoorGoal>(self);
             *self.entity.mob_entity.goals_selector.lock().unwrap() = goal_selector;
         }
     }
@@ -95,7 +95,7 @@ impl ZombieEntity {
     /// copy set (position/velocity/rotation/age/custom name/active effects) -- there is no
     /// generic `Mob::convertTo` here (equipment/leash/passenger transfer), so those are not
     /// carried over.
-    async fn finish_conversion(&self) {
+    fn finish_conversion(&self) {
         let old_entity = self.get_entity();
         let world = old_entity.world.load().clone();
         let pos = old_entity.pos.load();
@@ -132,16 +132,16 @@ impl ZombieEntity {
             .living_entity
             .active_effects
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .cloned()
             .collect();
         let new_living = &drowned.get_mob_entity().living_entity;
         for effect in effects {
-            new_living.add_effect(effect).await;
+            new_living.add_effect(effect);
         }
 
-        world.spawn_entity(drowned).await;
+        world.spawn_entity(drowned);
         // Zombie.java:242 gates this on `!isSilent()`, which has no equivalent field here.
         world.sync_world_event(
             WorldEvent::SoundZombieToDrowned,
@@ -149,7 +149,7 @@ impl ZombieEntity {
             0,
         );
 
-        old_entity.remove().await;
+        old_entity.remove();
     }
 }
 
@@ -159,57 +159,48 @@ impl NBTStorage for ZombieEntity {
     /// `putInt("DrownedConversionTime", isUnderWaterConverting() ? conversionTime : -1)`.
     /// `conversion_time` is already `-1` except while actively converting, so writing it
     /// unconditionally already matches the gated vanilla value.
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.mob_entity.living_entity.write_nbt(nbt).await;
-            let in_water_time = if self
-                .entity
-                .mob_entity
-                .living_entity
-                .entity
-                .touching_water
-                .load(Ordering::Relaxed)
-            {
-                self.in_water_time.load(Ordering::Relaxed)
-            } else {
-                -1
-            };
-            nbt.put_int("InWaterTime", in_water_time);
-            nbt.put_int(
-                "DrownedConversionTime",
-                self.conversion_time.load(Ordering::Relaxed),
-            );
-            // `Zombie::addAdditionalSaveData` (`Zombie.java:402`): `putBoolean("CanBreakDoors",
-            // this.canBreakDoors())`. Still-undecided (never ticked) zombies save as `false`,
-            // same as `canBreakDoors()`'s own `false` initial value.
-            nbt.put_bool(
-                "CanBreakDoors",
-                self.can_break_doors.load(Ordering::Relaxed) == 1,
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.mob_entity.living_entity.write_nbt(nbt);
+        let in_water_time = if self
+            .entity
+            .mob_entity
+            .living_entity
+            .entity
+            .touching_water
+            .load(Ordering::Relaxed)
+        {
+            self.in_water_time.load(Ordering::Relaxed)
+        } else {
+            -1
+        };
+        nbt.put_int("InWaterTime", in_water_time);
+        nbt.put_int(
+            "DrownedConversionTime",
+            self.conversion_time.load(Ordering::Relaxed),
+        );
+        // `Zombie::addAdditionalSaveData` (`Zombie.java:402`): `putBoolean("CanBreakDoors",
+        // this.canBreakDoors())`. Still-undecided (never ticked) zombies save as `false`,
+        // same as `canBreakDoors()`'s own `false` initial value.
+        nbt.put_bool(
+            "CanBreakDoors",
+            self.can_break_doors.load(Ordering::Relaxed) == 1,
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.mark_restored_from_nbt();
-            self.entity
-                .mob_entity
-                .living_entity
-                .read_nbt_non_mut(nbt)
-                .await;
-            self.in_water_time
-                .store(nbt.get_int("InWaterTime").unwrap_or(0), Ordering::Relaxed);
-            let time = nbt.get_int("DrownedConversionTime").unwrap_or(-1);
-            self.conversion_time.store(time, Ordering::Relaxed);
-            // `Zombie::readAdditionalSaveData` (`Zombie.java:411`):
-            // `setCanBreakDoors(input.getBooleanOr("CanBreakDoors", false))`. Routed through
-            // `set_can_break_doors` (rather than storing the flag directly) so a loaded zombie
-            // that can break doors actually gets `BreakDoorGoal` back in its goal selector, and so
-            // this settles the `CAN_BREAK_DOORS_UNDECIDED` sentinel before `mob_init_data_tracker`
-            // can roll a fresh chance for it.
-            self.set_can_break_doors(nbt.get_bool("CanBreakDoors").unwrap_or(false))
-                .await;
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.mark_restored_from_nbt();
+        self.entity.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.in_water_time
+            .store(nbt.get_int("InWaterTime").unwrap_or(0), Ordering::Relaxed);
+        let time = nbt.get_int("DrownedConversionTime").unwrap_or(-1);
+        self.conversion_time.store(time, Ordering::Relaxed);
+        // `Zombie::readAdditionalSaveData` (`Zombie.java:411`):
+        // `setCanBreakDoors(input.getBooleanOr("CanBreakDoors", false))`. Routed through
+        // `set_can_break_doors` (rather than storing the flag directly) so a loaded zombie
+        // that can break doors actually gets `BreakDoorGoal` back in its goal selector, and so
+        // this settles the `CAN_BREAK_DOORS_UNDECIDED` sentinel before `mob_init_data_tracker`
+        // can roll a fresh chance for it.
+        self.set_can_break_doors(nbt.get_bool("CanBreakDoors").unwrap_or(false));
     }
 }
 
@@ -224,37 +215,32 @@ impl Mob for ZombieEntity {
     /// a chunk already had `can_break_doors` settled by `read_nbt_non_mut` (which runs first), so
     /// `CAN_BREAK_DOORS_UNDECIDED` here means this is a genuine new spawn, matching vanilla's
     /// `finalizeSpawn` never running for loaded entities.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.entity.mob_init_data_tracker().await;
-            if self.can_break_doors.load(Ordering::Relaxed) == CAN_BREAK_DOORS_UNDECIDED {
-                let entity = self.get_entity();
-                let world = entity.world.load_full();
-                let difficulty = RegionalDifficulty::at(&world, entity.pos.load());
-                let roll = BREAK_DOOR_CHANCE * difficulty.special_multiplier;
-                self.set_can_break_doors(rand::random::<f32>() < roll).await;
-            }
-            // `Zombie::handleAttributes` (`Zombie.java:556`) forces door breaking on for a
-            // leader zombie, after `finalizeSpawn`'s own roll above.
-            if self.entity.is_leader.load(Ordering::Relaxed) {
-                self.set_can_break_doors(true).await;
-            }
-        })
+    fn mob_init_data_tracker(&self) {
+        self.entity.mob_init_data_tracker();
+        if self.can_break_doors.load(Ordering::Relaxed) == CAN_BREAK_DOORS_UNDECIDED {
+            let entity = self.get_entity();
+            let world = entity.world.load_full();
+            let difficulty = RegionalDifficulty::at(&world, entity.pos.load());
+            let roll = BREAK_DOOR_CHANCE * difficulty.special_multiplier;
+            self.set_can_break_doors(rand::random::<f32>() < roll);
+        }
+        // `Zombie::handleAttributes` (`Zombie.java:556`) forces door breaking on for a
+        // leader zombie, after `finalizeSpawn`'s own roll above.
+        if self.entity.is_leader.load(Ordering::Relaxed) {
+            self.set_can_break_doors(true);
+        }
     }
 
-    fn populate_default_equipment_slots<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        difficulty: &'a RegionalDifficulty,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn populate_default_equipment_slots(
+        &self,
+        world: &Arc<World>,
+        difficulty: &RegionalDifficulty,
+    ) {
         self.entity
             .populate_default_equipment_slots(world, difficulty)
     }
 
-    fn populate_default_equipment_enchantments<'a>(
-        &'a self,
-        difficulty: &'a RegionalDifficulty,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn populate_default_equipment_enchantments(&self, difficulty: &RegionalDifficulty) {
         self.entity
             .populate_default_equipment_enchantments(difficulty)
     }
@@ -262,56 +248,48 @@ impl Mob for ZombieEntity {
     /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`). `on_damage` only runs
     /// once the hit landed, which is what vanilla's `if (!super.hurtServer(...)) return false;`
     /// guarantees.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            try_spawn_reinforcements(&self.entity.mob_entity, source).await;
-        })
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        try_spawn_reinforcements(&self.entity.mob_entity, source);
     }
 
     /// `Zombie::tick` (`Zombie.java:212-233`): the base-Zombie half of the underwater
     /// conversion timer that `Husk` also drives (see `HuskEntity::mob_tick`), this time
     /// converting into `Drowned` instead of plain `Zombie`.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self
-                .entity
-                .mob_entity
-                .living_entity
-                .dead
-                .load(Ordering::Relaxed)
-            {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self
+            .entity
+            .mob_entity
+            .living_entity
+            .dead
+            .load(Ordering::Relaxed)
+        {
+            return;
+        }
 
-            let converting_time = self.conversion_time.load(Ordering::Relaxed);
-            if converting_time >= 0 {
-                let new_time = converting_time - 1;
-                self.conversion_time.store(new_time, Ordering::Relaxed);
-                if new_time < 0 {
-                    self.finish_conversion().await;
-                }
-            } else if self
-                .entity
-                .mob_entity
-                .living_entity
-                .entity
-                .touching_water
-                .load(Ordering::Relaxed)
-            {
-                let new_time = self.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
-                if new_time >= WATER_TICKS_TO_START_CONVERSION {
-                    self.in_water_time.store(0, Ordering::Relaxed);
-                    self.conversion_time
-                        .store(CONVERSION_TICKS, Ordering::Relaxed);
-                }
-            } else {
-                self.in_water_time.store(-1, Ordering::Relaxed);
+        let converting_time = self.conversion_time.load(Ordering::Relaxed);
+        if converting_time >= 0 {
+            let new_time = converting_time - 1;
+            self.conversion_time.store(new_time, Ordering::Relaxed);
+            if new_time < 0 {
+                self.finish_conversion();
             }
-        })
+        } else if self
+            .entity
+            .mob_entity
+            .living_entity
+            .entity
+            .touching_water
+            .load(Ordering::Relaxed)
+        {
+            let new_time = self.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
+            if new_time >= WATER_TICKS_TO_START_CONVERSION {
+                self.in_water_time.store(0, Ordering::Relaxed);
+                self.conversion_time
+                    .store(CONVERSION_TICKS, Ordering::Relaxed);
+            }
+        } else {
+            self.in_water_time.store(-1, Ordering::Relaxed);
+        }
     }
 }
 

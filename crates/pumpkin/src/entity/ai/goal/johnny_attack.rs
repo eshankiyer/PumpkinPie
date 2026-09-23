@@ -5,7 +5,7 @@ use std::sync::Arc;
 use pumpkin_data::attributes::Attributes;
 
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture};
+use crate::entity::ai::goal::{Controls, Goal};
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::living::LivingEntity;
 use crate::entity::mob::Mob;
@@ -39,7 +39,7 @@ impl JohnnyAttackGoal {
         }
     }
 
-    async fn find_closest_living_entity(&mut self, mob_entity: &MobEntity) {
+    fn find_closest_living_entity(&mut self, mob_entity: &MobEntity) {
         let follow_range = mob_entity
             .living_entity
             .get_attribute_value(&Attributes::FOLLOW_RANGE);
@@ -85,7 +85,6 @@ impl JohnnyAttackGoal {
                 && self
                     .target_predicate
                     .test(&world, Some(&mob_entity.living_entity), living)
-                    .await
             {
                 self.target = Some(entity);
                 break;
@@ -95,36 +94,30 @@ impl JohnnyAttackGoal {
 }
 
 impl Goal for JohnnyAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !mob
-                .cast_any()
-                .downcast_ref::<VindicatorEntity>()
-                .is_some_and(VindicatorEntity::is_johnny)
-            {
-                return false;
-            }
-            self.find_closest_living_entity(mob.get_mob_entity()).await;
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !mob
+            .cast_any()
+            .downcast_ref::<VindicatorEntity>()
+            .is_some_and(VindicatorEntity::is_johnny)
+        {
+            return false;
+        }
+        self.find_closest_living_entity(mob.get_mob_entity());
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.target = None;
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

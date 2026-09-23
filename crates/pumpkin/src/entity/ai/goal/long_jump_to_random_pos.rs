@@ -31,7 +31,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, breeze_jump::calculate_jump_vector_for_angle};
+use super::{Controls, Goal, breeze_jump::calculate_jump_vector_for_angle};
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::Navigator;
 use crate::entity::mob::Mob;
@@ -204,7 +204,7 @@ impl LongJumpToRandomPosGoal {
 
     /// `LongJumpToRandomPos.pickCandidate` (`LongJumpToRandomPos.java:150-171`), bounded to
     /// `CANDIDATES_PER_TICK` candidates per tick (see the module doc).
-    async fn pick_candidate(&mut self, mob: &dyn Mob) {
+    fn pick_candidate(&mut self, mob: &dyn Mob) {
         for _ in 0..CANDIDATES_PER_TICK {
             let Some(candidate) = self.take_jump_candidate(mob) else {
                 return;
@@ -222,9 +222,11 @@ impl LongJumpToRandomPosGoal {
             let mut navigator = Navigator::default();
             // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
             // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
-            let walkable = navigator
-                .can_reach_within_for_mob(mob, target_pos, MIN_PATHFIND_DISTANCE_TO_VALID_JUMP)
-                .await;
+            let walkable = navigator.can_reach_within_for_mob(
+                mob,
+                target_pos,
+                MIN_PATHFIND_DISTANCE_TO_VALID_JUMP,
+            );
             if walkable {
                 continue;
             }
@@ -243,175 +245,157 @@ impl LongJumpToRandomPosGoal {
 impl Goal for LongJumpToRandomPosGoal {
     /// `LongJumpToRandomPos.checkExtraStartConditions` (`LongJumpToRandomPos.java:92-99`), with
     /// `LONG_JUMP_COOLDOWN_TICKS` as a plain counter.
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.cooldown > 0 {
-                self.cooldown -= 1;
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.cooldown > 0 {
+            self.cooldown -= 1;
+            return false;
+        }
 
-            let entity = mob.get_entity();
-            let on_honey = {
-                let world = entity.world.load();
-                let (block, _) = world.get_block_and_state(&entity.block_pos.load());
-                block.id == pumpkin_data::Block::HONEY_BLOCK.id
-            };
-            let can_start = entity.on_ground.load(Relaxed)
-                && !entity.touching_water.load(Relaxed)
-                && !entity.touching_lava.load(Relaxed)
-                && !on_honey;
+        let entity = mob.get_entity();
+        let on_honey = {
+            let world = entity.world.load();
+            let (block, _) = world.get_block_and_state(&entity.block_pos.load());
+            block.id == pumpkin_data::Block::HONEY_BLOCK.id
+        };
+        let can_start = entity.on_ground.load(Relaxed)
+            && !entity.touching_water.load(Relaxed)
+            && !entity.touching_lava.load(Relaxed)
+            && !on_honey;
 
-            if !can_start {
-                self.cooldown = self.sample_time_between(mob) / 2;
-            }
-            can_start
-        })
+        if !can_start {
+            self.cooldown = self.sample_time_between(mob) / 2;
+        }
+        can_start
     }
 
     /// `LongJumpToRandomPos.start` (`LongJumpToRandomPos.java:112-133`): enumerate every block
     /// in the search box, weighted by squared distance.
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            self.phase = Phase::Searching;
-            self.find_jump_tries = FIND_JUMP_TRIES;
-            self.initial_position = Some(entity.pos.load());
+    fn start(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        self.phase = Phase::Searching;
+        self.find_jump_tries = FIND_JUMP_TRIES;
+        self.initial_position = Some(entity.pos.load());
 
-            let mob_pos = entity.block_pos.load();
-            let width = self.max_long_jump_width;
-            let height = self.max_long_jump_height;
-            self.candidates.clear();
-            self.total_weight = 0;
-            for dx in -width..=width {
-                for dy in -height..=height {
-                    for dz in -width..=width {
-                        if dx == 0 && dy == 0 && dz == 0 {
-                            continue;
-                        }
-                        // `Mth.ceil(mobPos.distSqr(pos))` over integer offsets is exact.
-                        let weight = dx * dx + dy * dy + dz * dz;
-                        self.candidates.push(PossibleJump {
-                            target: BlockPos::new(
-                                mob_pos.0.x + dx,
-                                mob_pos.0.y + dy,
-                                mob_pos.0.z + dz,
-                            ),
-                            weight,
-                        });
-                        self.total_weight += weight;
+        let mob_pos = entity.block_pos.load();
+        let width = self.max_long_jump_width;
+        let height = self.max_long_jump_height;
+        self.candidates.clear();
+        self.total_weight = 0;
+        for dx in -width..=width {
+            for dy in -height..=height {
+                for dz in -width..=width {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        continue;
                     }
+                    // `Mth.ceil(mobPos.distSqr(pos))` over integer offsets is exact.
+                    let weight = dx * dx + dy * dy + dz * dz;
+                    self.candidates.push(PossibleJump {
+                        target: BlockPos::new(mob_pos.0.x + dx, mob_pos.0.y + dy, mob_pos.0.z + dz),
+                        weight,
+                    });
+                    self.total_weight += weight;
                 }
             }
-        })
+        }
     }
 
     /// `LongJumpToRandomPos.canStillUse` (`LongJumpToRandomPos.java:101-110`) while searching or
     /// preparing; `LongJumpMidJump.canStillUse` (`LongJumpMidJump.java:24-26`) once launched.
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            if let Phase::MidJump { ticks } = self.phase {
-                return ticks < MID_JUMP_TIME_OUT
-                    && (ticks < MIN_AIRBORNE_TICKS || !entity.on_ground.load(Relaxed));
-            }
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        if let Phase::MidJump { ticks } = self.phase {
+            return ticks < MID_JUMP_TIME_OUT
+                && (ticks < MIN_AIRBORNE_TICKS || !entity.on_ground.load(Relaxed));
+        }
 
-            let still_put = self.initial_position == Some(entity.pos.load());
-            let has_work =
-                matches!(self.phase, Phase::Preparing { .. }) || !self.candidates.is_empty();
-            still_put
-                && self.find_jump_tries > 0
-                && !entity.touching_water.load(Relaxed)
-                && has_work
-        })
+        let still_put = self.initial_position == Some(entity.pos.load());
+        let has_work = matches!(self.phase, Phase::Preparing { .. }) || !self.candidates.is_empty();
+        still_put && self.find_jump_tries > 0 && !entity.touching_water.load(Relaxed) && has_work
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            match self.phase {
-                Phase::Searching => {
-                    self.find_jump_tries -= 1;
-                    self.pick_candidate(mob).await;
-                }
-                Phase::Preparing { velocity, ticks } => {
-                    if ticks < PREPARE_JUMP_DURATION {
-                        self.phase = Phase::Preparing {
-                            velocity,
-                            ticks: ticks + 1,
-                        };
-                        return;
-                    }
-
-                    // `body.setYRot(body.yBodyRot)` then the launch itself.
-                    entity.yaw.store(entity.head_yaw.load());
-                    entity.velocity.store(velocity);
-                    // `LongJumpToRandomPos` enables friction discard for the launched arc
-                    // (`LongJumpToRandomPos.java:137-146`).
-                    mob.get_mob_entity()
-                        .living_entity
-                        .set_discard_friction(true);
-                    entity.set_pose(EntityPose::LongJumping);
-                    mob.get_mob_entity()
-                        .living_entity
-                        .set_discard_friction(true);
-                    entity.world.load().play_sound(
-                        (self.jump_sound)(mob),
-                        SoundCategory::Neutral,
-                        &entity.pos.load(),
-                    );
-                    self.phase = Phase::MidJump { ticks: 0 };
-                }
-                Phase::MidJump { ticks } => {
-                    self.phase = Phase::MidJump { ticks: ticks + 1 };
-                }
+    fn tick(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        match self.phase {
+            Phase::Searching => {
+                self.find_jump_tries -= 1;
+                self.pick_candidate(mob);
             }
-        })
+            Phase::Preparing { velocity, ticks } => {
+                if ticks < PREPARE_JUMP_DURATION {
+                    self.phase = Phase::Preparing {
+                        velocity,
+                        ticks: ticks + 1,
+                    };
+                    return;
+                }
+
+                // `body.setYRot(body.yBodyRot)` then the launch itself.
+                entity.yaw.store(entity.head_yaw.load());
+                entity.velocity.store(velocity);
+                // `LongJumpToRandomPos` enables friction discard for the launched arc
+                // (`LongJumpToRandomPos.java:137-146`).
+                mob.get_mob_entity()
+                    .living_entity
+                    .set_discard_friction(true);
+                entity.set_pose(EntityPose::LongJumping);
+                mob.get_mob_entity()
+                    .living_entity
+                    .set_discard_friction(true);
+                entity.world.load().play_sound(
+                    (self.jump_sound)(mob),
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
+                );
+                self.phase = Phase::MidJump { ticks: 0 };
+            }
+            Phase::MidJump { ticks } => {
+                self.phase = Phase::MidJump { ticks: ticks + 1 };
+            }
+        }
     }
 
     /// `LongJumpMidJump.stop` (`LongJumpMidJump.java:33-43`) for a completed leap, and
     /// `LongJumpToRandomPos.canStillUse`'s half-cooldown for an abandoned search
     /// (`LongJumpToRandomPos.java:106`).
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let launched = matches!(self.phase, Phase::MidJump { .. });
+    fn stop(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let launched = matches!(self.phase, Phase::MidJump { .. });
 
-            if launched {
-                if entity.on_ground.load(Relaxed) {
-                    let velocity = entity.velocity.load();
-                    entity.velocity.store(velocity.multiply(0.1, 1.0, 0.1));
-                    entity.world.load().play_sound(
-                        self.landing_sound,
-                        SoundCategory::Neutral,
-                        &entity.pos.load(),
-                    );
-                }
-                mob.get_mob_entity()
-                    .living_entity
-                    .set_discard_friction(false);
-                self.cooldown = self.sample_time_between(mob);
-                // `LongJumpMidJump.stop` clears friction discard after landing
-                // (`LongJumpMidJump.java:33-40`).
-                mob.get_mob_entity()
-                    .living_entity
-                    .set_discard_friction(false);
-            } else {
-                self.cooldown = self.sample_time_between(mob) / 2;
-            }
-
-            if entity.pose.load() == EntityPose::LongJumping {
-                entity.set_pose(EntityPose::Standing);
+        if launched {
+            if entity.on_ground.load(Relaxed) {
+                let velocity = entity.velocity.load();
+                entity.velocity.store(velocity.multiply(0.1, 1.0, 0.1));
+                entity.world.load().play_sound(
+                    self.landing_sound,
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
+                );
             }
             mob.get_mob_entity()
                 .living_entity
                 .set_discard_friction(false);
+            self.cooldown = self.sample_time_between(mob);
+            // `LongJumpMidJump.stop` clears friction discard after landing
+            // (`LongJumpMidJump.java:33-40`).
+            mob.get_mob_entity()
+                .living_entity
+                .set_discard_friction(false);
+        } else {
+            self.cooldown = self.sample_time_between(mob) / 2;
+        }
 
-            self.phase = Phase::Searching;
-            self.candidates.clear();
-            self.total_weight = 0;
-            self.initial_position = None;
-            self.find_jump_tries = 0;
-        })
+        if entity.pose.load() == EntityPose::LongJumping {
+            entity.set_pose(EntityPose::Standing);
+        }
+        mob.get_mob_entity()
+            .living_entity
+            .set_discard_friction(false);
+
+        self.phase = Phase::Searching;
+        self.candidates.clear();
+        self.total_weight = 0;
+        self.initial_position = None;
+        self.find_jump_tries = 0;
     }
 
     fn should_run_every_tick(&self) -> bool {

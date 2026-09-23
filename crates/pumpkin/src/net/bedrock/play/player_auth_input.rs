@@ -21,7 +21,7 @@ impl BedrockClient {
         let entity = player.get_entity();
         let on_ground = packet.input_data.get(InputData::VerticalCollision as usize)
             && packet.delta.y < 0.0
-            && !entity.has_vehicle().await;
+            && !entity.has_vehicle();
         entity.on_ground.store(on_ground, Ordering::Relaxed);
 
         let new_pos = packet
@@ -50,7 +50,7 @@ impl BedrockClient {
                 entity.yaw.store(new_yaw);
                 // `Entity.turn` notifies the vehicle after passenger rotation changes
                 // (`Entity.java:490-501`).
-                entity.notify_vehicle_of_turn().await;
+                entity.notify_vehicle_of_turn();
             }
 
             let je_yaw = (new_yaw * 256.0 / 360.0).rem_euclid(256.0);
@@ -147,7 +147,7 @@ impl BedrockClient {
             }
 
             if pos_changed {
-                chunker::update_position(player).await;
+                chunker::update_position(player);
                 player.progress_motion(delta).await;
             }
         }
@@ -155,54 +155,54 @@ impl BedrockClient {
         let input_data = packet.input_data;
 
         if input_data.get(InputData::StartSprinting as usize) {
-            entity.set_sprinting(true).await;
+            entity.set_sprinting(true);
         } else if input_data.get(InputData::StopSprinting as usize) {
-            entity.set_sprinting(false).await;
+            entity.set_sprinting(false);
         }
 
         if input_data.get(InputData::StartSneaking as usize) {
-            entity.set_sneaking(true).await;
+            entity.set_sneaking(true);
         } else if input_data.get(InputData::StopSneaking as usize) {
-            entity.set_sneaking(false).await;
+            entity.set_sneaking(false);
         }
 
         if input_data.get(InputData::StartCrawling as usize) {
             entity.set_pose(EntityPose::Swimming);
         } else if input_data.get(InputData::StopCrawling as usize) {
-            player.update_player_pose().await;
+            player.update_player_pose();
         }
 
         if input_data.get(InputData::StartFlying as usize) {
-            let flying = { player.abilities.lock().await.flying };
+            let flying = { player.abilities.lock().flying };
             if !flying {
                 send_cancellable! {{
                     server;
                     PlayerToggleFlightEvent::new(player.clone(), true);
                     'after: {
                         {
-                            player.abilities.lock().await.flying = true;
+                            player.abilities.lock().flying = true;
                         };
-                        player.send_abilities_update().await;
+                        player.send_abilities_update();
                     }
                     'cancelled: {
-                        player.send_abilities_update().await;
+                        player.send_abilities_update();
                     }
                 }}
             }
         } else if input_data.get(InputData::StopFlying as usize) {
-            let flying = { player.abilities.lock().await.flying };
+            let flying = { player.abilities.lock().flying };
             if flying {
                 send_cancellable! {{
                     server;
                     PlayerToggleFlightEvent::new(player.clone(), false);
                     'after: {
                         {
-                            player.abilities.lock().await.flying = false;
+                            player.abilities.lock().flying = false;
                         };
-                        player.send_abilities_update().await;
+                        player.send_abilities_update();
                     }
                     'cancelled: {
-                        player.send_abilities_update().await;
+                        player.send_abilities_update();
                     }
                 }}
             }

@@ -3,10 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::plugin::player::egg_throw::PlayerEggThrowEvent;
 use crate::{
-    entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, projectile::ThrownItemEntity,
-        r#type::from_type,
-    },
+    entity::{Entity, EntityBase, NBTStorage, projectile::ThrownItemEntity, r#type::from_type},
     server::Server,
 };
 use pumpkin_data::entity::{EntityStatus, EntityType};
@@ -16,7 +13,7 @@ use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 use uuid::Uuid;
 
 const MAX_EGG_HATCH_EVENT_SPAWNS: usize = 16;
@@ -57,8 +54,11 @@ impl EggEntity {
     }
 
     /// Set the item stack shown by this thrown egg
-    pub async fn set_item_stack(&self, item_stack: ItemStack) {
-        let mut write = self.item_stack.write().await;
+    pub fn set_item_stack(&self, item_stack: ItemStack) {
+        let mut write = self
+            .item_stack
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *write = item_stack;
     }
 }
@@ -66,28 +66,25 @@ impl EggEntity {
 impl NBTStorage for EggEntity {}
 
 impl EntityBase for EggEntity {
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let stack = self.item_stack.read().await;
+    fn init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let stack = self
+            .item_stack
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            // Sync the item stack so the client renders the correct color/variant
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::egg::ITEM_STACK,
-                    &ItemStackSerializer::from(stack.clone()),
-                )],
-                None,
-            );
-        })
+        // Sync the item stack so the client renders the correct color/variant
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::egg::ITEM_STACK,
+                &ItemStackSerializer::from(stack.clone()),
+            )],
+            None,
+        );
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move { self.thrown.process_tick(caller, server).await })
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        self.thrown.process_tick(caller, server)
     }
 
     fn get_entity(&self) -> &Entity {
@@ -102,96 +99,96 @@ impl EntityBase for EggEntity {
         self
     }
 
-    fn on_hit(&self, hit: crate::entity::projectile::ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let world = self.get_entity().world.load();
-            let hit_pos = hit.hit_pos();
-            let normal = hit.normal();
+    fn on_hit(&self, hit: crate::entity::projectile::ProjectileHit) {
+        let world = self.get_entity().world.load();
+        let hit_pos = hit.hit_pos();
+        let normal = hit.normal();
 
-            // Chicken spawn position offset slightly from hit position
-            let spawn_pos = hit_pos.add(&normal.multiply(0.5, 0.5, 0.5));
+        // Chicken spawn position offset slightly from hit position
+        let spawn_pos = hit_pos.add(&normal.multiply(0.5, 0.5, 0.5));
 
-            // Play egg break particles
-            world.send_entity_status(
-                self.get_entity(),
-                EntityStatus::Death,
-                Some(ActorEventID::Death),
-            );
+        // Play egg break particles
+        world.send_entity_status(
+            self.get_entity(),
+            EntityStatus::Death,
+            Some(ActorEventID::Death),
+        );
 
-            // `ThrownEgg.onHitEntity`: a zero-damage hurt still flinches the target, plays its
-            // hurt sound and makes it retaliate, which is why an egg annoys a mob it hits.
-            if let crate::entity::projectile::ProjectileHit::Entity { ref entity, .. } = hit {
-                let entity_clone = entity.clone();
-                tokio::spawn(async move {
-                    entity_clone
-                        .damage(
-                            entity_clone.as_ref(),
-                            0.0,
-                            pumpkin_data::damage::DamageType::THROWN,
-                        )
-                        .await;
-                });
-            }
-
-            // Decide spawn count per probabilities:
-            // r == 0 -> spawn 4 (1/256)
-            // r in 1..31 -> spawn 1 (31/256)
-            // else -> 0
-            let r: u8 = rand::random(); // 0..=255
-            let mut to_spawn = if r == 0 { 4usize } else { usize::from(r < 32) };
-            let mut hatching = to_spawn > 0;
-            let mut hatching_type: &'static EntityType = &EntityType::CHICKEN;
-
-            if let Some(owner_id) = self.thrown.owner_id
-                && let Some(player) = world.get_player_by_id(owner_id)
-                && let Some(server) = world.server.upgrade()
-            {
-                let mut event = PlayerEggThrowEvent::new(
-                    player,
-                    self.get_entity().entity_uuid,
-                    hatching,
-                    to_spawn as u8,
-                    hatching_type,
+        // `ThrownEgg.onHitEntity`: a zero-damage hurt still flinches the target, plays its
+        // hurt sound and makes it retaliate, which is why an egg annoys a mob it hits.
+        if let crate::entity::projectile::ProjectileHit::Entity { ref entity, .. } = hit {
+            let entity_clone = entity.clone();
+            tokio::spawn(async move {
+                entity_clone.damage(
+                    entity_clone.as_ref(),
+                    0.0,
+                    pumpkin_data::damage::DamageType::THROWN,
                 );
-                server.plugin_manager.fire(&server, &mut event).await;
-                if event.cancelled {
-                    hatching = false;
-                } else {
-                    hatching = event.hatching;
-                    to_spawn = (event.num_hatches as usize).min(MAX_EGG_HATCH_EVENT_SPAWNS);
-                    hatching_type = event.hatching_type;
-                }
+            });
+        }
+
+        // Decide spawn count per probabilities:
+        // r == 0 -> spawn 4 (1/256)
+        // r in 1..31 -> spawn 1 (31/256)
+        // else -> 0
+        let r: u8 = rand::random(); // 0..=255
+        let mut to_spawn = if r == 0 { 4usize } else { usize::from(r < 32) };
+        let mut hatching = to_spawn > 0;
+        let mut hatching_type: &'static EntityType = &EntityType::CHICKEN;
+
+        if let Some(owner_id) = self.thrown.owner_id
+            && let Some(player) = world.get_player_by_id(owner_id)
+            && let Some(server) = world.server.upgrade()
+        {
+            let mut event = PlayerEggThrowEvent::new(
+                player,
+                self.get_entity().entity_uuid,
+                hatching,
+                to_spawn as u8,
+                hatching_type,
+            );
+            server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                hatching = false;
+            } else {
+                hatching = event.hatching;
+                to_spawn = (event.num_hatches as usize).min(MAX_EGG_HATCH_EVENT_SPAWNS);
+                hatching_type = event.hatching_type;
             }
+        }
 
-            // Spawn chickens in a separate task to prevent stack overflow
-            if hatching && to_spawn > 0 {
-                let world_clone = world.clone();
-                let spawn_pos_clone = spawn_pos;
+        // Spawn chickens in a separate task to prevent stack overflow
+        if hatching && to_spawn > 0 {
+            let world_clone = world.clone();
+            let spawn_pos_clone = spawn_pos;
 
-                let variant_name = {
-                    let stack = self.item_stack.read().await;
-                    stack.get_data_component::<pumpkin_data::data_component_impl::ChickenVariantImpl>()
-                        .map(|comp| comp.value.clone())
-                };
+            let variant_name = {
+                let stack = self
+                    .item_stack
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                stack
+                    .get_data_component::<pumpkin_data::data_component_impl::ChickenVariantImpl>()
+                    .map(|comp| comp.value.clone())
+            };
 
-                tokio::spawn(async move {
-                    for _ in 0..to_spawn {
-                        let mob =
-                            from_type(hatching_type, spawn_pos_clone, &world_clone, Uuid::new_v4());
+            tokio::spawn(async move {
+                for _ in 0..to_spawn {
+                    let mob =
+                        from_type(hatching_type, spawn_pos_clone, &world_clone, Uuid::new_v4());
 
-                        let yaw = rand::random::<f32>() * 360.0;
-                        let new_entity = mob.get_entity();
-                        new_entity.set_rotation(yaw, 0.0);
-                        new_entity.set_age(-24000);
-                        if let Some(name) = &variant_name {
-                            mob.set_variant_name(name);
-                        }
-
-                        world_clone.spawn_entity(mob).await;
+                    let yaw = rand::random::<f32>() * 360.0;
+                    let new_entity = mob.get_entity();
+                    new_entity.set_rotation(yaw, 0.0);
+                    new_entity.set_age(-24000);
+                    if let Some(name) = &variant_name {
+                        mob.set_variant_name(name);
                     }
-                });
-            }
-        })
+
+                    world_clone.spawn_entity(mob);
+                }
+            });
+        }
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {

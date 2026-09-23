@@ -13,7 +13,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         ambient_stand::AmbientStandGoal, follow_parent::FollowParentGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -138,30 +138,26 @@ impl SkeletonHorseEntity {
 }
 
 impl NBTStorage for SkeletonHorseEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            self.write_horse_nbt(nbt);
-            nbt.put_bool("SkeletonTrap", self.is_trap.load(Ordering::Relaxed));
-            nbt.put_int("SkeletonTrapTime", self.trap_time.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        self.write_horse_nbt(nbt);
+        nbt.put_bool("SkeletonTrap", self.is_trap.load(Ordering::Relaxed));
+        nbt.put_int("SkeletonTrapTime", self.trap_time.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            self.read_horse_nbt(nbt);
-            self.is_trap.store(
-                nbt.get_bool("SkeletonTrap").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.trap_time.store(
-                nbt.get_int("SkeletonTrapTime").unwrap_or(0),
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_animal_nbt(nbt);
+        self.read_horse_nbt(nbt);
+        self.is_trap.store(
+            nbt.get_bool("SkeletonTrap").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.trap_time.store(
+            nbt.get_int("SkeletonTrapTime").unwrap_or(0),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -202,7 +198,7 @@ impl Mob for SkeletonHorseEntity {
     }
 
     // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
-    fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
+    fn can_jump(&self) -> bool {
         AbstractHorse::can_jump_now(self)
     }
 
@@ -226,7 +222,7 @@ impl Mob for SkeletonHorseEntity {
         AbstractHorse::on_elastic_leash_pull(self);
     }
 
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
         AbstractHorse::custom_travel(self, caller)
     }
 
@@ -248,7 +244,7 @@ impl Mob for SkeletonHorseEntity {
         )
     }
 
-    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+    fn has_controlling_passenger(&self) -> bool {
         AbstractHorse::has_saddled_player_passenger(self)
     }
 
@@ -257,17 +253,11 @@ impl Mob for SkeletonHorseEntity {
     /// skeleton horse cannot be fed/ridden/opened at all until tamed by some other mechanism
     /// (this fully replaces `AbstractHorse::abstract_horse_mob_interact`'s feed/makeMad path
     /// when untamed, it doesn't just skip the ride step).
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if !self.is_tamed() {
-                return false;
-            }
-            self.abstract_horse_mob_interact(player, item_stack).await
-        })
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if !self.is_tamed() {
+            return false;
+        }
+        self.abstract_horse_mob_interact(player, item_stack)
     }
 
     fn mob_tick<'a>(
@@ -275,7 +265,7 @@ impl Mob for SkeletonHorseEntity {
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            self.tick_horse_ai().await;
+            self.tick_horse_ai();
             // Vanilla: `SkeletonHorse.aiStep` -- an untriggered trap horse despawns after
             // `TRAP_MAX_LIFE` ticks. `isPersistenceRequired` gating is skipped (Pumpkin doesn't
             // expose that flag to entities generically here); this only matters once something
@@ -283,7 +273,7 @@ impl Mob for SkeletonHorseEntity {
             if self.is_trap.load(Ordering::Relaxed) {
                 let elapsed = self.trap_time.fetch_add(1, Ordering::Relaxed) + 1;
                 if elapsed >= TRAP_MAX_LIFE {
-                    self.mob_entity.living_entity.entity.remove().await;
+                    self.mob_entity.living_entity.entity.remove();
                 }
             }
         })

@@ -2,7 +2,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
-use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::living::LivingEntity;
 use crate::entity::mob::Mob;
@@ -93,9 +92,12 @@ impl TrackTargetGoal {
 
     /// Vanilla `Entity.isAlliedTo`: scoreboard teams plus the owner alliance supplied by
     /// `TamableAnimal.considersEntityAsAlly`.
-    pub async fn is_allied(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+    pub fn is_allied(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
         let world = mob.get_entity().world.load();
-        let scoreboard = world.scoreboard.lock().await;
+        let scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mob_team = team_name(&world, &scoreboard, mob, &mut HashSet::new());
         let target_team = team_name(&world, &scoreboard, target, &mut HashSet::new());
         let same_team = mob_team.is_some() && mob_team == target_team;
@@ -128,7 +130,7 @@ impl TrackTargetGoal {
         self
     }
 
-    async fn can_navigate_to_entity(&self, mob: &dyn Mob, target: &LivingEntity) -> bool {
+    fn can_navigate_to_entity(&self, mob: &dyn Mob, target: &LivingEntity) -> bool {
         let cooldown = to_goal_ticks(10 + mob.get_random().random_range(0..5));
         self.check_can_navigate_cooldown
             .store(cooldown, Ordering::Relaxed);
@@ -140,7 +142,7 @@ impl TrackTargetGoal {
         };
         // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
         // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
-        navigator.can_reach_entity_for_mob(mob, target).await
+        navigator.can_reach_entity_for_mob(mob, target)
     }
 
     fn remembers_visible_target(&self, has_line_of_sight: bool) -> bool {
@@ -154,7 +156,7 @@ impl TrackTargetGoal {
     }
 
     /// Equivalent to Vanilla's `canAttack` check inside `TargetGoal`
-    pub async fn can_track(&mut self, mob: &dyn Mob, target: Option<&LivingEntity>) -> bool {
+    pub fn can_track(&mut self, mob: &dyn Mob, target: Option<&LivingEntity>) -> bool {
         let Some(target) = target else {
             return false;
         };
@@ -177,7 +179,6 @@ impl TrackTargetGoal {
         if !self
             .target_predicate
             .test(&world, Some(&mob_entity.living_entity), target)
-            .await
         {
             return false;
         }
@@ -199,7 +200,7 @@ impl TrackTargetGoal {
             }
 
             if self.can_navigate_flag.load(Ordering::Relaxed) == UNSET {
-                let can_reach = self.can_navigate_to_entity(mob, target).await;
+                let can_reach = self.can_navigate_to_entity(mob, target);
                 self.can_navigate_flag.store(
                     if can_reach { CAN_TRACK } else { CANNOT_TRACK },
                     Ordering::Relaxed,
@@ -216,77 +217,75 @@ impl TrackTargetGoal {
 }
 
 impl Goal for TrackTargetGoal {
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let mob_entity = mob.get_mob_entity();
-            let target_arc = mob_entity.target.lock().await.clone();
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        let target_arc = mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
-            let Some(target_base) = target_arc else {
-                return false;
-            };
+        let Some(target_base) = target_arc else {
+            return false;
+        };
 
-            let Some(target) = target_base.get_living_entity() else {
-                return false;
-            };
+        let Some(target) = target_base.get_living_entity() else {
+            return false;
+        };
 
-            if !target.entity.is_alive() {
+        if !target.entity.is_alive() {
+            return false;
+        }
+
+        if !self.can_track(mob, Some(target)) {
+            return false;
+        }
+
+        if Self::is_allied(mob, target_base.as_ref()) {
+            return false;
+        }
+
+        let dist_sq = mob_entity
+            .living_entity
+            .entity
+            .pos
+            .load()
+            .squared_distance_to_vec(&target.entity.pos.load());
+
+        // Get follow range attribute value and check if target is within range
+        let follow_range = mob_entity
+            .living_entity
+            .get_attribute_value(&Attributes::FOLLOW_RANGE)
+            * self.follow_distance_multiplier;
+
+        if dist_sq > follow_range * follow_range {
+            return false;
+        }
+
+        if self.check_visibility {
+            // TargetGoal uses LivingEntity.hasLineOfSight, which clips
+            // against block collision shapes. Testing `is_solid()` here
+            // incorrectly treats outline-only blocks such as fences as
+            // transparent.
+            let has_line_of_sight = mob_entity.has_line_of_sight(target_base.as_ref());
+
+            if !self.remembers_visible_target(has_line_of_sight) {
                 return false;
             }
+        }
 
-            if !self.can_track(mob, Some(target)).await {
-                return false;
-            }
-
-            if Self::is_allied(mob, target_base.as_ref()).await {
-                return false;
-            }
-
-            let dist_sq = mob_entity
-                .living_entity
-                .entity
-                .pos
-                .load()
-                .squared_distance_to_vec(&target.entity.pos.load());
-
-            // Get follow range attribute value and check if target is within range
-            let follow_range = mob_entity
-                .living_entity
-                .get_attribute_value(&Attributes::FOLLOW_RANGE)
-                * self.follow_distance_multiplier;
-
-            if dist_sq > follow_range * follow_range {
-                return false;
-            }
-
-            if self.check_visibility {
-                // TargetGoal uses LivingEntity.hasLineOfSight, which clips
-                // against block collision shapes. Testing `is_solid()` here
-                // incorrectly treats outline-only blocks such as fences as
-                // transparent.
-                let has_line_of_sight = mob_entity.has_line_of_sight(target_base.as_ref()).await;
-
-                if !self.remembers_visible_target(has_line_of_sight) {
-                    return false;
-                }
-            }
-
-            mob.set_mob_target(Some(target_base.clone())).await;
-            true
-        })
+        mob.set_mob_target(Some(target_base.clone()));
+        true
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.can_navigate_flag.store(UNSET, Ordering::Relaxed);
-            self.check_can_navigate_cooldown.store(0, Ordering::Relaxed);
-            self.time_without_visibility.store(0, Ordering::Relaxed);
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.can_navigate_flag.store(UNSET, Ordering::Relaxed);
+        self.check_can_navigate_cooldown.store(0, Ordering::Relaxed);
+        self.time_without_visibility.store(0, Ordering::Relaxed);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(None).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(None);
     }
 
     fn controls(&self) -> Controls {

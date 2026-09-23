@@ -1,8 +1,8 @@
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, CanPlaceAtArgs, CanUpdateAtArgs,
-        GetStateForNeighborUpdateArgs, OnPlaceArgs, RandomTickArgs, UseWithItemArgs,
-        blocks::abstract_multiface::can_attach_to, registry::BlockActionResult,
+        BlockBehaviour, CanPlaceAtArgs, CanUpdateAtArgs, GetStateForNeighborUpdateArgs,
+        OnPlaceArgs, RandomTickArgs, UseWithItemArgs, blocks::abstract_multiface::can_attach_to,
+        registry::BlockActionResult,
     },
     entity::{EntityBase, player::Player},
     world::World,
@@ -27,48 +27,43 @@ const MAX_FACES: usize = 5;
 
 impl BlockBehaviour for VineBlock {
     /// `VineBlock.randomTick` (`VineBlock.java:169-248`).
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !args.world.level_info.load().game_rules.spread_vines {
-                return;
-            }
-            if rand::rng().random_range(0..4) != 0 {
-                return;
-            }
-            spread(args.world, args.position).await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if !args.world.level_info.load().game_rules.spread_vines {
+            return;
+        }
+        if rand::rng().random_range(0..4) != 0 {
+            return;
+        }
+        spread(args.world, args.position);
     }
 
     /// `VineBlock.getStateForPlacement` (`VineBlock.java:289-305`): the first non-`DOWN` face,
     /// in the player's nearest-looking order, that is free and can be supported.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let (clicked_block, clicked_state_id) =
-                args.world.get_block_and_state_id(args.position);
-            let clicked_is_vine = clicked_block == &Block::VINE;
-            let result = if clicked_is_vine {
-                VineLikeProperties::from_state_id(clicked_state_id, args.block)
-            } else {
-                VineLikeProperties::default(args.block)
-            };
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let (clicked_block, clicked_state_id) = args.world.get_block_and_state_id(args.position);
+        let clicked_is_vine = clicked_block == &Block::VINE;
+        let result = if clicked_is_vine {
+            VineLikeProperties::from_state_id(clicked_state_id, args.block)
+        } else {
+            VineLikeProperties::default(args.block)
+        };
 
-            for direction in
-                get_nearest_looking_directions(args.player, clicked_is_vine, args.direction)
+        for direction in
+            get_nearest_looking_directions(args.player, clicked_is_vine, args.direction)
+        {
+            if direction != BlockDirection::Down
+                && !(clicked_is_vine && face(result, direction))
+                && can_support_at_face(args.world, args.position, direction)
             {
-                if direction != BlockDirection::Down
-                    && !(clicked_is_vine && face(result, direction))
-                    && can_support_at_face(args.world, args.position, direction)
-                {
-                    return with_face(result, direction, true).to_state_id(args.block);
-                }
+                return with_face(result, direction, true).to_state_id(args.block);
             }
+        }
 
-            if clicked_is_vine && count_faces(&result) > 0 {
-                result.to_state_id(args.block)
-            } else {
-                Block::AIR.default_state.id
-            }
-        })
+        if clicked_is_vine && count_faces(&result) > 0 {
+            result.to_state_id(args.block)
+        } else {
+            Block::AIR.default_state.id
+        }
     }
 
     /// Mirrors `getStateForPlacement` returning non-null (`VineBlock.java:289-305`).
@@ -127,26 +122,24 @@ impl BlockBehaviour for VineBlock {
     }
 
     /// `VineBlock.updateShape` (`VineBlock.java:147-163`).
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if args.direction == BlockDirection::Down {
-                return args.state_id;
-            }
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if args.direction == BlockDirection::Down {
+            return args.state_id;
+        }
 
-            let updated = get_updated_state(
-                VineLikeProperties::from_state_id(args.state_id, args.block),
-                args.world,
-                args.position,
-            );
-            if count_faces(&updated) == 0 {
-                Block::AIR.default_state.id
-            } else {
-                updated.to_state_id(args.block)
-            }
-        })
+        let updated = get_updated_state(
+            VineLikeProperties::from_state_id(args.state_id, args.block),
+            args.world,
+            args.position,
+        );
+        if count_faces(&updated) == 0 {
+            Block::AIR.default_state.id
+        } else {
+            updated.to_state_id(args.block)
+        }
     }
 
     /// `VineBlock.canBeReplaced` (`VineBlock.java:283-287`): a vine accepts another vine while
@@ -160,40 +153,32 @@ impl BlockBehaviour for VineBlock {
         count_faces(&props) < MAX_FACES
     }
 
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if args.item_stack.item.id != Item::VINE.id {
-                return BlockActionResult::Pass;
-            }
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        if args.item_stack.item.id != Item::VINE.id {
+            return BlockActionResult::Pass;
+        }
 
-            let state = args.world.get_block_state(args.position);
-            let props = VineLikeProperties::from_state_id(state.id, args.block);
-            if count_faces(&props) >= MAX_FACES {
-                return BlockActionResult::Pass;
-            }
+        let state = args.world.get_block_state(args.position);
+        let props = VineLikeProperties::from_state_id(state.id, args.block);
+        if count_faces(&props) >= MAX_FACES {
+            return BlockActionResult::Pass;
+        }
 
-            for direction in get_nearest_looking_directions(args.player, true, BlockDirection::Down)
+        for direction in get_nearest_looking_directions(args.player, true, BlockDirection::Down) {
+            if direction != BlockDirection::Down
+                && !face(props, direction)
+                && can_support_at_face(&**args.world, args.position, direction)
             {
-                if direction != BlockDirection::Down
-                    && !face(props, direction)
-                    && can_support_at_face(&**args.world, args.position, direction)
-                {
-                    args.world
-                        .set_block_state(
-                            args.position,
-                            with_face(props, direction, true).to_state_id(args.block),
-                            BlockFlags::NOTIFY_ALL,
-                        )
-                        .await;
-                    return BlockActionResult::Consume;
-                }
+                args.world.set_block_state(
+                    args.position,
+                    with_face(props, direction, true).to_state_id(args.block),
+                    BlockFlags::NOTIFY_ALL,
+                );
+                return BlockActionResult::Consume;
             }
+        }
 
-            BlockActionResult::Pass
-        })
+        BlockActionResult::Pass
     }
 
     /// `VineBlock.rotate` (`VineBlock.java:312-328`).
@@ -447,7 +432,7 @@ fn copy_random_faces(from: VineLikeProperties, mut to: VineLikeProperties) -> Vi
 /// `VineBlock.randomTick`'s body (`VineBlock.java:171-247`), entered once the
 /// `nextInt(4) == 0` gate and the `spreadVines` game rule have both passed.
 #[expect(clippy::too_many_lines)]
-async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
+fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
     let (block, state_id) = world.get_block_and_state_id(pos);
     if block != &Block::VINE {
         return;
@@ -470,9 +455,9 @@ async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
             let ccw_test_pos = test_pos.offset(ccw.to_offset());
 
             if cw_connected && is_acceptable_neighbour(world.as_ref(), &cw_test_pos, cw) {
-                place_vine(world, &test_pos, cw).await;
+                place_vine(world, &test_pos, cw);
             } else if ccw_connected && is_acceptable_neighbour(world.as_ref(), &ccw_test_pos, ccw) {
-                place_vine(world, &test_pos, ccw).await;
+                place_vine(world, &test_pos, ccw);
             } else {
                 let opposite = test_direction.opposite();
                 if cw_connected
@@ -483,7 +468,7 @@ async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
                         opposite,
                     )
                 {
-                    place_vine(world, &cw_test_pos, opposite).await;
+                    place_vine(world, &cw_test_pos, opposite);
                 } else if ccw_connected
                     && world.get_block_state(&ccw_test_pos).is_air()
                     && is_acceptable_neighbour(
@@ -492,22 +477,20 @@ async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
                         opposite,
                     )
                 {
-                    place_vine(world, &ccw_test_pos, opposite).await;
+                    place_vine(world, &ccw_test_pos, opposite);
                 } else if rand::rng().random::<f32>() < 0.05
                     && is_acceptable_neighbour(world.as_ref(), &test_pos.up(), BlockDirection::Up)
                 {
-                    place_vine(world, &test_pos, BlockDirection::Up).await;
+                    place_vine(world, &test_pos, BlockDirection::Up);
                 }
             }
         } else if is_acceptable_neighbour(world.as_ref(), &test_pos, test_direction) {
             let grown = with_face(state, test_direction, true);
-            world
-                .set_block_state(
-                    pos,
-                    grown.to_state_id(&Block::VINE),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
+            world.set_block_state(
+                pos,
+                grown.to_state_id(&Block::VINE),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
         }
         return;
     }
@@ -515,13 +498,11 @@ async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
     if test_direction == BlockDirection::Up && pos.0.y < world.get_top_y() {
         if can_support_at_face(world.as_ref(), pos, test_direction) {
             let grown = with_face(state, BlockDirection::Up, true);
-            world
-                .set_block_state(
-                    pos,
-                    grown.to_state_id(&Block::VINE),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
+            world.set_block_state(
+                pos,
+                grown.to_state_id(&Block::VINE),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
             return;
         }
 
@@ -543,13 +524,11 @@ async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
                 }
             }
             if has_horizontal_connection(above_state) {
-                world
-                    .set_block_state(
-                        &above_pos,
-                        above_state.to_state_id(&Block::VINE),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
+                world.set_block_state(
+                    &above_pos,
+                    above_state.to_state_id(&Block::VINE),
+                    BlockFlags::NOTIFY_LISTENERS,
+                );
             }
             return;
         }
@@ -566,27 +545,23 @@ async fn spread(world: &std::sync::Arc<World>, pos: &BlockPos) {
             };
             let after = copy_random_faces(state, before);
             if before != after && has_horizontal_connection(after) {
-                world
-                    .set_block_state(
-                        &below_pos,
-                        after.to_state_id(&Block::VINE),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
+                world.set_block_state(
+                    &below_pos,
+                    after.to_state_id(&Block::VINE),
+                    BlockFlags::NOTIFY_LISTENERS,
+                );
             }
         }
     }
 }
 
-async fn place_vine(world: &std::sync::Arc<World>, pos: &BlockPos, direction: BlockDirection) {
+fn place_vine(world: &std::sync::Arc<World>, pos: &BlockPos, direction: BlockDirection) {
     let props = with_face(VineLikeProperties::default(&Block::VINE), direction, true);
-    world
-        .set_block_state(
-            pos,
-            props.to_state_id(&Block::VINE),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
+    world.set_block_state(
+        pos,
+        props.to_state_id(&Block::VINE),
+        BlockFlags::NOTIFY_LISTENERS,
+    );
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use super::drowned_util::is_bright_outside;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::ai::pathfinder::pathfinding_context::PathfindingContext;
 use crate::entity::mob::Mob;
@@ -118,54 +118,48 @@ impl DrownedSwimUpGoal {
 }
 
 impl Goal for DrownedSwimUpGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::wants_to_surface(mob) })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::wants_to_surface(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::wants_to_surface(mob) && !self.stuck })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        Self::wants_to_surface(mob) && !self.stuck
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            let pos = entity.pos.load();
-            if pos.y >= f64::from(world.sea_level - 1) {
-                return;
-            }
-            let should_choose = {
-                let navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.is_idle() || navigator.close_to_next_pos(pos)
-            };
-            if !should_choose {
-                return;
-            }
+    fn tick(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        let pos = entity.pos.load();
+        if pos.y >= f64::from(world.sea_level - 1) {
+            return;
+        }
+        let should_choose = {
+            let navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            navigator.is_idle() || navigator.close_to_next_pos(pos)
+        };
+        if !should_choose {
+            return;
+        }
 
-            let Some(destination) = Self::find_surface_pos(mob, &world, pos) else {
-                self.stuck = true;
-                return;
-            };
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap()
-                .set_progress(NavigatorGoal::new(pos, destination, self.speed));
-        })
+        let Some(destination) = Self::find_surface_pos(mob, &world, pos) else {
+            self.stuck = true;
+            return;
+        };
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress(NavigatorGoal::new(pos, destination, self.speed));
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.stuck = false;
-            mob.set_searching_for_land(true);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.stuck = false;
+        mob.set_searching_for_land(true);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.set_searching_for_land(false);
-            self.stuck = false;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.set_searching_for_land(false);
+        self.stuck = false;
     }
 
     fn should_run_every_tick(&self) -> bool {

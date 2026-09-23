@@ -1,4 +1,4 @@
-use std::{pin::Pin, sync::Arc};
+use std::pin::sync::Arc;
 
 use crate::{
     block::blocks::campfire::CampfireBlock,
@@ -131,7 +131,7 @@ pub(crate) fn set_waterlogged(
 /// `limitCreativeStackSize` flag (`ItemUtils.java:16-25`): only the plain fluid-fill path
 /// passes `true`. `Bucketable.bucketMobPickup` always passes `false`
 /// (`Bucketable.java:86`), so catching a mob never dedups against an existing stack.
-async fn give_player_bucket_item(
+fn give_player_bucket_item(
     player: &Player,
     mut item_stack: ItemStack,
     limit_creative_stack_size: bool,
@@ -139,44 +139,47 @@ async fn give_player_bucket_item(
     let item = item_stack.item;
     let is_creative = player.gamemode.load() == GameMode::Creative;
     if limit_creative_stack_size && is_creative {
-        let inventory = player.inventory.main_inventory.read().await;
+        let inventory = player
+            .inventory
+            .main_inventory
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for i in 0..inventory.len() {
-            if player.inventory.main_inventory.read().await[i].item.id == item.id {
+            if player
+                .inventory
+                .main_inventory
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)[i]
+                .item
+                .id
+                == item.id
+            {
                 return;
             }
         }
-        player
-            .inventory
-            .insert_stack_anywhere(&mut item_stack)
-            .await;
+        player.inventory.insert_stack_anywhere(&mut item_stack);
     } else if is_creative {
         // `ItemStack.consume` (ItemStack.java:1082-1084) is a no-op for infinite-materials
         // players, so a creative player's held bucket is never shrunk or replaced here --
         // only the new item is granted.
-        player
-            .inventory
-            .offer_or_drop_stack(item_stack, player)
-            .await;
+        player.inventory.offer_or_drop_stack(item_stack, player);
     } else {
         let item_stack = ItemStack::new(1, item);
-        let mut held_stack = player.inventory.held_item().await;
+        let mut held_stack = player.inventory.held_item();
 
         if held_stack.item_count == 1 {
-            player.inventory.set_held_item(item_stack).await;
+            player.inventory.set_held_item(item_stack);
         } else {
             held_stack.decrement(1);
-            player.inventory.set_held_item(held_stack).await;
-            player
-                .inventory
-                .offer_or_drop_stack(item_stack, player)
-                .await;
+            player.inventory.set_held_item(held_stack);
+            player.inventory.offer_or_drop_stack(item_stack, player);
         }
     }
 }
 
 /// Tries to pick up powder snow, a waterlogged block, or a fluid source block at `block_pos`,
 /// returning the matching filled bucket item on success.
-pub(crate) async fn try_pickup_fluid_at(
+pub(crate) fn try_pickup_fluid_at(
     world: &Arc<World>,
     block_pos: BlockPos,
     user_is_creative: bool,
@@ -184,13 +187,11 @@ pub(crate) async fn try_pickup_fluid_at(
     let (block, state) = world.get_block_and_state_id(&block_pos);
 
     if block == &Block::POWDER_SNOW {
-        world
-            .break_block(
-                &block_pos,
-                None,
-                BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS,
-            )
-            .await;
+        world.break_block(
+            &block_pos,
+            None,
+            BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS,
+        );
         return Some(&Item::POWDER_SNOW_BUCKET);
     }
 
@@ -198,13 +199,11 @@ pub(crate) async fn try_pickup_fluid_at(
     // vanilla `BucketPickup` implementor; picking up a bubble column replaces it with air
     // and yields a water bucket. The column below reconciles through its neighbour update.
     if block == &Block::BUBBLE_COLUMN {
-        world
-            .set_block_state(
-                &block_pos,
-                Block::AIR.default_state.id,
-                BlockFlags::NOTIFY_NEIGHBORS,
-            )
-            .await;
+        world.set_block_state(
+            &block_pos,
+            Block::AIR.default_state.id,
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
         return Some(&Item::WATER_BUCKET);
     }
 
@@ -213,24 +212,18 @@ pub(crate) async fn try_pickup_fluid_at(
             || crate::block::blocks::barrier::can_pickup_liquid(user_is_creative))
     {
         let state_id = set_waterlogged(block, state, false);
-        world
-            .set_block_state(&block_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
-            .await;
+        world.set_block_state(&block_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS);
         world.schedule_fluid_tick(&Fluid::WATER, block_pos, 5, TickPriority::Normal);
         return Some(&Item::WATER_BUCKET);
     }
 
     if state == Block::LAVA.default_state.id || state == Block::WATER.default_state.id {
-        world
-            .break_block(&block_pos, None, BlockFlags::NOTIFY_NEIGHBORS)
-            .await;
-        world
-            .set_block_state(
-                &block_pos,
-                Block::AIR.default_state.id,
-                BlockFlags::NOTIFY_NEIGHBORS,
-            )
-            .await;
+        world.break_block(&block_pos, None, BlockFlags::NOTIFY_NEIGHBORS);
+        world.set_block_state(
+            &block_pos,
+            Block::AIR.default_state.id,
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
         return Some(if state == Block::LAVA.default_state.id {
             &Item::LAVA_BUCKET
         } else {
@@ -245,13 +238,13 @@ pub(crate) async fn try_pickup_fluid_at(
 /// (needed for `GameEvent::FluidPickup`, which vanilla emits at that exact position --
 /// `BucketItem.java:77` -- not always `block_pos` itself, since the waterlogged-neighbor
 /// branch below acts on `target_pos` instead).
-async fn try_pickup_bucket_item(
+fn try_pickup_bucket_item(
     world: &Arc<World>,
     block_pos: BlockPos,
     direction: BlockDirection,
     user_is_creative: bool,
 ) -> Option<(&'static Item, BlockPos)> {
-    if let Some(item) = try_pickup_fluid_at(world, block_pos, user_is_creative).await {
+    if let Some(item) = try_pickup_fluid_at(world, block_pos, user_is_creative) {
         return Some((item, block_pos));
     }
 
@@ -262,9 +255,7 @@ async fn try_pickup_bucket_item(
             || crate::block::blocks::barrier::can_pickup_liquid(user_is_creative))
     {
         let state_id = set_waterlogged(block, state, false);
-        world
-            .set_block_state(&target_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
-            .await;
+        world.set_block_state(&target_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS);
         world.schedule_fluid_tick(&Fluid::WATER, target_pos, 5, TickPriority::Normal);
         return Some((&Item::WATER_BUCKET, target_pos));
     }
@@ -457,11 +448,7 @@ fn read_tropical_fish_variant(
     ))
 }
 
-async fn try_place_powder_snow(
-    world: &Arc<World>,
-    pos: BlockPos,
-    direction: BlockDirection,
-) -> bool {
+fn try_place_powder_snow(world: &Arc<World>, pos: BlockPos, direction: BlockDirection) -> bool {
     let state = world.get_block_state(&pos);
     let target_pos = if state.replaceable() {
         pos
@@ -472,17 +459,15 @@ async fn try_place_powder_snow(
     if !target_state.is_air() && !target_state.is_liquid() && !target_state.replaceable() {
         return false;
     }
-    world
-        .set_block_state(
-            &target_pos,
-            Block::POWDER_SNOW.default_state.id,
-            BlockFlags::NOTIFY_NEIGHBORS,
-        )
-        .await;
+    world.set_block_state(
+        &target_pos,
+        Block::POWDER_SNOW.default_state.id,
+        BlockFlags::NOTIFY_NEIGHBORS,
+    );
     true
 }
 
-pub(crate) async fn try_place_filled_bucket(
+pub(crate) fn try_place_filled_bucket(
     world: &Arc<World>,
     item: &Item,
     pos: BlockPos,
@@ -492,7 +477,6 @@ pub(crate) async fn try_place_filled_bucket(
     let (block, state) = world.get_block_and_state(&pos);
     if item.id == Item::POWDER_SNOW_BUCKET.id {
         return try_place_powder_snow(world, pos, direction)
-            .await
             .then_some(pos.offset(direction.to_offset()));
     }
 
@@ -501,9 +485,7 @@ pub(crate) async fn try_place_filled_bucket(
         && crate::block::blocks::barrier::can_place_liquid(state.id, user_is_creative)
     {
         let state_id = set_waterlogged(block, state.id, true);
-        world
-            .set_block_state(&pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
-            .await;
+        world.set_block_state(&pos, state_id, BlockFlags::NOTIFY_NEIGHBORS);
         world.schedule_fluid_tick(&Fluid::WATER, pos, 5, TickPriority::Normal);
         return Some(pos);
     }
@@ -514,9 +496,7 @@ pub(crate) async fn try_place_filled_bucket(
             || crate::block::blocks::barrier::can_place_liquid(state.id, user_is_creative))
     {
         let state_id = set_waterlogged(block, state.id, true);
-        world
-            .set_block_state(&pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
-            .await;
+        world.set_block_state(&pos, state_id, BlockFlags::NOTIFY_NEIGHBORS);
         world.schedule_fluid_tick(&Fluid::WATER, pos, 5, TickPriority::Normal);
         return Some(pos);
     }
@@ -533,43 +513,39 @@ pub(crate) async fn try_place_filled_bucket(
         }
         if item.id == Item::WATER_BUCKET.id
             && (block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE)
-            && CampfireBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER).await
+            && CampfireBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER)
         {
             return Some(target_pos);
         }
         if item.id == Item::WATER_BUCKET.id
             && block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_CANDLES)
-            && CandleBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER).await
+            && CandleBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER)
         {
             return Some(target_pos);
         }
         let state_id = set_waterlogged(block, state.id, true);
-        world
-            .set_block_state(&target_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
-            .await;
+        world.set_block_state(&target_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS);
         world.schedule_fluid_tick(&Fluid::WATER, target_pos, 5, TickPriority::Normal);
         return Some(target_pos);
     }
 
     if state.id == Block::AIR.default_state.id || state.is_liquid() {
-        world
-            .set_block_state(
-                &target_pos,
-                if item.id == Item::LAVA_BUCKET.id {
-                    Block::LAVA.default_state.id
-                } else {
-                    Block::WATER.default_state.id
-                },
-                BlockFlags::NOTIFY_NEIGHBORS,
-            )
-            .await;
+        world.set_block_state(
+            &target_pos,
+            if item.id == Item::LAVA_BUCKET.id {
+                Block::LAVA.default_state.id
+            } else {
+                Block::WATER.default_state.id
+            },
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
         return Some(target_pos);
     }
 
     None
 }
 
-async fn spawn_mob_bucket_entity(
+fn spawn_mob_bucket_entity(
     world: &Arc<World>,
     item: &Item,
     pos: BlockPos,
@@ -614,7 +590,7 @@ async fn spawn_mob_bucket_entity(
         // the from-bucket marker.
         cube.set_from_bucket(true);
     }
-    world.spawn_entity(entity).await;
+    world.spawn_entity(entity);
     // Vanilla `MobBucketItem#playEmptySound`: `level.playSound(user, pos, emptySound, NEUTRAL,
     // 1.0F, 1.0F)`. `emptyContents` returns from the evaporation branch before reaching it, while
     // `checkExtraContent` still spawns the mob, so an evaporated mob bucket is silent.
@@ -640,173 +616,155 @@ async fn spawn_mob_bucket_entity(
                 f64::from(pos.0.z) + 0.5,
             ),
             crate::world::game_event::GameEventContext::of_entity(player),
-        )
-        .await;
+        );
     }
 }
 
 impl ItemBehaviour for EmptyBucketItem {
-    fn normal_use<'a>(
-        &'a self,
-        _block: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
-            let (start_pos, end_pos) = get_start_and_end_pos(player);
+    fn normal_use(&self, _block: &Item, player: &Player) {
+        let world = player.world();
+        let (start_pos, end_pos) = get_start_and_end_pos(player);
 
-            let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
-                let state_id = world_inner.get_block_state_id(pos);
+        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+            let state_id = world_inner.get_block_state_id(pos);
 
-                let block = Block::from_state_id(state_id);
+            let block = Block::from_state_id(state_id);
 
-                if state_id == Block::AIR.default_state.id {
-                    return false;
-                }
-
-                (block.id != Block::WATER.id && block.id != Block::LAVA.id)
-                    || ((block.id == Block::WATER.id && state_id == Block::WATER.default_state.id)
-                        || (block.id == Block::LAVA.id && state_id == Block::LAVA.default_state.id))
-            };
-
-            let Some((block_pos, direction)) = world.raycast(start_pos, end_pos, checker).await
-            else {
-                return;
-            };
-
-            let Some((item, acted_pos)) = try_pickup_bucket_item(
-                &world,
-                block_pos,
-                direction,
-                player.gamemode.load() == GameMode::Creative,
-            )
-            .await
-            else {
-                return;
-            };
-
-            if let Some(server) = world.server.upgrade()
-                && let Some(player_arc) = world.get_player_by_uuid(player.gameprofile.id)
-            {
-                let mut event =
-                    crate::plugin::api::events::player::player_bucket::PlayerBucketFillEvent::new(
-                        player_arc,
-                        block_pos,
-                        item.registry_key.to_string(),
-                    );
-                server.plugin_manager.fire(&server, &mut event).await;
-                if event.cancelled {
-                    return;
-                }
+            if state_id == Block::AIR.default_state.id {
+                return false;
             }
 
-            // BucketItem.java:77: level.gameEvent(player, GameEvent.FLUID_PICKUP, pos)
-            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                crate::world::game_event::emit_game_event(
-                    &world,
-                    pumpkin_data::game_event::GameEvent::FluidPickup,
-                    Vector3::new(
-                        f64::from(acted_pos.0.x) + 0.5,
-                        f64::from(acted_pos.0.y) + 0.5,
-                        f64::from(acted_pos.0.z) + 0.5,
-                    ),
-                    crate::world::game_event::GameEventContext::of_entity(player_arc),
-                )
-                .await;
-            }
+            (block.id != Block::WATER.id && block.id != Block::LAVA.id)
+                || ((block.id == Block::WATER.id && state_id == Block::WATER.default_state.id)
+                    || (block.id == Block::LAVA.id && state_id == Block::LAVA.default_state.id))
+        };
 
-            if let Some(sound) = bucket_fill_sound(item) {
-                world.play_sound_raw_expect(
-                    player,
-                    sound as u16,
-                    SoundCategory::Players,
-                    &player.position(),
-                    1.0,
-                    1.0,
+        let Some((block_pos, direction)) = world.raycast(start_pos, end_pos, checker) else {
+            return;
+        };
+
+        let Some((item, acted_pos)) = try_pickup_bucket_item(
+            &world,
+            block_pos,
+            direction,
+            player.gamemode.load() == GameMode::Creative,
+        ) else {
+            return;
+        };
+
+        if let Some(server) = world.server.upgrade()
+            && let Some(player_arc) = world.get_player_by_uuid(player.gameprofile.id)
+        {
+            let mut event =
+                crate::plugin::api::events::player::player_bucket::PlayerBucketFillEvent::new(
+                    player_arc,
+                    block_pos,
+                    item.registry_key.to_string(),
                 );
+            server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                return;
             }
+        }
 
-            give_player_bucket_item(player, ItemStack::new(1, item), true).await;
-        })
+        // BucketItem.java:77: level.gameEvent(player, GameEvent.FLUID_PICKUP, pos)
+        if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::FluidPickup,
+                Vector3::new(
+                    f64::from(acted_pos.0.x) + 0.5,
+                    f64::from(acted_pos.0.y) + 0.5,
+                    f64::from(acted_pos.0.z) + 0.5,
+                ),
+                crate::world::game_event::GameEventContext::of_entity(player_arc),
+            );
+        }
+
+        if let Some(sound) = bucket_fill_sound(item) {
+            world.play_sound_raw_expect(
+                player,
+                sound as u16,
+                SoundCategory::Players,
+                &player.position(),
+                1.0,
+                1.0,
+            );
+        }
+
+        give_player_bucket_item(player, ItemStack::new(1, item), true);
     }
 
-    fn use_on_entity<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
-        entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let entity_type = entity.get_entity().entity_type;
-            let Some(bucket_item) = bucket_item_for_entity_type(entity_type) else {
-                return;
-            };
-            let is_alive = entity
-                .get_living_entity()
-                .is_some_and(|living| living.health.load() > 0.0);
-            if !is_alive {
-                return;
-            }
+    fn use_on_entity(&self, _item: &mut ItemStack, player: &Player, entity: Arc<dyn EntityBase>) {
+        let entity_type = entity.get_entity().entity_type;
+        let Some(bucket_item) = bucket_item_for_entity_type(entity_type) else {
+            return;
+        };
+        let is_alive = entity
+            .get_living_entity()
+            .is_some_and(|living| living.health.load() > 0.0);
+        if !is_alive {
+            return;
+        }
 
-            if entity_type.id == EntityType::SULFUR_CUBE.id
-                && let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
-                && !cube.can_be_picked_from_inside().await
-            {
-                // SulfurCube.java:928-930 (`canBePickedFromInside`): carrying an item blocks
-                // empty-bucket capture.
-                return;
-            }
+        if entity_type.id == EntityType::SULFUR_CUBE.id
+            && let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
+            && !cube.can_be_picked_from_inside()
+        {
+            // SulfurCube.java:928-930 (`canBePickedFromInside`): carrying an item blocks
+            // empty-bucket capture.
+            return;
+        }
 
-            if let Some(sound) = pickup_sound_for_entity_type(entity_type) {
-                player.world().play_sound(
-                    sound,
-                    SoundCategory::Neutral,
-                    &entity.get_entity().pos.load(),
-                );
-            }
+        if let Some(sound) = pickup_sound_for_entity_type(entity_type) {
+            player.world().play_sound(
+                sound,
+                SoundCategory::Neutral,
+                &entity.get_entity().pos.load(),
+            );
+        }
 
-            // `TropicalFish.saveToBucketTag` (TropicalFish.java:200-206): copies the pattern
-            // and both colors onto the bucket item as data components so re-emptying it
-            // restores the exact same variant instead of a fresh random roll.
-            let components = entity
-                .cast_any()
-                .downcast_ref::<TropicalFishEntity>()
-                .map_or_else(Vec::new, |fish| {
-                    vec![
-                        (
-                            DataComponent::TropicalFishPattern,
-                            Some(
-                                TropicalFishPatternImpl {
-                                    value: fish.pattern().name().into(),
-                                }
-                                .to_dyn(),
-                            ),
+        // `TropicalFish.saveToBucketTag` (TropicalFish.java:200-206): copies the pattern
+        // and both colors onto the bucket item as data components so re-emptying it
+        // restores the exact same variant instead of a fresh random roll.
+        let components = entity
+            .cast_any()
+            .downcast_ref::<TropicalFishEntity>()
+            .map_or_else(Vec::new, |fish| {
+                vec![
+                    (
+                        DataComponent::TropicalFishPattern,
+                        Some(
+                            TropicalFishPatternImpl {
+                                value: fish.pattern().name().into(),
+                            }
+                            .to_dyn(),
                         ),
-                        (
-                            DataComponent::TropicalFishBaseColor,
-                            Some(
-                                TropicalFishBaseColorImpl {
-                                    value: String::from(fish.base_color()).into(),
-                                }
-                                .to_dyn(),
-                            ),
+                    ),
+                    (
+                        DataComponent::TropicalFishBaseColor,
+                        Some(
+                            TropicalFishBaseColorImpl {
+                                value: String::from(fish.base_color()).into(),
+                            }
+                            .to_dyn(),
                         ),
-                        (
-                            DataComponent::TropicalFishPatternColor,
-                            Some(
-                                TropicalFishPatternColorImpl {
-                                    value: String::from(fish.pattern_color()).into(),
-                                }
-                                .to_dyn(),
-                            ),
+                    ),
+                    (
+                        DataComponent::TropicalFishPatternColor,
+                        Some(
+                            TropicalFishPatternColorImpl {
+                                value: String::from(fish.pattern_color()).into(),
+                            }
+                            .to_dyn(),
                         ),
-                    ]
-                });
-            let bucket_stack = ItemStack::new_with_component(1, bucket_item, components);
+                    ),
+                ]
+            });
+        let bucket_stack = ItemStack::new_with_component(1, bucket_item, components);
 
-            give_player_bucket_item(player, bucket_stack, false).await;
-            player.world().remove_entity(entity.as_ref()).await;
-        })
+        give_player_bucket_item(player, bucket_stack, false);
+        player.world().remove_entity(entity.as_ref());
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -816,148 +774,134 @@ impl ItemBehaviour for EmptyBucketItem {
 
 impl ItemBehaviour for FilledBucketItem {
     #[expect(clippy::too_many_lines)]
-    fn normal_use<'a>(
-        &'a self,
-        item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
+    fn normal_use(&self, item: &Item, player: &Player) {
+        let world = player.world();
 
-            // Read off the caught variant before the held stack is overwritten below.
-            let tropical_fish_variant = if item.id == Item::TROPICAL_FISH_BUCKET.id {
-                let held_stack = player.inventory.held_item().await;
-                read_tropical_fish_variant(&held_stack)
-            } else {
-                None
-            };
+        // Read off the caught variant before the held stack is overwritten below.
+        let tropical_fish_variant = if item.id == Item::TROPICAL_FISH_BUCKET.id {
+            let held_stack = player.inventory.held_item();
+            read_tropical_fish_variant(&held_stack)
+        } else {
+            None
+        };
 
-            let (start_pos, end_pos) = get_start_and_end_pos(player);
-            let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
-                let state_id = world_inner.get_block_state_id(pos);
-                if Fluid::from_state_id(state_id).is_some() {
-                    return false;
-                }
-                state_id != Block::AIR.default_state.id
-            };
-
-            let Some((pos, direction)) = world.raycast(start_pos, end_pos, checker).await else {
-                return;
-            };
-
-            // `BucketItem.use` checks `Player.mayUseItemAt` for the adjacent placement
-            // position (`BucketItem.java:54-60`).
-            let placement_pos = pos.offset(direction.to_offset());
-            let held_stack = player.inventory().held_item().await;
-            let permission_stack = if held_stack.item.id == item.id {
-                held_stack
-            } else {
-                player.inventory().off_hand_item().await
-            };
-            if !player
-                .may_use_item_at(&placement_pos, direction, &permission_stack)
-                .await
-            {
-                return;
+        let (start_pos, end_pos) = get_start_and_end_pos(player);
+        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+            let state_id = world_inner.get_block_state_id(pos);
+            if Fluid::from_state_id(state_id).is_some() {
+                return false;
             }
+            state_id != Block::AIR.default_state.id
+        };
 
-            let player_arc = world.get_player_by_id(player.get_entity().entity_id);
+        let Some((pos, direction)) = world.raycast(start_pos, end_pos, checker) else {
+            return;
+        };
 
-            // BucketItem.emptyContents: the water-evaporates branch still returns true (a
-            // successful use), it just skips placing the fluid -- checkExtraContent (which
-            // spawns the bucketed mob) still runs afterward. Pumpkin previously returned
-            // early here, silently losing both the water AND the mob for a mob bucket used
-            // in the Nether.
-            let evaporated = should_evaporate_in_nether(item, &world);
-            let placed_pos = if holds_no_fluid(item) {
-                // `MobBucketItem.emptyContents` (`MobBucketItem.java:61-68`) returns before any
-                // placement for a `Fluids.EMPTY` bucket. `BucketItem.use` (`BucketItem.java:59`)
-                // only prefers the clicked block itself for a water bucket in a liquid
-                // container, so the mob lands on the face that was clicked.
-                pos.offset(direction.to_offset())
-            } else if evaporated {
-                play_bucket_evaporation_by_player(&world, player, pos);
-                pos
-            } else {
-                let Some(placed_pos) = try_place_filled_bucket(
-                    &world,
-                    item,
-                    pos,
-                    direction,
-                    player.gamemode.load() == GameMode::Creative,
-                )
-                .await
-                else {
-                    return;
-                };
-                placed_pos
-            };
+        // `BucketItem.use` checks `Player.mayUseItemAt` for the adjacent placement
+        // position (`BucketItem.java:54-60`).
+        let placement_pos = pos.offset(direction.to_offset());
+        let held_stack = player.inventory().held_item();
+        let permission_stack = if held_stack.item.id == item.id {
+            held_stack
+        } else {
+            player.inventory().off_hand_item()
+        };
+        if !player.may_use_item_at(&placement_pos, direction, &permission_stack) {
+            return;
+        }
 
-            // BucketItem.playEmptySound / SolidBucketItem.emptyContents: both call
-            // level.gameEvent(user, GameEvent.FLUID_PLACE, pos) (BucketItem.java:157,
-            // SolidBucketItem.java, emptyContents) -- but the evaporation branch returns
-            // before either is reached (BucketItem.java:122-130), so no fluid was actually
-            // placed and no event fires. MobBucketItem also overrides playEmptySound
-            // (MobBucketItem.java:42-44) without that call, so mob buckets (axolotl/fish/
-            // tadpole/etc.) must not emit FLUID_PLACE here either.
-            if !evaporated
-                && mob_bucket_entity_type(item).is_none()
-                && let Some(player_arc) = player_arc.clone()
-            {
-                crate::world::game_event::emit_game_event(
-                    &world,
-                    pumpkin_data::game_event::GameEvent::FluidPlace,
-                    Vector3::new(
-                        f64::from(placed_pos.0.x) + 0.5,
-                        f64::from(placed_pos.0.y) + 0.5,
-                        f64::from(placed_pos.0.z) + 0.5,
-                    ),
-                    crate::world::game_event::GameEventContext::of_entity(player_arc),
-                )
-                .await;
-            }
+        let player_arc = world.get_player_by_id(player.get_entity().entity_id);
 
-            if let Some(server) = world.server.upgrade()
-                && let Some(player_arc) = world.get_player_by_uuid(player.gameprofile.id)
-            {
-                let mut event =
-                    crate::plugin::api::events::player::player_bucket::PlayerBucketEmptyEvent::new(
-                        player_arc,
-                        pos,
-                        item.registry_key.to_string(),
-                    );
-                server.plugin_manager.fire(&server, &mut event).await;
-            }
-
-            if !evaporated && let Some(sound) = bucket_empty_sound(item) {
-                world.play_sound_raw_expect(
-                    player,
-                    sound as u16,
-                    SoundCategory::Blocks,
-                    &block_center(placed_pos),
-                    1.0,
-                    1.0,
-                );
-            }
-
-            spawn_mob_bucket_entity(
+        // BucketItem.emptyContents: the water-evaporates branch still returns true (a
+        // successful use), it just skips placing the fluid -- checkExtraContent (which
+        // spawns the bucketed mob) still runs afterward. Pumpkin previously returned
+        // early here, silently losing both the water AND the mob for a mob bucket used
+        // in the Nether.
+        let evaporated = should_evaporate_in_nether(item, &world);
+        let placed_pos = if holds_no_fluid(item) {
+            // `MobBucketItem.emptyContents` (`MobBucketItem.java:61-68`) returns before any
+            // placement for a `Fluids.EMPTY` bucket. `BucketItem.use` (`BucketItem.java:59`)
+            // only prefers the clicked block itself for a water bucket in a liquid
+            // container, so the mob lands on the face that was clicked.
+            pos.offset(direction.to_offset())
+        } else if evaporated {
+            play_bucket_evaporation_by_player(&world, player, pos);
+            pos
+        } else {
+            let Some(placed_pos) = try_place_filled_bucket(
                 &world,
                 item,
-                placed_pos,
-                player_arc,
+                pos,
+                direction,
+                player.gamemode.load() == GameMode::Creative,
+            ) else {
+                return;
+            };
+            placed_pos
+        };
+
+        // BucketItem.playEmptySound / SolidBucketItem.emptyContents: both call
+        // level.gameEvent(user, GameEvent.FLUID_PLACE, pos) (BucketItem.java:157,
+        // SolidBucketItem.java, emptyContents) -- but the evaporation branch returns
+        // before either is reached (BucketItem.java:122-130), so no fluid was actually
+        // placed and no event fires. MobBucketItem also overrides playEmptySound
+        // (MobBucketItem.java:42-44) without that call, so mob buckets (axolotl/fish/
+        // tadpole/etc.) must not emit FLUID_PLACE here either.
+        if !evaporated
+            && mob_bucket_entity_type(item).is_none()
+            && let Some(player_arc) = player_arc.clone()
+        {
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::FluidPlace,
+                Vector3::new(
+                    f64::from(placed_pos.0.x) + 0.5,
+                    f64::from(placed_pos.0.y) + 0.5,
+                    f64::from(placed_pos.0.z) + 0.5,
+                ),
+                crate::world::game_event::GameEventContext::of_entity(player_arc),
+            );
+        }
+
+        if let Some(server) = world.server.upgrade()
+            && let Some(player_arc) = world.get_player_by_uuid(player.gameprofile.id)
+        {
+            let mut event =
+                crate::plugin::api::events::player::player_bucket::PlayerBucketEmptyEvent::new(
+                    player_arc,
+                    pos,
+                    item.registry_key.to_string(),
+                );
+            server.plugin_manager.fire_blocking(&server, &mut event);
+        }
+
+        if !evaporated && let Some(sound) = bucket_empty_sound(item) {
+            world.play_sound_raw_expect(
                 player,
-                evaporated,
-                tropical_fish_variant,
-            )
-            .await;
-            if player.gamemode.load() != GameMode::Creative {
-                let item_stack = ItemStack::new(1, &Item::BUCKET);
-                player
-                    .inventory
-                    .set_stack(player.inventory.get_selected_slot().into(), item_stack)
-                    .await;
-            }
-        })
+                sound as u16,
+                SoundCategory::Blocks,
+                &block_center(placed_pos),
+                1.0,
+                1.0,
+            );
+        }
+
+        spawn_mob_bucket_entity(
+            &world,
+            item,
+            placed_pos,
+            player_arc,
+            player,
+            evaporated,
+            tropical_fish_variant,
+        );
+        if player.gamemode.load() != GameMode::Creative {
+            let item_stack = ItemStack::new(1, &Item::BUCKET);
+            player
+                .inventory
+                .set_stack(player.inventory.get_selected_slot().into(), item_stack);
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -966,27 +910,14 @@ impl ItemBehaviour for FilledBucketItem {
 }
 
 impl ItemBehaviour for MilkBucketItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, 32)
-                .await;
-        })
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        let stack = player.inventory().held_item();
+        player
+            .living_entity
+            .set_active_hand(pumpkin_util::Hand::Right, stack, 32);
     }
 
-    fn on_stopped_using<'a>(
-        &'a self,
-        _stack: &'a ItemStack,
-        _player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn on_stopped_using(&self, _stack: &ItemStack, _player: &Player) {}
 
     fn get_use_duration(&self) -> i32 {
         32

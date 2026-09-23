@@ -44,20 +44,13 @@ impl ArgumentConsumer for DifficultyArgumentConsumer {
         Box::pin(async move { result })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        _input: &'a str,
-    ) -> SuggestResult<'a> {
-        Box::pin(async move {
-            let difficulties = ["easy", "normal", "hard", "peaceful"];
-            let suggestions: Vec<CommandSuggestion> = difficulties
-                .iter()
-                .map(|difficulty| CommandSuggestion::new((*difficulty).to_string(), None))
-                .collect();
-            Ok(Some(suggestions))
-        })
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {
+        let difficulties = ["easy", "normal", "hard", "peaceful"];
+        let suggestions: Vec<CommandSuggestion> = difficulties
+            .iter()
+            .map(|difficulty| CommandSuggestion::new((*difficulty).to_string(), None))
+            .collect();
+        Ok(Some(suggestions))
     }
 }
 

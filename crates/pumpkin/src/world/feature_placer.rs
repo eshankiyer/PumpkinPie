@@ -170,14 +170,13 @@ impl<'a> FeatureCache<'a> {
 
     /// Applies the buffered placement, or discards it if anything escaped the loaded region.
     /// Returns whether the world was changed.
-    pub async fn commit(self) -> bool {
+    pub fn commit(self) -> bool {
         if self.escaped.load(Ordering::Relaxed) || self.writes.is_empty() {
             return false;
         }
         for (pos, state_id) in self.writes {
             self.world
-                .set_block_state(&pos, state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+                .set_block_state(&pos, state_id, BlockFlags::NOTIFY_ALL);
         }
         for (pos, nbt) in &self.block_entities {
             self.world.add_block_entity_nbt(*pos, nbt);
@@ -299,7 +298,7 @@ impl GenerationCache for FeatureCache<'_> {
 ///
 /// Returns whether the world changed. A feature that declines to generate, or one that reaches
 /// outside the loaded region, leaves the world untouched.
-pub async fn place_configured_feature(
+pub fn place_configured_feature(
     world: &Arc<World>,
     feature: pumpkin_data::configured_feature::ConfiguredFeature,
     pos: BlockPos,
@@ -309,5 +308,5 @@ pub async fn place_configured_feature(
     if !cache.place(feature, pos, random) {
         return false;
     }
-    cache.commit().await
+    cache.commit()
 }

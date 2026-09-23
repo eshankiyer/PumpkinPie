@@ -21,26 +21,22 @@ const ARG_STYLE: &str = "style";
 struct ListExecutor;
 
 impl CommandExecutor for ListExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        server: &'a crate::server::Server,
-        _args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let worlds = server.worlds.load();
-            let world = worlds.first().ok_or(CommandError::InvalidRequirement)?;
-            let dimension = world.dimension.minecraft_name.to_string();
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        server: &crate::server::Server,
+        _args: &ConsumedArgs,
+    ) -> CommandResult {
+        let worlds = server.worlds.load();
+        let world = worlds.first().ok_or(CommandError::InvalidRequirement)?;
+        let dimension = world.dimension.minecraft_name.to_string();
 
-            sender
-                .send_message(pumpkin_macros::translate_cross!(
-                    translation::java::COMMANDS_WAYPOINT_LIST_EMPTY,
-                    translation::java::COMMANDS_WAYPOINT_LIST_EMPTY,
-                    TextComponent::text(dimension)
-                ))
-                .await;
-            Ok(0)
-        })
+        sender.send_message(pumpkin_macros::translate_cross!(
+            translation::java::COMMANDS_WAYPOINT_LIST_EMPTY,
+            translation::java::COMMANDS_WAYPOINT_LIST_EMPTY,
+            TextComponent::text(dimension)
+        ));
+        Ok(0)
     }
 }
 
@@ -53,84 +49,74 @@ enum ColorAction {
 struct ColorExecutor(ColorAction);
 
 impl CommandExecutor for ColorExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let waypoint_entity = WaypointArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
-            let entity = waypoint_entity.get_entity();
-            let pos = entity.pos.load();
-            let block_pos = BlockPos::new(
-                pos.x.floor() as i32,
-                pos.y.floor() as i32,
-                pos.z.floor() as i32,
-            );
-            let uuid = entity.entity_uuid;
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let waypoint_entity = WaypointArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
+        let entity = waypoint_entity.get_entity();
+        let pos = entity.pos.load();
+        let block_pos = BlockPos::new(
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        );
+        let uuid = entity.entity_uuid;
 
-            let color_val = match self.0 {
-                ColorAction::Named => {
-                    let color = TeamColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
-                    let rgb = color.to_rgb();
-                    Some(i32::from_be_bytes([0, rgb.red, rgb.green, rgb.blue]))
-                }
-                ColorAction::Hex => {
-                    Some(HexColorArgumentConsumer::find_arg(args, ARG_COLOR)? as i32)
-                }
-                // Vanilla `WaypointCommand.resetWaypointColor` sets
-                // `icon.color = Optional.empty()` (`WaypointCommand.java:116`).
-                ColorAction::Reset => None,
-            };
-
-            let packet = CWaypoint::update_position(
-                uuid,
-                Some(WaypointIcon {
-                    style: None,
-                    color: color_val,
-                }),
-                block_pos,
-            );
-
-            if let Some(player) = sender.as_player() {
-                player.send_client_packet(&packet).await;
+        let color_val = match self.0 {
+            ColorAction::Named => {
+                let color = TeamColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
+                let rgb = color.to_rgb();
+                Some(i32::from_be_bytes([0, rgb.red, rgb.green, rgb.blue]))
             }
+            ColorAction::Hex => Some(HexColorArgumentConsumer::find_arg(args, ARG_COLOR)? as i32),
+            // Vanilla `WaypointCommand.resetWaypointColor` sets
+            // `icon.color = Optional.empty()` (`WaypointCommand.java:116`).
+            ColorAction::Reset => None,
+        };
 
-            match self.0 {
-                ColorAction::Named => {
-                    let color = TeamColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
-                    sender
-                        .send_message(pumpkin_macros::translate_cross!(
-                            translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
-                            translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
-                            TextComponent::text(color.name()).color_named(color)
-                        ))
-                        .await;
-                }
-                ColorAction::Hex => {
-                    let color_val = HexColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
-                    let hex_str = format!("{:06X}", color_val & 0xFFFFFF);
-                    sender
-                        .send_message(pumpkin_macros::translate_cross!(
-                            translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
-                            translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
-                            TextComponent::text(hex_str)
-                        ))
-                        .await;
-                }
-                ColorAction::Reset => {
-                    sender
-                        .send_message(pumpkin_macros::translate_cross!(
-                            translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR_RESET,
-                            translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR_RESET
-                        ))
-                        .await;
-                }
+        let packet = CWaypoint::update_position(
+            uuid,
+            Some(WaypointIcon {
+                style: None,
+                color: color_val,
+            }),
+            block_pos,
+        );
+
+        if let Some(player) = sender.as_player() {
+            player.send_client_packet(&packet).await;
+        }
+
+        match self.0 {
+            ColorAction::Named => {
+                let color = TeamColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
+                sender.send_message(pumpkin_macros::translate_cross!(
+                    translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
+                    translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
+                    TextComponent::text(color.name()).color_named(color)
+                ));
             }
+            ColorAction::Hex => {
+                let color_val = HexColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
+                let hex_str = format!("{:06X}", color_val & 0xFFFFFF);
+                sender.send_message(pumpkin_macros::translate_cross!(
+                    translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
+                    translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR,
+                    TextComponent::text(hex_str)
+                ));
+            }
+            ColorAction::Reset => {
+                sender.send_message(pumpkin_macros::translate_cross!(
+                    translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR_RESET,
+                    translation::java::COMMANDS_WAYPOINT_MODIFY_COLOR_RESET
+                ));
+            }
+        }
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
@@ -142,57 +128,53 @@ enum StyleAction {
 struct StyleExecutor(StyleAction);
 
 impl CommandExecutor for StyleExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let waypoint_entity = WaypointArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
-            let entity = waypoint_entity.get_entity();
-            let pos = entity.pos.load();
-            let block_pos = BlockPos::new(
-                pos.x.floor() as i32,
-                pos.y.floor() as i32,
-                pos.z.floor() as i32,
-            );
-            let uuid = entity.entity_uuid;
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let waypoint_entity = WaypointArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
+        let entity = waypoint_entity.get_entity();
+        let pos = entity.pos.load();
+        let block_pos = BlockPos::new(
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        );
+        let uuid = entity.entity_uuid;
 
-            let style_owned = match self.0 {
-                StyleAction::Set => {
-                    let style = ResourceLocationArgumentConsumer::find_arg(args, ARG_STYLE)?;
-                    Some(style.to_string())
-                }
-                StyleAction::Reset => None,
-            };
-            let style_str = style_owned.as_deref();
-
-            let packet = CWaypoint::update_position(
-                uuid,
-                Some(WaypointIcon {
-                    style: style_str,
-                    // Vanilla mutates only `icon.style` here
-                    // (`WaypointCommand.java:91`); with no stored icon state the
-                    // faithful stand-in is `Waypoint.Icon.NULL`'s empty color.
-                    color: None,
-                }),
-                block_pos,
-            );
-
-            if let Some(player) = sender.as_player() {
-                player.send_client_packet(&packet).await;
+        let style_owned = match self.0 {
+            StyleAction::Set => {
+                let style = ResourceLocationArgumentConsumer::find_arg(args, ARG_STYLE)?;
+                Some(style.to_string())
             }
+            StyleAction::Reset => None,
+        };
+        let style_str = style_owned.as_deref();
 
-            sender
-                .send_message(pumpkin_macros::translate_cross!(
-                    translation::java::COMMANDS_WAYPOINT_MODIFY_STYLE,
-                    translation::java::COMMANDS_WAYPOINT_MODIFY_STYLE
-                ))
-                .await;
+        let packet = CWaypoint::update_position(
+            uuid,
+            Some(WaypointIcon {
+                style: style_str,
+                // Vanilla mutates only `icon.style` here
+                // (`WaypointCommand.java:91`); with no stored icon state the
+                // faithful stand-in is `Waypoint.Icon.NULL`'s empty color.
+                color: None,
+            }),
+            block_pos,
+        );
 
-            Ok(0)
-        })
+        if let Some(player) = sender.as_player() {
+            player.send_client_packet(&packet).await;
+        }
+
+        sender.send_message(pumpkin_macros::translate_cross!(
+            translation::java::COMMANDS_WAYPOINT_MODIFY_STYLE,
+            translation::java::COMMANDS_WAYPOINT_MODIFY_STYLE
+        ));
+
+        Ok(0)
     }
 }
 

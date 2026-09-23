@@ -12,7 +12,7 @@ pub struct Ignition;
 impl Ignition {
     /// Lights `block` at `location` itself if it can be lit (campfires, candles, candle
     /// cakes), otherwise places a fire block at `fire_pos`.
-    pub async fn ignite_block<F, Fut>(
+    pub fn ignite_block<F, Fut>(
         ignite_logic: F,
         world: &Arc<World>,
         location: BlockPos,

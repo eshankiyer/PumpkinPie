@@ -61,33 +61,25 @@ impl JavaClient {
             _ => return,
         };
 
-        *structure_block.mode.lock().await = mode.to_string();
-        structure_block.set_structure_name(packet.name).await;
-        structure_block
-            .set_structure_pos(BlockPos::new(
-                i32::from(packet.offset_x).clamp(-48, 48),
-                i32::from(packet.offset_y).clamp(-48, 48),
-                i32::from(packet.offset_z).clamp(-48, 48),
-            ))
-            .await;
-        structure_block
-            .set_structure_size(Vector3::new(
-                i32::from(packet.size_x).min(48),
-                i32::from(packet.size_y).min(48),
-                i32::from(packet.size_z).min(48),
-            ))
-            .await;
-        *structure_block.mirror.lock().await = mirror.to_string();
-        *structure_block.rotation.lock().await = rotation.to_string();
-        structure_block.set_meta_data(packet.metadata).await;
-        structure_block
-            .set_integrity(packet.integrity.clamp(0.0, 1.0))
-            .await;
-        structure_block.set_strict(packet.strict()).await;
-        structure_block.set_show_air(packet.show_air()).await;
-        structure_block
-            .set_show_bounding_box(packet.show_bounding_box())
-            .await;
+        *structure_block.mode.lock() = mode.to_string();
+        structure_block.set_structure_name(packet.name);
+        structure_block.set_structure_pos(BlockPos::new(
+            i32::from(packet.offset_x).clamp(-48, 48),
+            i32::from(packet.offset_y).clamp(-48, 48),
+            i32::from(packet.offset_z).clamp(-48, 48),
+        ));
+        structure_block.set_structure_size(Vector3::new(
+            i32::from(packet.size_x).min(48),
+            i32::from(packet.size_y).min(48),
+            i32::from(packet.size_z).min(48),
+        ));
+        *structure_block.mirror.lock() = mirror.to_string();
+        *structure_block.rotation.lock() = rotation.to_string();
+        structure_block.set_meta_data(packet.metadata);
+        structure_block.set_integrity(packet.integrity.clamp(0.0, 1.0));
+        structure_block.set_strict(packet.strict());
+        structure_block.set_show_air(packet.show_air());
+        structure_block.set_show_bounding_box(packet.show_bounding_box());
 
         // `StructureBlockEntity.setMode` updates the block-state MODE property
         // (`StructureBlockEntity.java:224-229`), while the packet applies all entity fields first
@@ -100,29 +92,27 @@ impl JavaClient {
             properties.r#mode = state_mode;
             let new_state_id = properties.to_state_id(block);
             if new_state_id != state_id {
-                world
-                    .set_block_state(
-                        &packet.location,
-                        new_state_id,
-                        BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
-                    )
-                    .await;
+                world.set_block_state(
+                    &packet.location,
+                    new_state_id,
+                    BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
+                );
             }
         }
 
-        if structure_block.has_structure_name().await {
-            let structure_name = structure_block.get_structure_name().await;
+        if structure_block.has_structure_name() {
+            let structure_name = structure_block.get_structure_name();
             match packet.action.0 {
                 SSetStructureBlock::ACTION_SAVE_AREA => {
-                    structure_block.save_structure(&world, true).await;
+                    structure_block.save_structure(&world, true);
                 }
                 SSetStructureBlock::ACTION_LOAD_AREA => {
-                    if structure_block.is_structure_loadable().await {
-                        structure_block.place_structure_if_same_size(&world).await;
+                    if structure_block.is_structure_loadable() {
+                        structure_block.place_structure_if_same_size(&world);
                     }
                 }
                 SSetStructureBlock::ACTION_SCAN_AREA => {
-                    structure_block.detect_size(&world).await;
+                    structure_block.detect_size(&world);
                 }
                 _ => {}
             }

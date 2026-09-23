@@ -2,7 +2,7 @@
 use super::*;
 
 impl BedrockClient {
-    pub async fn handle_request_ability(
+    pub fn handle_request_ability(
         &self,
         player: &Arc<Player>,
         packet: pumpkin_protocol::bedrock::server::request_ability::SRequestAbility,
@@ -16,14 +16,14 @@ impl BedrockClient {
                     requested_flying,
                 ) = packet.value
                 {
-                    let mut abilities = player.abilities.lock().await;
+                    let mut abilities = player.abilities.lock();
                     if abilities.allow_flying {
                         abilities.flying = requested_flying;
                     } else {
                         abilities.flying = false;
                     }
                     drop(abilities);
-                    player.send_abilities_update().await;
+                    player.send_abilities_update();
                 }
             }
             _ => {

@@ -8,7 +8,7 @@ use pumpkin_data::tag::{self, Taggable};
 use rand::RngExt;
 
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture, to_goal_ticks};
+use crate::entity::ai::goal::{Controls, Goal, to_goal_ticks};
 use crate::entity::mob::Mob;
 use crate::entity::mob::witch::WitchEntity;
 use crate::entity::{EntityBase, mob::MobEntity};
@@ -92,44 +92,38 @@ impl Default for NearestHealableRaiderTargetGoal {
 }
 
 impl Goal for NearestHealableRaiderTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(witch) = mob.cast_any().downcast_ref::<WitchEntity>() else {
-                return false;
-            };
-            if witch.heal_cooldown.load(Relaxed) > 0 {
-                return false;
-            }
-            if !rand::rng().random_bool(0.5) {
-                return false;
-            }
-            if !mob.get_mob_entity().living_entity.has_active_raid() {
-                return false;
-            }
-            self.target = Self::find_target(mob.get_mob_entity());
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(witch) = mob.cast_any().downcast_ref::<WitchEntity>() else {
+            return false;
+        };
+        if witch.heal_cooldown.load(Relaxed) > 0 {
+            return false;
+        }
+        if !rand::rng().random_bool(0.5) {
+            return false;
+        }
+        if !mob.get_mob_entity().living_entity.has_active_raid() {
+            return false;
+        }
+        self.target = Self::find_target(mob.get_mob_entity());
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(witch) = mob.cast_any().downcast_ref::<WitchEntity>() {
-                witch.heal_cooldown.store(to_goal_ticks(200), Relaxed);
-            }
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(witch) = mob.cast_any().downcast_ref::<WitchEntity>() {
+            witch.heal_cooldown.store(to_goal_ticks(200), Relaxed);
+        }
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.target = None;
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

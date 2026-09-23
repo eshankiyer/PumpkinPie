@@ -477,7 +477,7 @@ impl Completer for PumpkinCommandCompleter {
 
         handle.block_on(async {
             let dispatcher = server.command_dispatcher.load();
-            let source = CommandSender::Console.into_source(server).await;
+            let source = CommandSender::Console.into_source(server);
 
             // Temporary setups to unify both dispatchers for now:
 
@@ -500,8 +500,8 @@ impl Completer for PumpkinCommandCompleter {
                 if reader.peek() == Some('/') {
                     reader.skip();
                 }
-                let parsed = dispatcher.parse(&mut reader, &source).await;
-                let suggestions = dispatcher.get_completion_suggestions(parsed, cursor).await;
+                let parsed = dispatcher.parse(&mut reader, &source);
+                let suggestions = dispatcher.get_completion_suggestions(parsed, cursor);
 
                 if !suggestions.is_empty() {
                     let start = suggestions.range.start;

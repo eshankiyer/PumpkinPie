@@ -1,13 +1,10 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
-use tokio::sync::Mutex;
 
 use crate::{
     block::blocks::redstone::target_block::TargetBlock,
-    entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
-        player::Player,
-    },
+    entity::{Entity, EntityBase, NBTStorage, living::LivingEntity, player::Player},
     server::Server,
 };
 use crossbeam::atomic::AtomicCell;
@@ -200,7 +197,7 @@ impl TridentEntity {
     /// `ThrownTrident.tick` (`ThrownTrident.java:63-97`), the Loyalty return leg. Returns `true`
     /// when the trident is flying home, in which case the caller must skip the normal movement
     /// and collision sweep -- vanilla sets `noPhysics`, so a returning trident hits nothing.
-    async fn tick_loyalty_return(&self, world: &Arc<crate::world::World>) -> bool {
+    fn tick_loyalty_return(&self, world: &Arc<crate::world::World>) -> bool {
         let entity = self.get_entity();
 
         // `ThrownTrident.java:64-66`: a trident stuck for more than four ticks counts as having
@@ -233,13 +230,15 @@ impl TridentEntity {
 
         if !acceptable {
             if self.pickup.load() == ArrowPickup::Allowed {
-                let stack = self.item_stack.lock().await.clone();
+                let stack = self
+                    .item_stack
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
                 let pos = entity.pos.load();
-                world
-                    .drop_stack(&BlockPos::floored(pos.x, pos.y, pos.z), stack)
-                    .await;
+                world.drop_stack(&BlockPos::floored(pos.x, pos.y, pos.z), stack);
             }
-            entity.remove().await;
+            entity.remove();
             return true;
         }
 
@@ -255,7 +254,7 @@ impl TridentEntity {
         if owner_player.is_none()
             && to_owner.length() < f64::from(owner_entity.entity_dimension.load().width) + 1.0
         {
-            entity.remove().await;
+            entity.remove();
             return true;
         }
 
@@ -313,7 +312,7 @@ impl TridentEntity {
 
     /// The block-then-entity raycast sweep of `AbstractArrow.tick` (`AbstractArrow.java`), split
     /// out of `tick` so the Loyalty return leg can bypass it wholesale.
-    async fn sweep_collision(
+    fn sweep_collision(
         &self,
         world: &Arc<crate::world::World>,
         start_pos: Vector3<f64>,
@@ -340,9 +339,8 @@ impl TridentEntity {
         let mut hit = None;
 
         // Block collisions
-        let (block_cols, block_positions) = world
-            .get_block_collisions(search_box, self.get_entity())
-            .await;
+        let (block_cols, block_positions) =
+            world.get_block_collisions(search_box, self.get_entity());
         for (idx, bb) in block_cols.iter().enumerate() {
             if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, bb)
                 && t < closest_t
@@ -409,69 +407,62 @@ impl TridentEntity {
 /// a trident's damage is the fixed 8.0 of `ThrownTrident.onHitEntity`
 /// (`ThrownTrident.java:122`) and the rest have no field on this entity.
 impl NBTStorage for TridentEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.write_nbt(nbt).await;
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.entity.write_nbt(nbt);
 
-            let mut item = pumpkin_nbt::compound::NbtCompound::new();
-            self.item_stack
-                .lock()
-                .await
-                .copy_with_count(1)
-                .write_item_stack(&mut item);
-            nbt.put_compound("item", item);
+        let mut item = pumpkin_nbt::compound::NbtCompound::new();
+        self.item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .copy_with_count(1)
+            .write_item_stack(&mut item);
+        nbt.put_compound("item", item);
 
-            // `ThrownTrident.java:204`.
-            nbt.put_bool("DealtDamage", self.dealt_damage.load(Ordering::Relaxed));
-            // `AbstractArrow.java:608-612`.
-            nbt.put_short("life", self.life.load(Ordering::Relaxed) as i16);
-            nbt.put_byte("shake", self.shake_time.load(Ordering::Relaxed) as i8);
-            nbt.put_bool("inGround", self.in_ground.load(Ordering::Relaxed));
-            nbt.put_byte("pickup", self.pickup.load().to_byte() as i8);
-        })
+        // `ThrownTrident.java:204`.
+        nbt.put_bool("DealtDamage", self.dealt_damage.load(Ordering::Relaxed));
+        // `AbstractArrow.java:608-612`.
+        nbt.put_short("life", self.life.load(Ordering::Relaxed) as i16);
+        nbt.put_byte("shake", self.shake_time.load(Ordering::Relaxed) as i8);
+        nbt.put_bool("inGround", self.in_ground.load(Ordering::Relaxed));
+        nbt.put_byte("pickup", self.pickup.load().to_byte() as i8);
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.read_nbt_non_mut(nbt).await;
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.entity.read_nbt_non_mut(nbt);
 
-            if let Some(stack) = nbt
-                .get_compound("item")
-                .and_then(ItemStack::read_item_stack)
-                .map(|stack| stack.copy_with_count(1))
-            {
-                // `ThrownTrident.readAdditionalSaveData` (`ThrownTrident.java:198`) does not
-                // save loyalty: it re-derives it from the stored stack on load.
-                let loyalty = stack
-                    .get_enchantment_level(&pumpkin_data::Enchantment::LOYALTY)
-                    .clamp(0, i32::from(u8::MAX)) as u8;
-                self.loyalty.store(loyalty, Ordering::Relaxed);
-                *self.item_stack.lock().await = stack;
-            }
+        if let Some(stack) = nbt
+            .get_compound("item")
+            .and_then(ItemStack::read_item_stack)
+            .map(|stack| stack.copy_with_count(1))
+        {
+            // `ThrownTrident.readAdditionalSaveData` (`ThrownTrident.java:198`) does not
+            // save loyalty: it re-derives it from the stored stack on load.
+            let loyalty = stack
+                .get_enchantment_level(&pumpkin_data::Enchantment::LOYALTY)
+                .clamp(0, i32::from(u8::MAX)) as u8;
+            self.loyalty.store(loyalty, Ordering::Relaxed);
+            *self
+                .item_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+        }
 
-            self.dealt_damage.store(
-                nbt.get_bool("DealtDamage").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.life.store(
-                u32::from(nbt.get_short("life").unwrap_or(0).max(0) as u16),
-                Ordering::Relaxed,
-            );
-            // `AbstractArrow.java:626` masks the stored byte with 255.
-            self.shake_time
-                .store(nbt.get_byte("shake").unwrap_or(0) as u8, Ordering::Relaxed);
-            self.in_ground
-                .store(nbt.get_bool("inGround").unwrap_or(false), Ordering::Relaxed);
-            self.pickup.store(ArrowPickup::from_byte(
-                nbt.get_byte("pickup").unwrap_or(0) as u8
-            ));
-        })
+        self.dealt_damage.store(
+            nbt.get_bool("DealtDamage").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.life.store(
+            u32::from(nbt.get_short("life").unwrap_or(0).max(0) as u16),
+            Ordering::Relaxed,
+        );
+        // `AbstractArrow.java:626` masks the stored byte with 255.
+        self.shake_time
+            .store(nbt.get_byte("shake").unwrap_or(0) as u8, Ordering::Relaxed);
+        self.in_ground
+            .store(nbt.get_bool("inGround").unwrap_or(false), Ordering::Relaxed);
+        self.pickup.store(ArrowPickup::from_byte(
+            nbt.get_byte("pickup").unwrap_or(0) as u8
+        ));
     }
 }
 
@@ -483,122 +474,116 @@ impl EntityBase for TridentEntity {
     /// `ThrownTrident.defineSynchedData` (`ThrownTrident.java:56-60`) plus the constructor's
     /// `entityData.set(ID_LOYALTY, ...)` / `set(ID_FOIL, ...)` (`ThrownTrident.java:44-46`).
     /// Without `ID_LOYALTY` the client never animates the trident spiralling home.
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let has_foil = {
-                let stack = self.item_stack.lock().await;
-                // `ItemStack.hasFoil` (`ItemStack.java:968-971`) supplies the trident's glint
-                // metadata from the same stack-level rule used by vanilla.
-                stack.has_foil()
-            };
+    fn init_data_tracker(&self) {
+        let has_foil = {
+            let stack = self
+                .item_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // `ItemStack.hasFoil` (`ItemStack.java:968-971`) supplies the trident's glint
+            // metadata from the same stack-level rule used by vanilla.
+            stack.has_foil()
+        };
 
-            self.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::thrown_trident::ID_LOYALTY,
-                    self.loyalty.load(Ordering::Relaxed),
-                )],
-                None,
-            );
-            self.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::thrown_trident::ID_FOIL,
-                    has_foil,
-                )],
-                None,
-            );
-        })
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::thrown_trident::ID_LOYALTY,
+                self.loyalty.load(Ordering::Relaxed),
+            )],
+            None,
+        );
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::thrown_trident::ID_FOIL,
+                has_foil,
+            )],
+            None,
+        );
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let world = entity.world.load();
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
 
-            // Handle shake time
-            let shake = self.shake_time.load(Ordering::Relaxed);
-            if shake > 0 {
-                self.shake_time.store(shake - 1, Ordering::Relaxed);
+        // Handle shake time
+        let shake = self.shake_time.load(Ordering::Relaxed);
+        if shake > 0 {
+            self.shake_time.store(shake - 1, Ordering::Relaxed);
+        }
+
+        if self.tick_loyalty_return(&world) {
+            return;
+        }
+
+        if self.in_ground.load(Ordering::Relaxed) {
+            let _in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed);
+            let life = self.life.fetch_add(1, Ordering::Relaxed);
+
+            // Despawn after enough time
+            if life >= Self::DESPAWN_TIME {
+                entity.remove();
             }
+            return;
+        }
 
-            if self.tick_loyalty_return(&world).await {
-                return;
-            }
+        // Trident is flying
+        let start_pos = entity.pos.load();
+        let mut velocity = entity.velocity.load();
 
-            if self.in_ground.load(Ordering::Relaxed) {
-                let _in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed);
-                let life = self.life.fetch_add(1, Ordering::Relaxed);
+        // Apply gravity
+        velocity.y -= Self::GRAVITY;
 
-                // Despawn after enough time
-                if life >= Self::DESPAWN_TIME {
-                    entity.remove().await;
-                }
-                return;
-            }
+        // Apply inertia (air resistance or water drag)
+        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+            Self::WATER_INERTIA
+        } else {
+            Self::AIR_INERTIA
+        };
+        velocity = velocity.multiply(inertia, inertia, inertia);
 
-            // Trident is flying
-            let start_pos = entity.pos.load();
-            let mut velocity = entity.velocity.load();
+        entity.velocity.store(velocity);
 
-            // Apply gravity
-            velocity.y -= Self::GRAVITY;
+        // `Projectile.checkLeftOwner` runs before `ThrownTrident` scans for a hit
+        // (`Projectile.java:105-127`; `ThrownTrident.java:63-97`).
+        crate::entity::projectile::check_left_owner(entity, self.owner_id, velocity);
 
-            // Apply inertia (air resistance or water drag)
-            let inertia = if entity.touching_water.load(Ordering::Relaxed) {
-                Self::WATER_INERTIA
-            } else {
-                Self::AIR_INERTIA
-            };
-            velocity = velocity.multiply(inertia, inertia, inertia);
+        // Update rotation based on velocity
+        let len = velocity.horizontal_length();
+        entity.set_rotation(
+            velocity.x.atan2(velocity.z) as f32 * 57.295_776,
+            velocity.y.atan2(len) as f32 * 57.295_776,
+        );
 
-            entity.velocity.store(velocity);
+        // Move trident
+        let new_pos = start_pos.add(&velocity);
+        entity.set_pos(new_pos);
 
-            // `Projectile.checkLeftOwner` runs before `ThrownTrident` scans for a hit
-            // (`Projectile.java:105-127`; `ThrownTrident.java:63-97`).
-            crate::entity::projectile::check_left_owner(entity, self.owner_id, velocity).await;
+        // Broadcast velocity update
+        let packet = CEntityVelocity::new(entity.entity_id.into(), velocity);
+        let chunk_pos = entity.chunk_pos.load();
+        world.broadcast_to_chunk(chunk_pos, &packet);
 
-            // Update rotation based on velocity
-            let len = velocity.horizontal_length();
-            entity.set_rotation(
-                velocity.x.atan2(velocity.z) as f32 * 57.295_776,
-                velocity.y.atan2(len) as f32 * 57.295_776,
-            );
+        let hit = self.sweep_collision(&world, start_pos, velocity);
 
-            // Move trident
-            let new_pos = start_pos.add(&velocity);
-            entity.set_pos(new_pos);
-
-            // Broadcast velocity update
-            let packet = CEntityVelocity::new(entity.entity_id.into(), velocity);
-            let chunk_pos = entity.chunk_pos.load();
-            world.broadcast_to_chunk(chunk_pos, &packet);
-
-            let hit = self.sweep_collision(&world, start_pos, velocity).await;
-
-            // Handle hit
-            if let Some(h) = hit
-                && !self.has_hit.swap(true, Ordering::SeqCst)
+        // Handle hit
+        if let Some(h) = hit
+            && !self.has_hit.swap(true, Ordering::SeqCst)
+        {
+            // Trident has its own hit path (doesn't go through
+            // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
+            // emission mirroring the one in projectile::mod.
+            let land_pos = crate::entity::projectile::projectile_land_pos(&h);
+            if let ProjectileHit::Block {
+                pos, face, hit_pos, ..
+            } = &h
             {
-                // Trident has its own hit path (doesn't go through
-                // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
-                // emission mirroring the one in projectile::mod.
-                let land_pos = crate::entity::projectile::projectile_land_pos(&h);
-                if let ProjectileHit::Block {
-                    pos, face, hit_pos, ..
-                } = &h
-                {
-                    crate::entity::projectile::on_projectile_block_hit(
-                        &world, server, caller, *pos, *face, *hit_pos,
-                    )
-                    .await;
-                }
-                caller.on_hit(h).await;
-                crate::entity::projectile::emit_projectile_land(&world, caller, land_pos).await;
+                crate::entity::projectile::on_projectile_block_hit(
+                    &world, server, caller, *pos, *face, *hit_pos,
+                );
             }
-        })
+            caller.on_hit(h);
+            crate::entity::projectile::emit_projectile_land(&world, caller, land_pos);
+        }
     }
 
     fn get_entity(&self) -> &Entity {
@@ -612,162 +597,157 @@ impl EntityBase for TridentEntity {
         self
     }
 
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let world = entity.world.load();
+    fn on_hit(&self, hit: ProjectileHit) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
 
-            match hit {
-                ProjectileHit::Block {
-                    pos, face, hit_pos, ..
-                } => {
-                    self.in_ground.store(true, Ordering::Relaxed);
-                    self.shake_time.store(7, Ordering::Relaxed);
-                    *self
-                        .last_block_pos
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pos);
+        match hit {
+            ProjectileHit::Block {
+                pos, face, hit_pos, ..
+            } => {
+                self.in_ground.store(true, Ordering::Relaxed);
+                self.shake_time.store(7, Ordering::Relaxed);
+                *self
+                    .last_block_pos
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pos);
 
-                    if world.get_block(&pos) == &pumpkin_data::Block::TARGET {
-                        on_target_block_hit(
-                            &world,
-                            &pos,
-                            face,
-                            hit_pos,
-                            self.owner_id,
-                            TargetBlock::PERSISTENT_PROJECTILE_DELAY,
-                        )
-                        .await;
-                    }
-
-                    // Stop the trident
-                    entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
-                    entity.set_pos(hit_pos);
-
-                    // Play sound
-                    let sound_packet = CSoundEffect::new(
-                        IdOr::Id(Sound::ItemTridentHitGround as u16),
-                        SoundCategory::Neutral,
-                        &hit_pos,
-                        1.0,
-                        1.0,
-                        0.0,
+                if world.get_block(&pos) == &pumpkin_data::Block::TARGET {
+                    on_target_block_hit(
+                        &world,
+                        &pos,
+                        face,
+                        hit_pos,
+                        self.owner_id,
+                        TargetBlock::PERSISTENT_PROJECTILE_DELAY,
                     );
-                    let chunk_pos = entity.chunk_pos.load();
-                    world.broadcast_to_chunk(chunk_pos, &sound_packet);
                 }
-                ProjectileHit::Entity {
-                    entity: target,
-                    hit_pos,
-                    ..
-                } => {
-                    let mut damage = Self::BASE_DAMAGE;
 
-                    // Apply Impaling enchantment extra damage
-                    if let Some(enchantments) = self
-                        .item_stack
-                        .lock()
-                        .await
-                        .get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>(
-                    ) {
-                        for (enchantment, level) in enchantments.enchantment.iter() {
-                            // Dispatched through the crate::enchantment framework: IMPALING's
-                            // `damage` component gates on the target entity type being tagged
-                            // sensitive_to_impaling (aquatic mobs), not on whether the target
-                            // happens to be touching water.
-                            let target_type = target.get_entity().entity_type;
-                            for effect in crate::enchantment::effects_for(enchantment) {
-                                if let crate::enchantment::EnchantmentEffect::Damage(
-                                    condition,
-                                    value,
-                                ) = effect
-                                    && condition.applies(target_type)
-                                {
-                                    damage += f64::from(value.calculate(*level));
-                                }
+                // Stop the trident
+                entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
+                entity.set_pos(hit_pos);
+
+                // Play sound
+                let sound_packet = CSoundEffect::new(
+                    IdOr::Id(Sound::ItemTridentHitGround as u16),
+                    SoundCategory::Neutral,
+                    &hit_pos,
+                    1.0,
+                    1.0,
+                    0.0,
+                );
+                let chunk_pos = entity.chunk_pos.load();
+                world.broadcast_to_chunk(chunk_pos, &sound_packet);
+            }
+            ProjectileHit::Entity {
+                entity: target,
+                hit_pos,
+                ..
+            } => {
+                let mut damage = Self::BASE_DAMAGE;
+
+                // Apply Impaling enchantment extra damage
+                if let Some(enchantments) = self
+                    .item_stack
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
+                {
+                    for (enchantment, level) in enchantments.enchantment.iter() {
+                        // Dispatched through the crate::enchantment framework: IMPALING's
+                        // `damage` component gates on the target entity type being tagged
+                        // sensitive_to_impaling (aquatic mobs), not on whether the target
+                        // happens to be touching water.
+                        let target_type = target.get_entity().entity_type;
+                        for effect in crate::enchantment::effects_for(enchantment) {
+                            if let crate::enchantment::EnchantmentEffect::Damage(condition, value) =
+                                effect
+                                && condition.applies(target_type)
+                            {
+                                damage += f64::from(value.calculate(*level));
                             }
                         }
                     }
-
-                    // `ThrownTrident.onHitEntity` (`ThrownTrident.java:129`) sets `dealtDamage`
-                    // before the hurt call, so a loyal trident returns even if the target is
-                    // invulnerable to the hit.
-                    self.dealt_damage.store(true, Ordering::Relaxed);
-
-                    target
-                        .damage(self, damage as f32, DamageType::TRIDENT)
-                        .await;
-
-                    // Play hit sound
-                    let sound_packet = CSoundEffect::new(
-                        IdOr::Id(Sound::ItemTridentHit as u16),
-                        SoundCategory::Neutral,
-                        &hit_pos,
-                        1.0,
-                        1.0,
-                        0.0,
-                    );
-                    world.broadcast_packet_all(&sound_packet);
-
-                    // Channeling (enchantment/channeling.json): post_attack summons a
-                    // lightning bolt on the victim, gated on thundering weather and the
-                    // victim's position being able to see the sky.
-                    let channeling_level = self
-                        .item_stack
-                        .lock()
-                        .await
-                        .get_enchantment_level(&pumpkin_data::Enchantment::CHANNELING);
-                    if channeling_level > 0
-                        && world.is_thundering().await
-                        && world.can_see_sky(&BlockPos::floored(hit_pos.x, hit_pos.y, hit_pos.z))
-                    {
-                        let lightning = crate::entity::Entity::new(
-                            entity.world.load_full(),
-                            hit_pos,
-                            &pumpkin_data::entity::EntityType::LIGHTNING_BOLT,
-                        );
-                        world.spawn_entity(Arc::new(lightning)).await;
-                    }
-
-                    // Standard bounce/fall-back behavior
-                    entity.velocity.store(Vector3::new(0.0, -0.1, 0.0));
-                    self.has_hit.store(false, Ordering::Relaxed); // Let it hit the ground
                 }
+
+                // `ThrownTrident.onHitEntity` (`ThrownTrident.java:129`) sets `dealtDamage`
+                // before the hurt call, so a loyal trident returns even if the target is
+                // invulnerable to the hit.
+                self.dealt_damage.store(true, Ordering::Relaxed);
+
+                target.damage(self, damage as f32, DamageType::TRIDENT);
+
+                // Play hit sound
+                let sound_packet = CSoundEffect::new(
+                    IdOr::Id(Sound::ItemTridentHit as u16),
+                    SoundCategory::Neutral,
+                    &hit_pos,
+                    1.0,
+                    1.0,
+                    0.0,
+                );
+                world.broadcast_packet_all(&sound_packet);
+
+                // Channeling (enchantment/channeling.json): post_attack summons a
+                // lightning bolt on the victim, gated on thundering weather and the
+                // victim's position being able to see the sky.
+                let channeling_level = self
+                    .item_stack
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_enchantment_level(&pumpkin_data::Enchantment::CHANNELING);
+                if channeling_level > 0
+                    && world.is_thundering()
+                    && world.can_see_sky(&BlockPos::floored(hit_pos.x, hit_pos.y, hit_pos.z))
+                {
+                    let lightning = crate::entity::Entity::new(
+                        entity.world.load_full(),
+                        hit_pos,
+                        &pumpkin_data::entity::EntityType::LIGHTNING_BOLT,
+                    );
+                    world.spawn_entity(Arc::new(lightning));
+                }
+
+                // Standard bounce/fall-back behavior
+                entity.velocity.store(Vector3::new(0.0, -0.1, 0.0));
+                self.has_hit.store(false, Ordering::Relaxed); // Let it hit the ground
             }
-        })
+        }
     }
 
-    fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `ThrownTrident.tryPickup` (`ThrownTrident.java:173-175`): a trident flying back
-            // under Loyalty is picked up by its owner regardless of the normal pickup rules,
-            // which is the whole point of the enchantment.
-            let returning_to_owner = self.no_physics.load(Ordering::Relaxed)
-                && self.owner_id == Some(player.living_entity.entity.entity_id);
+    fn on_player_collision(&self, player: &Arc<Player>) {
+        // `ThrownTrident.tryPickup` (`ThrownTrident.java:173-175`): a trident flying back
+        // under Loyalty is picked up by its owner regardless of the normal pickup rules,
+        // which is the whole point of the enchantment.
+        let returning_to_owner = self.no_physics.load(Ordering::Relaxed)
+            && self.owner_id == Some(player.living_entity.entity.entity_id);
 
-            // Can only pick up when on the ground
-            if !returning_to_owner && !self.in_ground.load(Ordering::Relaxed) {
-                return;
-            }
+        // Can only pick up when on the ground
+        if !returning_to_owner && !self.in_ground.load(Ordering::Relaxed) {
+            return;
+        }
 
-            if player.living_entity.health.load() <= 0.0 {
-                return;
-            }
+        if player.living_entity.health.load() <= 0.0 {
+            return;
+        }
 
-            if !returning_to_owner {
-                match self.pickup.load() {
-                    ArrowPickup::Disallowed => return,
-                    ArrowPickup::CreativeOnly if !player.is_creative() => return,
-                    _ => {}
-                }
+        if !returning_to_owner {
+            match self.pickup.load() {
+                ArrowPickup::Disallowed => return,
+                ArrowPickup::CreativeOnly if !player.is_creative() => return,
+                _ => {}
             }
+        }
 
-            let mut stack = self.item_stack.lock().await.clone();
-            if player.is_creative() || player.inventory.insert_stack_anywhere(&mut stack).await {
-                player.living_entity.pickup(&self.entity, 1);
-                self.get_entity().remove().await;
-            }
-        })
+        let mut stack = self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if player.is_creative() || player.inventory.insert_stack_anywhere(&mut stack) {
+            player.living_entity.pickup(&self.entity, 1);
+            self.get_entity().remove();
+        }
     }
 }
 

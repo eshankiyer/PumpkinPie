@@ -18,28 +18,26 @@ struct SpawnMobsExecutor {
 
 impl CommandExecutor for SpawnMobsExecutor {
     /// Implements `DebugMobSpawningCommand.spawnMobs` (`DebugMobSpawningCommand.java:29-31`).
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let position = BlockPosArgumentType::get_loaded_block_pos(context, ARG_POSITION)?;
-            let world = context.world();
-            let chunk_position = position.chunk_position();
-            let is_thundering = world.is_thundering().await;
-            let spawn_state = world.spawn_state.load();
-            let entities = spawn_category_for_position(
-                self.category,
-                world,
-                position,
-                &chunk_position,
-                &spawn_state,
-                is_thundering,
-            );
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let position = BlockPosArgumentType::get_loaded_block_pos(context, ARG_POSITION)?;
+        let world = context.world();
+        let chunk_position = position.chunk_position();
+        let is_thundering = world.is_thundering();
+        let spawn_state = world.spawn_state.load();
+        let entities = spawn_category_for_position(
+            self.category,
+            world,
+            position,
+            &chunk_position,
+            &spawn_state,
+            is_thundering,
+        );
 
-            for entity in entities {
-                world.spawn_entity(entity).await;
-            }
+        for entity in entities {
+            world.spawn_entity(entity);
+        }
 
-            Ok(1)
-        })
+        Ok(1)
     }
 }
 

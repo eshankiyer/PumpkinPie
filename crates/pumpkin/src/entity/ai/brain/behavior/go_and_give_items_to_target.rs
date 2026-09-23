@@ -186,6 +186,6 @@ fn throw_item(
         DEFAULT_PICKUP_DELAY,
     ));
     tokio::spawn(async move {
-        world.spawn_entity(item_entity).await;
+        world.spawn_entity(item_entity);
     });
 }

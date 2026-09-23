@@ -3,7 +3,6 @@ pub mod potion;
 pub mod registry;
 
 use std::any::Any;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::EntityBase;
@@ -22,64 +21,31 @@ pub trait ItemMetadata {
 
 pub trait ItemBehaviour: Send + Sync {
     /// Called once per server tick for an item held in an inventory.
-    fn inventory_tick<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        _owner: &'a dyn EntityBase,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn inventory_tick(&self, _item: &mut ItemStack, _owner: &dyn EntityBase, _server: &Server) {}
 
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        _player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn normal_use(&self, _item: &Item, _player: &Player) {}
 
     #[expect(clippy::too_many_arguments)]
-    fn use_on_block<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        _player: &'a Player,
+    fn use_on_block(
+        &self,
+        _item: &mut ItemStack,
+        _player: &Player,
         _location: BlockPos,
         _face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
+        _block: &Block,
+        _server: &Server,
+    ) {
     }
 
-    fn use_on_entity<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        _player: &'a Player,
-        _entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
+    fn use_on_entity(&self, _item: &mut ItemStack, _player: &Player, _entity: Arc<dyn EntityBase>) {
     }
 
-    fn on_stopped_using<'a>(
-        &'a self,
-        _stack: &'a ItemStack,
-        _player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn on_stopped_using(&self, _stack: &ItemStack, _player: &Player) {}
 
     /// Called once per tick while this item is actively being used (right-click held down),
     /// before the use-duration countdown is checked for completion.
-    fn on_use_tick<'a>(
-        &'a self,
-        _stack: &'a ItemStack,
-        _player: &'a Player,
-        _remaining_use_ticks: i32,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn on_use_tick(&self, _stack: &ItemStack, _player: &Player, _remaining_use_ticks: i32) {}
 
     /// Mirrors `Item.useOnRelease`, which defaults to false (`Item.java:356-358`).
     fn use_on_release(&self, _stack: &ItemStack) -> bool {

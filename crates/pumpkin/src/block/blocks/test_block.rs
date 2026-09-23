@@ -11,9 +11,9 @@ use pumpkin_util::{GameMode, PermissionLvl};
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::test_block::TestBlockBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, EmitsRedstonePowerArgs,
-    GetCloneItemStackArgs, GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    OnScheduledTickArgs, registry::BlockActionResult,
+    BlockBehaviour, BlockMetadata, CanPlaceAtArgs, EmitsRedstonePowerArgs, GetCloneItemStackArgs,
+    GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
+    registry::BlockActionResult,
 };
 
 /// `net.minecraft.world.level.block.TestBlock`.
@@ -44,110 +44,99 @@ impl BlockBehaviour for TestBlock {
     /// `TestBlock.getStateForPlacement` (TestBlock.java:42-53): reads the block's current mode
     /// from the item's `block_state` data component so that a creative pick-block → place cycle
     /// preserves the mode.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = TestBlockLikeProperties::default(args.block);
-            let held = args.player.inventory.held_item().await;
-            if let Some(block_state) =
-                held.get_data_component::<pumpkin_data::data_component_impl::BlockStateImpl>()
-                && let Some((_, mode_val)) = block_state
-                    .properties
-                    .iter()
-                    .find(|(k, _)| k.as_ref() == "mode")
-            {
-                props.mode = match mode_val.as_ref() {
-                    "start" => TestBlockMode::Start,
-                    "log" => TestBlockMode::Log,
-                    "fail" => TestBlockMode::Fail,
-                    "accept" => TestBlockMode::Accept,
-                    _ => props.mode,
-                };
-            }
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = TestBlockLikeProperties::default(args.block);
+        let held = args.player.inventory.held_item();
+        if let Some(block_state) =
+            held.get_data_component::<pumpkin_data::data_component_impl::BlockStateImpl>()
+            && let Some((_, mode_val)) = block_state
+                .properties
+                .iter()
+                .find(|(k, _)| k.as_ref() == "mode")
+        {
+            props.mode = match mode_val.as_ref() {
+                "start" => TestBlockMode::Start,
+                "log" => TestBlockMode::Log,
+                "fail" => TestBlockMode::Fail,
+                "accept" => TestBlockMode::Accept,
+                _ => props.mode,
+            };
+        }
+        props.to_state_id(args.block)
     }
 
     /// `TestBlock.tick`: the scheduled tick resets the block entity.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(entity) = args.world.get_block_entity(args.position)
-                && let Some(test_block) = entity.as_any().downcast_ref::<TestBlockBlockEntity>()
-            {
-                test_block.reset(args.world).await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        if let Some(entity) = args.world.get_block_entity(args.position)
+            && let Some(test_block) = entity.as_any().downcast_ref::<TestBlockBlockEntity>()
+        {
+            test_block.reset(args.world);
+        }
     }
 
     /// `TestBlock.neighborChanged`: a rising redstone edge triggers non-START blocks; a
     /// falling edge only clears `powered`. START-mode blocks are driven by `trigger()`
     /// from the test framework instead, so they ignore neighbour signal entirely.
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(entity) = args.world.get_block_entity(args.position) else {
-                return;
-            };
-            let Some(test_block) = entity.as_any().downcast_ref::<TestBlockBlockEntity>() else {
-                return;
-            };
-            if test_block.get_mode().await == TestBlockMode::Start {
-                return;
-            }
-            let should_trigger = block_receives_redstone_power(args.world, args.position).await;
-            let is_powered = test_block.is_powered();
-            if should_trigger && !is_powered {
-                test_block.set_powered(true);
-                test_block.trigger(args.world).await;
-            } else if !should_trigger && is_powered {
-                test_block.set_powered(false);
-            }
-        })
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let Some(entity) = args.world.get_block_entity(args.position) else {
+            return;
+        };
+        let Some(test_block) = entity.as_any().downcast_ref::<TestBlockBlockEntity>() else {
+            return;
+        };
+        if test_block.get_mode().await == TestBlockMode::Start {
+            return;
+        }
+        let should_trigger = block_receives_redstone_power(args.world, args.position);
+        let is_powered = test_block.is_powered();
+        if should_trigger && !is_powered {
+            test_block.set_powered(true);
+            test_block.trigger(args.world);
+        } else if !should_trigger && is_powered {
+            test_block.set_powered(false);
+        }
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { true })
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
+        true
     }
 
     /// `TestBlock.ownSignal`: only a powered START block emits, and it emits full strength.
-    fn get_weak_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            let props = TestBlockLikeProperties::from_state_id(args.state.id, args.block);
-            if props.mode != TestBlockMode::Start {
-                return 0;
-            }
-            let powered = args
-                .world
-                .get_block_entity(args.position)
-                .is_some_and(|entity| {
-                    entity
-                        .as_any()
-                        .downcast_ref::<TestBlockBlockEntity>()
-                        .is_some_and(TestBlockBlockEntity::is_powered)
-                });
-            if powered { 15 } else { 0 }
-        })
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        let props = TestBlockLikeProperties::from_state_id(args.state.id, args.block);
+        if props.mode != TestBlockMode::Start {
+            return 0;
+        }
+        let powered = args
+            .world
+            .get_block_entity(args.position)
+            .is_some_and(|entity| {
+                entity
+                    .as_any()
+                    .downcast_ref::<TestBlockBlockEntity>()
+                    .is_some_and(TestBlockBlockEntity::is_powered)
+            });
+        if powered { 15 } else { 0 }
     }
 
     /// `TestBlock.useWithoutItem` (TestBlock.java:61-75): only a game master may open the test
     /// block; the server validates permissions and reports success while the client opens its
     /// own screen. `Player.canUseGameMasterBlocks` (Player.java:1863-1865) requires instabuild
     /// and permission level 2.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if args.world.get_block_entity(args.position).is_none() {
-                return BlockActionResult::Pass;
-            }
-            let instabuild = args.player.abilities.lock().await.creative;
-            if !instabuild || args.player.permission_lvl.load() < PermissionLvl::Two {
-                return BlockActionResult::Pass;
-            }
-            BlockActionResult::SuccessServer
-        })
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        if args.world.get_block_entity(args.position).is_none() {
+            return BlockActionResult::Pass;
+        }
+        let instabuild = args
+            .player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .creative;
+        if !instabuild || args.player.permission_lvl.load() < PermissionLvl::Two {
+            return BlockActionResult::Pass;
+        }
+        BlockActionResult::SuccessServer
     }
 
     /// `TestBlock.getCloneItemStack` + `setModeOnStack` (TestBlock.java:122-130): pick-block

@@ -8,7 +8,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -95,36 +95,31 @@ impl TadpoleEntity {
     }
 
     /// `Tadpole.ageUp` (`Tadpole.java:238-247`).
-    async fn grow_into_frog(&self) {
+    fn grow_into_frog(&self) {
         let entity = self.get_entity();
         let world = entity.world.load();
         let pos = entity.pos.load();
         // Vanilla plays the sound inside the conversion callback, before the tadpole is
         // discarded; `convert_to` removes it, so the sound is played first at the same spot.
         world.play_sound(Sound::EntityTadpoleGrowUp, SoundCategory::Neutral, &pos);
-        zombification::convert_to(&self.mob_entity, &EntityType::FROG, false, FrogEntity::new)
-            .await;
+        zombification::convert_to(&self.mob_entity, &EntityType::FROG, false, FrogEntity::new);
     }
 }
 
 impl NBTStorage for TadpoleEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            // `Tadpole.addAdditionalSaveData` (`Tadpole.java:113-117`).
-            nbt.put_int("Age", self.age.load(Relaxed));
-            nbt.put_bool("AgeLocked", self.is_age_locked());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        // `Tadpole.addAdditionalSaveData` (`Tadpole.java:113-117`).
+        nbt.put_int("Age", self.age.load(Relaxed));
+        nbt.put_bool("AgeLocked", self.is_age_locked());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            // `Tadpole.readAdditionalSaveData` (`Tadpole.java:119-123`).
-            self.age.store(nbt.get_int("Age").unwrap_or(0), Relaxed);
-            self.age_locked
-                .store(nbt.get_bool("AgeLocked").unwrap_or(false), Relaxed);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        // `Tadpole.readAdditionalSaveData` (`Tadpole.java:119-123`).
+        self.age.store(nbt.get_int("Age").unwrap_or(0), Relaxed);
+        self.age_locked
+            .store(nbt.get_bool("AgeLocked").unwrap_or(false), Relaxed);
     }
 }
 
@@ -133,30 +128,26 @@ impl Mob for TadpoleEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.get_entity().send_meta_data(
-                &[Metadata::new(
-                    tracked_data::tadpole::AGE_LOCKED,
-                    self.is_age_locked(),
-                )],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::tadpole::AGE_LOCKED,
+                self.is_age_locked(),
+            )],
+            None,
+        );
     }
 
     /// `Tadpole.aiStep` (`Tadpole.java:103-106`) plus the growth check `setAge` performs
     /// (`Tadpole.java:231-236`).
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.get_entity().is_alive() || self.is_age_locked() {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if !self.get_entity().is_alive() || self.is_age_locked() {
+            return;
+        }
 
-            let age = self.age.fetch_add(1, Relaxed) + 1;
-            if age >= TICKS_TO_BE_FROG {
-                self.grow_into_frog().await;
-            }
-        })
+        let age = self.age.fetch_add(1, Relaxed) + 1;
+        if age >= TICKS_TO_BE_FROG {
+            self.grow_into_frog();
+        }
     }
 }

@@ -13,7 +13,7 @@ use pumpkin_util::Difficulty;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, interact_with_door::InteractWithDoorGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -141,20 +141,16 @@ impl PiglinBruteEntity {
 
 impl NBTStorage for PiglinBruteEntity {
     /// `AbstractPiglin.addAdditionalSaveData` (`AbstractPiglin.java:65-70`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.zombification.write_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.zombification.write_nbt(nbt);
     }
 
     /// `AbstractPiglin.readAdditionalSaveData` (`AbstractPiglin.java:72-78`).
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.zombification.read_nbt(nbt);
-            self.send_immune_to_zombification();
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.zombification.read_nbt(nbt);
+        self.send_immune_to_zombification();
     }
 }
 
@@ -164,10 +160,8 @@ impl Mob for PiglinBruteEntity {
     }
 
     /// `AbstractPiglin.defineSynchedData`: `DATA_IMMUNE_TO_ZOMBIFICATION`.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.send_immune_to_zombification();
-        })
+    fn mob_init_data_tracker(&self) {
+        self.send_immune_to_zombification();
     }
 
     fn get_base_experience_reward(&self) -> u32 {
@@ -192,66 +186,57 @@ impl Mob for PiglinBruteEntity {
     /// `PiglinBruteAi.wasHurtBy`: unlike `Piglin`, brutes have no baby-flee or
     /// hoglin-outnumbered branch -- any non-piglin attacker is retaliated against
     /// directly via the same `maybeRetaliate`/`broadcastAngerTarget` piglins use.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(source) = source {
-                if source.get_entity().entity_type.id == EntityType::PIGLIN.id
-                    || source.get_entity().entity_type.id == EntityType::PIGLIN_BRUTE.id
-                {
-                    return;
-                }
-                piglin_shared::retaliate_and_alert_piglins(self, source).await;
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        if let Some(source) = source {
+            if source.get_entity().entity_type.id == EntityType::PIGLIN.id
+                || source.get_entity().entity_type.id == EntityType::PIGLIN_BRUTE.id
+            {
+                return;
             }
-        })
+            piglin_shared::retaliate_and_alert_piglins(self, source);
+        }
     }
 
     /// `AbstractPiglin.customServerAiStep` (`AbstractPiglin.java:80-96`): the overworld
     /// zombification timer, with `PiglinBrute.playConvertedSound`
     /// (`PiglinBrute.java:141-144`) for the conversion sound.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `PiglinBruteAi.maybePlayActivitySound` (`PiglinBruteAi.java:150-161`) is
-            // reached from `PiglinBrute.customServerAiStep` (`PiglinBrute.java:92-100`).
-            if self.mob_entity.get_target().await.is_some() && rand::random::<f32>() < 0.0125 {
-                let entity = &self.mob_entity.living_entity.entity;
-                entity.world.load().play_sound_fine(
-                    Sound::EntityPiglinBruteAngry,
-                    SoundCategory::Hostile,
-                    &entity.pos.load(),
-                    1.0,
-                    1.0,
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        // `PiglinBruteAi.maybePlayActivitySound` (`PiglinBruteAi.java:150-161`) is
+        // reached from `PiglinBrute.customServerAiStep` (`PiglinBrute.java:92-100`).
+        if self.mob_entity.get_target().is_some() && rand::random::<f32>() < 0.0125 {
+            let entity = &self.mob_entity.living_entity.entity;
+            entity.world.load().play_sound_fine(
+                Sound::EntityPiglinBruteAngry,
+                SoundCategory::Hostile,
+                &entity.pos.load(),
+                1.0,
+                1.0,
+            );
+        }
+
+        if self.zombification.tick(&self.mob_entity) {
+            if self
+                .mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .level_info
+                .load()
+                .difficulty
+                != Difficulty::Peaceful
+            {
+                zombification::play_converted_sound(
+                    &self.mob_entity,
+                    Sound::EntityPiglinBruteConvertedToZombified,
                 );
             }
-
-            if self.zombification.tick(&self.mob_entity) {
-                if self
-                    .mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .level_info
-                    .load()
-                    .difficulty
-                    != Difficulty::Peaceful
-                {
-                    zombification::play_converted_sound(
-                        &self.mob_entity,
-                        Sound::EntityPiglinBruteConvertedToZombified,
-                    );
-                }
-                zombification::convert_to(
-                    &self.mob_entity,
-                    &EntityType::ZOMBIFIED_PIGLIN,
-                    true,
-                    ZombifiedPiglinEntity::new,
-                )
-                .await;
-            }
-        })
+            zombification::convert_to(
+                &self.mob_entity,
+                &EntityType::ZOMBIFIED_PIGLIN,
+                true,
+                ZombifiedPiglinEntity::new,
+            );
+        }
     }
 }

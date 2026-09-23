@@ -3,11 +3,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
-use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
-};
+use crate::entity::{Entity, EntityBase, NBTStorage, living::LivingEntity};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityPose;
 use pumpkin_nbt::compound::NbtCompound;
@@ -141,12 +139,18 @@ impl MannequinEntity {
         }
     }
 
-    pub async fn get_profile(&self) -> Option<NbtCompound> {
-        self.profile.lock().await.clone()
+    pub fn get_profile(&self) -> Option<NbtCompound> {
+        self.profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    pub async fn set_profile(&self, profile: NbtCompound) {
-        *self.profile.lock().await = Some(profile);
+    pub fn set_profile(&self, profile: NbtCompound) {
+        *self
+            .profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(profile);
     }
 
     pub fn is_immovable(&self) -> bool {
@@ -169,76 +173,87 @@ impl MannequinEntity {
 }
 
 impl NBTStorage for MannequinEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.living_entity.write_nbt(nbt).await;
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.living_entity.write_nbt(nbt);
 
-            if let Some(profile) = self.profile.lock().await.as_ref() {
-                nbt.put_compound("profile", profile.clone());
-            }
-            nbt.put_list(
-                "hidden_layers",
-                hidden_layers_list(self.shown_layers.load(Ordering::Relaxed)),
-            );
-            nbt.put_string(
-                "main_hand",
-                main_hand_name(self.main_hand_right.load(Ordering::Relaxed)).to_string(),
-            );
-            if let Some(name) = pose_name(self.living_entity.entity.pose.load()) {
-                nbt.put_string("pose", name.to_string());
-            }
-            nbt.put_bool("immovable", self.is_immovable());
+        if let Some(profile) = self
+            .profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_compound("profile", profile.clone());
+        }
+        nbt.put_list(
+            "hidden_layers",
+            hidden_layers_list(self.shown_layers.load(Ordering::Relaxed)),
+        );
+        nbt.put_string(
+            "main_hand",
+            main_hand_name(self.main_hand_right.load(Ordering::Relaxed)).to_string(),
+        );
+        if let Some(name) = pose_name(self.living_entity.entity.pose.load()) {
+            nbt.put_string("pose", name.to_string());
+        }
+        nbt.put_bool("immovable", self.is_immovable());
 
-            if self.hide_description.load(Ordering::Relaxed) {
-                nbt.put_bool("hide_description", true);
-            } else {
-                let description = self.description.lock().await;
-                if *description != default_description()
-                    && let Ok(json) = pumpkin_util::serde_json::to_string(&*description)
-                {
-                    nbt.put_string("description", json);
-                }
+        if self.hide_description.load(Ordering::Relaxed) {
+            nbt.put_bool("hide_description", true);
+        } else {
+            let description = self
+                .description
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *description != default_description()
+                && let Ok(json) = pumpkin_util::serde_json::to_string(&*description)
+            {
+                nbt.put_string("description", json);
             }
-        })
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.living_entity.read_nbt_non_mut(nbt).await;
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.living_entity.read_nbt_non_mut(nbt);
 
-            *self.profile.lock().await = nbt.get_compound("profile").cloned();
+        *self
+            .profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            nbt.get_compound("profile").cloned();
 
-            self.shown_layers.store(
-                nbt.get_list("hidden_layers")
-                    .map_or(ALL_LAYERS, shown_mask_from_hidden_layers),
-                Ordering::Relaxed,
-            );
-            self.main_hand_right.store(
-                nbt.get_string("main_hand")
-                    .map_or(DEFAULT_MAIN_HAND_RIGHT, |name| name != "left"),
-                Ordering::Relaxed,
-            );
+        self.shown_layers.store(
+            nbt.get_list("hidden_layers")
+                .map_or(ALL_LAYERS, shown_mask_from_hidden_layers),
+            Ordering::Relaxed,
+        );
+        self.main_hand_right.store(
+            nbt.get_string("main_hand")
+                .map_or(DEFAULT_MAIN_HAND_RIGHT, |name| name != "left"),
+            Ordering::Relaxed,
+        );
 
-            let pose = nbt
-                .get_string("pose")
-                .and_then(pose_from_name)
-                .unwrap_or(EntityPose::Standing);
-            Self::apply_pose(&self.living_entity.entity, pose);
+        let pose = nbt
+            .get_string("pose")
+            .and_then(pose_from_name)
+            .unwrap_or(EntityPose::Standing);
+        Self::apply_pose(&self.living_entity.entity, pose);
 
-            self.set_immovable(nbt.get_bool("immovable").unwrap_or(false));
+        self.set_immovable(nbt.get_bool("immovable").unwrap_or(false));
 
-            let hide_description = nbt.get_bool("hide_description").unwrap_or(false);
-            self.hide_description
-                .store(hide_description, Ordering::Relaxed);
-            let description = if hide_description {
-                default_description()
-            } else {
-                nbt.get_string("description")
-                    .and_then(|json| pumpkin_util::serde_json::from_str(json).ok())
-                    .unwrap_or_else(default_description)
-            };
-            *self.description.lock().await = description;
-        })
+        let hide_description = nbt.get_bool("hide_description").unwrap_or(false);
+        self.hide_description
+            .store(hide_description, Ordering::Relaxed);
+        let description = if hide_description {
+            default_description()
+        } else {
+            nbt.get_string("description")
+                .and_then(|json| pumpkin_util::serde_json::from_str(json).ok())
+                .unwrap_or_else(default_description)
+        };
+        *self
+            .description
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = description;
     }
 }
 
@@ -259,23 +274,19 @@ impl EntityBase for MannequinEntity {
         self
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a crate::server::Server,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &crate::server::Server) {
         self.living_entity.tick(caller, server)
     }
 
-    fn damage_with_context<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        caller: &dyn EntityBase,
         amount: f32,
         damage_type: DamageType,
         position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
         self.living_entity
             .damage_with_context(caller, amount, damage_type, position, source, cause)
     }

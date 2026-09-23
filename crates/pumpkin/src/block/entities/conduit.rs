@@ -15,10 +15,9 @@ use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// `ConduitBlockEntity.MIN_ACTIVE_SIZE`
@@ -128,20 +127,18 @@ impl BlockEntity for ConduitBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let target = *self.destroy_target.lock().await;
-            if let Some(uuid) = target {
-                nbt.put("Target", uuid_to_int_array(uuid));
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let target = *self
+            .destroy_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(uuid) = target {
+            nbt.put("Target", uuid_to_int_array(uuid));
+        }
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move { self.server_tick(world).await })
+    fn tick(&self, world: &Arc<World>) {
+        self.server_tick(world)
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -190,9 +187,9 @@ impl ConduitBlockEntity {
     }
 
     /// `ConduitBlockEntity.serverTick`
-    async fn server_tick(&self, world: &Arc<World>) {
+    fn server_tick(&self, world: &Arc<World>) {
         self.tick_count.fetch_add(1, Ordering::Relaxed);
-        let game_time = world.get_world_age().await;
+        let game_time = world.get_world_age();
 
         if game_time % 40 == 0 {
             let shape = scan_shape(
@@ -213,11 +210,14 @@ impl ConduitBlockEntity {
             }
             self.is_active.store(active, Ordering::Relaxed);
             self.is_hunting.store(hunting, Ordering::Relaxed);
-            *self.effect_blocks.lock().await = shape;
+            *self
+                .effect_blocks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = shape;
 
             if active {
-                self.apply_effects(world).await;
-                self.update_and_attack_target(world, hunting).await;
+                self.apply_effects(world);
+                self.update_and_attack_target(world, hunting);
             }
         }
 
@@ -249,8 +249,12 @@ impl ConduitBlockEntity {
     }
 
     /// `ConduitBlockEntity.applyEffects`
-    async fn apply_effects(&self, world: &Arc<World>) {
-        let active_size = self.effect_blocks.lock().await.len() as i32;
+    fn apply_effects(&self, world: &Arc<World>) {
+        let active_size = self
+            .effect_blocks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len() as i32;
         let effect_range = f64::from(active_size / 7 * 16);
         if effect_range <= 0.0 {
             return;
@@ -264,25 +268,23 @@ impl ConduitBlockEntity {
             let player_pos = player.living_entity.entity.block_pos.load();
             let close_enough =
                 self.position.squared_distance(&player_pos) < (effect_range * effect_range) as i32;
-            if close_enough && is_wet(&player.living_entity, world).await {
-                player
-                    .add_effect(Effect {
-                        effect_type: &StatusEffect::CONDUIT_POWER,
-                        duration: CONDUIT_POWER_DURATION,
-                        amplifier: 0,
-                        ambient: true,
-                        show_particles: true,
-                        show_icon: true,
-                        blend: false,
-                    })
-                    .await;
+            if close_enough && is_wet(&player.living_entity, world) {
+                player.add_effect(Effect {
+                    effect_type: &StatusEffect::CONDUIT_POWER,
+                    duration: CONDUIT_POWER_DURATION,
+                    amplifier: 0,
+                    ambient: true,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                });
             }
         }
     }
 
     /// `ConduitBlockEntity.updateAndAttackTarget`
-    async fn update_and_attack_target(&self, world: &Arc<World>, hunting: bool) {
-        let new_target = self.update_destroy_target(world, hunting).await;
+    fn update_and_attack_target(&self, world: &Arc<World>, hunting: bool) {
+        let new_target = self.update_destroy_target(world, hunting);
 
         if let Some(uuid) = new_target
             && let Some(target) = world.get_entity_by_uuid(uuid)
@@ -293,21 +295,27 @@ impl ConduitBlockEntity {
         {
             let pos = target.get_entity().pos.load();
             world.play_sound(Sound::BlockConduitAttackTarget, SoundCategory::Blocks, &pos);
-            target.damage(&*target, 4.0, DamageType::MAGIC).await;
+            target.damage(&*target, 4.0, DamageType::MAGIC);
         }
 
-        *self.destroy_target.lock().await = new_target;
+        *self
+            .destroy_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = new_target;
     }
 
     /// `ConduitBlockEntity.updateDestroyTarget`
-    async fn update_destroy_target(&self, world: &Arc<World>, hunting: bool) -> Option<Uuid> {
+    fn update_destroy_target(&self, world: &Arc<World>, hunting: bool) -> Option<Uuid> {
         if !hunting {
             return None;
         }
 
-        let current = *self.destroy_target.lock().await;
+        let current = *self
+            .destroy_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(uuid) = current else {
-            return self.select_new_target(world).await;
+            return self.select_new_target(world);
         };
 
         let still_valid = world.get_entity_by_uuid(uuid).is_some_and(|target| {
@@ -329,7 +337,7 @@ impl ConduitBlockEntity {
     /// used as the closest available proxy (it covers effectively all `Enemy`
     /// implementors that can appear at all, at the cost of not matching a couple of
     /// edge-case mobs whose category differs from their `Enemy` status upstream).
-    async fn select_new_target(&self, world: &Arc<World>) -> Option<Uuid> {
+    fn select_new_target(&self, world: &Arc<World>) -> Option<Uuid> {
         let bb = BoundingBox::from_block(&self.position).expand(KILL_RANGE, KILL_RANGE, KILL_RANGE);
 
         let mut candidates = Vec::new();
@@ -340,7 +348,7 @@ impl ConduitBlockEntity {
             if entity.get_entity().entity_type.category.id != MobCategory::MONSTER.id {
                 continue;
             }
-            if is_wet(living, world).await {
+            if is_wet(living, world) {
                 candidates.push(entity.get_entity().entity_uuid);
             }
         }
@@ -356,11 +364,11 @@ impl ConduitBlockEntity {
 /// `LivingEntity.isInWaterOrRain`, approximated with the primitives this codebase
 /// already exposes: `LivingEntity::is_in_water` (block-at-feet check) plus the
 /// server's rain-at-position check.
-async fn is_wet(living: &LivingEntity, world: &World) -> bool {
+fn is_wet(living: &LivingEntity, world: &World) -> bool {
     if living.is_in_water() {
         return true;
     }
-    if !world.is_raining().await {
+    if !world.is_raining() {
         return false;
     }
     world.is_raining_at_unchecked(&living.entity.block_pos.load())

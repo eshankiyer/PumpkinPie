@@ -4,10 +4,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
-    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
-    offer_or_drop_stack,
+    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack,
 };
-use crate::slot::{BoxFuture, Slot};
+use crate::slot::Slot;
 
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{DataComponentImpl, TrimImpl};
@@ -150,10 +149,10 @@ impl SmithingScreenHandler {
         ItemStack::EMPTY.clone()
     }
 
-    async fn update_output(&self) {
-        let template = self.input_inventory.get_stack(TEMPLATE_SLOT).await;
-        let base = self.input_inventory.get_stack(BASE_SLOT).await;
-        let addition = self.input_inventory.get_stack(ADDITION_SLOT).await;
+    fn update_output(&self) {
+        let template = self.input_inventory.get_stack(TEMPLATE_SLOT);
+        let base = self.input_inventory.get_stack(BASE_SLOT);
+        let addition = self.input_inventory.get_stack(ADDITION_SLOT);
 
         let result = Self::compute_result(&template, &base, &addition);
         // `SmithingMenu.slotsChanged` (`SmithingMenu.java:96-105`) sets the error flag only
@@ -161,30 +160,22 @@ impl SmithingScreenHandler {
         self.recipe_error.set(
             !template.is_empty() && !base.is_empty() && !addition.is_empty() && result.is_empty(),
         );
-        self.output_inventory.set_stack(0, result).await;
+        self.output_inventory.set_stack(0, result);
     }
 
     /// `SmithingMenu.canMoveIntoInputSlots` (`SmithingMenu.java:134-140`): a shift-click from
     /// the player's inventory only tries the input slots at all if the stack fills a role
     /// (template/base/addition) whose slot is still empty.
-    async fn can_move_into_input_slots(&self, stack: &ItemStack) -> bool {
-        let template_empty = self
-            .input_inventory
-            .get_stack(TEMPLATE_SLOT)
-            .await
-            .is_empty();
+    fn can_move_into_input_slots(&self, stack: &ItemStack) -> bool {
+        let template_empty = self.input_inventory.get_stack(TEMPLATE_SLOT).is_empty();
         if is_template_candidate(stack.item) && template_empty {
             return true;
         }
-        let base_empty = self.input_inventory.get_stack(BASE_SLOT).await.is_empty();
+        let base_empty = self.input_inventory.get_stack(BASE_SLOT).is_empty();
         if is_base_candidate(stack.item) && base_empty {
             return true;
         }
-        let addition_empty = self
-            .input_inventory
-            .get_stack(ADDITION_SLOT)
-            .await
-            .is_empty();
+        let addition_empty = self.input_inventory.get_stack(ADDITION_SLOT).is_empty();
         is_addition_candidate(stack.item) && addition_empty
     }
 }
@@ -217,98 +208,85 @@ impl ScreenHandler for SmithingScreenHandler {
 
     // net/minecraft/world/inventory/ItemCombinerMenu#removed: input slots are returned to the
     // player when the menu closes (the result slot is never populated with a real item to drop).
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
-                let stack = self.input_inventory.remove_stack(index).await;
-                if !stack.is_empty() {
-                    offer_or_drop_stack(player, stack).await;
-                }
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
+            let stack = self.input_inventory.remove_stack(index);
+            if !stack.is_empty() {
+                offer_or_drop_stack(player, stack);
             }
-        })
+        }
     }
 
-    fn on_slot_click<'a>(
-        &'a mut self,
+    fn on_slot_click(
+        &mut self,
         slot_index: i32,
         button: i32,
         action_type: SlotActionType,
-        player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            if action_type == SlotActionType::PickupAll && button == 0 {
-                // `SmithingMenu.canTakeItemForPickAll` (`SmithingMenu.java:128-130`) excludes
-                // the result container from the shared pickup-all scan.
-                self.output_inventory.remove_stack(0).await;
-                self.internal_on_slot_click(slot_index, button, action_type, player)
-                    .await;
-                self.update_output().await;
-                return;
-            }
-            self.internal_on_slot_click(slot_index, button, action_type, player)
-                .await;
-            if (0..4).contains(&slot_index) {
-                self.update_output().await;
-            }
-        })
+        player: &dyn InventoryPlayer,
+    ) {
+        if action_type == SlotActionType::PickupAll && button == 0 {
+            // `SmithingMenu.canTakeItemForPickAll` (`SmithingMenu.java:128-130`) excludes
+            // the result container from the shared pickup-all scan.
+            self.output_inventory.remove_stack(0);
+            self.internal_on_slot_click(slot_index, button, action_type, player);
+            self.update_output();
+            return;
+        }
+        self.internal_on_slot_click(slot_index, button, action_type, player);
+        if (0..4).contains(&slot_index) {
+            self.update_output();
+        }
     }
 
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ScreenHandlerFuture<'a, ItemStack> {
-        Box::pin(async move {
-            let mut stack = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
 
-            if let Some(slot) = slot {
-                let mut slot_stack = slot.get_cloned_stack().await;
-                if !slot_stack.is_empty() {
-                    stack = slot_stack.clone();
-                    if slot_index < 4 {
-                        if !self.insert_item(&mut slot_stack, 4, 40, true).await {
-                            return ItemStack::EMPTY.clone();
-                        }
-                        slot.on_quick_move_crafted(slot_stack.clone(), stack.clone())
-                            .await;
-                    } else if self.can_move_into_input_slots(&slot_stack).await
-                        && (4..40).contains(&slot_index)
-                    {
-                        if !self.insert_item(&mut slot_stack, 0, 3, false).await {
-                            return ItemStack::EMPTY.clone();
-                        }
-                    } else if (4..31).contains(&slot_index) {
-                        // Main inventory -> hotbar (`ItemCombinerMenu.java:137-140`).
-                        if !self.insert_item(&mut slot_stack, 31, 40, false).await {
-                            return ItemStack::EMPTY.clone();
-                        }
-                    } else if (31..40).contains(&slot_index)
-                        && !self.insert_item(&mut slot_stack, 4, 31, false).await
-                    {
-                        // Hotbar -> main inventory (`ItemCombinerMenu.java:141-144`).
+        if let Some(slot) = slot {
+            let mut slot_stack = slot.get_cloned_stack();
+            if !slot_stack.is_empty() {
+                stack = slot_stack.clone();
+                if slot_index < 4 {
+                    if !self.insert_item(&mut slot_stack, 4, 40, true) {
                         return ItemStack::EMPTY.clone();
                     }
-
-                    let moved_count = stack.item_count - slot_stack.item_count;
-                    if slot_stack.is_empty() {
-                        slot.set_stack(ItemStack::EMPTY.clone()).await;
-                    } else {
-                        slot.set_stack(slot_stack).await;
+                    slot.on_quick_move_crafted(slot_stack.clone(), stack.clone());
+                } else if self.can_move_into_input_slots(&slot_stack)
+                    && (4..40).contains(&slot_index)
+                {
+                    if !self.insert_item(&mut slot_stack, 0, 3, false) {
+                        return ItemStack::EMPTY.clone();
                     }
-
-                    if slot_index == 3 {
-                        let mut taken_stack = stack.clone();
-                        taken_stack.set_count(moved_count);
-                        slot.on_take_item(player, &taken_stack).await;
+                } else if (4..31).contains(&slot_index) {
+                    // Main inventory -> hotbar (`ItemCombinerMenu.java:137-140`).
+                    if !self.insert_item(&mut slot_stack, 31, 40, false) {
+                        return ItemStack::EMPTY.clone();
                     }
-
-                    self.update_output().await;
+                } else if (31..40).contains(&slot_index)
+                    && !self.insert_item(&mut slot_stack, 4, 31, false)
+                {
+                    // Hotbar -> main inventory (`ItemCombinerMenu.java:141-144`).
+                    return ItemStack::EMPTY.clone();
                 }
+
+                let moved_count = stack.item_count - slot_stack.item_count;
+                if slot_stack.is_empty() {
+                    slot.set_stack(ItemStack::EMPTY.clone());
+                } else {
+                    slot.set_stack(slot_stack);
+                }
+
+                if slot_index == 3 {
+                    let mut taken_stack = stack.clone();
+                    taken_stack.set_count(moved_count);
+                    slot.on_take_item(player, &taken_stack);
+                }
+
+                self.update_output();
             }
-            stack
-        })
+        }
+        stack
     }
 }
 
@@ -361,15 +339,13 @@ impl Slot for SmithingInputSlot {
         self.id.store(id as u8, Ordering::Relaxed);
     }
 
-    fn can_insert(&self, stack: &ItemStack) -> BoxFuture<'_, bool> {
+    fn can_insert(&self, stack: &ItemStack) -> bool {
         let matches = (self.predicate)(stack.item);
         Box::pin(async move { matches })
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -409,64 +385,50 @@ impl Slot for SmithingOutputSlot {
     }
 
     // net/minecraft/world/inventory/SmithingMenu#onTake.
-    fn on_take_item<'a>(
-        &'a self,
-        player: &'a dyn InventoryPlayer,
-        stack: &'a ItemStack,
-    ) -> BoxFuture<'a, ()> {
-        Box::pin(async move {
-            player
-                .increment_stat(
-                    StatisticCategory::Crafted,
-                    stack.item.id as i32,
-                    stack.item_count as i32,
-                )
-                .await;
+    fn on_take_item(&self, player: &dyn InventoryPlayer, stack: &ItemStack) {
+        player.increment_stat(
+            StatisticCategory::Crafted,
+            stack.item.id as i32,
+            stack.item_count as i32,
+        );
 
-            for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
-                let mut input_stack = self.input_inventory.get_stack(index).await;
-                if !input_stack.is_empty() {
-                    input_stack.item_count -= 1;
-                    if input_stack.item_count == 0 {
-                        input_stack = ItemStack::EMPTY.clone();
-                    }
+        for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
+            let mut input_stack = self.input_inventory.get_stack(index);
+            if !input_stack.is_empty() {
+                input_stack.item_count -= 1;
+                if input_stack.item_count == 0 {
+                    input_stack = ItemStack::EMPTY.clone();
                 }
-                self.input_inventory.set_stack(index, input_stack).await;
             }
-            self.mark_dirty().await;
-        })
+            self.input_inventory.set_stack(index, input_stack);
+        }
+        self.mark_dirty();
     }
 
-    fn can_insert(&self, _stack: &ItemStack) -> BoxFuture<'_, bool> {
-        Box::pin(async move { false })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
     }
 
-    fn get_stack(&self) -> BoxFuture<'_, ItemStack> {
-        Box::pin(async move { self.inventory.get_stack(self.index).await })
+    fn get_stack(&self) -> ItemStack {
+        self.inventory.get_stack(self.index)
     }
 
-    fn get_cloned_stack(&self) -> BoxFuture<'_, ItemStack> {
-        Box::pin(async move { self.inventory.get_stack(self.index).await })
+    fn get_cloned_stack(&self) -> ItemStack {
+        self.inventory.get_stack(self.index)
     }
 
-    fn has_stack(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move { !self.inventory.get_stack(self.index).await.is_empty() })
+    fn has_stack(&self) -> bool {
+        !self.inventory.get_stack(self.index).is_empty()
     }
 
-    fn set_stack(&self, stack: ItemStack) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.set_stack(self.index, stack).await;
-        })
+    fn set_stack(&self, stack: ItemStack) {
+        self.inventory.set_stack(self.index, stack);
     }
 
-    fn set_stack_prev(&self, _stack: ItemStack, _previous_stack: ItemStack) -> BoxFuture<'_, ()> {
-        Box::pin(async move {})
-    }
+    fn set_stack_prev(&self, _stack: ItemStack, _previous_stack: ItemStack) {}
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -476,7 +438,7 @@ mod tests {
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use pumpkin_data::item::Item;
     use pumpkin_data::trim::{TrimMaterial, TrimPattern};
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
 
     fn handler() -> SmithingScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -487,51 +449,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn netherite_upgrade_produces_netherite_item_and_consumes_inputs() {
+    fn netherite_upgrade_produces_netherite_item_and_consumes_inputs() {
         let handler = handler();
+        handler.input_inventory.set_stack(
+            TEMPLATE_SLOT,
+            ItemStack::new(1, &Item::NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+        );
         handler
             .input_inventory
-            .set_stack(
-                TEMPLATE_SLOT,
-                ItemStack::new(1, &Item::NETHERITE_UPGRADE_SMITHING_TEMPLATE),
-            )
-            .await;
+            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD));
         handler
             .input_inventory
-            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD))
-            .await;
-        handler
-            .input_inventory
-            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::NETHERITE_INGOT))
-            .await;
-        handler.update_output().await;
+            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::NETHERITE_INGOT));
+        handler.update_output();
 
-        let output = handler.output_inventory.get_stack(0).await;
+        let output = handler.output_inventory.get_stack(0);
         assert!(output.item == &Item::NETHERITE_SWORD);
         assert_eq!(output.item_count, 1);
     }
 
     #[tokio::test]
-    async fn armor_trim_sets_trim_component() {
+    fn armor_trim_sets_trim_component() {
         let handler = handler();
+        handler.input_inventory.set_stack(
+            TEMPLATE_SLOT,
+            ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
+        );
         handler
             .input_inventory
-            .set_stack(
-                TEMPLATE_SLOT,
-                ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
-            )
-            .await;
+            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_CHESTPLATE));
         handler
             .input_inventory
-            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_CHESTPLATE))
-            .await;
-        handler
-            .input_inventory
-            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ))
-            .await;
-        handler.update_output().await;
+            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ));
+        handler.update_output();
 
-        let output = handler.output_inventory.get_stack(0).await;
+        let output = handler.output_inventory.get_stack(0);
         assert!(output.item == &Item::DIAMOND_CHESTPLATE);
         let trim = output.get_data_component::<TrimImpl>().unwrap();
         assert_eq!(trim.material, TrimMaterial::Quartz);
@@ -539,7 +491,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reapplying_identical_trim_yields_no_result() {
+    fn reapplying_identical_trim_yields_no_result() {
         let handler = handler();
         let mut trimmed = ItemStack::new(1, &Item::DIAMOND_CHESTPLATE);
         trimmed.patch.push((
@@ -552,56 +504,46 @@ mod tests {
                 .to_dyn(),
             ),
         ));
+        handler.input_inventory.set_stack(
+            TEMPLATE_SLOT,
+            ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
+        );
+        handler.input_inventory.set_stack(BASE_SLOT, trimmed);
         handler
             .input_inventory
-            .set_stack(
-                TEMPLATE_SLOT,
-                ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
-            )
-            .await;
-        handler.input_inventory.set_stack(BASE_SLOT, trimmed).await;
-        handler
-            .input_inventory
-            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ))
-            .await;
-        handler.update_output().await;
+            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ));
+        handler.update_output();
 
-        let output = handler.output_inventory.get_stack(0).await;
+        let output = handler.output_inventory.get_stack(0);
         assert!(output.is_empty());
     }
 
     #[tokio::test]
-    async fn mismatched_ingredients_produce_no_result() {
+    fn mismatched_ingredients_produce_no_result() {
         let handler = handler();
         handler
             .input_inventory
-            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD))
-            .await;
-        handler.update_output().await;
+            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD));
+        handler.update_output();
 
-        let output = handler.output_inventory.get_stack(0).await;
+        let output = handler.output_inventory.get_stack(0);
         assert!(output.is_empty());
     }
 
     #[tokio::test]
-    async fn complete_invalid_inputs_set_recipe_error_property() {
+    fn complete_invalid_inputs_set_recipe_error_property() {
         let handler = handler();
+        handler.input_inventory.set_stack(
+            TEMPLATE_SLOT,
+            ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
+        );
         handler
             .input_inventory
-            .set_stack(
-                TEMPLATE_SLOT,
-                ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
-            )
-            .await;
+            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD));
         handler
             .input_inventory
-            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD))
-            .await;
-        handler
-            .input_inventory
-            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ))
-            .await;
-        handler.update_output().await;
+            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ));
+        handler.update_output();
 
         // `SmithingMenu.slotsChanged` (`SmithingMenu.java:96-105`) marks a complete input set
         // with no result as a recipe error for the client.
@@ -609,42 +551,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn output_repopulates_after_taking_with_stacked_inputs() {
+    fn output_repopulates_after_taking_with_stacked_inputs() {
         let handler = handler();
+        handler.input_inventory.set_stack(
+            TEMPLATE_SLOT,
+            ItemStack::new(2, &Item::NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+        );
         handler
             .input_inventory
-            .set_stack(
-                TEMPLATE_SLOT,
-                ItemStack::new(2, &Item::NETHERITE_UPGRADE_SMITHING_TEMPLATE),
-            )
-            .await;
+            .set_stack(BASE_SLOT, ItemStack::new(2, &Item::DIAMOND_SWORD));
         handler
             .input_inventory
-            .set_stack(BASE_SLOT, ItemStack::new(2, &Item::DIAMOND_SWORD))
-            .await;
-        handler
-            .input_inventory
-            .set_stack(ADDITION_SLOT, ItemStack::new(2, &Item::NETHERITE_INGOT))
-            .await;
-        handler.update_output().await;
+            .set_stack(ADDITION_SLOT, ItemStack::new(2, &Item::NETHERITE_INGOT));
+        handler.update_output();
 
-        let output = handler.output_inventory.get_stack(0).await;
+        let output = handler.output_inventory.get_stack(0);
         assert!(output.item == &Item::NETHERITE_SWORD);
 
         // Simulate SmithingOutputSlot::on_take_item shrinking each input by 1 (all three
         // slots start stacked at 2, so one remains in each after the take).
         for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
-            let stack = handler.input_inventory.get_stack(index).await;
+            let stack = handler.input_inventory.get_stack(index);
             let mut stack = stack;
             stack.item_count -= 1;
             if stack.item_count == 0 {
                 stack = ItemStack::EMPTY.clone();
             }
-            handler.input_inventory.set_stack(index, stack).await;
+            handler.input_inventory.set_stack(index, stack);
         }
-        handler.update_output().await;
+        handler.update_output();
 
-        let output = handler.output_inventory.get_stack(0).await;
+        let output = handler.output_inventory.get_stack(0);
         assert!(
             output.item == &Item::NETHERITE_SWORD,
             "output should repopulate from the remaining stacked template/addition after a craft"
@@ -652,43 +589,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn input_slots_reject_items_outside_their_role() {
+    fn input_slots_reject_items_outside_their_role() {
         let inventory: Arc<dyn Inventory> = Arc::new(SimpleInventory::new(3));
         let template_slot =
             SmithingInputSlot::new(inventory.clone(), TEMPLATE_SLOT, is_template_candidate);
         let base_slot = SmithingInputSlot::new(inventory.clone(), BASE_SLOT, is_base_candidate);
         let addition_slot = SmithingInputSlot::new(inventory, ADDITION_SLOT, is_addition_candidate);
 
-        assert!(
-            !template_slot
-                .can_insert(&ItemStack::new(1, &Item::DIRT))
-                .await
-        );
-        assert!(
-            template_slot
-                .can_insert(&ItemStack::new(
-                    1,
-                    &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE
-                ))
-                .await
-        );
+        assert!(!template_slot.can_insert(&ItemStack::new(1, &Item::DIRT)));
+        assert!(template_slot.can_insert(&ItemStack::new(
+            1,
+            &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE
+        )));
 
-        assert!(!base_slot.can_insert(&ItemStack::new(1, &Item::DIRT)).await);
-        assert!(
-            base_slot
-                .can_insert(&ItemStack::new(1, &Item::DIAMOND_CHESTPLATE))
-                .await
-        );
+        assert!(!base_slot.can_insert(&ItemStack::new(1, &Item::DIRT)));
+        assert!(base_slot.can_insert(&ItemStack::new(1, &Item::DIAMOND_CHESTPLATE)));
 
-        assert!(
-            !addition_slot
-                .can_insert(&ItemStack::new(1, &Item::DIRT))
-                .await
-        );
-        assert!(
-            addition_slot
-                .can_insert(&ItemStack::new(1, &Item::QUARTZ))
-                .await
-        );
+        assert!(!addition_slot.can_insert(&ItemStack::new(1, &Item::DIRT)));
+        assert!(addition_slot.can_insert(&ItemStack::new(1, &Item::QUARTZ)));
     }
 }

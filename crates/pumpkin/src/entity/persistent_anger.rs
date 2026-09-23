@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicI32, Ordering::Relaxed};
 
 use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 // Vanilla `Wolf`/`ZombifiedPiglin`/`Bee`/`PolarBear`/`IronGolem`/`EnderMan`:
@@ -29,8 +29,11 @@ impl Default for PersistentAnger {
 }
 
 impl PersistentAnger {
-    pub async fn angry_at(&self) -> Option<Uuid> {
-        *self.angry_at.lock().await
+    pub fn angry_at(&self) -> Option<Uuid> {
+        *self
+            .angry_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[must_use]
@@ -38,26 +41,40 @@ impl PersistentAnger {
         self.remaining_ticks.load(Relaxed) > 0
     }
 
-    pub async fn is_angry_at(&self, target: Uuid) -> bool {
-        self.is_angry() && *self.angry_at.lock().await == Some(target)
+    pub fn is_angry_at(&self, target: Uuid) -> bool {
+        self.is_angry()
+            && *self
+                .angry_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                == Some(target)
     }
 
     /// Vanilla `NeutralMob.isAngryAtAllPlayers`: true while angry with no specific grudge
     /// target, gated behind the `universal_anger` game rule (checked by the caller).
-    pub async fn is_angry_at_all_players(&self, universal_anger_rule: bool) -> bool {
-        universal_anger_rule && self.is_angry() && self.angry_at.lock().await.is_none()
+    pub fn is_angry_at_all_players(&self, universal_anger_rule: bool) -> bool {
+        universal_anger_rule
+            && self.is_angry()
+            && self
+                .angry_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
     }
 
     /// Vanilla `NeutralMob.forgetCurrentTargetAndRefreshUniversalAnger`: `stopBeingAngry()`
     /// then `startPersistentAngerTimer()`, leaving `angry_at` cleared so `isAngryAtAllPlayers`
     /// becomes true for the duration of the new timer.
-    pub async fn forget_current_target_and_refresh_universal_anger(&self) {
-        self.stop_being_angry().await;
+    pub fn forget_current_target_and_refresh_universal_anger(&self) {
+        self.stop_being_angry();
         self.start_timer();
     }
 
-    pub async fn set_angry_at(&self, target: Option<Uuid>) {
-        *self.angry_at.lock().await = target;
+    pub fn set_angry_at(&self, target: Option<Uuid>) {
+        *self
+            .angry_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
     }
 
     /// Vanilla `startPersistentAngerTimer`: `setTimeToRemainAngry(PERSISTENT_ANGER_TIME.sample(random))`.
@@ -69,35 +86,44 @@ impl PersistentAnger {
 
     /// Vanilla `stopBeingAngry`: clears target and anger end time (last-hurt-by/target
     /// clearing is the consumer's responsibility since it touches entity/AI state).
-    pub async fn stop_being_angry(&self) {
-        *self.angry_at.lock().await = None;
+    pub fn stop_being_angry(&self) {
+        *self
+            .angry_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.remaining_ticks.store(0, Relaxed);
     }
 
     /// Per-tick decrement, auto-clearing the target once the timer expires.
-    pub async fn tick(&self) {
+    pub fn tick(&self) {
         let prev = self.remaining_ticks.fetch_sub(1, Relaxed);
         if prev <= 0 {
             self.remaining_ticks.store(0, Relaxed);
         } else if prev == 1 {
-            *self.angry_at.lock().await = None;
+            *self
+                .angry_at
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
     }
 
     // Vanilla `NeutralMob.java:44-46` legacy read path: a plain int holding the
     // remaining-ticks count (`AngerTime` -> `setTimeToRemainAngry`), unlike the modern
     // `anger_end_time` long which stores an absolute game tick this primitive doesn't track.
-    pub async fn write_nbt(&self, nbt: &mut NbtCompound) {
+    pub fn write_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_int("AngerTime", self.remaining_ticks.load(Relaxed).max(0));
-        if let Some(uuid) = self.angry_at().await {
+        if let Some(uuid) = self.angry_at() {
             nbt.put_uuid("angry_at", uuid);
         }
     }
 
-    pub async fn read_nbt(&self, nbt: &NbtCompound) {
+    pub fn read_nbt(&self, nbt: &NbtCompound) {
         self.remaining_ticks
             .store(nbt.get_int("AngerTime").unwrap_or(0).max(0), Relaxed);
-        *self.angry_at.lock().await = nbt.get_uuid("angry_at");
+        *self
+            .angry_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = nbt.get_uuid("angry_at");
     }
 }
 
@@ -112,7 +138,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn start_timer_sets_angry_in_range() {
+    fn start_timer_sets_angry_in_range() {
         let anger = PersistentAnger::default();
         anger.start_timer();
         assert!(anger.is_angry());
@@ -121,54 +147,54 @@ mod test {
     }
 
     #[tokio::test]
-    async fn tick_decrements_and_expires() {
+    fn tick_decrements_and_expires() {
         let anger = PersistentAnger::default();
         let target = Uuid::new_v4();
-        anger.set_angry_at(Some(target)).await;
+        anger.set_angry_at(Some(target));
         anger.remaining_ticks.store(2, Relaxed);
 
-        anger.tick().await;
+        anger.tick();
         assert!(anger.is_angry());
-        assert!(anger.is_angry_at(target).await);
+        assert!(anger.is_angry_at(target));
 
-        anger.tick().await;
+        anger.tick();
         assert!(!anger.is_angry());
-        assert_eq!(anger.angry_at().await, None);
+        assert_eq!(anger.angry_at(), None);
     }
 
     #[tokio::test]
-    async fn tick_on_expired_timer_is_noop() {
+    fn tick_on_expired_timer_is_noop() {
         let anger = PersistentAnger::default();
-        anger.tick().await;
+        anger.tick();
         assert!(!anger.is_angry());
     }
 
     #[tokio::test]
-    async fn stop_being_angry_clears_state() {
+    fn stop_being_angry_clears_state() {
         let anger = PersistentAnger::default();
-        anger.set_angry_at(Some(Uuid::new_v4())).await;
+        anger.set_angry_at(Some(Uuid::new_v4()));
         anger.start_timer();
 
-        anger.stop_being_angry().await;
+        anger.stop_being_angry();
 
         assert!(!anger.is_angry());
-        assert_eq!(anger.angry_at().await, None);
+        assert_eq!(anger.angry_at(), None);
     }
 
     #[tokio::test]
-    async fn nbt_round_trip() {
+    fn nbt_round_trip() {
         let anger = PersistentAnger::default();
         let target = Uuid::new_v4();
-        anger.set_angry_at(Some(target)).await;
+        anger.set_angry_at(Some(target));
         anger.remaining_ticks.store(123, Relaxed);
 
         let mut nbt = NbtCompound::new();
-        anger.write_nbt(&mut nbt).await;
+        anger.write_nbt(&mut nbt);
 
         let restored = PersistentAnger::default();
-        restored.read_nbt(&nbt).await;
+        restored.read_nbt(&nbt);
 
         assert_eq!(restored.remaining_ticks.load(Relaxed), 123);
-        assert_eq!(restored.angry_at().await, Some(target));
+        assert_eq!(restored.angry_at(), Some(target));
     }
 }

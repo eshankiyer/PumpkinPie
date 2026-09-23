@@ -1073,7 +1073,7 @@ fn equip_mob_from_def(
 /// and broadcasts the changes to nearby players.
 ///
 /// Mobs not listed in the registry silently receive no equipment.
-pub async fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::World>) {
+pub fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::World>) {
     let entity_type = mob.get_entity().entity_type;
     let pos = mob.get_entity().pos.load();
     let difficulty = RegionalDifficulty::at(world, pos);
@@ -1088,7 +1088,10 @@ pub async fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::
         return;
     };
 
-    let mut equipment = living.entity_equipment.lock().await;
+    let mut equipment = living
+        .entity_equipment
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut changes_with_drops = equip_mob_from_def(def, &difficulty);
 
     // Vanilla dispatches subclass weapon-enchant overrides through the virtual
@@ -1117,7 +1120,7 @@ pub async fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::
 
     if let Some(mob) = mob.get_mob() {
         for (slot, _, drop_chance) in changes_with_drops {
-            mob.set_drop_chance(slot, drop_chance).await;
+            mob.set_drop_chance(slot, drop_chance);
         }
     }
 

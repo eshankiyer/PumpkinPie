@@ -14,22 +14,18 @@ pub type InventoryFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait Inventory: Send + Sync + Clearable {
     fn size(&self) -> usize;
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool>;
+    fn is_empty(&self) -> bool;
 
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack>;
+    fn get_stack(&self, slot: usize) -> ItemStack;
 
-    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack>;
+    fn remove_stack(&self, slot: usize) -> ItemStack;
 
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack>;
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack;
 
-    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()>;
+    fn set_stack(&self, slot: usize, stack: ItemStack);
 
-    fn on_open(&self) -> InventoryFuture<'_, ()> {
-        Box::pin(async {})
-    }
-    fn on_close(&self) -> InventoryFuture<'_, ()> {
-        Box::pin(async {})
-    }
+    fn on_open(&self) {}
+    fn on_close(&self) {}
 
     /// Vanilla `WorldlyContainer.getSlotsForFace`. Default: unrestricted, matching plain
     /// `Container`s (chests, barrels, etc), which hoppers may access from any face/slot.
@@ -38,89 +34,71 @@ pub trait Inventory: Send + Sync + Clearable {
     }
 
     /// Vanilla `WorldlyContainer.canPlaceItemThroughFace`. Default: unrestricted.
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         _slot: usize,
-        _stack: &'a ItemStack,
+        _stack: &ItemStack,
         _direction: BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async { true })
+    ) -> bool {
+        true
     }
 
     /// Vanilla `WorldlyContainer.canTakeItemThroughFace`. Default: unrestricted.
-    fn can_extract_through_face<'a>(
-        &'a self,
+    fn can_extract_through_face(
+        &self,
         _slot: usize,
-        _stack: &'a ItemStack,
+        _stack: &ItemStack,
         _direction: BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async { true })
+    ) -> bool {
+        true
     }
 
-    fn count<'a>(&'a self, item: &'a Item) -> InventoryFuture<'a, u8> {
-        Box::pin(async move {
-            let mut count = 0;
+    fn count(&self, item: &Item) -> u8 {
+        let mut count = 0;
 
-            for i in 0..self.size() {
-                let stack = self.get_stack(i).await;
-                if stack.get_item().id == item.id {
-                    count += stack.item_count;
-                }
+        for i in 0..self.size() {
+            let stack = self.get_stack(i);
+            if stack.get_item().id == item.id {
+                count += stack.item_count;
             }
+        }
 
-            count
-        })
+        count
     }
 
-    fn contains_any_predicate<'a>(
-        &'a self,
-        predicate: &'a (dyn Fn(&ItemStack) -> bool + Sync),
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            for i in 0..self.size() {
-                let stack = self.get_stack(i).await;
-                if predicate(&stack) {
-                    return true;
-                }
+    fn contains_any_predicate(&self, predicate: &(dyn Fn(&ItemStack) -> bool + Sync)) -> bool {
+        for i in 0..self.size() {
+            let stack = self.get_stack(i);
+            if predicate(&stack) {
+                return true;
             }
+        }
 
-            false
-        })
+        false
     }
 
-    fn contains_any<'a>(&'a self, items: &'a [Item]) -> InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            self.contains_any_predicate(&|stack| {
-                !stack.is_empty() && items.contains(stack.get_item())
-            })
-            .await
-        })
+    fn contains_any(&self, items: &[Item]) -> bool {
+        self.contains_any_predicate(&|stack| !stack.is_empty() && items.contains(stack.get_item()))
     }
 
-    fn write_inventory_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-        include_empty: bool,
-    ) -> InventoryFuture<'a, ()> {
-        Box::pin(async move {
-            let mut slots = Vec::new();
-            let size = self.size();
+    fn write_inventory_nbt(&self, nbt: &mut NbtCompound, include_empty: bool) {
+        let mut slots = Vec::new();
+        let size = self.size();
 
-            for i in 0..size {
-                let stack = self.get_stack(i).await;
+        for i in 0..size {
+            let stack = self.get_stack(i);
 
-                if !stack.is_empty() {
-                    let mut item_compound = NbtCompound::new();
-                    item_compound.put_byte("Slot", i as i8);
-                    stack.write_item_stack(&mut item_compound);
-                    slots.push(NbtTag::Compound(item_compound));
-                }
+            if !stack.is_empty() {
+                let mut item_compound = NbtCompound::new();
+                item_compound.put_byte("Slot", i as i8);
+                stack.write_item_stack(&mut item_compound);
+                slots.push(NbtTag::Compound(item_compound));
             }
+        }
 
-            if include_empty || !slots.is_empty() {
-                nbt.put("Items", NbtTag::List(slots));
-            }
-        })
+        if include_empty || !slots.is_empty() {
+            nbt.put("Items", NbtTag::List(slots));
+        }
     }
 
     fn get_max_count_per_stack(&self) -> u8 {
@@ -140,12 +118,8 @@ pub trait Inventory: Send + Sync + Clearable {
     /// Vanilla `Container.canPlaceItem` admission check. Most inventories only need the
     /// synchronous slot restriction above; inventories whose rule depends on their other
     /// slots can override this asynchronous hook.
-    fn can_place_item<'a>(
-        &'a self,
-        slot: usize,
-        stack: &'a ItemStack,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move { self.is_valid_slot_for(slot, stack) })
+    fn can_place_item(&self, slot: usize, stack: &ItemStack) -> bool {
+        self.is_valid_slot_for(slot, stack)
     }
 
     fn can_transfer_to(
@@ -160,20 +134,15 @@ pub trait Inventory: Send + Sync + Clearable {
     /// Vanilla `Container.canTakeItem` source-to-destination admission. The default keeps
     /// existing inventories unrestricted; special containers can inspect the destination
     /// asynchronously (`JukeboxBlockEntity.java:147-150`).
-    fn can_take_item<'a>(
-        &'a self,
-        _into: &'a dyn Inventory,
-        _slot: usize,
-        _stack: &'a ItemStack,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async { true })
+    fn can_take_item(&self, _into: &dyn Inventory, _slot: usize, _stack: &ItemStack) -> bool {
+        true
     }
 
     fn as_any(&self) -> &dyn Any;
 }
 
 pub trait Clearable {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+    fn clear(&self);
 }
 
 pub fn sync_read_items_from_nbt(nbt: &NbtCompound, stacks: &mut [ItemStack]) {

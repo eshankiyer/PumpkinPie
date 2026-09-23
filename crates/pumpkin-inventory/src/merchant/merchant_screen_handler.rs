@@ -16,10 +16,10 @@ use pumpkin_world::inventory::Inventory;
 use crate::{
     player::player_inventory::PlayerInventory,
     screen_handler::{
-        InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
-        ScreenHandlerFuture, offer_or_drop_stack,
+        InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
+        offer_or_drop_stack,
     },
-    slot::{BoxFuture, NormalSlot, Slot},
+    slot::{NormalSlot, Slot},
 };
 
 type MerchantValidityCheck = Box<dyn Fn(&dyn InventoryPlayer) -> bool + Send + Sync>;
@@ -42,7 +42,7 @@ pub struct MerchantScreenHandler {
 }
 
 impl MerchantScreenHandler {
-    pub async fn new(
+    pub fn new(
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
         inventory: Arc<dyn Inventory>,
@@ -66,7 +66,7 @@ impl MerchantScreenHandler {
             result_taken: result_taken.clone(),
         };
 
-        inventory.on_open().await;
+        inventory.on_open();
 
         for i in 0..2 {
             handler.add_slot(Arc::new(NormalSlot::new(inventory.clone(), i)));
@@ -83,15 +83,15 @@ impl MerchantScreenHandler {
         handler
     }
 
-    pub async fn set_selected_offer(&mut self, index: usize) {
+    pub fn set_selected_offer(&mut self, index: usize) {
         self.selected_offer = index;
-        self.try_move_items(index).await;
-        self.update_result_slot().await;
-        self.notify_trade_updated().await;
-        self.send_content_updates().await;
+        self.try_move_items(index);
+        self.update_result_slot();
+        self.notify_trade_updated();
+        self.send_content_updates();
     }
 
-    async fn try_move_items(&mut self, index: usize) {
+    fn try_move_items(&mut self, index: usize) {
         let Some(offer) = self.offers.get(index) else {
             return;
         };
@@ -102,26 +102,20 @@ impl MerchantScreenHandler {
         let player_slots_end = self.get_behaviour().slots.len() as i32;
 
         for index in 0..2 {
-            let mut stack = self.inventory.get_stack(index).await;
-            if !stack.is_empty()
-                && !self
-                    .insert_item(&mut stack, 3, player_slots_end, true)
-                    .await
-            {
+            let mut stack = self.inventory.get_stack(index);
+            if !stack.is_empty() && !self.insert_item(&mut stack, 3, player_slots_end, true) {
                 return;
             }
-            self.inventory.set_stack(index, stack).await;
+            self.inventory.set_stack(index, stack);
         }
 
-        if !self.inventory.get_stack(0).await.is_empty()
-            || !self.inventory.get_stack(1).await.is_empty()
-        {
+        if !self.inventory.get_stack(0).is_empty() || !self.inventory.get_stack(1).is_empty() {
             return;
         }
 
-        self.move_from_inventory_to_payment_slot(0, &cost_a).await;
+        self.move_from_inventory_to_payment_slot(0, &cost_a);
         if !cost_b.is_empty() {
-            self.move_from_inventory_to_payment_slot(1, &cost_b).await;
+            self.move_from_inventory_to_payment_slot(1, &cost_b);
         }
     }
 
@@ -169,7 +163,7 @@ impl MerchantScreenHandler {
             })
     }
 
-    async fn complete_trade(&mut self, player: &dyn InventoryPlayer) -> bool {
+    fn complete_trade(&mut self, player: &dyn InventoryPlayer) -> bool {
         let Some(offer_index) = self.active_offer else {
             return false;
         };
@@ -180,8 +174,8 @@ impl MerchantScreenHandler {
             return false;
         }
 
-        let input_a = self.inventory.get_stack(0).await;
-        let input_b = self.inventory.get_stack(1).await;
+        let input_a = self.inventory.get_stack(0);
+        let input_b = self.inventory.get_stack(1);
         let Some(swapped) = Self::input_order(offer, &input_a, &input_b) else {
             return false;
         };
@@ -198,40 +192,34 @@ impl MerchantScreenHandler {
         }
         let slot_a = usize::from(swapped);
         let slot_b = usize::from(!swapped);
-        self.inventory
-            .set_stack(
-                slot_a,
-                if buy_a.is_empty() {
-                    ItemStack::EMPTY.clone()
-                } else {
-                    buy_a
-                },
-            )
-            .await;
-        self.inventory
-            .set_stack(
-                slot_b,
-                if buy_b.is_empty() {
-                    ItemStack::EMPTY.clone()
-                } else {
-                    buy_b
-                },
-            )
-            .await;
-        self.get_behaviour().slots[slot_a].mark_dirty().await;
-        self.get_behaviour().slots[slot_b].mark_dirty().await;
+        self.inventory.set_stack(
+            slot_a,
+            if buy_a.is_empty() {
+                ItemStack::EMPTY.clone()
+            } else {
+                buy_a
+            },
+        );
+        self.inventory.set_stack(
+            slot_b,
+            if buy_b.is_empty() {
+                ItemStack::EMPTY.clone()
+            } else {
+                buy_b
+            },
+        );
+        self.get_behaviour().slots[slot_a].mark_dirty();
+        self.get_behaviour().slots[slot_b].mark_dirty();
         self.offers[offer_index].increase_uses();
 
         if let Some(on_trade) = &self.on_trade {
             on_trade(offer_index).await;
         }
-        player
-            .increment_stat(
-                StatisticCategory::Custom,
-                CustomStatistic::TradedWithVillager as i32,
-                1,
-            )
-            .await;
+        player.increment_stat(
+            StatisticCategory::Custom,
+            CustomStatistic::TradedWithVillager as i32,
+            1,
+        );
         true
     }
 
@@ -240,30 +228,29 @@ impl MerchantScreenHandler {
     /// Bedrock moves the result directly between named containers instead of
     /// sending Java's slot-click action, so the caller has already validated
     /// that the result can be inserted into its destination.
-    pub async fn complete_bedrock_trade(&mut self, player: &dyn InventoryPlayer) -> bool {
-        if !self.complete_trade(player).await {
+    pub fn complete_bedrock_trade(&mut self, player: &dyn InventoryPlayer) -> bool {
+        if !self.complete_trade(player) {
             return false;
         }
-        self.update_result_slot().await;
-        self.notify_trade_updated().await;
-        self.send_content_updates().await;
+        self.update_result_slot();
+        self.notify_trade_updated();
+        self.send_content_updates();
         true
     }
 
-    async fn can_fully_insert(&self, stack: &ItemStack, start: usize, end: usize) -> bool {
+    fn can_fully_insert(&self, stack: &ItemStack, start: usize, end: usize) -> bool {
         let mut remaining = stack.item_count;
         for slot in &self.get_behaviour().slots[start..end] {
-            if !slot.can_insert(stack).await {
+            if !slot.can_insert(stack) {
                 continue;
             }
-            let existing = slot.get_cloned_stack().await;
+            let existing = slot.get_cloned_stack();
             let capacity = if existing.is_empty() {
-                slot.get_max_item_count_for_stack(stack).await
+                slot.get_max_item_count_for_stack(stack)
             } else if existing.are_items_and_components_equal(stack)
                 && stack.are_items_and_components_equal(&existing)
             {
                 slot.get_max_item_count_for_stack(&existing)
-                    .await
                     .saturating_sub(existing.item_count)
             } else {
                 0
@@ -276,11 +263,11 @@ impl MerchantScreenHandler {
         false
     }
 
-    async fn move_from_inventory_to_payment_slot(&self, payment_slot: usize, cost: &ItemStack) {
-        let mut payment = self.inventory.get_stack(payment_slot).await;
+    fn move_from_inventory_to_payment_slot(&self, payment_slot: usize, cost: &ItemStack) {
+        let mut payment = self.inventory.get_stack(payment_slot);
 
         for slot in &self.get_behaviour().slots[3..] {
-            let mut source = slot.get_stack().await;
+            let mut source = slot.get_stack();
             if source.is_empty()
                 || source.item.id != cost.item.id
                 || !cost.are_items_and_components_equal(&source)
@@ -302,28 +289,27 @@ impl MerchantScreenHandler {
             if source.is_empty() {
                 source = ItemStack::EMPTY.clone();
             }
-            slot.set_stack(source).await;
+            slot.set_stack(source);
             if payment.item_count == payment.get_max_stack_size() {
                 break;
             }
         }
-        self.inventory.set_stack(payment_slot, payment).await;
+        self.inventory.set_stack(payment_slot, payment);
     }
 
-    pub async fn update_result_slot(&mut self) {
-        let input_a = self.inventory.get_stack(0).await;
-        let input_b = self.inventory.get_stack(1).await;
+    pub fn update_result_slot(&mut self) {
+        let input_a = self.inventory.get_stack(0);
+        let input_b = self.inventory.get_stack(1);
         self.active_offer = self.find_active_offer(&input_a, &input_b);
 
         if let Some(index) = self.active_offer {
             // Vanilla sets futureXp from the valid offer and resets it for an invalid offer (MerchantContainer.java:112-119).
             self.future_trader_xp = self.offers[index].xp;
             self.inventory
-                .set_stack(2, (*self.offers[index].output.0).clone())
-                .await;
+                .set_stack(2, (*self.offers[index].output.0).clone());
         } else {
             self.future_trader_xp = 0;
-            self.inventory.set_stack(2, ItemStack::EMPTY.clone()).await;
+            self.inventory.set_stack(2, ItemStack::EMPTY.clone());
         }
     }
 
@@ -331,10 +317,8 @@ impl MerchantScreenHandler {
         self.future_trader_xp
     }
 
-    async fn notify_trade_updated(&self) {
-        if self.inventory.get_stack(0).await.is_empty()
-            && self.inventory.get_stack(1).await.is_empty()
-        {
+    fn notify_trade_updated(&self) {
+        if self.inventory.get_stack(0).is_empty() && self.inventory.get_stack(1).is_empty() {
             return;
         }
         if let Some(on_trade_updated) = &self.on_trade_updated {
@@ -366,138 +350,113 @@ impl ScreenHandler for MerchantScreenHandler {
         &mut self.behaviour
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(on_close) = &self.on_close {
-                on_close().await;
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        if let Some(on_close) = &self.on_close {
+            on_close();
+        }
+        self.default_on_closed(player);
+        self.inventory.on_close();
+        // Vanilla drops items from merchant container on close
+        for i in 0..2 {
+            // Drop inputs only, output is virtual/ghost in some sense or just cleared
+            let stack = self.inventory.remove_stack(i);
+            if !stack.is_empty() {
+                offer_or_drop_stack(player, stack);
             }
-            self.default_on_closed(player).await;
-            self.inventory.on_close().await;
-            // Vanilla drops items from merchant container on close
-            for i in 0..2 {
-                // Drop inputs only, output is virtual/ghost in some sense or just cleared
-                let stack = self.inventory.remove_stack(i).await;
-                if !stack.is_empty() {
-                    offer_or_drop_stack(player, stack).await;
-                }
-            }
-            // Clear output slot
-            self.inventory.set_stack(2, ItemStack::EMPTY.clone()).await;
-        })
+        }
+        // Clear output slot
+        self.inventory.set_stack(2, ItemStack::EMPTY.clone());
     }
 
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            const PLAYER_INVENTORY_START: i32 = 3;
-            const PLAYER_HOTBAR_START: i32 = 30;
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        const PLAYER_INVENTORY_START: i32 = 3;
+        const PLAYER_HOTBAR_START: i32 = 30;
 
-            let slot = self.get_behaviour().slots[slot_index as usize].clone();
-            let mut stack = slot.get_cloned_stack().await;
-            if stack.is_empty() {
-                return ItemStack::EMPTY.clone();
-            }
-            let original = stack.clone();
-            let player_slots_end = self.get_behaviour().slots.len() as i32;
+        let slot = self.get_behaviour().slots[slot_index as usize].clone();
+        let mut stack = slot.get_cloned_stack();
+        if stack.is_empty() {
+            return ItemStack::EMPTY.clone();
+        }
+        let original = stack.clone();
+        let player_slots_end = self.get_behaviour().slots.len() as i32;
 
-            if slot_index == 2 {
-                if !self
-                    .can_fully_insert(
-                        &stack,
-                        PLAYER_INVENTORY_START as usize,
-                        player_slots_end as usize,
-                    )
-                    .await
-                    || !self
-                        .insert_item(&mut stack, PLAYER_INVENTORY_START, player_slots_end, true)
-                        .await
-                {
-                    return ItemStack::EMPTY.clone();
-                }
-            } else if slot_index < PLAYER_INVENTORY_START {
-                if !self
-                    .insert_item(&mut stack, PLAYER_INVENTORY_START, player_slots_end, false)
-                    .await
-                {
-                    return ItemStack::EMPTY.clone();
-                }
-            } else if slot_index < PLAYER_HOTBAR_START {
-                if !self
-                    .insert_item(&mut stack, PLAYER_HOTBAR_START, player_slots_end, false)
-                    .await
-                {
-                    return ItemStack::EMPTY.clone();
-                }
-            } else if !self
-                .insert_item(
-                    &mut stack,
-                    PLAYER_INVENTORY_START,
-                    PLAYER_HOTBAR_START,
-                    false,
-                )
-                .await
+        if slot_index == 2 {
+            if !self.can_fully_insert(
+                &stack,
+                PLAYER_INVENTORY_START as usize,
+                player_slots_end as usize,
+            ) || !self.insert_item(&mut stack, PLAYER_INVENTORY_START, player_slots_end, true)
             {
                 return ItemStack::EMPTY.clone();
             }
-
-            if stack.item_count == original.item_count {
+        } else if slot_index < PLAYER_INVENTORY_START {
+            if !self.insert_item(&mut stack, PLAYER_INVENTORY_START, player_slots_end, false) {
                 return ItemStack::EMPTY.clone();
             }
-            if stack.is_empty() {
-                slot.set_stack(ItemStack::EMPTY.clone()).await;
-            } else {
-                slot.set_stack(stack.clone()).await;
+        } else if slot_index < PLAYER_HOTBAR_START {
+            if !self.insert_item(&mut stack, PLAYER_HOTBAR_START, player_slots_end, false) {
+                return ItemStack::EMPTY.clone();
             }
+        } else if !self.insert_item(
+            &mut stack,
+            PLAYER_INVENTORY_START,
+            PLAYER_HOTBAR_START,
+            false,
+        ) {
+            return ItemStack::EMPTY.clone();
+        }
 
-            let mut taken = original.clone();
-            taken.set_count(original.item_count - stack.item_count);
-            slot.on_take_item(player, &taken).await;
-            if slot_index == 2 {
-                slot.on_quick_move_crafted(stack, original.clone()).await;
-                self.result_taken.store(false, Ordering::Relaxed);
-                if !self.complete_trade(player).await {
-                    return ItemStack::EMPTY.clone();
-                }
-                if let Some(on_quick_move_trade) = &self.on_quick_move_trade {
-                    on_quick_move_trade();
-                }
-                self.update_result_slot().await;
+        if stack.item_count == original.item_count {
+            return ItemStack::EMPTY.clone();
+        }
+        if stack.is_empty() {
+            slot.set_stack(ItemStack::EMPTY.clone());
+        } else {
+            slot.set_stack(stack.clone());
+        }
+
+        let mut taken = original.clone();
+        taken.set_count(original.item_count - stack.item_count);
+        slot.on_take_item(player, &taken);
+        if slot_index == 2 {
+            slot.on_quick_move_crafted(stack, original.clone());
+            self.result_taken.store(false, Ordering::Relaxed);
+            if !self.complete_trade(player) {
+                return ItemStack::EMPTY.clone();
             }
+            if let Some(on_quick_move_trade) = &self.on_quick_move_trade {
+                on_quick_move_trade();
+            }
+            self.update_result_slot();
+        }
 
-            original
-        })
+        original
     }
 
-    fn on_slot_click<'a>(
-        &'a mut self,
+    fn on_slot_click(
+        &mut self,
         slot_index: i32,
         button: i32,
         action_type: pumpkin_protocol::java::server::play::SlotActionType,
-        player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            if action_type == pumpkin_protocol::java::server::play::SlotActionType::PickupAll {
-                // Vanilla `MerchantMenu.canTakeItemForPickAll` rejects every target in this
-                // menu (`MerchantMenu.java:95-98`); `AbstractContainerMenu` applies that hook
-                // while processing PICKUP_ALL (`AbstractContainerMenu.java:534-545`).
-                return;
-            }
-            if slot_index == 2 {
-                self.update_result_slot().await;
-            }
-            self.result_taken.store(false, Ordering::Relaxed);
-            self.internal_on_slot_click(slot_index, button, action_type, player)
-                .await;
-            if self.result_taken.swap(false, Ordering::Relaxed) {
-                self.complete_trade(player).await;
-            }
-            self.update_result_slot().await;
-            self.notify_trade_updated().await;
-            self.send_content_updates().await;
-        })
+        player: &dyn InventoryPlayer,
+    ) {
+        if action_type == pumpkin_protocol::java::server::play::SlotActionType::PickupAll {
+            // Vanilla `MerchantMenu.canTakeItemForPickAll` rejects every target in this
+            // menu (`MerchantMenu.java:95-98`); `AbstractContainerMenu` applies that hook
+            // while processing PICKUP_ALL (`AbstractContainerMenu.java:534-545`).
+            return;
+        }
+        if slot_index == 2 {
+            self.update_result_slot();
+        }
+        self.result_taken.store(false, Ordering::Relaxed);
+        self.internal_on_slot_click(slot_index, button, action_type, player);
+        if self.result_taken.swap(false, Ordering::Relaxed) {
+            self.complete_trade(player);
+        }
+        self.update_result_slot();
+        self.notify_trade_updated();
+        self.send_content_updates();
     }
 }
 
@@ -532,29 +491,21 @@ impl Slot for MerchantResultSlot {
         self.id.store(id as u8, Ordering::Relaxed);
     }
 
-    fn take_stack(&self, _amount: u8) -> BoxFuture<'_, ItemStack> {
-        Box::pin(async move { self.inventory.remove_stack(self.index).await })
+    fn take_stack(&self, _amount: u8) -> ItemStack {
+        self.inventory.remove_stack(self.index)
     }
 
-    fn on_take_item<'a>(
-        &'a self,
-        _player: &'a dyn InventoryPlayer,
-        _stack: &'a ItemStack,
-    ) -> BoxFuture<'a, ()> {
-        Box::pin(async move {
-            self.result_taken.store(true, Ordering::Relaxed);
-            self.mark_dirty().await;
-        })
+    fn on_take_item(&self, _player: &dyn InventoryPlayer, _stack: &ItemStack) {
+        self.result_taken.store(true, Ordering::Relaxed);
+        self.mark_dirty();
     }
 
-    fn can_insert(&self, _stack: &ItemStack) -> BoxFuture<'_, bool> {
-        Box::pin(async { false })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -578,7 +529,7 @@ mod tests {
         },
     };
     use pumpkin_world::inventory::SimpleInventory;
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
 
     use crate::{
         entity_equipment::EntityEquipment,
@@ -632,13 +583,9 @@ mod tests {
             self
         }
 
-        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) {}
 
-        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) {}
 
         fn get_inventory(&self) -> Arc<PlayerInventory> {
             self.inventory.clone()
@@ -656,90 +603,49 @@ mod tests {
             0
         }
 
-        fn add_experience_levels(&self, _levels: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn add_experience_levels(&self, _levels: i32) {}
 
         fn enchantment_seed(&self) -> i32 {
             0
         }
 
-        fn set_enchantment_seed(&self, _seed: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn set_enchantment_seed(&self, _seed: i32) {}
 
-        fn enqueue_inventory_packet<'a>(
-            &'a self,
-            _packet: &'a CSetContainerContent,
+        fn enqueue_inventory_packet(
+            &self,
+            _packet: &CSetContainerContent,
             _window_type: Option<WindowType>,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        ) {
         }
 
-        fn enqueue_slot_packet<'a>(
-            &'a self,
-            _packet: &'a CSetContainerSlot,
+        fn enqueue_slot_packet(
+            &self,
+            _packet: &CSetContainerSlot,
             _window_type: Option<WindowType>,
             _total_slots: usize,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        ) {
         }
 
-        fn enqueue_cursor_packet<'a>(
-            &'a self,
-            _packet: &'a CSetCursorItem,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        fn enqueue_cursor_packet(&self, _packet: &CSetCursorItem) {}
+
+        fn enqueue_property_packet(&self, _packet: &CSetContainerProperty) {}
+
+        fn enqueue_slot_set_packet(&self, _packet: &CSetPlayerInventory) {}
+
+        fn enqueue_set_held_item_packet(&self, _packet: &CSetSelectedSlot) {}
+
+        fn enqueue_equipment_change(&self, _slot: &EquipmentSlot, _stack: &ItemStack) {}
+
+        fn award_experience(&self, amount: i32) {
+            self.experience.fetch_add(amount, Ordering::Relaxed);
         }
 
-        fn enqueue_property_packet<'a>(
-            &'a self,
-            _packet: &'a CSetContainerProperty,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-
-        fn enqueue_slot_set_packet<'a>(
-            &'a self,
-            _packet: &'a CSetPlayerInventory,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-
-        fn enqueue_set_held_item_packet<'a>(
-            &'a self,
-            _packet: &'a CSetSelectedSlot,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-
-        fn enqueue_equipment_change<'a>(
-            &'a self,
-            _slot: &'a EquipmentSlot,
-            _stack: &'a ItemStack,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
-        }
-
-        fn award_experience(&self, amount: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async move {
-                self.experience.fetch_add(amount, Ordering::Relaxed);
-            })
-        }
-
-        fn increment_stat(
-            &self,
-            category: StatisticCategory,
-            stat_id: i32,
-            amount: i32,
-        ) -> PlayerFuture<'_, ()> {
-            Box::pin(async move {
-                if category == StatisticCategory::Custom
-                    && stat_id == CustomStatistic::TradedWithVillager as i32
-                {
-                    self.traded.fetch_add(amount, Ordering::Relaxed);
-                }
-            })
+        fn increment_stat(&self, category: StatisticCategory, stat_id: i32, amount: i32) {
+            if category == StatisticCategory::Custom
+                && stat_id == CustomStatistic::TradedWithVillager as i32
+            {
+                self.traded.fetch_add(amount, Ordering::Relaxed);
+            }
         }
     }
 
@@ -754,67 +660,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selecting_bookshelf_trade_moves_payment_and_creates_result() {
+    fn selecting_bookshelf_trade_moves_payment_and_creates_result() {
         let (player_inventory, merchant_inventory) = inventories();
-        player_inventory
-            .set_stack(0, ItemStack::new(12, &Item::EMERALD))
-            .await;
+        player_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
+        );
 
-        handler.set_selected_offer(0).await;
+        handler.set_selected_offer(0);
 
-        let payment = merchant_inventory.get_stack(0).await;
+        let payment = merchant_inventory.get_stack(0);
         assert_eq!(payment.item_count, 12);
-        let result = merchant_inventory.get_stack(2).await;
+        let result = merchant_inventory.get_stack(2);
         assert_eq!(result.item.id, Item::BOOKSHELF.id);
-        assert!(player_inventory.get_stack(0).await.is_empty());
+        assert!(player_inventory.get_stack(0).is_empty());
     }
 
     // Vanilla clears futureXp when no valid, in-stock offer is selected (MerchantContainer.java:100-123).
     #[tokio::test]
-    async fn future_trader_xp_tracks_the_active_offer() {
+    fn future_trader_xp_tracks_the_active_offer() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(12, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
+        );
 
-        handler.update_result_slot().await;
+        handler.update_result_slot();
         assert_eq!(handler.get_future_trader_xp(), 2);
 
-        merchant_inventory
-            .set_stack(0, ItemStack::new(8, &Item::EMERALD))
-            .await;
-        handler.update_result_slot().await;
+        merchant_inventory.set_stack(0, ItemStack::new(8, &Item::EMERALD));
+        handler.update_result_slot();
         assert_eq!(handler.get_future_trader_xp(), 0);
     }
 
     #[tokio::test]
-    async fn taking_result_commits_payment_after_delivery() {
+    fn taking_result_commits_payment_after_delivery() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(12, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
+        );
         let trade_count = Arc::new(AtomicUsize::new(0));
         handler.on_trade = Some(Box::new({
             let trade_count = trade_count.clone();
@@ -825,16 +720,20 @@ mod tests {
                 })
             }
         }));
-        handler.update_result_slot().await;
+        handler.update_result_slot();
 
-        handler
-            .on_slot_click(2, 0, SlotActionType::Pickup, &player)
-            .await;
+        handler.on_slot_click(2, 0, SlotActionType::Pickup, &player);
 
         assert_eq!(handler.offers[0].uses, 1);
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 3);
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 3);
         assert_eq!(
-            handler.get_behaviour().cursor_stack.lock().await.item.id,
+            handler
+                .get_behaviour()
+                .cursor_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .item
+                .id,
             Item::BOOKSHELF.id
         );
         assert_eq!(player.traded.load(Ordering::Relaxed), 1);
@@ -843,19 +742,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bedrock_result_request_commits_the_trade() {
+    fn bedrock_result_request_commits_the_trade() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(12, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
+        );
         let trade_count = Arc::new(AtomicUsize::new(0));
         handler.on_trade = Some(Box::new({
             let trade_count = trade_count.clone();
@@ -866,23 +762,21 @@ mod tests {
                 })
             }
         }));
-        handler.update_result_slot().await;
+        handler.update_result_slot();
 
-        assert!(handler.complete_bedrock_trade(&player).await);
+        assert!(handler.complete_bedrock_trade(&player));
 
         assert_eq!(handler.offers[0].uses, 1);
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 3);
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 3);
         assert_eq!(player.traded.load(Ordering::Relaxed), 1);
         assert_eq!(trade_count.load(Ordering::Relaxed), 1);
-        assert!(merchant_inventory.get_stack(2).await.is_empty());
+        assert!(merchant_inventory.get_stack(2).is_empty());
     }
 
     #[tokio::test]
-    async fn selection_hint_zero_resolves_matching_offer() {
+    fn selection_hint_zero_resolves_matching_offer() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(64, &Item::PAPER))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(64, &Item::PAPER));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
@@ -892,8 +786,7 @@ mod tests {
                 bookshelf_offer(),
                 single_cost_offer(&Item::PAPER, 24, &Item::EMERALD, 16),
             ],
-        )
-        .await;
+        );
         let traded_offer = Arc::new(AtomicUsize::new(usize::MAX));
         handler.on_trade = Some(Box::new({
             let traded_offer = traded_offer.clone();
@@ -904,65 +797,70 @@ mod tests {
                 })
             }
         }));
-        handler.update_result_slot().await;
+        handler.update_result_slot();
 
-        handler
-            .on_slot_click(2, 0, SlotActionType::Pickup, &player)
-            .await;
+        handler.on_slot_click(2, 0, SlotActionType::Pickup, &player);
 
         assert_eq!(handler.offers[0].uses, 0);
         assert_eq!(handler.offers[1].uses, 1);
         assert_eq!(traded_offer.load(Ordering::Relaxed), 1);
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 40);
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 40);
         assert_eq!(
-            handler.get_behaviour().cursor_stack.lock().await.item.id,
+            handler
+                .get_behaviour()
+                .cursor_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .item
+                .id,
             Item::EMERALD.id
         );
     }
 
     #[tokio::test]
-    async fn pickup_all_does_not_take_merchant_inputs() {
+    fn pickup_all_does_not_take_merchant_inputs() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(9, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(9, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
-        *handler.get_behaviour().cursor_stack.lock().await = ItemStack::new(1, &Item::EMERALD);
+        );
+        *handler
+            .get_behaviour()
+            .cursor_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ItemStack::new(1, &Item::EMERALD);
 
         // Vanilla `MerchantMenu.canTakeItemForPickAll` is false for payment slots too
         // (`MerchantMenu.java:95-98`).
-        handler
-            .on_slot_click(0, 0, SlotActionType::PickupAll, &player)
-            .await;
+        handler.on_slot_click(0, 0, SlotActionType::PickupAll, &player);
 
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 9);
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 9);
         assert_eq!(
-            handler.get_behaviour().cursor_stack.lock().await.item_count,
+            handler
+                .get_behaviour()
+                .cursor_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .item_count,
             1
         );
     }
 
     #[tokio::test]
-    async fn invalid_payment_does_not_notify_the_merchant() {
+    fn invalid_payment_does_not_notify_the_merchant() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(8, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(8, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
+        );
         let trade_count = Arc::new(AtomicUsize::new(0));
         handler.on_trade = Some(Box::new({
             let trade_count = trade_count.clone();
@@ -974,79 +872,71 @@ mod tests {
             }
         }));
 
-        handler
-            .on_slot_click(2, 0, SlotActionType::Pickup, &player)
-            .await;
+        handler.on_slot_click(2, 0, SlotActionType::Pickup, &player);
 
         assert_eq!(handler.offers[0].uses, 0);
         assert_eq!(trade_count.load(Ordering::Relaxed), 0);
         assert_eq!(player.traded.load(Ordering::Relaxed), 0);
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 8);
-        assert!(handler.get_behaviour().cursor_stack.lock().await.is_empty());
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 8);
+        assert!(
+            handler
+                .get_behaviour()
+                .cursor_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        );
     }
 
     #[tokio::test]
-    async fn full_inventory_does_not_commit_quick_moved_trade() {
+    fn full_inventory_does_not_commit_quick_moved_trade() {
         let (player_inventory, merchant_inventory) = inventories();
         player_inventory
             .main_inventory
             .write()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .fill_with(|| ItemStack::new(64, &Item::COBBLESTONE));
-        merchant_inventory
-            .set_stack(0, ItemStack::new(9, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(9, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
-        handler.update_result_slot().await;
+        );
+        handler.update_result_slot();
 
-        handler
-            .on_slot_click(2, 0, SlotActionType::QuickMove, &player)
-            .await;
+        handler.on_slot_click(2, 0, SlotActionType::QuickMove, &player);
 
         assert_eq!(handler.offers[0].uses, 0);
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 9);
-        assert_eq!(
-            merchant_inventory.get_stack(2).await.item.id,
-            Item::BOOKSHELF.id
-        );
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 9);
+        assert_eq!(merchant_inventory.get_stack(2).item.id, Item::BOOKSHELF.id);
         assert_eq!(player.traded.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test]
-    async fn quick_move_repeats_while_payment_and_stock_remain() {
+    fn quick_move_repeats_while_payment_and_stock_remain() {
         let (player_inventory, merchant_inventory) = inventories();
-        merchant_inventory
-            .set_stack(0, ItemStack::new(64, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(64, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![bookshelf_offer()],
-        )
-        .await;
-        handler.update_result_slot().await;
+        );
+        handler.update_result_slot();
 
-        handler
-            .on_slot_click(2, 0, SlotActionType::QuickMove, &player)
-            .await;
+        handler.on_slot_click(2, 0, SlotActionType::QuickMove, &player);
 
         assert_eq!(handler.offers[0].uses, 7);
         assert_eq!(player.traded.load(Ordering::Relaxed), 7);
-        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 1);
-        assert_eq!(player_inventory.get_stack(8).await.item_count, 7);
+        assert_eq!(merchant_inventory.get_stack(0).item_count, 1);
+        assert_eq!(player_inventory.get_stack(8).item_count, 7);
     }
 
     #[tokio::test]
-    async fn swapped_payment_slots_are_accepted_and_consumed() {
+    fn swapped_payment_slots_are_accepted_and_consumed() {
         let (player_inventory, merchant_inventory) = inventories();
         let mut offer = bookshelf_offer();
         offer.base_cost_a = ItemStackSerializer(Cow::Owned(ItemStack::new(5, &Item::EMERALD)));
@@ -1054,28 +944,21 @@ mod tests {
             1,
             &Item::BOOK,
         ))));
-        merchant_inventory
-            .set_stack(0, ItemStack::new(1, &Item::BOOK))
-            .await;
-        merchant_inventory
-            .set_stack(1, ItemStack::new(5, &Item::EMERALD))
-            .await;
+        merchant_inventory.set_stack(0, ItemStack::new(1, &Item::BOOK));
+        merchant_inventory.set_stack(1, ItemStack::new(5, &Item::EMERALD));
         let player = TestPlayer::new(player_inventory.clone());
         let mut handler = MerchantScreenHandler::new(
             1,
             &player_inventory,
             merchant_inventory.clone(),
             vec![offer],
-        )
-        .await;
-        handler.update_result_slot().await;
+        );
+        handler.update_result_slot();
 
-        handler
-            .on_slot_click(2, 0, SlotActionType::Pickup, &player)
-            .await;
+        handler.on_slot_click(2, 0, SlotActionType::Pickup, &player);
 
         assert_eq!(handler.offers[0].uses, 1);
-        assert!(merchant_inventory.get_stack(0).await.is_empty());
-        assert!(merchant_inventory.get_stack(1).await.is_empty());
+        assert!(merchant_inventory.get_stack(0).is_empty());
+        assert!(merchant_inventory.get_stack(1).is_empty());
     }
 }

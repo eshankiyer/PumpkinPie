@@ -3,8 +3,7 @@ use std::sync::Arc;
 use crate::entity::EntityBase;
 
 use crate::block::{
-    BlockFuture, GetComparatorOutputArgs, OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs,
-    PlacedArgs,
+    GetComparatorOutputArgs, OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs, PlacedArgs,
 };
 use crate::block::{
     registry::BlockActionResult,
@@ -18,18 +17,18 @@ use pumpkin_data::translation;
 use pumpkin_data::{BlockDirection, FacingExt};
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_inventory::shulker_box_screen_handler::ShulkerBoxScreenHandler;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 struct ShulkerBoxScreenFactory(Arc<dyn Inventory>);
 
-async fn unpack_shulker_loot(entity: &Arc<dyn BlockEntity>) {
+fn unpack_shulker_loot(entity: &Arc<dyn BlockEntity>) {
     let Some((loot_key, seed)) = entity.take_loot_table() else {
         return;
     };
@@ -41,7 +40,7 @@ async fn unpack_shulker_loot(entity: &Arc<dyn BlockEntity>) {
     };
     // `RandomizableContainerBlockEntity.createMenu` (`RandomizableContainerBlockEntity.java:84-87`)
     // unpacks deferred loot immediately before creating the menu.
-    crate::world::loot::fill_chest_inventory(&inventory, table, seed).await;
+    crate::world::loot::fill_chest_inventory(&inventory, table, seed);
     inventory.mark_dirty();
 }
 
@@ -82,22 +81,19 @@ fn lid_open_bounding_box(
 }
 
 impl ScreenHandlerFactory for ShulkerBoxScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            // `ShulkerBoxMenu.java:17-32`: a shulker box is MenuType.SHULKER_BOX with
-            // `ShulkerBoxSlot`s, not a generic 9x3 chest - the slots refuse items that
-            // cannot nest inside container items (`BlockItem.java:193-196`).
-            let handler =
-                ShulkerBoxScreenHandler::new(sync_id, player_inventory, self.0.clone()).await;
-            let screen_handler_arc = Arc::new(Mutex::new(handler));
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        // `ShulkerBoxMenu.java:17-32`: a shulker box is MenuType.SHULKER_BOX with
+        // `ShulkerBoxSlot`s, not a generic 9x3 chest - the slots refuse items that
+        // cannot nest inside container items (`BlockItem.java:193-196`).
+        let handler = ShulkerBoxScreenHandler::new(sync_id, player_inventory, self.0.clone());
+        let screen_handler_arc = Arc::new(Mutex::new(handler));
 
-            Some(screen_handler_arc as SharedScreenHandler)
-        })
+        Some(screen_handler_arc as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {
@@ -114,118 +110,92 @@ pub struct ShulkerBoxBlock;
 type EndRodLikeProperties = pumpkin_data::block_properties::EndRodLikeProperties;
 
 impl BlockBehaviour for ShulkerBoxBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = EndRodLikeProperties::default(args.block);
-            props.facing = args.direction.to_facing().opposite();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = EndRodLikeProperties::default(args.block);
+        props.facing = args.direction.to_facing().opposite();
+        props.to_state_id(args.block)
     }
 
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move {
-            // On the server, we don't need the Animation steps for now, because the client is responsible for that.
-            // TODO: Do not open the shulker box when it is currently closing
-            args.r#type == Self::OPEN_ANIMATION_EVENT_TYPE
-        })
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        // On the server, we don't need the Animation steps for now, because the client is responsible for that.
+        // TODO: Do not open the shulker box when it is currently closing
+        args.r#type == Self::OPEN_ANIMATION_EVENT_TYPE
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let barrel_block_entity = ShulkerBoxBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(barrel_block_entity));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let barrel_block_entity = ShulkerBoxBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(barrel_block_entity));
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position) {
-                // `RandomizableContainerBlockEntity.canOpen` (`RandomizableContainerBlockEntity.java:79-81`)
-                // keeps spectators from opening a container whose loot has not been generated.
-                if args.player.is_spectator() && block_entity.has_loot_table() {
-                    return BlockActionResult::Success;
-                }
-                if !args.player.is_spectator() {
-                    unpack_shulker_loot(&block_entity).await;
-                }
-                let Some(inventory) = block_entity.clone().get_inventory() else {
-                    return BlockActionResult::Success;
-                };
-                if let Some(shulker) = block_entity
-                    .as_any()
-                    .downcast_ref::<ShulkerBoxBlockEntity>()
-                    && shulker.get_animation_status()
-                        == crate::block::entities::shulker_box::AnimationStatus::Closed
-                {
-                    let state_id = args.world.get_block_state_id(args.position);
-                    let facing = EndRodLikeProperties::from_state_id(state_id, args.block)
-                        .facing
-                        .to_block_direction();
-                    let lid_box = lid_open_bounding_box(args.position, facing);
-                    // `ShulkerBoxBlock.canOpen` (`ShulkerBoxBlock.java:90-97`) refuses to open
-                    // when the closed-to-half-open lid volume collides with a block or entity.
-                    if !args.world.is_space_empty(lid_box)
-                        || !args.world.get_entities_at_box(&lid_box).is_empty()
-                    {
-                        return BlockActionResult::Success;
-                    }
-                }
-
-                args.player
-                    .increment_interaction_stat(
-                        pumpkin_data::statistic::StatisticCategory::Custom,
-                        pumpkin_data::statistic::CustomStatistic::OpenShulkerBox as i32,
-                        1,
-                    )
-                    .await;
-                args.player
-                    .open_handled_screen(&ShulkerBoxScreenFactory(inventory), Some(*args.position))
-                    .await;
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        if let Some(block_entity) = args.world.get_block_entity(args.position) {
+            // `RandomizableContainerBlockEntity.canOpen` (`RandomizableContainerBlockEntity.java:79-81`)
+            // keeps spectators from opening a container whose loot has not been generated.
+            if args.player.is_spectator() && block_entity.has_loot_table() {
+                return BlockActionResult::Success;
             }
-
-            BlockActionResult::Success
-        })
-    }
-
-    fn player_will_destroy<'a>(
-        &'a self,
-        args: crate::block::PlayerWillDestroyArgs<'a>,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position) {
-                // `ShulkerBoxBlock.playerWillDestroy` (`ShulkerBoxBlock.java:110-124`) unpacks
-                // deferred loot before the block is removed and its contents are copied to drops.
-                unpack_shulker_loot(&block_entity).await;
+            if !args.player.is_spectator() {
+                unpack_shulker_loot(&block_entity);
             }
-        })
-    }
-
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `ShulkerBoxBlock.affectNeighborsAfterRemoval` (`ShulkerBoxBlock.java:141-144`)
-            // refreshes comparator outputs using the removed block's state.
-            args.world
-                .update_comparators(args.position, args.block)
-                .await;
-        })
-    }
-
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(inventory) = block_entity.get_inventory()
+            let Some(inventory) = block_entity.clone().get_inventory() else {
+                return BlockActionResult::Success;
+            };
+            if let Some(shulker) = block_entity
+                .as_any()
+                .downcast_ref::<ShulkerBoxBlockEntity>()
+                && shulker.get_animation_status()
+                    == crate::block::entities::shulker_box::AnimationStatus::Closed
             {
-                Some(crate::block::calculate_comparator_output(inventory.as_ref()).await)
-            } else {
-                None
+                let state_id = args.world.get_block_state_id(args.position);
+                let facing = EndRodLikeProperties::from_state_id(state_id, args.block)
+                    .facing
+                    .to_block_direction();
+                let lid_box = lid_open_bounding_box(args.position, facing);
+                // `ShulkerBoxBlock.canOpen` (`ShulkerBoxBlock.java:90-97`) refuses to open
+                // when the closed-to-half-open lid volume collides with a block or entity.
+                if !args.world.is_space_empty(lid_box)
+                    || !args.world.get_entities_at_box(&lid_box).is_empty()
+                {
+                    return BlockActionResult::Success;
+                }
             }
-        })
+
+            args.player.increment_interaction_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                pumpkin_data::statistic::CustomStatistic::OpenShulkerBox as i32,
+                1,
+            );
+            args.player
+                .open_handled_screen(&ShulkerBoxScreenFactory(inventory), Some(*args.position));
+        }
+
+        BlockActionResult::Success
+    }
+
+    fn player_will_destroy(&self, args: crate::block::PlayerWillDestroyArgs<'_>) {
+        if let Some(block_entity) = args.world.get_block_entity(args.position) {
+            // `ShulkerBoxBlock.playerWillDestroy` (`ShulkerBoxBlock.java:110-124`) unpacks
+            // deferred loot before the block is removed and its contents are copied to drops.
+            unpack_shulker_loot(&block_entity);
+        }
+    }
+
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        // `ShulkerBoxBlock.affectNeighborsAfterRemoval` (`ShulkerBoxBlock.java:141-144`)
+        // refreshes comparator outputs using the removed block's state.
+        args.world.update_comparators(args.position, args.block);
+    }
+
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(inventory) = block_entity.get_inventory()
+        {
+            Some(crate::block::calculate_comparator_output(
+                inventory.as_ref(),
+            ))
+        } else {
+            None
+        }
     }
 }
 

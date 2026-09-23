@@ -22,9 +22,7 @@ impl JavaClient {
         server.plugin_manager.fire(server, &mut event).await;
 
         if let Some(book_type) = RecipeBookType::from_id(packet.book_type.0) {
-            player
-                .set_recipe_book_setting(book_type, packet.is_open, packet.is_filtering)
-                .await;
+            player.set_recipe_book_setting(book_type, packet.is_open, packet.is_filtering);
         }
     }
 }

@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -28,95 +27,83 @@ impl ItemMetadata for FishingRodItem {
 }
 
 impl ItemBehaviour for FishingRodItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
-            let bobber_id = player.fishing_bobber.load(Ordering::Relaxed);
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        let world = player.world();
+        let bobber_id = player.fishing_bobber.load(Ordering::Relaxed);
 
-            if bobber_id == -1 {
-                // Cast
-                world.play_sound_fine(
-                    Sound::EntityFishingBobberThrow,
-                    SoundCategory::Neutral,
-                    &player.position(),
-                    0.5,
-                    bobber_sound_pitch(rand::random()),
-                );
+        if bobber_id == -1 {
+            // Cast
+            world.play_sound_fine(
+                Sound::EntityFishingBobberThrow,
+                SoundCategory::Neutral,
+                &player.position(),
+                0.5,
+                bobber_sound_pitch(rand::random()),
+            );
 
-                let bobber_entity = Entity::new(
-                    world.clone(),
+            let bobber_entity = Entity::new(
+                world.clone(),
+                player.position(),
+                &EntityType::FISHING_BOBBER,
+            );
+            let bobber = FishingBobberEntity::new(bobber_entity, player);
+
+            let look_vec = player.living_entity.get_looking_vector();
+            bobber
+                .entity
+                .velocity
+                .store(look_vec.multiply(1.5, 1.5, 1.5));
+
+            player
+                .fishing_bobber
+                .store(bobber.entity.entity_id, Ordering::Relaxed);
+
+            let bobber_arc: Arc<FishingBobberEntity> = Arc::new(bobber);
+            world.spawn_entity(bobber_arc);
+
+            // Vanilla awards ITEM_USED and emits ITEM_INTERACT_START on the cast path
+            // (`FishingRodItem.java:52-59`).
+            player.increment_stat(StatisticCategory::Used, Item::FISHING_ROD.id as i32, 1);
+            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::ItemInteractStart,
                     player.position(),
-                    &EntityType::FISHING_BOBBER,
+                    crate::world::game_event::GameEventContext::of_entity(player_arc),
                 );
-                let bobber = FishingBobberEntity::new(bobber_entity, player);
-
-                let look_vec = player.living_entity.get_looking_vector();
-                bobber
-                    .entity
-                    .velocity
-                    .store(look_vec.multiply(1.5, 1.5, 1.5));
-
-                player
-                    .fishing_bobber
-                    .store(bobber.entity.entity_id, Ordering::Relaxed);
-
-                let bobber_arc: Arc<FishingBobberEntity> = Arc::new(bobber);
-                world.spawn_entity(bobber_arc).await;
-
-                // Vanilla awards ITEM_USED and emits ITEM_INTERACT_START on the cast path
-                // (`FishingRodItem.java:52-59`).
-                player
-                    .increment_stat(StatisticCategory::Used, Item::FISHING_ROD.id as i32, 1)
-                    .await;
-                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                    crate::world::game_event::emit_game_event(
-                        &world,
-                        pumpkin_data::game_event::GameEvent::ItemInteractStart,
-                        player.position(),
-                        crate::world::game_event::GameEventContext::of_entity(player_arc),
-                    )
-                    .await;
-                }
-            } else {
-                // Reel in
-                if let Some(bobber_base) = world.get_entity_by_id(bobber_id) {
-                    if let Some(bobber) =
-                        bobber_base.cast_any().downcast_ref::<FishingBobberEntity>()
-                    {
-                        let result = bobber.reel_in(player).await;
-                        if result > 0 {
-                            player.damage_held_item(result).await;
-                        }
-                    }
-                    bobber_base.get_entity().remove().await;
-                }
-                player.fishing_bobber.store(-1, Ordering::Relaxed);
-
-                world.play_sound_fine(
-                    Sound::EntityFishingBobberRetrieve,
-                    SoundCategory::Neutral,
-                    &player.position(),
-                    1.0,
-                    bobber_sound_pitch(rand::random()),
-                );
-
-                // Vanilla emits ITEM_INTERACT_FINISH on the reel-in path
-                // (`FishingRodItem.java:24-40`).
-                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                    crate::world::game_event::emit_game_event(
-                        &world,
-                        pumpkin_data::game_event::GameEvent::ItemInteractFinish,
-                        player.position(),
-                        crate::world::game_event::GameEventContext::of_entity(player_arc),
-                    )
-                    .await;
-                }
             }
-        })
+        } else {
+            // Reel in
+            if let Some(bobber_base) = world.get_entity_by_id(bobber_id) {
+                if let Some(bobber) = bobber_base.cast_any().downcast_ref::<FishingBobberEntity>() {
+                    let result = bobber.reel_in(player);
+                    if result > 0 {
+                        player.damage_held_item(result);
+                    }
+                }
+                bobber_base.get_entity().remove();
+            }
+            player.fishing_bobber.store(-1, Ordering::Relaxed);
+
+            world.play_sound_fine(
+                Sound::EntityFishingBobberRetrieve,
+                SoundCategory::Neutral,
+                &player.position(),
+                1.0,
+                bobber_sound_pitch(rand::random()),
+            );
+
+            // Vanilla emits ITEM_INTERACT_FINISH on the reel-in path
+            // (`FishingRodItem.java:24-40`).
+            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::ItemInteractFinish,
+                    player.position(),
+                    crate::world::game_event::GameEventContext::of_entity(player_arc),
+                );
+            }
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

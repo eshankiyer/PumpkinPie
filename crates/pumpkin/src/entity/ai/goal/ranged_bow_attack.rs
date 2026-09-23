@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 
 use crate::entity::{
     Entity, EntityBase,
-    ai::goal::{Controls, Goal, GoalFuture},
+    ai::goal::{Controls, Goal},
     mob::Mob,
     projectile::arrow::{ArrowEntity, ArrowPickup},
 };
@@ -75,14 +75,14 @@ impl RangedBowAttackGoal {
     }
 
     /// `RangedBowAttackGoal#isHoldingBow`: `mob.isHolding(Items.BOW)`.
-    async fn held_bow(mob: &dyn Mob) -> Option<(Hand, pumpkin_data::item_stack::ItemStack)> {
+    fn held_bow(mob: &dyn Mob) -> Option<(Hand, pumpkin_data::item_stack::ItemStack)> {
         let (main_hand, off_hand) = {
             let equipment = mob
                 .get_mob_entity()
                 .living_entity
                 .entity_equipment
                 .lock()
-                .await;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             (
                 equipment.get(&EquipmentSlot::MAIN_HAND),
                 equipment.get(&EquipmentSlot::OFF_HAND),
@@ -94,17 +94,21 @@ impl RangedBowAttackGoal {
         (off_hand.item.registry_key == Item::BOW.registry_key).then_some((Hand::Left, off_hand))
     }
 
-    async fn is_holding_bow(mob: &dyn Mob) -> bool {
+    fn is_holding_bow(mob: &dyn Mob) -> bool {
         // `RangedBowAttackGoal#isHoldingBow` delegates to `LivingEntity.isHolding`
         // (`RangedBowAttackGoal.java:41`, `LivingEntity.java:2243-2249`).
         mob.get_mob_entity()
             .living_entity
             .is_holding(mob, &Item::BOW)
-            .await
     }
 
-    async fn item_use_ticks(mob: &dyn Mob) -> Option<i32> {
-        let item = mob.get_mob_entity().living_entity.item_in_use.lock().await;
+    fn item_use_ticks(mob: &dyn Mob) -> Option<i32> {
+        let item = mob
+            .get_mob_entity()
+            .living_entity
+            .item_in_use
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         item.as_ref().map(|stack| {
             stack.get_max_use_time()
                 - mob
@@ -115,17 +119,16 @@ impl RangedBowAttackGoal {
         })
     }
 
-    async fn start_using_bow(mob: &dyn Mob) {
-        if let Some((hand, stack)) = Self::held_bow(mob).await {
+    fn start_using_bow(mob: &dyn Mob) {
+        if let Some((hand, stack)) = Self::held_bow(mob) {
             mob.get_mob_entity()
                 .living_entity
-                .set_active_hand(hand, stack, 72_000)
-                .await;
+                .set_active_hand(hand, stack, 72_000);
         }
     }
 
-    async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-        mob.get_mob_entity().has_line_of_sight(target).await
+    fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+        mob.get_mob_entity().has_line_of_sight(target)
     }
 
     fn target_vector(shooter: &Entity, target: &dyn EntityBase) -> Vector3<f64> {
@@ -151,20 +154,16 @@ impl RangedBowAttackGoal {
         )
     }
 
-    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase, power: f32) {
+    fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase, power: f32) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
         let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), &EntityType::ARROW);
         // `AbstractSkeleton.performRangedAttack` passes its `getProjectile` result into the
         // arrow factory (`AbstractSkeleton.java:160-174`).
-        let Some((_, bow_item)) = Self::held_bow(mob).await else {
+        let Some((_, bow_item)) = Self::held_bow(mob) else {
             return;
         };
-        let mut arrow_item = mob
-            .get_mob_entity()
-            .living_entity
-            .get_projectile(&bow_item)
-            .await;
+        let mut arrow_item = mob.get_mob_entity().living_entity.get_projectile(&bow_item);
         if !self.arrow_effects.is_empty() {
             arrow_item.patch.push((
                 DataComponent::PotionContents,
@@ -193,7 +192,7 @@ impl RangedBowAttackGoal {
         // `14 - level.getDifficulty().getId() * 4`.
         let inaccuracy = f64::from(14 - difficulty * 4);
         arrow.set_velocity(direction.x, direction.y, direction.z, 1.6, inaccuracy);
-        world.spawn_entity(Arc::new(arrow)).await;
+        world.spawn_entity(Arc::new(arrow));
 
         let sound = CSoundEffect::new(
             IdOr::Id(Sound::EntitySkeletonShoot as u16),
@@ -208,130 +207,125 @@ impl RangedBowAttackGoal {
 }
 
 impl Goal for RangedBowAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let has_target = mob
-                .get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive());
-            has_target && Self::is_holding_bow(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let has_target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|target| target.get_entity().is_alive());
+        has_target && Self::is_holding_bow(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let has_target = mob
-                .get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive());
-            let navigation_active = !mob.get_mob_entity().navigator.lock().unwrap().is_idle();
-            (has_target || navigation_active) && Self::is_holding_bow(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let has_target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|target| target.get_entity().is_alive());
+        let navigation_active = !mob.get_mob_entity().navigator.lock().unwrap().is_idle();
+        (has_target || navigation_active) && Self::is_holding_bow(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.attack_time = -1;
+    fn start(&mut self, mob: &dyn Mob) {
+        self.attack_time = -1;
+        self.see_time = 0;
+        mob.get_mob_entity().set_attacking(true);
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        mob.get_mob_entity().set_attacking(false);
+        self.see_time = 0;
+        self.attack_time = -1;
+        mob.get_mob_entity().living_entity.clear_active_hand();
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let shooter = mob.get_entity();
+        let target_pos = target.get_entity().pos.load();
+        let distance_squared = shooter.pos.load().squared_distance_to_vec(&target_pos);
+        let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref());
+        let had_line_of_sight = self.see_time > 0;
+        if has_line_of_sight != had_line_of_sight {
             self.see_time = 0;
-            mob.get_mob_entity().set_attacking(true);
-        })
-    }
+        }
+        if has_line_of_sight {
+            self.see_time += 1;
+        } else {
+            self.see_time -= 1;
+        }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
+        if distance_squared <= self.attack_radius_sqr && self.see_time >= 20 {
             mob.get_mob_entity().navigator.lock().unwrap().stop();
-            mob.get_mob_entity().set_attacking(false);
-            self.see_time = 0;
-            self.attack_time = -1;
-            mob.get_mob_entity().living_entity.clear_active_hand().await;
-        })
-    }
+            self.strafing_time += 1;
+        } else {
+            mob.get_mob_entity().navigator.lock().unwrap().set_progress(
+                crate::entity::ai::pathfinder::NavigatorGoal {
+                    current_progress: shooter.pos.load(),
+                    destination: target_pos,
+                    speed: self.speed_modifier,
+                },
+            );
+            self.strafing_time = -1;
+        }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return;
-            };
-            let shooter = mob.get_entity();
-            let target_pos = target.get_entity().pos.load();
-            let distance_squared = shooter.pos.load().squared_distance_to_vec(&target_pos);
-            let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref()).await;
-            let had_line_of_sight = self.see_time > 0;
-            if has_line_of_sight != had_line_of_sight {
-                self.see_time = 0;
+        if self.strafing_time >= 20 {
+            if mob.get_random().random::<f32>() < 0.3 {
+                self.strafing_clockwise = !self.strafing_clockwise;
             }
-            if has_line_of_sight {
-                self.see_time += 1;
-            } else {
-                self.see_time -= 1;
+            if mob.get_random().random::<f32>() < 0.3 {
+                self.strafing_backwards = !self.strafing_backwards;
             }
+            self.strafing_time = 0;
+        }
 
-            if distance_squared <= self.attack_radius_sqr && self.see_time >= 20 {
-                mob.get_mob_entity().navigator.lock().unwrap().stop();
-                self.strafing_time += 1;
-            } else {
-                mob.get_mob_entity().navigator.lock().unwrap().set_progress(
-                    crate::entity::ai::pathfinder::NavigatorGoal {
-                        current_progress: shooter.pos.load(),
-                        destination: target_pos,
-                        speed: self.speed_modifier,
-                    },
-                );
-                self.strafing_time = -1;
+        if self.strafing_time > -1 {
+            if distance_squared > self.attack_radius_sqr * 0.75 {
+                self.strafing_backwards = false;
+            } else if distance_squared < self.attack_radius_sqr * 0.25 {
+                self.strafing_backwards = true;
             }
+            mob.get_mob_entity().move_control.lock().unwrap().strafe(
+                if self.strafing_backwards { -0.5 } else { 0.5 },
+                if self.strafing_clockwise { 0.5 } else { -0.5 },
+            );
+        }
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 30.0, 30.0);
 
-            if self.strafing_time >= 20 {
-                if mob.get_random().random::<f32>() < 0.3 {
-                    self.strafing_clockwise = !self.strafing_clockwise;
-                }
-                if mob.get_random().random::<f32>() < 0.3 {
-                    self.strafing_backwards = !self.strafing_backwards;
-                }
-                self.strafing_time = 0;
+        if Self::item_use_ticks(mob).is_some() {
+            if !has_line_of_sight && self.see_time < -60 {
+                mob.get_mob_entity().living_entity.clear_active_hand();
+            } else if has_line_of_sight
+                && let Some(pull_time) = Self::item_use_ticks(mob)
+                && pull_time >= 20
+            {
+                mob.get_mob_entity().living_entity.clear_active_hand();
+                self.shoot(mob, target.as_ref(), bow_power_for_time(pull_time));
+                self.reset_attack_time();
             }
-
-            if self.strafing_time > -1 {
-                if distance_squared > self.attack_radius_sqr * 0.75 {
-                    self.strafing_backwards = false;
-                } else if distance_squared < self.attack_radius_sqr * 0.25 {
-                    self.strafing_backwards = true;
-                }
-                mob.get_mob_entity().move_control.lock().unwrap().strafe(
-                    if self.strafing_backwards { -0.5 } else { 0.5 },
-                    if self.strafing_clockwise { 0.5 } else { -0.5 },
-                );
+        } else {
+            self.attack_time -= 1;
+            if self.attack_time <= 0 && self.see_time >= -60 {
+                Self::start_using_bow(mob);
             }
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-
-            if Self::item_use_ticks(mob).await.is_some() {
-                if !has_line_of_sight && self.see_time < -60 {
-                    mob.get_mob_entity().living_entity.clear_active_hand().await;
-                } else if has_line_of_sight
-                    && let Some(pull_time) = Self::item_use_ticks(mob).await
-                    && pull_time >= 20
-                {
-                    mob.get_mob_entity().living_entity.clear_active_hand().await;
-                    self.shoot(mob, target.as_ref(), bow_power_for_time(pull_time))
-                        .await;
-                    self.reset_attack_time();
-                }
-            } else {
-                self.attack_time -= 1;
-                if self.attack_time <= 0 && self.see_time >= -60 {
-                    Self::start_using_bow(mob).await;
-                }
-            }
-        })
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

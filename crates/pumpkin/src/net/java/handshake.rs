@@ -24,15 +24,13 @@ impl PendingConnection {
                     translation::java::MULTIPLAYER_DISCONNECT_OUTDATED_CLIENT,
                     translation::bedrock::DISCONNECTIONSCREEN_OUTDATEDCLIENT,
                     [TextComponent::text(CURRENT_MC_VERSION.to_string())],
-                ))
-                .await;
+                ));
             } else if protocol > CURRENT_MC_VERSION.protocol_version() as u32 {
                 self.kick(TextComponent::translate_cross(
                     translation::java::MULTIPLAYER_DISCONNECT_OUTDATED_SERVER,
                     translation::bedrock::DISCONNECTIONSCREEN_OUTDATEDSERVER,
                     [TextComponent::text(CURRENT_MC_VERSION.to_string())],
-                ))
-                .await;
+                ));
             }
         }
     }

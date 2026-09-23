@@ -1,8 +1,7 @@
 use super::BlockEntity;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 pub struct SkullBlockEntity {
     pub position: BlockPos,
@@ -38,21 +37,31 @@ impl BlockEntity for SkullBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(sound) = self.note_block_sound.lock().await.as_ref() {
-                nbt.put_string("note_block_sound", sound.clone());
-            }
-            if let Some(prof) = self.profile.lock().await.as_ref() {
-                nbt.put_compound("profile", prof.clone());
-            }
-            if let Some(name) = self.custom_name.lock().await.as_ref() {
-                nbt.put_string("custom_name", name.clone());
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(sound) = self
+            .note_block_sound
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_string("note_block_sound", sound.clone());
+        }
+        if let Some(prof) = self
+            .profile
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_compound("profile", prof.clone());
+        }
+        if let Some(name) = self
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_string("custom_name", name.clone());
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

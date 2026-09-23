@@ -6,7 +6,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal,
         melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
@@ -85,17 +85,11 @@ impl Mob for SilverfishEntity {
 
     /// Vanilla `Silverfish.hurtServer`: only alerts nearby infested blocks when the damage came
     /// from an entity, or is tagged `#minecraft:always_triggers_silverfish`.
-    fn on_damage<'a>(
-        &'a self,
-        damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if source.is_some()
-                || damage_type.has_tag(&tag::DamageType::MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH)
-            {
-                self.notify_hurt();
-            }
-        })
+    fn on_damage(&self, damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        if source.is_some()
+            || damage_type.has_tag(&tag::DamageType::MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH)
+        {
+            self.notify_hurt();
+        }
     }
 }

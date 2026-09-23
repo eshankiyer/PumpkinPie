@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use rand::RngExt;
@@ -59,80 +59,82 @@ impl Default for CamelSitGoal {
 }
 
 impl Goal for CamelSitGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.pose_ticks += 1;
-            if self.pose_ticks < MIN_POSE_TICKS {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.pose_ticks += 1;
+        if self.pose_ticks < MIN_POSE_TICKS {
+            return false;
+        }
 
-            let entity = mob.get_entity();
-            if !entity.on_ground.load(Relaxed) || entity.touching_water.load(Relaxed) {
-                return false;
-            }
+        let entity = mob.get_entity();
+        if !entity.on_ground.load(Relaxed) || entity.touching_water.load(Relaxed) {
+            return false;
+        }
 
-            // `CamelAi.RandomSitting.checkExtraStartConditions` (`CamelAi.java:122-128`) also
-            // refuses to start while the camel is leashed or has a controlling passenger.
-            if entity.leashed_to.lock().await.is_some() || mob.has_controlling_passenger().await {
-                return false;
-            }
+        // `CamelAi.RandomSitting.checkExtraStartConditions` (`CamelAi.java:122-128`) also
+        // refuses to start while the camel is leashed or has a controlling passenger.
+        if entity
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+            || mob.has_controlling_passenger()
+        {
+            return false;
+        }
 
-            mob.get_random().random::<f32>() < SIT_CHANCE_PER_TICK
-        })
+        mob.get_random().random::<f32>() < SIT_CHANCE_PER_TICK
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla stands a sitting camel back up as soon as its rider pushes forward
-            // (`Camel.java:262-263`). Pumpkin has no mounted-input routing, so a mounted camel
-            // would otherwise stay pinned by this goal forever; any passenger boarding is used
-            // as the stand-up trigger instead. That is a deliberate deviation, not a port.
-            if !mob.get_entity().passengers.lock().await.is_empty() {
-                return false;
-            }
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        // Vanilla stands a sitting camel back up as soon as its rider pushes forward
+        // (`Camel.java:262-263`). Pumpkin has no mounted-input routing, so a mounted camel
+        // would otherwise stay pinned by this goal forever; any passenger boarding is used
+        // as the stand-up trigger instead. That is a deliberate deviation, not a port.
+        if !mob
+            .get_entity()
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
+            return false;
+        }
 
-            if self.pose_ticks < MIN_POSE_TICKS {
-                return true;
-            }
-            mob.get_random().random::<f32>() >= STAND_CHANCE_PER_TICK
-        })
+        if self.pose_ticks < MIN_POSE_TICKS {
+            return true;
+        }
+        mob.get_random().random::<f32>() >= STAND_CHANCE_PER_TICK
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.pose_ticks = 0;
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
+    fn start(&mut self, mob: &dyn Mob) {
+        self.pose_ticks = 0;
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
 
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            world.play_sound(
-                Sound::EntityCamelSit,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        })
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        world.play_sound(
+            Sound::EntityCamelSit,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.pose_ticks = 0;
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.pose_ticks = 0;
 
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            world.play_sound(
-                Sound::EntityCamelStand,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        })
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        world.play_sound(
+            Sound::EntityCamelStand,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.pose_ticks += 1;
-            // Keep the camel from wandering off while sitting.
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.pose_ticks += 1;
+        // Keep the camel from wandering off while sitting.
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
     fn should_run_every_tick(&self) -> bool {

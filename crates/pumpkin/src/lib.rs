@@ -240,7 +240,7 @@ impl PumpkinServer {
         advanced_config: AdvancedConfiguration,
         vanilla_data: VanillaData,
     ) -> Self {
-        let server = Server::new(basic_config, advanced_config, vanilla_data).await;
+        let server = Server::new(basic_config, advanced_config, vanilla_data);
 
         let rcon = server.advanced_config.networking.rcon.clone();
 
@@ -250,7 +250,7 @@ impl PumpkinServer {
             );
             let rcon_server = server.clone();
             server.spawn_task(async move {
-                RCONServer::run(&rcon, rcon_server).await;
+                RCONServer::run(&rcon, rcon_server);
             });
         }
 
@@ -312,7 +312,7 @@ impl PumpkinServer {
         {
             let ticker_server = server.clone();
             server.spawn_task(async move {
-                Ticker::run(&ticker_server).await;
+                Ticker::run(&ticker_server);
             });
         };
 
@@ -494,9 +494,7 @@ impl PumpkinServer {
 
         let kick_message = TextComponent::text("Server stopped");
         for player in self.server.get_all_players() {
-            player
-                .kick(DisconnectReason::Shutdown, kick_message.clone())
-                .await;
+            player.kick(DisconnectReason::Shutdown, kick_message.clone());
         }
 
         info!("Ending player tasks");
@@ -585,8 +583,8 @@ impl PumpkinServer {
                                         client.close();
                                         client.await_tasks().await;
                                     }
-                                    player.remove().await;
-                                    server_clone.remove_player(&player).await;
+                                    player.remove();
+                                    server_clone.remove_player(&player);
                                     if let Err(e) = server_clone.player_data_storage
                                         .handle_player_leave(&player)
                                         .await {
@@ -604,7 +602,7 @@ impl PumpkinServer {
                     }
                     Err(e) => {
                         error!("Failed to accept Java client connection: {e}");
-                        sleep(Duration::from_millis(50)).await;
+                        sleep(Duration::from_millis(50));
                     }
                 }
             },
@@ -635,7 +633,7 @@ impl PumpkinServer {
                         packet_limiter,
                     ));
                     client.start_outgoing_packet_task();
-                    bedrock_clients.lock().await.insert(client_addr, client.clone());
+                    bedrock_clients.lock().insert(client_addr, client.clone());
 
                     let packet_client = client.clone();
                     let packet_server = self.server.clone();
@@ -685,8 +683,8 @@ impl PumpkinServer {
                         client.progress_player_packets(&player, &server).await;
                         client.close().await;
                         client.await_tasks().await;
-                        player.remove().await;
-                        server.remove_player(&player).await;
+                        player.remove();
+                        server.remove_player(&player);
                         if let Err(error) = server
                             .player_data_storage
                             .handle_player_leave(&player)
@@ -728,14 +726,10 @@ fn setup_stdin_console(server: Arc<Server>) {
             let mut event = ServerCommandEvent::new(command.clone());
             server.plugin_manager.fire(&server, &mut event).await;
             if !event.cancelled {
-                server
-                    .command_dispatcher
-                    .load()
-                    .handle_command(
-                        &command::CommandSender::Console.into_source(&server).await,
-                        command.as_str(),
-                    )
-                    .await;
+                server.command_dispatcher.load().handle_command(
+                    &command::CommandSender::Console.into_source(&server),
+                    command.as_str(),
+                );
             }
         }
     });
@@ -800,14 +794,10 @@ fn setup_console(mut rl: Editor<PumpkinCommandCompleter, FileHistory>, server: A
                 let mut event = ServerCommandEvent::new(line.clone());
                 server.plugin_manager.fire(&server, &mut event).await;
                 if !event.cancelled {
-                    server
-                        .command_dispatcher
-                        .load()
-                        .handle_command(
-                            &command::CommandSender::Console.into_source(&server).await,
-                            &line,
-                        )
-                        .await;
+                    server.command_dispatcher.load().handle_command(
+                        &command::CommandSender::Console.into_source(&server),
+                        &line,
+                    );
                 }
                 let _ = tx_reply.send(1).await;
             } else {

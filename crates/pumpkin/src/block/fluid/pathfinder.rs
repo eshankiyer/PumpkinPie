@@ -39,7 +39,7 @@ fn is_hole(world: &Arc<World>, fluid: &Fluid, pos: &BlockPos) -> bool {
 /// - Holes (downward flow opportunities) get distance 0 priority
 /// - All directions with equal minimum distance are returned
 /// - Returns up to 4 directions with their computed fluid states
-pub async fn get_spread<T: FlowingFluid + Sync + ?Sized>(
+pub fn get_spread<T: FlowingFluid + Sync + ?Sized>(
     fluid_impl: &T,
     world: &Arc<World>,
     fluid: &Fluid,

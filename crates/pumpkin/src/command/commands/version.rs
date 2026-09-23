@@ -27,74 +27,70 @@ const STABLE: bool = true;
 struct Executor;
 
 impl CommandExecutor for Executor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let source = &context.source;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let source = &context.source;
 
-            // VersionCommand.java:20-25 sends the header, then every line of
-            // `dumpVersion`, as system messages rather than command feedback.
-            source
-                .send_message(TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_HEADER,
-                    [],
-                ))
-                .await;
+        // VersionCommand.java:20-25 sends the header, then every line of
+        // `dumpVersion`, as system messages rather than command feedback.
+        source.send_message(TextComponent::translate(
+            translation::java::COMMANDS_VERSION_HEADER,
+            [],
+        ));
 
-            let protocol = CURRENT_MC_VERSION.protocol_version();
+        let protocol = CURRENT_MC_VERSION.protocol_version();
 
-            // VersionCommand.java:29-38.
-            for line in [
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_ID,
-                    [TextComponent::text(CURRENT_MC_VERSION_NAME)],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_NAME,
-                    [TextComponent::text(CURRENT_MC_VERSION_NAME)],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_DATA,
-                    [TextComponent::text(
-                        MAXIMUM_SUPPORTED_WORLD_DATA_VERSION.to_string(),
-                    )],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_SERIES,
-                    [TextComponent::text(SERIES_ID)],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_PROTOCOL,
-                    [
-                        TextComponent::text(protocol.to_string()),
-                        TextComponent::text(format!("0x{protocol:x}")),
-                    ],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_BUILD_TIME,
-                    [TextComponent::text(BUILD_TIME)],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_PACK_RESOURCE,
-                    [TextComponent::text(RESOURCE_PACK_FORMAT)],
-                ),
-                TextComponent::translate(
-                    translation::java::COMMANDS_VERSION_PACK_DATA,
-                    [TextComponent::text(DATA_PACK_FORMAT)],
-                ),
-                TextComponent::translate(
-                    if STABLE {
-                        translation::java::COMMANDS_VERSION_STABLE_YES
-                    } else {
-                        translation::java::COMMANDS_VERSION_STABLE_NO
-                    },
-                    [],
-                ),
-            ] {
-                source.send_message(line).await;
-            }
+        // VersionCommand.java:29-38.
+        for line in [
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_ID,
+                [TextComponent::text(CURRENT_MC_VERSION_NAME)],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_NAME,
+                [TextComponent::text(CURRENT_MC_VERSION_NAME)],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_DATA,
+                [TextComponent::text(
+                    MAXIMUM_SUPPORTED_WORLD_DATA_VERSION.to_string(),
+                )],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_SERIES,
+                [TextComponent::text(SERIES_ID)],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_PROTOCOL,
+                [
+                    TextComponent::text(protocol.to_string()),
+                    TextComponent::text(format!("0x{protocol:x}")),
+                ],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_BUILD_TIME,
+                [TextComponent::text(BUILD_TIME)],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_PACK_RESOURCE,
+                [TextComponent::text(RESOURCE_PACK_FORMAT)],
+            ),
+            TextComponent::translate(
+                translation::java::COMMANDS_VERSION_PACK_DATA,
+                [TextComponent::text(DATA_PACK_FORMAT)],
+            ),
+            TextComponent::translate(
+                if STABLE {
+                    translation::java::COMMANDS_VERSION_STABLE_YES
+                } else {
+                    translation::java::COMMANDS_VERSION_STABLE_NO
+                },
+                [],
+            ),
+        ] {
+            source.send_message(line);
+        }
 
-            Ok(1)
-        })
+        Ok(1)
     }
 }
 

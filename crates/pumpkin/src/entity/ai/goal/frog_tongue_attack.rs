@@ -22,7 +22,7 @@ use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture};
+use crate::entity::ai::goal::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::mob::magma_cube::MagmaCubeEntity;
@@ -100,56 +100,57 @@ impl Default for FrogFindFoodGoal {
 }
 
 impl Goal for FrogFindFoodGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            let pos = entity.pos.load();
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        let pos = entity.pos.load();
 
-            // Vanilla covers this case via `StopAttackingIfTargetInvalid` /
-            // `TrackTargetGoal::should_continue`; here it means clearing a stale target rather
-            // than just refusing to pick a new one, otherwise a target that dies (or stops
-            // qualifying) before `FrogTongueAttackGoal` starts would never be cleared and the
-            // frog could never hunt again.
+        // Vanilla covers this case via `StopAttackingIfTargetInvalid` /
+        // `TrackTargetGoal::should_continue`; here it means clearing a stale target rather
+        // than just refusing to pick a new one, otherwise a target that dies (or stops
+        // qualifying) before `FrogTongueAttackGoal` starts would never be cleared and the
+        // frog could never hunt again.
+        {
+            let mut target = mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(t) = target.as_ref()
+                && (!t.get_entity().is_alive() || !is_frog_food(t.as_ref()))
             {
-                let mut target = mob.get_mob_entity().target.lock().await;
-                if let Some(t) = target.as_ref()
-                    && (!t.get_entity().is_alive() || !is_frog_food(t.as_ref()))
-                {
-                    *target = None;
-                }
-                if target.is_some() {
-                    return false;
-                }
+                *target = None;
             }
+            if target.is_some() {
+                return false;
+            }
+        }
 
-            let mut nearest: Option<(Arc<dyn EntityBase>, f64)> = None;
-            for candidate in world.get_nearby_entities(pos, self.range).values() {
-                if !candidate.get_entity().is_alive() || !is_frog_food(candidate.as_ref()) {
-                    continue;
-                }
-                let dist_sq = candidate
-                    .get_entity()
-                    .pos
-                    .load()
-                    .squared_distance_to_vec(&pos);
-                if nearest.as_ref().is_none_or(|(_, best)| dist_sq < *best) {
-                    nearest = Some((candidate.clone(), dist_sq));
-                }
+        let mut nearest: Option<(Arc<dyn EntityBase>, f64)> = None;
+        for candidate in world.get_nearby_entities(pos, self.range).values() {
+            if !candidate.get_entity().is_alive() || !is_frog_food(candidate.as_ref()) {
+                continue;
             }
+            let dist_sq = candidate
+                .get_entity()
+                .pos
+                .load()
+                .squared_distance_to_vec(&pos);
+            if nearest.as_ref().is_none_or(|(_, best)| dist_sq < *best) {
+                nearest = Some((candidate.clone(), dist_sq));
+            }
+        }
 
-            if let Some((target, _)) = nearest {
-                mob.set_mob_target(Some(target)).await;
-                true
-            } else {
-                false
-            }
-        })
+        if let Some((target, _)) = nearest {
+            mob.set_mob_target(Some(target));
+            true
+        } else {
+            false
+        }
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        // One-shot: hands off to `FrogTongueAttackGoal` immediately once a target is set.
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 }
 
@@ -204,130 +205,138 @@ impl Default for FrogTongueAttackGoal {
 }
 
 impl Goal for FrogTongueAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = mob.get_mob_entity().target.lock().await;
-            let Some(target) = target.as_ref() else {
-                return false;
-            };
-            target.get_entity().is_alive() && is_frog_food(target.as_ref())
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(target) = target.as_ref() else {
+            return false;
+        };
+        target.get_entity().is_alive() && is_frog_food(target.as_ref())
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if self.state == TongueState::Done {
-                return false;
-            }
-            let target = mob.get_mob_entity().target.lock().await;
-            target.as_ref().is_some_and(|t| t.get_entity().is_alive())
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        if self.state == TongueState::Done {
+            return false;
+        }
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        target.as_ref().is_some_and(|t| t.get_entity().is_alive())
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                return;
-            };
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-            sync_tongue_target(mob.get_entity(), Some(target.get_entity().entity_id));
+    fn start(&mut self, mob: &dyn Mob) {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            return;
+        };
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 30.0, 30.0);
+        sync_tongue_target(mob.get_entity(), Some(target.get_entity().entity_id));
 
-            let mob_pos = mob.get_entity().pos.load();
-            let target_pos = target.get_entity().pos.load();
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap()
-                .set_progress(NavigatorGoal {
-                    current_progress: mob_pos,
-                    destination: target_pos,
-                    speed: 2.0,
-                });
+        let mob_pos = mob.get_entity().pos.load();
+        let target_pos = target.get_entity().pos.load();
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress(NavigatorGoal {
+                current_progress: mob_pos,
+                destination: target_pos,
+                speed: 2.0,
+            });
 
-            self.state = TongueState::MoveToTarget;
-            self.path_recalc_counter = PATH_RECALC_INTERVAL;
-        })
+        self.state = TongueState::MoveToTarget;
+        self.path_recalc_counter = PATH_RECALC_INTERVAL;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.set_mob_target(None).await;
-            sync_tongue_pose(mob.get_entity(), EntityPose::Standing);
-            sync_tongue_target(mob.get_entity(), None);
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(None);
+        sync_tongue_pose(mob.get_entity(), EntityPose::Standing);
+        sync_tongue_target(mob.get_entity(), None);
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        self.state = TongueState::Done;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
             self.state = TongueState::Done;
-        })
-    }
+            return;
+        };
+        // Vanilla `ShootTongue::tick` re-sets `DATA_TONGUE_TARGET_ID` every tick, but
+        // `SynchedEntityData` only broadcasts on an actual value change, and the target
+        // can't change mid-run here -- so the `start()` broadcast already covers it and a
+        // per-tick resend (which Pumpkin's `send_meta_data` would broadcast unconditionally)
+        // is skipped as a no-op.
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                self.state = TongueState::Done;
-                return;
-            };
-            // Vanilla `ShootTongue::tick` re-sets `DATA_TONGUE_TARGET_ID` every tick, but
-            // `SynchedEntityData` only broadcasts on an actual value change, and the target
-            // can't change mid-run here -- so the `start()` broadcast already covers it and a
-            // per-tick resend (which Pumpkin's `send_meta_data` would broadcast unconditionally)
-            // is skipped as a no-op.
+        match self.state {
+            TongueState::MoveToTarget => {
+                let mob_pos = mob.get_entity().pos.load();
+                let target_pos = target.get_entity().pos.load();
+                let distance = mob_pos.squared_distance_to_vec(&target_pos).sqrt();
 
-            match self.state {
-                TongueState::MoveToTarget => {
-                    let mob_pos = mob.get_entity().pos.load();
-                    let target_pos = target.get_entity().pos.load();
-                    let distance = mob_pos.squared_distance_to_vec(&target_pos).sqrt();
+                if distance < EATING_DISTANCE {
+                    let world = mob.get_entity().world.load();
+                    world.play_sound_fine(
+                        Sound::EntityFrogTongue,
+                        SoundCategory::Neutral,
+                        &mob_pos,
+                        2.0,
+                        1.0,
+                    );
+                    sync_tongue_pose(mob.get_entity(), EntityPose::UsingTongue);
+                    mob.get_mob_entity().navigator.lock().unwrap().stop();
 
-                    if distance < EATING_DISTANCE {
-                        let world = mob.get_entity().world.load();
-                        world.play_sound_fine(
-                            Sound::EntityFrogTongue,
-                            SoundCategory::Neutral,
-                            &mob_pos,
-                            2.0,
-                            1.0,
+                    let pull_dir = (mob_pos - target_pos).normalize() * EATING_MOVEMENT_FACTOR;
+                    target
+                        .get_entity()
+                        .set_velocity(Vector3::new(pull_dir.x, pull_dir.y, pull_dir.z));
+
+                    self.timer = 0;
+                    self.state = TongueState::CatchAnimation;
+                } else {
+                    self.path_recalc_counter -= 1;
+                    if self.path_recalc_counter <= 0 {
+                        mob.get_mob_entity().navigator.lock().unwrap().set_progress(
+                            NavigatorGoal {
+                                current_progress: mob_pos,
+                                destination: target_pos,
+                                speed: 2.0,
+                            },
                         );
-                        sync_tongue_pose(mob.get_entity(), EntityPose::UsingTongue);
-                        mob.get_mob_entity().navigator.lock().unwrap().stop();
-
-                        let pull_dir = (mob_pos - target_pos).normalize() * EATING_MOVEMENT_FACTOR;
-                        target
-                            .get_entity()
-                            .set_velocity(Vector3::new(pull_dir.x, pull_dir.y, pull_dir.z));
-
-                        self.timer = 0;
-                        self.state = TongueState::CatchAnimation;
-                    } else {
-                        self.path_recalc_counter -= 1;
-                        if self.path_recalc_counter <= 0 {
-                            mob.get_mob_entity().navigator.lock().unwrap().set_progress(
-                                NavigatorGoal {
-                                    current_progress: mob_pos,
-                                    destination: target_pos,
-                                    speed: 2.0,
-                                },
-                            );
-                            self.path_recalc_counter = PATH_RECALC_INTERVAL;
-                        }
+                        self.path_recalc_counter = PATH_RECALC_INTERVAL;
                     }
                 }
-                TongueState::CatchAnimation | TongueState::EatAnimation => {
-                    let (new_state, new_timer, should_eat) =
-                        advance_catch_or_eat(self.state, self.timer);
-                    if should_eat {
-                        eat_target(mob, target.as_ref()).await;
-                    }
-                    self.state = new_state;
-                    self.timer = new_timer;
-                }
-                TongueState::Done => {}
             }
-        })
+            TongueState::CatchAnimation | TongueState::EatAnimation => {
+                let (new_state, new_timer, should_eat) =
+                    advance_catch_or_eat(self.state, self.timer);
+                if should_eat {
+                    eat_target(mob, target.as_ref());
+                }
+                self.state = new_state;
+                self.timer = new_timer;
+            }
+            TongueState::Done => {}
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -369,7 +378,7 @@ const fn advance_catch_or_eat(state: TongueState, timer: i32) -> (TongueState, i
 /// Vanilla `ShootTongue::eatEntity`: attack the target for the frog's attack damage, then force
 /// a silent removal (no drops) if it's somehow still alive -- vanilla's fallback for the case
 /// where the attack alone doesn't kill it (`target.remove(Entity.RemovalReason.KILLED)`).
-async fn eat_target(mob: &dyn Mob, target: &dyn EntityBase) {
+fn eat_target(mob: &dyn Mob, target: &dyn EntityBase) {
     let world = mob.get_entity().world.load();
     world.play_sound_fine(
         Sound::EntityFrogEat,
@@ -382,9 +391,9 @@ async fn eat_target(mob: &dyn Mob, target: &dyn EntityBase) {
     if !target.get_entity().is_alive() {
         return;
     }
-    mob.try_attack(target).await;
+    mob.try_attack(target);
     if target.get_entity().is_alive() {
-        world.remove_entity(target).await;
+        world.remove_entity(target);
     }
 }
 

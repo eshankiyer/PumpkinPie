@@ -10,7 +10,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         active_target::ActiveTargetGoal, escape_danger::EscapeDangerGoal,
@@ -110,12 +110,12 @@ impl PolarBearEntity {
                                 let Some(anger) = mob.persistent_anger() else {
                                     return false;
                                 };
-                                if anger.is_angry_at(target.entity_uuid).await {
+                                if anger.is_angry_at(target.entity_uuid) {
                                     return true;
                                 }
                                 let universal_anger =
                                     world.level_info.load().game_rules.universal_anger;
-                                anger.is_angry_at_all_players(universal_anger).await
+                                anger.is_angry_at_all_players(universal_anger)
                             }
                         },
                     ),
@@ -208,20 +208,16 @@ impl AgeableMob for PolarBearEntity {
 }
 
 impl NBTStorage for PolarBearEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.persistent_anger.write_nbt(nbt).await;
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.persistent_anger.write_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt).await;
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.persistent_anger.read_nbt(nbt);
     }
 }
 
@@ -252,29 +248,32 @@ impl Mob for PolarBearEntity {
         Some(&self.persistent_anger)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.ageable_ai_step();
-            self.persistent_anger.tick().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.ageable_ai_step();
+        self.persistent_anger.tick();
 
-            // Vanilla `PolarBear::tick`: `if (warningSoundTicks > 0) warningSoundTicks--;`.
-            let ticks = self.warning_sound_ticks.load(Relaxed);
-            if ticks > 0 {
-                self.warning_sound_ticks.store(ticks - 1, Relaxed);
-            }
+        // Vanilla `PolarBear::tick`: `if (warningSoundTicks > 0) warningSoundTicks--;`.
+        let ticks = self.warning_sound_ticks.load(Relaxed);
+        if ticks > 0 {
+            self.warning_sound_ticks.store(ticks - 1, Relaxed);
+        }
 
-            // Simplified `NeutralMob::updatePersistentAnger(level, true)`: whenever this bear
-            // currently has a live target (set by e.g. `PolarBearHurtByTargetGoal`), adopt it as
-            // the anger target and (re)start the timer, mirroring `WolfEntity::mob_tick`.
-            let current_target = self.mob_entity.target.lock().await.clone();
-            if let Some(target) = current_target {
-                let target_uuid = target.get_entity().entity_uuid;
-                if !self.persistent_anger.is_angry_at(target_uuid).await {
-                    self.persistent_anger.set_angry_at(Some(target_uuid)).await;
-                    self.persistent_anger.start_timer();
-                }
+        // Simplified `NeutralMob::updatePersistentAnger(level, true)`: whenever this bear
+        // currently has a live target (set by e.g. `PolarBearHurtByTargetGoal`), adopt it as
+        // the anger target and (re)start the timer, mirroring `WolfEntity::mob_tick`.
+        let current_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = current_target {
+            let target_uuid = target.get_entity().entity_uuid;
+            if !self.persistent_anger.is_angry_at(target_uuid) {
+                self.persistent_anger.set_angry_at(Some(target_uuid));
+                self.persistent_anger.start_timer();
             }
-        })
+        }
     }
 }
 

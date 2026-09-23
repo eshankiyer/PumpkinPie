@@ -139,7 +139,7 @@ impl ZombificationTimer {
 /// keeps the golden axe -- here the converted zombified piglin arrives empty-handed. Pumpkin
 /// has no generic `Mob::convertTo`, and building equipment transfer here would duplicate work
 /// that belongs in one.
-pub async fn convert_to<T>(
+pub fn convert_to<T>(
     old: &MobEntity,
     new_type: &'static EntityType,
     nausea: bool,
@@ -177,31 +177,29 @@ pub async fn convert_to<T>(
         .living_entity
         .active_effects
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .values()
         .cloned()
         .collect();
     if let Some(new_living) = converted.get_living_entity() {
         for effect in effects {
-            new_living.add_effect(effect).await;
+            new_living.add_effect(effect);
         }
         if nausea {
-            new_living
-                .add_effect(Effect {
-                    effect_type: &StatusEffect::NAUSEA,
-                    duration: NAUSEA_DURATION_TICKS,
-                    amplifier: 0,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                })
-                .await;
+            new_living.add_effect(Effect {
+                effect_type: &StatusEffect::NAUSEA,
+                duration: NAUSEA_DURATION_TICKS,
+                amplifier: 0,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            });
         }
     }
 
-    world.spawn_entity(converted as Arc<dyn EntityBase>).await;
-    old_entity.remove().await;
+    world.spawn_entity(converted as Arc<dyn EntityBase>);
+    old_entity.remove();
 }
 
 /// Plays a mob's conversion sound at its own position.

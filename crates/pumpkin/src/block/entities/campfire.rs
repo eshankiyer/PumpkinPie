@@ -6,17 +6,16 @@ use pumpkin_data::recipes::CookingRecipeKind;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
-use std::pin::Pin;
+use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
 
 pub struct CampfireBlockEntity {
     pub position: BlockPos,
     pub items: [Arc<Mutex<ItemStack>>; 4],
-    pub cooking_times: [tokio::sync::Mutex<i32>; 4],
-    pub cooking_total_times: [tokio::sync::Mutex<i32>; 4],
+    pub cooking_times: [std::sync::Mutex<i32>; 4],
+    pub cooking_total_times: [std::sync::Mutex<i32>; 4],
     pub dirty: AtomicBool,
 }
 
@@ -68,110 +67,114 @@ impl BlockEntity for CampfireBlockEntity {
         }
     }
 
-    fn tick<'a>(
-        &'a self,
-        world: &'a Arc<crate::world::World>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let (block, state) = world.get_block_and_state(&self.position);
-            if !CampfireLikeProperties::from_state_id(state.id, block).lit {
-                for slot in 0..self.items.len() {
-                    let total_time = *self.cooking_total_times[slot].lock().await;
-                    let mut cooking_time = self.cooking_times[slot].lock().await;
-                    if *cooking_time > 0 {
-                        *cooking_time = (*cooking_time - 2).clamp(0, total_time.max(0));
-                        self.dirty.store(true, Ordering::Relaxed);
-                    }
-                }
-                return;
-            }
-
+    fn tick(&self, world: &Arc<crate::world::World>) {
+        let (block, state) = world.get_block_and_state(&self.position);
+        if !CampfireLikeProperties::from_state_id(state.id, block).lit {
             for slot in 0..self.items.len() {
-                let mut item = self.items[slot].lock().await;
-                if item.is_empty() {
-                    *self.cooking_times[slot].lock().await = 0;
-                    continue;
+                let total_time = *self.cooking_total_times[slot]
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut cooking_time = self.cooking_times[slot]
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if *cooking_time > 0 {
+                    *cooking_time = (*cooking_time - 2).clamp(0, total_time.max(0));
+                    self.dirty.store(true, Ordering::Relaxed);
                 }
-
-                let Some(recipe) = pumpkin_data::recipes::get_cooking_recipe_with_ingredient(
-                    item.item,
-                    CookingRecipeKind::CampfireCooking,
-                ) else {
-                    *self.cooking_times[slot].lock().await = 0;
-                    continue;
-                };
-
-                let mut cooking_time = self.cooking_times[slot].lock().await;
-                let mut total_time = self.cooking_total_times[slot].lock().await;
-                if *total_time <= 0 {
-                    *total_time = recipe.cookingtime;
-                }
-                *cooking_time += 1;
-                if *cooking_time < *total_time {
-                    continue;
-                }
-
-                let Some(result_item) = Item::from_registry_key(
-                    recipe
-                        .result
-                        .id
-                        .strip_prefix("minecraft:")
-                        .unwrap_or(recipe.result.id),
-                ) else {
-                    *cooking_time = 0;
-                    continue;
-                };
-                // `CampfireBlockEntity.cookTick` (CampfireBlockEntity.java:67-75) DROPS the
-                // finished food with `Containers.dropItemStack` and empties the slot; it never
-                // writes the result back onto the campfire. Replacing the raw item in place left
-                // cooked food sitting on the campfire forever, so nothing ever popped off and the
-                // slot could never be reused.
-                *item = ItemStack::EMPTY.clone();
-                *cooking_time = 0;
-                *total_time = 0;
-                drop(total_time);
-                drop(cooking_time);
-                drop(item);
-                world
-                    .drop_stack(
-                        &self.position,
-                        ItemStack::new(recipe.result.count, result_item),
-                    )
-                    .await;
-                self.dirty.store(true, Ordering::Relaxed);
             }
-        })
+            return;
+        }
+
+        for slot in 0..self.items.len() {
+            let mut item = self.items[slot]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if item.is_empty() {
+                *self.cooking_times[slot]
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = 0;
+                continue;
+            }
+
+            let Some(recipe) = pumpkin_data::recipes::get_cooking_recipe_with_ingredient(
+                item.item,
+                CookingRecipeKind::CampfireCooking,
+            ) else {
+                *self.cooking_times[slot]
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = 0;
+                continue;
+            };
+
+            let mut cooking_time = self.cooking_times[slot]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut total_time = self.cooking_total_times[slot]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *total_time <= 0 {
+                *total_time = recipe.cookingtime;
+            }
+            *cooking_time += 1;
+            if *cooking_time < *total_time {
+                continue;
+            }
+
+            let Some(result_item) = Item::from_registry_key(
+                recipe
+                    .result
+                    .id
+                    .strip_prefix("minecraft:")
+                    .unwrap_or(recipe.result.id),
+            ) else {
+                *cooking_time = 0;
+                continue;
+            };
+            // `CampfireBlockEntity.cookTick` (CampfireBlockEntity.java:67-75) DROPS the
+            // finished food with `Containers.dropItemStack` and empties the slot; it never
+            // writes the result back onto the campfire. Replacing the raw item in place left
+            // cooked food sitting on the campfire forever, so nothing ever popped off and the
+            // slot could never be reused.
+            *item = ItemStack::EMPTY.clone();
+            *cooking_time = 0;
+            *total_time = 0;
+            drop(total_time);
+            drop(cooking_time);
+            drop(item);
+            world.drop_stack(
+                &self.position,
+                ItemStack::new(recipe.result.count, result_item),
+            );
+            self.dirty.store(true, Ordering::Relaxed);
+        }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let mut list = Vec::new();
-            for (i, item_mutex) in self.items.iter().enumerate() {
-                let stack = item_mutex.lock().await;
-                if !stack.is_empty() {
-                    let mut item_nbt = NbtCompound::new();
-                    item_nbt.put_byte("Slot", i as i8);
-                    stack.write_item_stack(&mut item_nbt);
-                    list.push(NbtTag::Compound(item_nbt));
-                }
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let mut list = Vec::new();
+        for (i, item_mutex) in self.items.iter().enumerate() {
+            let stack = item_mutex
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !stack.is_empty() {
+                let mut item_nbt = NbtCompound::new();
+                item_nbt.put_byte("Slot", i as i8);
+                stack.write_item_stack(&mut item_nbt);
+                list.push(NbtTag::Compound(item_nbt));
             }
-            nbt.put_list("Items", list);
+        }
+        nbt.put_list("Items", list);
 
-            let mut times = Vec::new();
-            for m in &self.cooking_times {
-                times.push(*m.lock().await);
-            }
-            nbt.put("CookingTimes", NbtTag::IntArray(times));
+        let mut times = Vec::new();
+        for m in &self.cooking_times {
+            times.push(*m.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        }
+        nbt.put("CookingTimes", NbtTag::IntArray(times));
 
-            let mut total_times = Vec::new();
-            for m in &self.cooking_total_times {
-                total_times.push(*m.lock().await);
-            }
-            nbt.put("CookingTotalTimes", NbtTag::IntArray(total_times));
-        })
+        let mut total_times = Vec::new();
+        for m in &self.cooking_total_times {
+            total_times.push(*m.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        }
+        nbt.put("CookingTotalTimes", NbtTag::IntArray(total_times));
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -218,7 +221,7 @@ impl CampfireBlockEntity {
         }
     }
 
-    pub async fn add_item(&self, stack: &mut ItemStack, creative: bool) -> bool {
+    pub fn add_item(&self, stack: &mut ItemStack, creative: bool) -> bool {
         let Some(recipe) = pumpkin_data::recipes::get_cooking_recipe_with_ingredient(
             stack.item,
             CookingRecipeKind::CampfireCooking,
@@ -227,14 +230,20 @@ impl CampfireBlockEntity {
         };
 
         for slot in 0..self.items.len() {
-            let mut slot_stack = self.items[slot].lock().await;
+            let mut slot_stack = self.items[slot]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if slot_stack.is_empty() {
                 *slot_stack = stack.copy_with_count(1);
                 if !creative {
                     stack.decrement(1);
                 }
-                *self.cooking_times[slot].lock().await = 0;
-                *self.cooking_total_times[slot].lock().await = recipe.cookingtime;
+                *self.cooking_times[slot]
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = 0;
+                *self.cooking_total_times[slot]
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = recipe.cookingtime;
                 self.dirty.store(true, Ordering::Relaxed);
                 return true;
             }
@@ -248,43 +257,52 @@ impl Inventory for CampfireBlockEntity {
         self.items.len()
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move {
-            for slot in &self.items {
-                if !slot.lock().await.is_empty() {
-                    return false;
-                }
+    fn is_empty(&self) -> bool {
+        for slot in &self.items {
+            if !slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+            {
+                return false;
             }
-            true
-        })
+        }
+        true
     }
 
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move { self.items[slot].lock().await.clone() })
+    fn get_stack(&self, slot: usize) -> ItemStack {
+        self.items[slot]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut removed = ItemStack::EMPTY.clone();
-            std::mem::swap(&mut removed, &mut *self.items[slot].lock().await);
-            self.dirty.store(true, Ordering::Relaxed);
-            removed
-        })
+    fn remove_stack(&self, slot: usize) -> ItemStack {
+        let mut removed = ItemStack::EMPTY.clone();
+        std::mem::swap(
+            &mut removed,
+            &mut *self.items[slot]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        self.dirty.store(true, Ordering::Relaxed);
+        removed
     }
 
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let removed = self.items[slot].lock().await.split(amount);
-            self.dirty.store(true, Ordering::Relaxed);
-            removed
-        })
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
+        let removed = self.items[slot]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .split(amount);
+        self.dirty.store(true, Ordering::Relaxed);
+        removed
     }
 
-    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            *self.items[slot].lock().await = stack;
-            self.dirty.store(true, Ordering::Relaxed);
-        })
+    fn set_stack(&self, slot: usize, stack: ItemStack) {
+        *self.items[slot]
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+        self.dirty.store(true, Ordering::Relaxed);
     }
 
     fn mark_dirty(&self) {
@@ -297,13 +315,13 @@ impl Inventory for CampfireBlockEntity {
 }
 
 impl Clearable for CampfireBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            for slot in &self.items {
-                *slot.lock().await = ItemStack::EMPTY.clone();
-            }
-            self.dirty.store(true, Ordering::Relaxed);
-        })
+    fn clear(&self) {
+        for slot in &self.items {
+            *slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = ItemStack::EMPTY.clone();
+        }
+        self.dirty.store(true, Ordering::Relaxed);
     }
 }
 
@@ -315,10 +333,10 @@ mod tests {
     use pumpkin_world::inventory::Inventory;
 
     #[tokio::test]
-    async fn chunk_data_contains_campfire_items() {
+    fn chunk_data_contains_campfire_items() {
         // `CampfireBlockEntity.getUpdateTag` (`CampfireBlockEntity.java:159-163`) includes items.
         let campfire = CampfireBlockEntity::new(BlockPos::new(0, 64, 0));
-        campfire.set_stack(2, ItemStack::new(1, &Item::BEEF)).await;
+        campfire.set_stack(2, ItemStack::new(1, &Item::BEEF));
 
         let nbt = campfire.chunk_data_nbt().expect("campfire update data");
         let items = nbt.get_list("Items").expect("serialized item list");

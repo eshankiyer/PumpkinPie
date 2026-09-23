@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use pumpkin_data::entity::EntityType;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::{EntityBase, ai::pathfinder::NavigatorGoal, mob::Mob};
 
 const SEARCH_RADIUS: f64 = 8.0;
@@ -97,70 +97,60 @@ impl FollowParentGoal {
 }
 
 impl Goal for FollowParentGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let age = mob.get_mob_entity().living_entity.entity.age.load(Relaxed);
-            if age >= 0 {
-                return false;
-            }
-            if self.horse_family && !mob.is_bred() {
-                return false;
-            }
-            self.parent = Self::find_parent(mob, self.horse_family);
-            self.parent.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let age = mob.get_mob_entity().living_entity.entity.age.load(Relaxed);
+        if age >= 0 {
+            return false;
+        }
+        if self.horse_family && !mob.is_bred() {
+            return false;
+        }
+        self.parent = Self::find_parent(mob, self.horse_family);
+        self.parent.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let age = mob.get_mob_entity().living_entity.entity.age.load(Relaxed);
-            if age >= 0 {
-                return false;
-            }
-            let Some(parent) = &self.parent else {
-                return false;
-            };
-            let parent_entity = parent.get_entity();
-            if !parent_entity.is_alive() {
-                return false;
-            }
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let age = mob.get_mob_entity().living_entity.entity.age.load(Relaxed);
+        if age >= 0 {
+            return false;
+        }
+        let Some(parent) = &self.parent else {
+            return false;
+        };
+        let parent_entity = parent.get_entity();
+        if !parent_entity.is_alive() {
+            return false;
+        }
+        let mob_pos = mob.get_mob_entity().living_entity.entity.pos.load();
+        let parent_pos = parent_entity.pos.load();
+        let dist_sq = mob_pos.squared_distance_to_vec(&parent_pos);
+        (MIN_DISTANCE_SQ..=MAX_DISTANCE_SQ).contains(&dist_sq)
+    }
+
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.delay = 0;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.delay -= 1;
+        if self.delay > 0 {
+            return;
+        }
+        self.delay = to_goal_ticks(10);
+        if let Some(parent) = &self.parent {
             let mob_pos = mob.get_mob_entity().living_entity.entity.pos.load();
-            let parent_pos = parent_entity.pos.load();
-            let dist_sq = mob_pos.squared_distance_to_vec(&parent_pos);
-            (MIN_DISTANCE_SQ..=MAX_DISTANCE_SQ).contains(&dist_sq)
-        })
+            let parent_pos = parent.get_entity().pos.load();
+            let mut navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            navigator.set_progress(NavigatorGoal::new(mob_pos, parent_pos, self.speed));
+        }
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.delay = 0;
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.delay -= 1;
-            if self.delay > 0 {
-                return;
-            }
-            self.delay = to_goal_ticks(10);
-            if let Some(parent) = &self.parent {
-                let mob_pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                let parent_pos = parent.get_entity().pos.load();
-                let mut navigator = mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal::new(mob_pos, parent_pos, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.parent = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.parent = None;
     }
 
     fn controls(&self) -> Controls {

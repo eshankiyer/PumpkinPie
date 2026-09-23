@@ -59,8 +59,11 @@ impl PiglinAi {
         rand::random::<f32>() < Self::PROBABILITY_OF_CELEBRATION_DANCE
     }
 
-    pub async fn is_wearing_safe_armor(target: &LivingEntity) -> bool {
-        let equipment = target.entity_equipment.lock().await;
+    pub fn is_wearing_safe_armor(target: &LivingEntity) -> bool {
+        let equipment = target
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         [
             EquipmentSlot::HEAD,
             EquipmentSlot::CHEST,
@@ -154,7 +157,7 @@ impl PiglinAi {
         }
     }
 
-    pub async fn throw_items(
+    pub fn throw_items(
         piglin: &PiglinEntity,
         items: Vec<ItemStack>,
         target_pos: Option<Vector3<f64>>,
@@ -179,7 +182,7 @@ impl PiglinAi {
                         vel.z * 0.3,
                     ));
                 }
-                world.spawn_entity(Arc::new(item_entity)).await;
+                world.spawn_entity(Arc::new(item_entity));
             }
         }
     }

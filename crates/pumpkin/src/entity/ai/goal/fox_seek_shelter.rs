@@ -9,7 +9,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use super::fox_behavior::{animal_walk_target_value, is_bright_outside};
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
@@ -61,74 +61,75 @@ impl FoxSeekShelterGoal {
 }
 
 impl Goal for FoxSeekShelterGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return false;
-            };
-            if fox.is_sleeping() || mob.get_mob_entity().target.lock().await.is_some() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return false;
+        };
+        if fox.is_sleeping()
+            || mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+        {
+            return false;
+        }
 
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            let pos = entity.block_pos.load();
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        let pos = entity.block_pos.load();
 
-            // Thunder is the fast path: no interval countdown, and it ignores the village and
-            // daylight tests (`Fox.java:1377-1378`).
-            if world.is_thundering().await && world.can_see_sky(&pos) {
-                self.wanted = Self::hide_pos(mob);
-                return self.wanted.is_some();
-            }
-
-            if self.interval > 0 {
-                self.interval -= 1;
-                return false;
-            }
-            self.interval = INTERVAL;
-
-            if !is_bright_outside(&world) || !world.can_see_sky(&pos) {
-                return false;
-            }
-            // `ServerLevel.isVillage(pos)` is `isCloseToVillage(pos, 1)`
-            // (`ServerLevel.java:1542-1544`).
-            if world.is_close_to_village(pos, 1).await {
-                return false;
-            }
-
+        // Thunder is the fast path: no interval countdown, and it ignores the village and
+        // daylight tests (`Fox.java:1377-1378`).
+        if world.is_thundering() && world.can_see_sky(&pos) {
             self.wanted = Self::hide_pos(mob);
-            self.wanted.is_some()
-        })
+            return self.wanted.is_some();
+        }
+
+        if self.interval > 0 {
+            self.interval -= 1;
+            return false;
+        }
+        self.interval = INTERVAL;
+
+        if !is_bright_outside(&world) || !world.can_see_sky(&pos) {
+            return false;
+        }
+        // `ServerLevel.isVillage(pos)` is `isCloseToVillage(pos, 1)`
+        // (`ServerLevel.java:1542-1544`).
+        if world.is_close_to_village(pos, 1) {
+            return false;
+        }
+
+        self.wanted = Self::hide_pos(mob);
+        self.wanted.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            !mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle()
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        !mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.clear_states();
-            }
-            let Some(wanted) = self.wanted else {
-                return;
-            };
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .set_progress(NavigatorGoal::new(
-                    mob.get_entity().pos.load(),
-                    wanted,
-                    self.speed,
-                ));
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.clear_states();
+        }
+        let Some(wanted) = self.wanted else {
+            return;
+        };
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_progress(NavigatorGoal::new(
+                mob.get_entity().pos.load(),
+                wanted,
+                self.speed,
+            ));
     }
 
     fn controls(&self) -> Controls {

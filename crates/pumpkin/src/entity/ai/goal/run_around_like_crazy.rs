@@ -6,7 +6,7 @@ use pumpkin_data::entity::EntityStatus;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob, passive::equine::AbstractHorse};
 
 /// `RunAroundLikeCrazyGoal`'s `DefaultRandomPos.getPos(horse, 5, 4)` horizontal/vertical search
@@ -59,91 +59,93 @@ impl<T: AbstractHorse + Mob + ?Sized> RunAroundLikeCrazyGoal<T> {
 }
 
 impl<T: AbstractHorse + Mob + ?Sized + Send + Sync + 'static> Goal for RunAroundLikeCrazyGoal<T> {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return false;
-            };
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(horse) = self.horse.upgrade() else {
+            return false;
+        };
 
-            if horse.is_mob_controlled().await || horse.is_tamed() {
-                return false;
-            }
-            if !mob.get_entity().has_passengers().await {
-                return false;
-            }
+        if horse.is_mob_controlled() || horse.is_tamed() {
+            return false;
+        }
+        if !mob.get_entity().has_passengers() {
+            return false;
+        }
 
-            self.target = Some(Self::find_target(mob));
-            true
-        })
+        self.target = Some(Self::find_target(mob));
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return false;
-            };
-            if horse.is_tamed() {
-                return false;
-            }
-            if mob.get_mob_entity().navigator.lock().unwrap().is_idle() {
-                return false;
-            }
-            mob.get_entity().has_passengers().await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(horse) = self.horse.upgrade() else {
+            return false;
+        };
+        if horse.is_tamed() {
+            return false;
+        }
+        if mob.get_mob_entity().navigator.lock().unwrap().is_idle() {
+            return false;
+        }
+        mob.get_entity().has_passengers()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(target) = self.target {
-                let pos = mob.get_entity().pos.load();
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(target) = self.target {
+            let pos = mob.get_entity().pos.load();
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return;
-            };
-            if horse.is_tamed() {
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(horse) = self.horse.upgrade() else {
+            return;
+        };
+        if horse.is_tamed() {
+            return;
+        }
+        if mob
+            .get_random()
+            .random_range(0..to_goal_ticks(BUCK_CHECK_INTERVAL))
+            != 0
+        {
+            return;
+        }
+
+        let entity = mob.get_entity();
+        let Some(passenger) = entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first()
+            .cloned()
+        else {
+            return;
+        };
+
+        if let Some(player) = passenger.get_player() {
+            let temper = horse.get_temper();
+            let max_temper = horse.max_temper();
+            if max_temper > 0 && mob.get_random().random_range(0..max_temper) < temper {
+                horse.set_tamed(player.gameprofile.id);
                 return;
             }
-            if mob
-                .get_random()
-                .random_range(0..to_goal_ticks(BUCK_CHECK_INTERVAL))
-                != 0
-            {
-                return;
-            }
+            horse.modify_temper(TEMPER_GAIN_ON_FAILURE);
+        }
 
-            let entity = mob.get_entity();
-            let Some(passenger) = entity.passengers.lock().await.first().cloned() else {
-                return;
-            };
+        let passengers = entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for passenger in passengers {
+            entity
+                .remove_passenger(passenger.get_entity().entity_id)
+                .await;
+        }
 
-            if let Some(player) = passenger.get_player() {
-                let temper = horse.get_temper();
-                let max_temper = horse.max_temper();
-                if max_temper > 0 && mob.get_random().random_range(0..max_temper) < temper {
-                    horse.set_tamed(player.gameprofile.id);
-                    return;
-                }
-                horse.modify_temper(TEMPER_GAIN_ON_FAILURE);
-            }
-
-            let passengers = entity.passengers.lock().await.clone();
-            for passenger in passengers {
-                entity
-                    .remove_passenger(passenger.get_entity().entity_id)
-                    .await;
-            }
-
-            horse.make_mad();
-            let world = entity.world.load();
-            world.send_entity_status(entity, EntityStatus::TamingFailed, None);
-        })
+        horse.make_mad();
+        let world = entity.world.load();
+        world.send_entity_status(entity, EntityStatus::TamingFailed, None);
     }
 
     fn controls(&self) -> Controls {

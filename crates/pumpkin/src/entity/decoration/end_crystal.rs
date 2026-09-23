@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam::atomic::AtomicCell;
 
-use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity};
+use crate::entity::{Entity, EntityBase, NBTStorage, living::LivingEntity};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -84,38 +84,32 @@ impl EntityBase for EndCrystalEntity {
         true
     }
 
-    fn damage_with_context<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         _amount: f32,
         damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        _cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if source.is_some_and(|source| {
-                source.get_entity().entity_type == &pumpkin_data::entity::EntityType::ENDER_DRAGON
-            }) {
-                return false;
-            }
+        source: Option<&dyn EntityBase>,
+        _cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        if source.is_some_and(|source| {
+            source.get_entity().entity_type == &pumpkin_data::entity::EntityType::ENDER_DRAGON
+        }) {
+            return false;
+        }
 
-            self.entity.remove().await;
-            if !is_explosion_damage(&damage_type) {
-                self.entity
-                    .world
-                    .load()
-                    .explode(
-                        self.entity.pos.load(),
-                        6.0,
-                        crate::world::ExplosionInteraction::Block,
-                    )
-                    .await;
-            }
+        self.entity.remove();
+        if !is_explosion_damage(&damage_type) {
+            self.entity.world.load().explode(
+                self.entity.pos.load(),
+                6.0,
+                crate::world::ExplosionInteraction::Block,
+            );
+        }
 
-            // TODO
-            true
-        })
+        // TODO
+        true
     }
 
     fn as_nbt_storage(&self) -> &dyn NBTStorage {

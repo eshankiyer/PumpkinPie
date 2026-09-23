@@ -17,7 +17,7 @@ use pumpkin_data::villager::{
 };
 use pumpkin_inventory::merchant::merchant_screen_handler::MerchantScreenHandler;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -30,7 +30,7 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::SimpleInventory;
 use rand::RngExt;
 use rand::seq::IndexedRandom;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use super::villager::{
     apply_potion, apply_random_dye, apply_random_stew_effect, enchant_trade_item,
@@ -41,7 +41,7 @@ use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
     ai::goal::{
-        Controls, Goal, GoalFuture, avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
+        Controls, Goal, avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         interact::InteractGoal, look_at_entity::LookAtEntityGoal, look_at_trading_player,
         move_towards_restriction::MoveTowardsRestrictionGoal, swim::SwimGoal,
         trade_with_player::TradeWithPlayerGoal, wander_around::WanderAroundGoal,
@@ -316,8 +316,11 @@ impl WanderingTraderEntity {
     /// Vanilla `WanderingTrader::updateTrades` (`WanderingTrader.java:129-135`), via the
     /// shared `AbstractVillager.addOffersFromTradeSet` helper: pulls buying, then uncommon,
     /// then common trade sets, in that fixed order.
-    pub async fn update_trades(&self) {
-        let mut offers = self.offers.lock().await;
+    pub fn update_trades(&self) {
+        let mut offers = self
+            .offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut rng = rand::rng();
         for trade_set in [
             WANDERING_TRADER_TRADE_SET_BUYING,
@@ -329,14 +332,21 @@ impl WanderingTraderEntity {
     }
 
     /// Regenerates the offer list from scratch.
-    pub async fn generate_trades(&self) {
-        self.offers.lock().await.clear();
-        self.update_trades().await;
+    pub fn generate_trades(&self) {
+        self.offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.update_trades();
     }
 
     pub async fn open_trading_screen(&self, player: &Arc<Player>) {
-        if let Some(sync_id) = player.open_handled_screen(self, None).await {
-            let offers = self.offers.lock().await.clone();
+        if let Some(sync_id) = player.open_handled_screen(self, None) {
+            let offers = self
+                .offers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
             self.send_trade_offers(player, sync_id, offers).await;
         }
     }
@@ -492,9 +502,12 @@ impl WanderingTraderEntity {
 
     /// Vanilla `AbstractVillager.notifyTrade` (`AbstractVillager.java:135-142`) plus
     /// `WanderingTrader.rewardTradeXp` (`WanderingTrader.java:158-163`).
-    async fn complete_trade(&self, offer_index: usize, world: &Arc<World>) {
+    fn complete_trade(&self, offer_index: usize, world: &Arc<World>) {
         let reward_exp = {
-            let mut offers = self.offers.lock().await;
+            let mut offers = self
+                .offers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let Some(offer) = offers.get_mut(offer_index) else {
                 return;
             };
@@ -518,123 +531,117 @@ impl WanderingTraderEntity {
                 world,
                 position,
                 3 + rand::random_range(0..4u32),
-            )
-            .await;
+            );
         }
 
         // `notifyTrade`: `CriteriaTriggers.TRADE.trigger(tradingPlayer, ...)`.
         if let Some(player) = self.get_trading_player() {
-            trigger_trade_advancement(&player).await;
+            trigger_trade_advancement(&player);
         }
     }
 }
 
 impl ScreenHandlerFactory for WanderingTraderEntity {
     #[allow(clippy::too_many_lines)]
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<pumpkin_inventory::player::player_inventory::PlayerInventory>,
-        player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let offers = self.offers.lock().await;
-            let self_weak = self.self_weak.lock().unwrap().clone().unwrap();
+        player_inventory: &Arc<pumpkin_inventory::player::player_inventory::PlayerInventory>,
+        player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let offers = self
+            .offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let self_weak = self.self_weak.lock().unwrap().clone().unwrap();
 
-            let mut handler = MerchantScreenHandler::new(
-                sync_id,
-                player_inventory,
-                self.merchant_inventory.clone(),
-                offers.clone(),
-            )
-            .await;
+        let mut handler = MerchantScreenHandler::new(
+            sync_id,
+            player_inventory,
+            self.merchant_inventory.clone(),
+            offers.clone(),
+        );
 
-            // `AbstractVillager.notifyTradeUpdated` (`AbstractVillager.java:152-157)`)
-            // calls the concrete `getTradeUpdatedSound` after the payment slots change,
-            // while suppressing repeats during the ambient-sound cooldown window.
-            let update_sound_weak = self_weak.clone();
-            handler.on_trade_updated = Some(Box::new(move |has_result| {
-                if let Some(trader) = update_sound_weak.upgrade() {
-                    let interval = trader.get_ambient_sound_interval();
-                    let current = trader.mob_entity.ambient_sound_time.load(Ordering::Relaxed);
-                    if current > -interval + 20
-                        && trader
-                            .mob_entity
-                            .ambient_sound_time
-                            .compare_exchange(
-                                current,
-                                -interval,
-                                Ordering::Relaxed,
-                                Ordering::Relaxed,
-                            )
-                            .is_ok()
-                    {
-                        trader.get_entity().play_sound(if has_result {
-                            Sound::EntityWanderingTraderYes
-                        } else {
-                            Sound::EntityWanderingTraderNo
-                        });
-                    }
+        // `AbstractVillager.notifyTradeUpdated` (`AbstractVillager.java:152-157)`)
+        // calls the concrete `getTradeUpdatedSound` after the payment slots change,
+        // while suppressing repeats during the ambient-sound cooldown window.
+        let update_sound_weak = self_weak.clone();
+        handler.on_trade_updated = Some(Box::new(move |has_result| {
+            if let Some(trader) = update_sound_weak.upgrade() {
+                let interval = trader.get_ambient_sound_interval();
+                let current = trader.mob_entity.ambient_sound_time.load(Ordering::Relaxed);
+                if current > -interval + 20
+                    && trader
+                        .mob_entity
+                        .ambient_sound_time
+                        .compare_exchange(current, -interval, Ordering::Relaxed, Ordering::Relaxed)
+                        .is_ok()
+                {
+                    trader.get_entity().play_sound(if has_result {
+                        Sound::EntityWanderingTraderYes
+                    } else {
+                        Sound::EntityWanderingTraderNo
+                    });
                 }
-            }));
-
-            // `AbstractVillager.startTrading` sets `tradingPlayer`; `stopTrading` clears it.
-            // With it set, `isTrading()` suppresses despawn and `TradeWithPlayerGoal` holds
-            // the trader still (`WanderingTrader.java:79, 212`).
-            if let Some(server_player) = player.as_any().downcast_ref::<Player>() {
-                *self
-                    .trading_player
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                    Some(server_player.get_entity().entity_uuid);
             }
+        }));
 
-            // Vanilla `MerchantMenu.stillValid` delegates to the merchant
-            // (`MerchantMenu.java:68-70`, `AbstractVillager.java:304-306`).
-            let validity_weak = self_weak.clone();
-            handler.validity_check = Some(Box::new(move |inventory_player| {
-                validity_weak
-                    .upgrade()
-                    .is_some_and(|trader| trader.can_continue_trading(inventory_player))
-            }));
+        // `AbstractVillager.startTrading` sets `tradingPlayer`; `stopTrading` clears it.
+        // With it set, `isTrading()` suppresses despawn and `TradeWithPlayerGoal` holds
+        // the trader still (`WanderingTrader.java:79, 212`).
+        if let Some(server_player) = player.as_any().downcast_ref::<Player>() {
+            *self
+                .trading_player
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(server_player.get_entity().entity_uuid);
+        }
 
-            let close_weak = self_weak.clone();
-            handler.on_close = Some(Box::new(move || {
-                let close_weak = close_weak.clone();
-                Box::pin(async move {
-                    if let Some(trader) = close_weak.upgrade() {
-                        *trader
-                            .trading_player
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-                    }
-                })
-            }));
+        // Vanilla `MerchantMenu.stillValid` delegates to the merchant
+        // (`MerchantMenu.java:68-70`, `AbstractVillager.java:304-306`).
+        let validity_weak = self_weak.clone();
+        handler.validity_check = Some(Box::new(move |inventory_player| {
+            validity_weak
+                .upgrade()
+                .is_some_and(|trader| trader.can_continue_trading(inventory_player))
+        }));
 
-            let world = self.get_entity().world.load_full();
-            handler.on_trade = Some(Box::new(move |offer_index| {
-                let self_weak = self_weak.clone();
-                let world = world.clone();
-                Box::pin(async move {
-                    if let Some(trader) = self_weak.upgrade() {
-                        trader.complete_trade(offer_index, &world).await;
-                    }
-                })
-            }));
-
-            let sound_weak = self.self_weak.lock().unwrap().clone().unwrap();
-            handler.on_quick_move_trade = Some(Box::new(move || {
-                if let Some(trader) = sound_weak.upgrade() {
-                    // `MerchantMenu.playTradeSound`/`WanderingTrader.getNotifyTradeSound`
-                    // (`MerchantMenu.java:142-147`, `WanderingTrader.java:191-193`).
-                    trader
-                        .get_entity()
-                        .play_sound(pumpkin_data::sound::Sound::EntityWanderingTraderYes);
+        let close_weak = self_weak.clone();
+        handler.on_close = Some(Box::new(move || {
+            let close_weak = close_weak.clone();
+            Box::pin(async move {
+                if let Some(trader) = close_weak.upgrade() {
+                    *trader
+                        .trading_player
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                 }
-            }));
+            })
+        }));
 
-            Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
-        })
+        let world = self.get_entity().world.load_full();
+        handler.on_trade = Some(Box::new(move |offer_index| {
+            let self_weak = self_weak.clone();
+            let world = world.clone();
+            Box::pin(async move {
+                if let Some(trader) = self_weak.upgrade() {
+                    trader.complete_trade(offer_index, &world);
+                }
+            })
+        }));
+
+        let sound_weak = self.self_weak.lock().unwrap().clone().unwrap();
+        handler.on_quick_move_trade = Some(Box::new(move || {
+            if let Some(trader) = sound_weak.upgrade() {
+                // `MerchantMenu.playTradeSound`/`WanderingTrader.getNotifyTradeSound`
+                // (`MerchantMenu.java:142-147`, `WanderingTrader.java:191-193`).
+                trader
+                    .get_entity()
+                    .play_sound(pumpkin_data::sound::Sound::EntityWanderingTraderYes);
+            }
+        }));
+
+        Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {
@@ -645,7 +652,7 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
 impl NBTStorage for WanderingTraderEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.mob_entity.living_entity.write_nbt(nbt);
             nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
             if let Some(target) = self.wander_target.load() {
                 nbt.put(
@@ -654,7 +661,10 @@ impl NBTStorage for WanderingTraderEntity {
                 );
             }
 
-            let offers = self.offers.lock().await;
+            let offers = self
+                .offers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut recipes = Vec::new();
             for offer in offers.iter() {
                 let mut recipe = NbtCompound::new();
@@ -693,7 +703,7 @@ impl NBTStorage for WanderingTraderEntity {
 
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt);
             if let Some(delay) = nbt.get_int("DespawnDelay") {
                 self.despawn_delay.store(delay, Ordering::Relaxed);
             }
@@ -713,7 +723,10 @@ impl NBTStorage for WanderingTraderEntity {
             if let Some(offers_compound) = nbt.get_compound("Offers")
                 && let Some(recipes) = offers_compound.get_list("Recipes")
             {
-                let mut offers = self.offers.lock().await;
+                let mut offers = self
+                    .offers
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 offers.clear();
                 for tag in recipes {
                     if let Some(recipe) = tag.extract_compound() {
@@ -783,70 +796,60 @@ impl WanderToPositionGoal {
 }
 
 impl Goal for WanderToPositionGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(trader) = mob.cast_any().downcast_ref::<WanderingTraderEntity>() else {
-                return false;
-            };
-            let Some(target) = trader.wander_target.load() else {
-                return false;
-            };
-            if !Self::is_too_far(mob, target, self.stop_distance) {
-                return false;
-            }
-            self.target = Some(target);
-            true
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(trader) = mob.cast_any().downcast_ref::<WanderingTraderEntity>() else {
+            return false;
+        };
+        let Some(target) = trader.wander_target.load() else {
+            return false;
+        };
+        if !Self::is_too_far(mob, target, self.stop_distance) {
+            return false;
+        }
+        self.target = Some(target);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.target
-                .is_some_and(|target| Self::is_too_far(mob, target, self.stop_distance))
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.target
+            .is_some_and(|target| Self::is_too_far(mob, target, self.stop_distance))
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {})
+    fn start(&mut self, _mob: &dyn Mob) {}
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(trader) = mob.cast_any().downcast_ref::<WanderingTraderEntity>() {
+            trader.set_wander_target(None);
+        }
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
+        self.target = None;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(trader) = mob.cast_any().downcast_ref::<WanderingTraderEntity>() {
-                trader.set_wander_target(None);
-            }
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-            self.target = None;
-        })
-    }
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = self.target else {
+            return;
+        };
+        let mut navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !navigator.is_idle() {
+            return;
+        }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = self.target else {
-                return;
-            };
-            let mut navigator = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !navigator.is_idle() {
-                return;
-            }
-
-            let current = mob.get_entity().pos.load();
-            let target_center = target.to_f64() + Vector3::new(0.5, 0.5, 0.5);
-            let destination = if Self::is_too_far(mob, target, 10.0) {
-                current + (target_center - current).normalize() * 10.0
-            } else {
-                target_center
-            };
-            navigator.set_progress(NavigatorGoal::new(current, destination, self.speed));
-        })
+        let current = mob.get_entity().pos.load();
+        let target_center = target.to_f64() + Vector3::new(0.5, 0.5, 0.5);
+        let destination = if Self::is_too_far(mob, target, 10.0) {
+            current + (target_center - current).normalize() * 10.0
+        } else {
+            target_center
+        };
+        navigator.set_progress(NavigatorGoal::new(current, destination, self.speed));
     }
 
     fn controls(&self) -> Controls {
@@ -913,108 +916,98 @@ impl WanderingTraderUseItemGoal {
         }
     }
 
-    async fn set_main_hand(trader: &WanderingTraderEntity, stack: ItemStack) {
+    fn set_main_hand(trader: &WanderingTraderEntity, stack: ItemStack) {
         let living = &trader.mob_entity.living_entity;
         living
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .put(&EquipmentSlot::MAIN_HAND, stack.clone());
         living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, stack)]);
     }
 }
 
 impl Goal for WanderingTraderUseItemGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(trader) = self.trader.upgrade() else {
-                return false;
-            };
-            let living = &trader.mob_entity.living_entity;
-            let world = living.entity.world.load();
-            let is_invisible = living.has_effect(&StatusEffect::INVISIBILITY).await;
-            match self.kind {
-                UseItemKind::Invisibility => Self::is_dark_outside(&world) && !is_invisible,
-                UseItemKind::Milk => Self::is_bright_outside(&world) && is_invisible,
-            }
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(trader) = self.trader.upgrade() else {
+            return false;
+        };
+        let living = &trader.mob_entity.living_entity;
+        let world = living.entity.world.load();
+        let is_invisible = living.has_effect(&StatusEffect::INVISIBILITY);
+        match self.kind {
+            UseItemKind::Invisibility => Self::is_dark_outside(&world) && !is_invisible,
+            UseItemKind::Milk => Self::is_bright_outside(&world) && is_invisible,
+        }
     }
 
     /// `UseItemGoal.canContinueToUse`: `mob.isUsingItem()`.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.remaining_ticks > 0
-                && self
-                    .trader
-                    .upgrade()
-                    .is_some_and(|trader| trader.get_entity().is_alive())
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.remaining_ticks > 0
+            && self
+                .trader
+                .upgrade()
+                .is_some_and(|trader| trader.get_entity().is_alive())
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(trader) = self.trader.upgrade() else {
-                return;
-            };
-            self.remaining_ticks = Self::USE_DURATION;
-            Self::set_main_hand(&trader, self.item()).await;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(trader) = self.trader.upgrade() else {
+            return;
+        };
+        self.remaining_ticks = Self::USE_DURATION;
+        Self::set_main_hand(&trader, self.item());
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(trader) = self.trader.upgrade() else {
-                return;
-            };
-            self.remaining_ticks -= 1;
-            let entity = trader.get_entity();
-            // `LivingEntity.shouldTriggerItemUseEffects`: past the first 21.875% of the use
-            // duration, every 4 ticks.
-            let ticks_used = Self::USE_DURATION - self.remaining_ticks;
-            if self.remaining_ticks > 0
-                && ticks_used as f32 > Self::USE_DURATION as f32 * 0.218_75
-                && self.remaining_ticks % 4 == 0
-            {
-                entity.play_sound(match self.kind {
-                    UseItemKind::Invisibility => Sound::EntityWanderingTraderDrinkPotion,
-                    UseItemKind::Milk => Sound::EntityWanderingTraderDrinkMilk,
-                });
-            }
-            if self.remaining_ticks == 0 {
-                let living = &trader.mob_entity.living_entity;
-                match self.kind {
-                    // `Potions.INVISIBILITY`: invisibility for 3600 ticks.
-                    UseItemKind::Invisibility => {
-                        for effect in pumpkin_data::potion::Potion::INVISIBILITY.effects {
-                            living.add_effect(effect.clone()).await;
-                        }
-                    }
-                    // Milk clears every status effect.
-                    UseItemKind::Milk => {
-                        living.remove_all_effects().await;
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let Some(trader) = self.trader.upgrade() else {
+            return;
+        };
+        self.remaining_ticks -= 1;
+        let entity = trader.get_entity();
+        // `LivingEntity.shouldTriggerItemUseEffects`: past the first 21.875% of the use
+        // duration, every 4 ticks.
+        let ticks_used = Self::USE_DURATION - self.remaining_ticks;
+        if self.remaining_ticks > 0
+            && ticks_used as f32 > Self::USE_DURATION as f32 * 0.218_75
+            && self.remaining_ticks % 4 == 0
+        {
+            entity.play_sound(match self.kind {
+                UseItemKind::Invisibility => Sound::EntityWanderingTraderDrinkPotion,
+                UseItemKind::Milk => Sound::EntityWanderingTraderDrinkMilk,
+            });
+        }
+        if self.remaining_ticks == 0 {
+            let living = &trader.mob_entity.living_entity;
+            match self.kind {
+                // `Potions.INVISIBILITY`: invisibility for 3600 ticks.
+                UseItemKind::Invisibility => {
+                    for effect in pumpkin_data::potion::Potion::INVISIBILITY.effects {
+                        living.add_effect(effect.clone());
                     }
                 }
+                // Milk clears every status effect.
+                UseItemKind::Milk => {
+                    living.remove_all_effects();
+                }
             }
-        })
+        }
     }
 
     /// `UseItemGoal.stop`: empty the main hand and play the finish sound.
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(trader) = self.trader.upgrade() {
-                Self::set_main_hand(&trader, ItemStack::EMPTY.clone()).await;
-                let entity = trader.get_entity();
-                entity.world.load().play_sound(
-                    match self.kind {
-                        UseItemKind::Invisibility => Sound::EntityWanderingTraderDisappeared,
-                        UseItemKind::Milk => Sound::EntityWanderingTraderReappeared,
-                    },
-                    SoundCategory::Neutral,
-                    &entity.pos.load(),
-                );
-            }
-            self.remaining_ticks = 0;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        if let Some(trader) = self.trader.upgrade() {
+            Self::set_main_hand(&trader, ItemStack::EMPTY.clone());
+            let entity = trader.get_entity();
+            entity.world.load().play_sound(
+                match self.kind {
+                    UseItemKind::Invisibility => Sound::EntityWanderingTraderDisappeared,
+                    UseItemKind::Milk => Sound::EntityWanderingTraderReappeared,
+                },
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+            );
+        }
+        self.remaining_ticks = 0;
     }
 
     fn controls(&self) -> Controls {
@@ -1069,7 +1062,7 @@ impl Mob for WanderingTraderEntity {
                 self.despawn_delay.store(new_delay, Ordering::Relaxed);
                 if new_delay <= 0 {
                     let world = self.get_entity().world.load();
-                    world.remove_entity(self).await;
+                    world.remove_entity(self);
                 }
             }
         })
@@ -1091,19 +1084,23 @@ impl Mob for WanderingTraderEntity {
                 return false;
             }
 
-            player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::TalkedToVillager as i32,
-                    1,
-                )
-                .await;
+            player.increment_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                pumpkin_data::statistic::CustomStatistic::TalkedToVillager as i32,
+                1,
+            );
 
-            let mut offers = self.offers.lock().await;
+            let mut offers = self
+                .offers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if offers.is_empty() {
                 drop(offers);
-                self.update_trades().await;
-                offers = self.offers.lock().await;
+                self.update_trades();
+                offers = self
+                    .offers
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
 
             // Vanilla: `getOffers().isEmpty()` returns `CONSUME` (acknowledge, no menu).

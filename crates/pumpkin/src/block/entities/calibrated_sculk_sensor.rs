@@ -1,10 +1,9 @@
 use super::BlockEntity;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
 
 use crate::world::World;
 
@@ -26,14 +25,11 @@ impl BlockEntity for CalibratedSculkSensorBlockEntity {
     /// Vanilla inherits the sensor block entity's listener construction for calibrated
     /// sensors (`CalibratedSculkSensorBlockEntity.java:14-21`). Re-register the listener
     /// after loading because Pumpkin stores listeners separately from block entities.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            crate::block::blocks::redstone::sculk_sensor::ensure_listener_registered(
-                world,
-                &self.position,
-            )
-            .await;
-        })
+    fn tick(&self, world: &Arc<World>) {
+        crate::block::blocks::redstone::sculk_sensor::ensure_listener_registered(
+            world,
+            &self.position,
+        );
     }
 
     /// Vanilla inherits the sensor's `setChanged` callback for vibration updates
@@ -59,16 +55,14 @@ impl BlockEntity for CalibratedSculkSensorBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_int(
-                "last_vibration_frequency",
-                *self.last_vibration_frequency.lock().await,
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int(
+            "last_vibration_frequency",
+            *self
+                .last_vibration_frequency
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -100,8 +94,11 @@ impl CalibratedSculkSensorBlockEntity {
         }
     }
 
-    pub async fn set_last_vibration_frequency(&self, frequency: i32) {
-        *self.last_vibration_frequency.lock().await = frequency;
+    pub fn set_last_vibration_frequency(&self, frequency: i32) {
+        *self
+            .last_vibration_frequency
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = frequency;
         self.dirty.store(true, Ordering::Release);
     }
 }

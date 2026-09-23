@@ -46,7 +46,7 @@ trait PlantBlockBase {
         block.has_tag(&tag::Block::MINECRAFT_SUPPORTS_VEGETATION)
     }
 
-    async fn get_state_for_neighbor_update(
+    fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,
         block_pos: &BlockPos,
@@ -104,7 +104,7 @@ pub(super) fn connected_plant_head(
 
 /// Shared `GrowingPlantHeadBlock` bonemeal implementation
 /// (`GrowingPlantHeadBlock.java:125-134`).
-pub(super) async fn bonemeal_grow_plant_head(
+pub(super) fn bonemeal_grow_plant_head(
     world: &std::sync::Arc<crate::world::World>,
     mut head_pos: BlockPos,
     head: &'static Block,
@@ -129,20 +129,16 @@ pub(super) async fn bonemeal_grow_plant_head(
 
         let mut grown = KelpLikeProperties::default(head);
         grown.age = next_age;
-        world
-            .set_block_state(
-                &forward_pos,
-                grown.to_state_id(head),
-                BlockFlags::NOTIFY_NEIGHBORS,
-            )
-            .await;
-        world
-            .set_block_state(
-                &head_pos,
-                body.default_state.id,
-                BlockFlags::NOTIFY_NEIGHBORS,
-            )
-            .await;
+        world.set_block_state(
+            &forward_pos,
+            grown.to_state_id(head),
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
+        world.set_block_state(
+            &head_pos,
+            body.default_state.id,
+            BlockFlags::NOTIFY_NEIGHBORS,
+        );
         // `forward_pos` now holds the head we just placed; advancing `head_pos` to match
         // is what makes each earlier segment convert to body in turn instead of leaving a
         // stack of head blocks behind when `blocks_to_grow` > 1.
@@ -159,7 +155,7 @@ pub(super) async fn bonemeal_grow_plant_head(
 /// write for free from `updateShape` (`GrowingPlantHeadBlock.java:97-105`); pumpkin has no
 /// equivalent chain for these blocks, so it is applied explicitly, exactly as
 /// `plant/cave_vines.rs` does.
-pub(super) async fn grow_plant_head(
+pub(super) fn grow_plant_head(
     world: &std::sync::Arc<crate::world::World>,
     pos: &BlockPos,
     head: &'static Block,
@@ -187,16 +183,12 @@ pub(super) async fn grow_plant_head(
     }
 
     let grown = KelpLikeProperties { age: age + 1 };
-    world
-        .set_block_state(
-            &grow_pos,
-            grown.to_state_id(head),
-            BlockFlags::NOTIFY_NEIGHBORS,
-        )
-        .await;
-    world
-        .set_block_state(pos, body.default_state.id, BlockFlags::NOTIFY_NEIGHBORS)
-        .await;
+    world.set_block_state(
+        &grow_pos,
+        grown.to_state_id(head),
+        BlockFlags::NOTIFY_NEIGHBORS,
+    );
+    world.set_block_state(pos, body.default_state.id, BlockFlags::NOTIFY_NEIGHBORS);
 }
 
 #[cfg(test)]

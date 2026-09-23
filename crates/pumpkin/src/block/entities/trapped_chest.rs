@@ -11,7 +11,7 @@ use crate::{
 
 pub struct TrappedChestBlockEntity {
     pub position: BlockPos,
-    pub items: tokio::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
 
     // Viewer

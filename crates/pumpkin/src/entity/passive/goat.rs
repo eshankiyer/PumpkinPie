@@ -14,7 +14,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         breed::BreedGoal, follow_parent::FollowParentGoal, goat_ram::GoatRamGoal,
@@ -224,7 +224,7 @@ impl GoatEntity {
     /// `item_stack` is the player's held stack, which `EntityBase::interact`'s caller writes
     /// back into the held slot (`net/java/play/interact.rs:122-129`), so the empty-bucket half
     /// of the swap is done by mutating it in place.
-    async fn fill_bucket_with_milk(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
+    fn fill_bucket_with_milk(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
         let filled = ItemStack::new(1, &Item::MILK_BUCKET);
 
         // `limitCreativeStackSize` is `true` for this call site, so a creative player keeps the
@@ -232,7 +232,7 @@ impl GoatEntity {
         if player.gamemode.load() == GameMode::Creative {
             if !player.inventory.contains_item(&Item::MILK_BUCKET) {
                 let mut filled = filled;
-                player.inventory.insert_stack_anywhere(&mut filled).await;
+                player.inventory.insert_stack_anywhere(&mut filled);
             }
             return;
         }
@@ -241,10 +241,7 @@ impl GoatEntity {
         if item_stack.is_empty() {
             *item_stack = filled;
         } else {
-            player
-                .inventory
-                .offer_or_drop_stack(filled, &**player)
-                .await;
+            player.inventory.offer_or_drop_stack(filled, &**player);
         }
     }
 }
@@ -262,40 +259,36 @@ impl AgeableMob for GoatEntity {
 }
 
 impl NBTStorage for GoatEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            use super::animal::Animal;
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            // `Goat.addAdditionalSaveData` (`Goat.java:259-264`).
-            nbt.put_bool("IsScreamingGoat", self.is_screaming_goat());
-            nbt.put_bool("HasLeftHorn", self.has_left_horn());
-            nbt.put_bool("HasRightHorn", self.has_right_horn());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        use super::animal::Animal;
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        // `Goat.addAdditionalSaveData` (`Goat.java:259-264`).
+        nbt.put_bool("IsScreamingGoat", self.is_screaming_goat());
+        nbt.put_bool("HasLeftHorn", self.has_left_horn());
+        nbt.put_bool("HasRightHorn", self.has_right_horn());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            use super::animal::Animal;
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            // `Goat.readAdditionalSaveData` (`Goat.java:266-272`): horns default to present,
-            // screaming defaults to false.
-            self.is_screaming.store(
-                nbt.get_bool("IsScreamingGoat").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.has_left_horn.store(
-                nbt.get_bool("HasLeftHorn").unwrap_or(true),
-                Ordering::Relaxed,
-            );
-            self.has_right_horn.store(
-                nbt.get_bool("HasRightHorn").unwrap_or(true),
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        use super::animal::Animal;
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        // `Goat.readAdditionalSaveData` (`Goat.java:266-272`): horns default to present,
+        // screaming defaults to false.
+        self.is_screaming.store(
+            nbt.get_bool("IsScreamingGoat").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.has_left_horn.store(
+            nbt.get_bool("HasLeftHorn").unwrap_or(true),
+            Ordering::Relaxed,
+        );
+        self.has_right_horn.store(
+            nbt.get_bool("HasRightHorn").unwrap_or(true),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -323,89 +316,76 @@ impl Mob for GoatEntity {
         super::animal::Animal::get_walk_target_value(self, pos)
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[
-                    Metadata::new(
-                        pumpkin_data::tracked_data::goat::IS_SCREAMING_GOAT,
-                        self.is_screaming_goat(),
-                    ),
-                    Metadata::new(
-                        pumpkin_data::tracked_data::goat::HAS_LEFT_HORN,
-                        self.has_left_horn(),
-                    ),
-                    Metadata::new(
-                        pumpkin_data::tracked_data::goat::HAS_RIGHT_HORN,
-                        self.has_right_horn(),
-                    ),
-                ],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[
+                Metadata::new(
+                    pumpkin_data::tracked_data::goat::IS_SCREAMING_GOAT,
+                    self.is_screaming_goat(),
+                ),
+                Metadata::new(
+                    pumpkin_data::tracked_data::goat::HAS_LEFT_HORN,
+                    self.has_left_horn(),
+                ),
+                Metadata::new(
+                    pumpkin_data::tracked_data::goat::HAS_RIGHT_HORN,
+                    self.has_right_horn(),
+                ),
+            ],
+            None,
+        );
     }
 
     /// `Goat.mobInteract` (`Goat.java:216-232`): an empty bucket on a non-baby goat is filled
     /// with milk, otherwise the interaction falls through to `Animal.mobInteract` (feeding and
     /// breeding), which plays the eating sound when it consumes food.
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            use super::animal::Animal;
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        use super::animal::Animal;
 
-            let entity = &self.mob_entity.living_entity.entity;
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if item_stack.item.id == Item::BUCKET.id && !is_baby {
-                let world = entity.world.load();
-                world.play_sound(
-                    self.milking_sound(),
-                    SoundCategory::Neutral,
-                    &entity.pos.load(),
-                );
-                self.fill_bucket_with_milk(player, item_stack).await;
-                return true;
-            }
+        let entity = &self.mob_entity.living_entity.entity;
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if item_stack.item.id == Item::BUCKET.id && !is_baby {
+            let world = entity.world.load();
+            world.play_sound(
+                self.milking_sound(),
+                SoundCategory::Neutral,
+                &entity.pos.load(),
+            );
+            self.fill_bucket_with_milk(player, item_stack);
+            return true;
+        }
 
-            self.animal_interact(player, item_stack, self.eating_sound())
-                .await
-        })
+        self.animal_interact(player, item_stack, self.eating_sound())
     }
 
     /// `Goat.getBreedOffspring` (`Goat.java:151-161`): the kid inherits screaming from one
     /// randomly chosen parent, or rolls the 2% chance independently.
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn crate::entity::EntityBase,
-        world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn crate::entity::EntityBase>>> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                uuid::Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn crate::entity::EntityBase,
+        world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn crate::entity::EntityBase>> {
+        let entity = &self.mob_entity.living_entity.entity;
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            uuid::Uuid::new_v4(),
+        );
 
-            let mut rng = rand::rng();
-            let parent_screaming = if rng.random::<bool>() {
-                self.is_screaming_goat()
-            } else {
-                mate.cast_any()
-                    .downcast_ref::<Self>()
-                    .is_some_and(Self::is_screaming_goat)
-            };
-            if let Some(kid) = baby.cast_any().downcast_ref::<Self>() {
-                kid.set_screaming_goat(
-                    parent_screaming || rng.random::<f64>() < GOAT_SCREAMING_CHANCE,
-                );
-            }
+        let mut rng = rand::rng();
+        let parent_screaming = if rng.random::<bool>() {
+            self.is_screaming_goat()
+        } else {
+            mate.cast_any()
+                .downcast_ref::<Self>()
+                .is_some_and(Self::is_screaming_goat)
+        };
+        if let Some(kid) = baby.cast_any().downcast_ref::<Self>() {
+            kid.set_screaming_goat(parent_screaming || rng.random::<f64>() < GOAT_SCREAMING_CHANCE);
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 }
 

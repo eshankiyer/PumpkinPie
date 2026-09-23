@@ -60,10 +60,10 @@ impl scoreboard::HostScoreboard for PluginHostState {
 
         match provider {
             ScoreboardProvider::World(world) => {
-                world.scoreboard.lock().await.add_objective(objective);
+                world.scoreboard.lock().add_objective(objective);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if !matches!(
                     *custom_guard,
                     Some(crate::entity::player::CustomScoreboard::Java(_))
@@ -104,12 +104,10 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .update_objective(world.as_ref(), objective)
-                    .await;
+                    .update_objective(world.as_ref(), objective);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if !matches!(
                     *custom_guard,
                     Some(crate::entity::player::CustomScoreboard::Java(_))
@@ -121,7 +119,7 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.update_objective(player.as_ref(), objective).await;
+                    sb.update_objective(player.as_ref(), objective);
                 }
             }
         }
@@ -139,16 +137,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .remove_objective(world.as_ref(), &name)
-                    .await;
+                    .remove_objective(world.as_ref(), &name);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.remove_objective(player.as_ref(), &name).await;
+                    sb.remove_objective(player.as_ref(), &name);
                 }
             }
         }
@@ -166,15 +162,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
 
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .set_display_objective(world.as_ref(), slot, Some(&objective_name))
-                    .await;
+                world.scoreboard.lock().set_display_objective(
+                    world.as_ref(),
+                    slot,
+                    Some(&objective_name),
+                );
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if !matches!(
                     *custom_guard,
                     Some(crate::entity::player::CustomScoreboard::Java(_))
@@ -186,8 +181,7 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.set_display_objective(player.as_ref(), slot, Some(&objective_name))
-                        .await;
+                    sb.set_display_objective(player.as_ref(), slot, Some(&objective_name));
                 }
             }
         }
@@ -207,16 +201,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .clear_display_objective(world.as_ref(), slot)
-                    .await;
+                    .clear_display_objective(world.as_ref(), slot);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.clear_display_objective(player.as_ref(), slot).await;
+                    sb.clear_display_objective(player.as_ref(), slot);
                 }
             }
         }
@@ -234,15 +226,10 @@ impl scoreboard::HostScoreboard for PluginHostState {
         let score = ScoreboardScore::new(entity_name, objective_name, VarInt(value), None, None);
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .update_score(world.as_ref(), score)
-                    .await;
+                world.scoreboard.lock().update_score(world.as_ref(), score);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if !matches!(
                     *custom_guard,
                     Some(crate::entity::player::CustomScoreboard::Java(_))
@@ -254,7 +241,7 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.update_score(player.as_ref(), score).await;
+                    sb.update_score(player.as_ref(), score);
                 }
             }
         }
@@ -270,16 +257,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
     ) -> wasmtime::Result<i32> {
         let provider = self.get_scoreboard_res(&res)?.provider.clone();
         let new_val = match provider {
-            ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .add_score(world.as_ref(), entity_name, objective_name, delta)
-                    .await
-            }
+            ScoreboardProvider::World(world) => world.scoreboard.lock().add_score(
+                world.as_ref(),
+                entity_name,
+                objective_name,
+                delta,
+            ),
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if !matches!(
                     *custom_guard,
                     Some(crate::entity::player::CustomScoreboard::Java(_))
@@ -293,7 +278,6 @@ impl scoreboard::HostScoreboard for PluginHostState {
                     return Err(wasmtime::Error::msg("Invalid scoreboard state"));
                 };
                 sb.add_score(player.as_ref(), entity_name, objective_name, delta)
-                    .await
             }
         };
         Ok(new_val)
@@ -311,17 +295,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .remove_score(world.as_ref(), &entity_name, &objective_name)
-                    .await;
+                    .remove_score(world.as_ref(), &entity_name, &objective_name);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.remove_score(player.as_ref(), &entity_name, &objective_name)
-                        .await;
+                    sb.remove_score(player.as_ref(), &entity_name, &objective_name);
                 }
             }
         }
@@ -339,17 +320,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .reset_scores_for_entity(world.as_ref(), &entity_name)
-                    .await;
+                    .reset_scores_for_entity(world.as_ref(), &entity_name);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.reset_scores_for_entity(player.as_ref(), &entity_name)
-                        .await;
+                    sb.reset_scores_for_entity(player.as_ref(), &entity_name);
                 }
             }
         }
@@ -366,15 +344,10 @@ impl scoreboard::HostScoreboard for PluginHostState {
         let team = map_team_settings(name, &settings, self)?;
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .add_team(world.as_ref(), team)
-                    .await;
+                world.scoreboard.lock().add_team(world.as_ref(), team);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if !matches!(
                     *custom_guard,
                     Some(crate::entity::player::CustomScoreboard::Java(_))
@@ -386,7 +359,7 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.add_team(player.as_ref(), team).await;
+                    sb.add_team(player.as_ref(), team);
                 }
             }
         }
@@ -401,19 +374,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
         let provider = self.get_scoreboard_res(&res)?.provider.clone();
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .remove_team(world.as_ref(), &name)
-                    .await;
+                world.scoreboard.lock().remove_team(world.as_ref(), &name);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.remove_team(player.as_ref(), &name).await;
+                    sb.remove_team(player.as_ref(), &name);
                 }
             }
         }
@@ -430,19 +398,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
         let team = map_team_settings(name, &settings, self)?;
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .update_team(world.as_ref(), team)
-                    .await;
+                world.scoreboard.lock().update_team(world.as_ref(), team);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.update_team(player.as_ref(), team).await;
+                    sb.update_team(player.as_ref(), team);
                 }
             }
         }
@@ -461,17 +424,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .add_player_to_team(world.as_ref(), &team_name, player_name)
-                    .await;
+                    .add_player_to_team(world.as_ref(), &team_name, player_name);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.add_player_to_team(player.as_ref(), &team_name, player_name)
-                        .await;
+                    sb.add_player_to_team(player.as_ref(), &team_name, player_name);
                 }
             }
         }
@@ -487,20 +447,18 @@ impl scoreboard::HostScoreboard for PluginHostState {
         let provider = self.get_scoreboard_res(&res)?.provider.clone();
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .remove_player_from_team(world.as_ref(), &team_name, &player_name)
-                    .await;
+                world.scoreboard.lock().remove_player_from_team(
+                    world.as_ref(),
+                    &team_name,
+                    &player_name,
+                );
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.remove_player_from_team(player.as_ref(), &team_name, &player_name)
-                        .await;
+                    sb.remove_player_from_team(player.as_ref(), &team_name, &player_name);
                 }
             }
         }
@@ -518,16 +476,14 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 world
                     .scoreboard
                     .lock()
-                    .await
-                    .clear_team_players(world.as_ref(), &team_name)
-                    .await;
+                    .clear_team_players(world.as_ref(), &team_name);
             }
             ScoreboardProvider::Player(player) => {
-                let mut custom_guard = player.custom_scoreboard.lock().await;
+                let mut custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.clear_team_players(player.as_ref(), &team_name).await;
+                    sb.clear_team_players(player.as_ref(), &team_name);
                 }
             }
         }
@@ -543,13 +499,12 @@ impl scoreboard::HostScoreboard for PluginHostState {
             ScoreboardProvider::World(world) => world
                 .scoreboard
                 .lock()
-                .await
                 .get_teams()
                 .keys()
                 .cloned()
                 .collect(),
             ScoreboardProvider::Player(player) => {
-                let custom_guard = player.custom_scoreboard.lock().await;
+                let custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_ref()
                 {
@@ -569,11 +524,9 @@ impl scoreboard::HostScoreboard for PluginHostState {
     ) -> wasmtime::Result<Option<TeamSettings>> {
         let provider = self.get_scoreboard_res(&res)?.provider.clone();
         let team_opt = match provider {
-            ScoreboardProvider::World(world) => {
-                world.scoreboard.lock().await.get_team(&name).cloned()
-            }
+            ScoreboardProvider::World(world) => world.scoreboard.lock().get_team(&name).cloned(),
             ScoreboardProvider::Player(player) => {
-                let custom_guard = player.custom_scoreboard.lock().await;
+                let custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_ref()
                 {
@@ -601,12 +554,11 @@ impl scoreboard::HostScoreboard for PluginHostState {
             ScoreboardProvider::World(world) => world
                 .scoreboard
                 .lock()
-                .await
                 .get_team(&team_name)
                 .map(|t| t.players.clone())
                 .unwrap_or_default(),
             ScoreboardProvider::Player(player) => {
-                let custom_guard = player.custom_scoreboard.lock().await;
+                let custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_ref()
                 {
@@ -631,11 +583,10 @@ impl scoreboard::HostScoreboard for PluginHostState {
             ScoreboardProvider::World(world) => world
                 .scoreboard
                 .lock()
-                .await
                 .get_entity_team(&player_name)
                 .map(|t| t.name.clone()),
             ScoreboardProvider::Player(player) => {
-                let custom_guard = player.custom_scoreboard.lock().await;
+                let custom_guard = player.custom_scoreboard.lock();
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_ref()
                 {
@@ -884,7 +835,7 @@ impl HostBedrockScoreboard for PluginHostState {
         sort_order: scoreboard::BedrockSortOrder,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if !matches!(
             *custom_guard,
             Some(crate::entity::player::CustomScoreboard::Bedrock(_))
@@ -911,8 +862,7 @@ impl HostBedrockScoreboard for PluginHostState {
                     }
                 },
             },
-        )
-        .await;
+        );
         Ok(())
     }
 
@@ -924,7 +874,7 @@ impl HostBedrockScoreboard for PluginHostState {
         sort_order: scoreboard::BedrockSortOrder,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if !matches!(
             *custom_guard,
             Some(crate::entity::player::CustomScoreboard::Bedrock(_))
@@ -951,8 +901,7 @@ impl HostBedrockScoreboard for PluginHostState {
                     }
                 },
             },
-        )
-        .await;
+        );
         Ok(())
     }
 
@@ -962,9 +911,9 @@ impl HostBedrockScoreboard for PluginHostState {
         name: String,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if let Some(crate::entity::player::CustomScoreboard::Bedrock(sb)) = custom_guard.as_mut() {
-            sb.remove_objective(player.as_ref(), &name).await;
+            sb.remove_objective(player.as_ref(), &name);
         }
         Ok(())
     }
@@ -976,7 +925,7 @@ impl HostBedrockScoreboard for PluginHostState {
         objective_name: String,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if !matches!(
             *custom_guard,
             Some(crate::entity::player::CustomScoreboard::Bedrock(_))
@@ -1000,8 +949,7 @@ impl HostBedrockScoreboard for PluginHostState {
                 crate::world::scoreboard::BedrockDisplaySlot::BelowName
             }
         };
-        sb.set_display_objective(player.as_ref(), b_slot, Some(&objective_name))
-            .await;
+        sb.set_display_objective(player.as_ref(), b_slot, Some(&objective_name));
         Ok(())
     }
 
@@ -1011,7 +959,7 @@ impl HostBedrockScoreboard for PluginHostState {
         slot: scoreboard::BedrockDisplaySlot,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if let Some(crate::entity::player::CustomScoreboard::Bedrock(sb)) = custom_guard.as_mut() {
             let b_slot = match slot {
                 scoreboard::BedrockDisplaySlot::PlayerList => {
@@ -1024,7 +972,7 @@ impl HostBedrockScoreboard for PluginHostState {
                     crate::world::scoreboard::BedrockDisplaySlot::BelowName
                 }
             };
-            sb.clear_display_objective(player.as_ref(), b_slot).await;
+            sb.clear_display_objective(player.as_ref(), b_slot);
         }
         Ok(())
     }
@@ -1037,7 +985,7 @@ impl HostBedrockScoreboard for PluginHostState {
         value: i32,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if !matches!(
             *custom_guard,
             Some(crate::entity::player::CustomScoreboard::Bedrock(_))
@@ -1050,8 +998,7 @@ impl HostBedrockScoreboard for PluginHostState {
         else {
             return Err(wasmtime::Error::msg("Invalid scoreboard state"));
         };
-        sb.update_score(player.as_ref(), &entity_name, &objective_name, value)
-            .await;
+        sb.update_score(player.as_ref(), &entity_name, &objective_name, value);
         Ok(())
     }
 
@@ -1063,7 +1010,7 @@ impl HostBedrockScoreboard for PluginHostState {
         delta: i32,
     ) -> wasmtime::Result<i32> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if !matches!(
             *custom_guard,
             Some(crate::entity::player::CustomScoreboard::Bedrock(_))
@@ -1076,9 +1023,7 @@ impl HostBedrockScoreboard for PluginHostState {
         else {
             return Err(wasmtime::Error::msg("Invalid scoreboard state"));
         };
-        let new_val = sb
-            .add_score(player.as_ref(), entity_name, objective_name, delta)
-            .await;
+        let new_val = sb.add_score(player.as_ref(), entity_name, objective_name, delta);
         Ok(new_val)
     }
 
@@ -1089,10 +1034,9 @@ impl HostBedrockScoreboard for PluginHostState {
         objective_name: String,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if let Some(crate::entity::player::CustomScoreboard::Bedrock(sb)) = custom_guard.as_mut() {
-            sb.remove_score(player.as_ref(), &entity_name, &objective_name)
-                .await;
+            sb.remove_score(player.as_ref(), &entity_name, &objective_name);
         }
         Ok(())
     }
@@ -1103,10 +1047,9 @@ impl HostBedrockScoreboard for PluginHostState {
         entity_name: String,
     ) -> wasmtime::Result<()> {
         let player = self.get_bedrock_scoreboard_res(&res)?.provider.clone();
-        let mut custom_guard = player.custom_scoreboard.lock().await;
+        let mut custom_guard = player.custom_scoreboard.lock();
         if let Some(crate::entity::player::CustomScoreboard::Bedrock(sb)) = custom_guard.as_mut() {
-            sb.reset_scores_for_entity(player.as_ref(), &entity_name)
-                .await;
+            sb.reset_scores_for_entity(player.as_ref(), &entity_name);
         }
         Ok(())
     }

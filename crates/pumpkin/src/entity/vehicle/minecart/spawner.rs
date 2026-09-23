@@ -127,16 +127,14 @@ impl SpawnerMinecart {
     /// `level.broadcastEntityEvent(this, (byte) id)`; clients route it back in
     /// through `handleEntityEvent` (MinecartSpawner.java:63-66) →
     /// `onEventTriggered` (BaseSpawner.java:249-259).
-    pub(super) async fn tick(&self, world: &Arc<World>, position: BlockPos, entity: &Entity) {
+    pub(super) fn tick(&self, world: &Arc<World>, position: BlockPos, entity: &Entity) {
         if base_spawner_server_tick(
             world,
             position,
             &self.delay,
             self.config.load(),
             self.entity_type.load(),
-        )
-        .await
-        {
+        ) {
             world.broadcast_packet_all(&CEntityStatus::new(entity.entity_id, 1));
         }
     }

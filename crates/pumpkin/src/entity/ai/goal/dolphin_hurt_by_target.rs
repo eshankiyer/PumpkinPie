@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::goal::revenge::RevengeGoal;
 use crate::entity::mob::Mob;
 use pumpkin_data::entity::EntityType;
@@ -39,32 +39,30 @@ impl DolphinHurtByTargetGoal {
 }
 
 impl Goal for DolphinHurtByTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let living = &mob.get_mob_entity().living_entity;
-            let attacker_id = living.last_attacker_id.load(Relaxed);
-            if attacker_id != 0 {
-                let world = living.entity.world.load();
-                if let Some(attacker) = world.get_entity_by_id(attacker_id) {
-                    let attacker_type = attacker.get_entity().entity_type;
-                    if IGNORED_ATTACKER_TYPES.contains(&attacker_type) {
-                        return false;
-                    }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let living = &mob.get_mob_entity().living_entity;
+        let attacker_id = living.last_attacker_id.load(Relaxed);
+        if attacker_id != 0 {
+            let world = living.entity.world.load();
+            if let Some(attacker) = world.get_entity_by_id(attacker_id) {
+                let attacker_type = attacker.get_entity().entity_type;
+                if IGNORED_ATTACKER_TYPES.contains(&attacker_type) {
+                    return false;
                 }
             }
-            self.inner.can_start(mob).await
-        })
+        }
+        self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 

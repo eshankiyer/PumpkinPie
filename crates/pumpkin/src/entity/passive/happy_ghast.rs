@@ -19,7 +19,7 @@ use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::brain::behavior::gate::GateBehavior,
     ai::brain::behavior::look_at_target_sink::LookAtTargetSink,
@@ -205,17 +205,17 @@ impl HappyGhastEntity {
         Self::should_tick_brain_for_age(self.mob_entity.living_entity.entity.age.load(Relaxed))
     }
 
-    async fn body_armor_stack(&self) -> ItemStack {
+    fn body_armor_stack(&self) -> ItemStack {
         self.mob_entity
             .living_entity
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&EquipmentSlot::BODY)
     }
 
-    async fn is_wearing_body_armor(&self) -> bool {
-        !self.body_armor_stack().await.is_empty()
+    fn is_wearing_body_armor(&self) -> bool {
+        !self.body_armor_stack().is_empty()
     }
 
     fn is_harness(item_stack: &ItemStack) -> Option<&EquippableImpl> {
@@ -226,7 +226,7 @@ impl HappyGhastEntity {
         .then_some(equippable)
     }
 
-    async fn setup_adult(&self) {
+    fn setup_adult(&self) {
         // `HappyGhast.adultGhastSetup` (`HappyGhast.java:120-129`) replaces the flying
         // controller and clears/re-registers the server goals after the age boundary.
         *self
@@ -237,7 +237,7 @@ impl HappyGhastEntity {
             Box::new(GhastMoveControl::default());
         // `Mob.removeFreeWill` (`Mob.java:1417-1421`) is the live reset used before adult goals
         // are registered.
-        self.mob_entity.remove_free_will(self).await;
+        self.mob_entity.remove_free_will(self);
         self.mob_entity.add_goal(3, SwimGoal::default());
         self.mob_entity.add_goal(
             4,
@@ -247,7 +247,7 @@ impl HappyGhastEntity {
             .add_goal(5, GhastRandomFloatAroundGoal::new());
     }
 
-    async fn setup_baby(&self) {
+    fn setup_baby(&self) {
         // `HappyGhast.babyGhastSetup` (`HappyGhast.java:132-138`) has no goals and uses
         // `FlyingMoveControl(this, 180, true)`.
         *self
@@ -258,15 +258,15 @@ impl HappyGhastEntity {
             Box::new(FlyingMoveControl::new(180.0, true));
         self.set_server_still_timeout(0);
         // `Mob.removeFreeWill` (`Mob.java:1417-1421`) is the live reset for the baby goal set.
-        self.mob_entity.remove_free_will(self).await;
+        self.mob_entity.remove_free_will(self);
     }
 
-    async fn try_equip_harness(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+    fn try_equip_harness(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         let Some(equippable) = Self::is_harness(item_stack) else {
             return false;
         };
 
-        if self.is_wearing_body_armor().await {
+        if self.is_wearing_body_armor() {
             return false;
         }
 
@@ -277,7 +277,12 @@ impl HappyGhastEntity {
 
         let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
         {
-            let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let mut equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.put(&EquipmentSlot::BODY, new_stack.clone())
         };
         self.mob_entity
@@ -290,13 +295,17 @@ impl HappyGhastEntity {
         true
     }
 
-    async fn try_mount(&self, player: &Arc<Player>) -> bool {
-        if !self.is_wearing_body_armor().await || !player.get_entity().can_start_riding().await {
+    fn try_mount(&self, player: &Arc<Player>) -> bool {
+        if !self.is_wearing_body_armor() || !player.get_entity().can_start_riding() {
             return false;
         }
 
         let entity = &self.mob_entity.living_entity.entity;
-        let passengers_len = entity.passengers.lock().await.len();
+        let passengers_len = entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
         // HappyGhast.java:339, MAX_PASSENGERS (vanilla misspells the constant name).
         if passengers_len >= 4 {
             return false;
@@ -318,9 +327,7 @@ impl HappyGhastEntity {
             );
         }
 
-        entity
-            .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-            .await;
+        entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
         true
     }
 
@@ -344,14 +351,19 @@ impl HappyGhastEntity {
 
     // HappyGhast.java:452-459. Only called from `mob_tick` while not a vehicle
     // (`this.isVehicle()` there).
-    async fn check_restriction(&self) {
+    fn check_restriction(&self) {
         let entity = &self.mob_entity.living_entity.entity;
-        if entity.leashed_to.lock().await.is_some() {
+        if entity
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
             return;
         }
 
         let is_baby = self.is_baby();
-        let has_body_armor = self.is_wearing_body_armor().await;
+        let has_body_armor = self.is_wearing_body_armor();
 
         let radius = restriction_radius(is_baby, has_body_armor);
         self.mob_entity
@@ -363,7 +375,7 @@ impl HappyGhastEntity {
     /// `HappyGhast.scanPlayerAboveGhast` (`HappyGhast.java:547-568`) detects a non-spectator
     /// player's root vehicle in the box above the ghast. The caller refreshes the still timeout
     /// on the same tick as vanilla (`HappyGhast.java:432-434`).
-    async fn scan_player_above_ghast(&self) -> bool {
+    fn scan_player_above_ghast(&self) -> bool {
         let entity = &self.mob_entity.living_entity.entity;
         let ghast_box = entity.bounding_box.load();
         let detection_box = BoundingBox {
@@ -387,7 +399,13 @@ impl HappyGhastEntity {
 
             let mut root_vehicle: Arc<dyn EntityBase> = player.clone();
             loop {
-                let Some(vehicle) = root_vehicle.get_entity().vehicle.lock().await.clone() else {
+                let Some(vehicle) = root_vehicle
+                    .get_entity()
+                    .vehicle
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+                else {
                     break;
                 };
                 root_vehicle = vehicle;
@@ -454,27 +472,23 @@ impl AgeableMob for HappyGhastEntity {
 }
 
 impl NBTStorage for HappyGhastEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_int(
-                "still_timeout",
-                self.server_still_timeout.load(Ordering::Relaxed),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_int(
+            "still_timeout",
+            self.server_still_timeout.load(Ordering::Relaxed),
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            if let Some(timeout) = nbt.get_int("still_timeout") {
-                self.set_server_still_timeout(timeout);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(timeout) = nbt.get_int("still_timeout") {
+            self.set_server_still_timeout(timeout);
+        }
     }
 }
 
@@ -558,87 +572,88 @@ impl Mob for HappyGhastEntity {
         happy_ghast_fall_damage(fall_distance, damage_modifier)
     }
 
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            let entity = &living.entity;
-            let flying_speed = living.get_attribute_value(&Attributes::FLYING_SPEED);
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
+        let living = &self.mob_entity.living_entity;
+        let entity = &living.entity;
+        let flying_speed = living.get_attribute_value(&Attributes::FLYING_SPEED);
 
-            // HappyGhast.getRiddenInput/getRiddenRotation/tickRidden
-            // (`HappyGhast.java:350-387`) are folded into this reachable travel hook. The
-            // packet's input flags are the server representation of the rider's xxa/zza/jumping.
-            let rider_input = {
-                let passengers = entity.passengers.lock().await;
-                passengers.first().and_then(|passenger| {
-                    passenger.get_player().map(|rider| {
-                        (
-                            rider.last_input.load(Relaxed),
-                            rider.get_entity().pitch.load(),
-                            rider.get_entity().yaw.load(),
-                        )
-                    })
+        // HappyGhast.getRiddenInput/getRiddenRotation/tickRidden
+        // (`HappyGhast.java:350-387`) are folded into this reachable travel hook. The
+        // packet's input flags are the server representation of the rider's xxa/zza/jumping.
+        let rider_input = {
+            let passengers = entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            passengers.first().and_then(|passenger| {
+                passenger.get_player().map(|rider| {
+                    (
+                        rider.last_input.load(Relaxed),
+                        rider.get_entity().pitch.load(),
+                        rider.get_entity().yaw.load(),
+                    )
                 })
-            };
-            let movement_input = if !self.is_on_still_timeout()
-                && self.is_wearing_body_armor().await
-                && let Some((input, pitch, yaw)) = rider_input
-            {
-                // `ServerPlayer.getLastClientMoveIntent` (`ServerPlayer.java:2231`): left is
-                // positive strafe, right is negative.
-                let mut strafe = 0.0;
-                if input & SPlayerInput::LEFT != 0 {
-                    strafe += 1.0;
+            })
+        };
+        let movement_input = if !self.is_on_still_timeout()
+            && self.is_wearing_body_armor()
+            && let Some((input, pitch, yaw)) = rider_input
+        {
+            // `ServerPlayer.getLastClientMoveIntent` (`ServerPlayer.java:2231`): left is
+            // positive strafe, right is negative.
+            let mut strafe = 0.0;
+            if input & SPlayerInput::LEFT != 0 {
+                strafe += 1.0;
+            }
+            if input & SPlayerInput::RIGHT != 0 {
+                strafe -= 1.0;
+            }
+
+            let mut up = 0.0;
+            let mut forward = 0.0;
+            if input & (SPlayerInput::FORWARD | SPlayerInput::BACKWARD) != 0 {
+                let pitch_radians = f64::from(pitch).to_radians();
+                forward = pitch_radians.cos();
+                up = -pitch_radians.sin();
+                if input & SPlayerInput::BACKWARD != 0 {
+                    forward *= -0.5;
+                    up *= -0.5;
                 }
-                if input & SPlayerInput::RIGHT != 0 {
-                    strafe -= 1.0;
-                }
+            }
+            if input & SPlayerInput::JUMP != 0 {
+                up += 0.5;
+            }
 
-                let mut up = 0.0;
-                let mut forward = 0.0;
-                if input & (SPlayerInput::FORWARD | SPlayerInput::BACKWARD) != 0 {
-                    let pitch_radians = f64::from(pitch).to_radians();
-                    forward = pitch_radians.cos();
-                    up = -pitch_radians.sin();
-                    if input & SPlayerInput::BACKWARD != 0 {
-                        forward *= -0.5;
-                        up *= -0.5;
-                    }
-                }
-                if input & SPlayerInput::JUMP != 0 {
-                    up += 0.5;
-                }
+            let diff = pumpkin_util::math::wrap_degrees(yaw - entity.yaw.load());
+            let new_yaw = entity.yaw.load() + diff * 0.08;
+            entity.yaw.store(new_yaw);
+            entity.pitch.store(pitch * 0.5);
+            entity.head_yaw.store(new_yaw);
+            entity.body_yaw.store(new_yaw);
 
-                let diff = pumpkin_util::math::wrap_degrees(yaw - entity.yaw.load());
-                let new_yaw = entity.yaw.load() + diff * 0.08;
-                entity.yaw.store(new_yaw);
-                entity.pitch.store(pitch * 0.5);
-                entity.head_yaw.store(new_yaw);
-                entity.body_yaw.store(new_yaw);
+            Vector3::new(strafe, up, forward) * (3.9 * flying_speed)
+        } else {
+            living.movement_input.load()
+        };
 
-                Vector3::new(strafe, up, forward) * (3.9 * flying_speed)
-            } else {
-                living.movement_input.load()
-            };
+        // `HappyGhast.travel` (`HappyGhast.java:176-179`) always uses travelFlying with
+        // FLYING_SPEED * 5/3, including in water and lava. `travelFlying` applies the
+        // corresponding 0.8/0.5/0.91 velocity drag (`LivingEntity.java:2439-2457`).
+        living
+            .entity
+            .update_velocity_from_input(movement_input, flying_speed * (5.0 / 3.0));
+        let velocity = entity.velocity.load();
+        entity.move_entity(caller, velocity);
 
-            // `HappyGhast.travel` (`HappyGhast.java:176-179`) always uses travelFlying with
-            // FLYING_SPEED * 5/3, including in water and lava. `travelFlying` applies the
-            // corresponding 0.8/0.5/0.91 velocity drag (`LivingEntity.java:2439-2457`).
-            living
-                .entity
-                .update_velocity_from_input(movement_input, flying_speed * (5.0 / 3.0));
-            let velocity = entity.velocity.load();
-            entity.move_entity(caller, velocity).await;
-
-            let drag = if entity.touching_water.load(Relaxed) {
-                0.8
-            } else if entity.touching_lava.load(Relaxed) {
-                0.5
-            } else {
-                0.91
-            };
-            entity.velocity.store(entity.velocity.load() * drag);
-            true
-        })
+        let drag = if entity.touching_water.load(Relaxed) {
+            0.8
+        } else if entity.touching_lava.load(Relaxed) {
+            0.5
+        } else {
+            0.91
+        };
+        entity.velocity.store(entity.velocity.load() * drag);
+        true
     }
 
     fn get_ambient_sound(&self) -> Option<Sound> {
@@ -663,149 +678,136 @@ impl Mob for HappyGhastEntity {
         happy_ghast_voice_pitch()
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::happy_ghast::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
-                &[
-                    Metadata::new(
-                        pumpkin_data::tracked_data::happy_ghast::IS_LEASH_HOLDER,
-                        self.is_leash_holder.load(Ordering::Relaxed),
-                    ),
-                    Metadata::new(
-                        pumpkin_data::tracked_data::happy_ghast::STAYS_STILL,
-                        self.stays_still.load(Ordering::Relaxed),
-                    ),
-                ],
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::happy_ghast::BABY_ID,
+                    true,
+                )],
                 None,
             );
-        })
+        }
+        entity.send_meta_data(
+            &[
+                Metadata::new(
+                    pumpkin_data::tracked_data::happy_ghast::IS_LEASH_HOLDER,
+                    self.is_leash_holder.load(Ordering::Relaxed),
+                ),
+                Metadata::new(
+                    pumpkin_data::tracked_data::happy_ghast::STAYS_STILL,
+                    self.stays_still.load(Ordering::Relaxed),
+                ),
+            ],
+            None,
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            // HappyGhast.java:281-283: babies never equip/ride, only eat to grow up.
-            if self.is_baby() {
-                use crate::entity::passive::animal::Animal as _;
-                return self
-                    .animal_interact(player, item_stack, Sound::EntityGhastlingAmbient)
-                    .await;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        // HappyGhast.java:281-283: babies never equip/ride, only eat to grow up.
+        if self.is_baby() {
+            use crate::entity::passive::animal::Animal as _;
+            return self.animal_interact(player, item_stack, Sound::EntityGhastlingAmbient);
+        }
 
-            if !item_stack.is_empty() && self.try_equip_harness(player, item_stack).await {
-                return true;
-            }
+        if !item_stack.is_empty() && self.try_equip_harness(player, item_stack) {
+            return true;
+        }
 
-            if self.try_mount(player).await {
-                return true;
-            }
+        if self.try_mount(player) {
+            return true;
+        }
 
+        self.mob_entity
+            .mob_interact(player, item_stack, self.can_be_leashed())
+    }
+
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if !self.mob_entity.living_entity.entity.is_alive() {
+            return;
+        }
+
+        // `HappyGhastBodyRotationControl.clientTick` keeps a vehicle's head and body
+        // aligned to its yaw (`HappyGhast.java:612-625`; `Mob.java:358-361`). Apply the same
+        // invariant on the server's live mob tick before the shared head-turn pass.
+        if !self
+            .mob_entity
+            .living_entity
+            .entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
+            let yaw = self.get_entity().yaw.load();
+            self.get_entity().head_yaw.store(yaw);
+            self.get_entity().body_yaw.store(yaw);
+        }
+
+        // Vanilla `HappyGhast.aiStep` updates `requiresPrecisePosition` from
+        // `isOnStillTimeout` before the base movement tick (`HappyGhast.java:439-445`).
+        self.get_entity()
+            .set_requires_precise_position(self.is_on_still_timeout());
+
+        self.ageable_ai_step();
+
+        if self.is_baby() {
+            if !self.baby_setup.swap(true, Relaxed) {
+                self.setup_baby();
+            }
+        } else if self.baby_setup.swap(false, Relaxed) {
+            self.setup_adult();
+        }
+
+        // `HappyGhastAi.updateActivity` (`HappyGhast.java:400-409`) selects the first valid
+        // non-core activity after the baby Brain tick.
+        if self.is_baby() {
             self.mob_entity
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-        })
-    }
+                .brain
+                .as_ref()
+                .expect("HappyGhastEntity is always constructed with a brain")
+                .set_active_activity_to_first_valid(&[Activity::Idle]);
+        }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.mob_entity.living_entity.entity.is_alive() {
-                return;
+        let leash_time = self.leash_holder_time.load(Relaxed);
+        if leash_time > 0 {
+            self.leash_holder_time.fetch_sub(1, Relaxed);
+        }
+        self.set_leash_holder(leash_time > 0);
+
+        if self.server_still_timeout.load(Relaxed) > 0 {
+            if self.get_entity().age.load(Relaxed) > 60 {
+                self.server_still_timeout.fetch_sub(1, Relaxed);
             }
+            self.sync_stay_still_flag();
+        }
 
-            // `HappyGhastBodyRotationControl.clientTick` keeps a vehicle's head and body
-            // aligned to its yaw (`HappyGhast.java:612-625`; `Mob.java:358-361`). Apply the same
-            // invariant on the server's live mob tick before the shared head-turn pass.
-            if !self
-                .mob_entity
-                .living_entity
-                .entity
-                .passengers
-                .lock()
-                .await
-                .is_empty()
-            {
-                let yaw = self.get_entity().yaw.load();
-                self.get_entity().head_yaw.store(yaw);
-                self.get_entity().body_yaw.store(yaw);
-            }
+        // `HappyGhast.tick` refreshes the rider-overhead grace timeout from
+        // `scanPlayerAboveGhast` (`HappyGhast.java:432-434,547-568`).
+        if self.scan_player_above_ghast() {
+            self.set_server_still_timeout(10);
+        }
 
-            // Vanilla `HappyGhast.aiStep` updates `requiresPrecisePosition` from
-            // `isOnStillTimeout` before the base movement tick (`HappyGhast.java:439-445`).
-            self.get_entity()
-                .set_requires_precise_position(self.is_on_still_timeout());
+        // Vanilla `HappyGhast.aiStep` (`HappyGhast.java:438-442`) requests precise position
+        // packets while the still-timeout is active, after its server AI step updates it.
+        self.get_entity()
+            .set_requires_precise_position(self.is_on_still_timeout());
 
-            self.ageable_ai_step();
+        self.continuous_heal();
 
-            if self.is_baby() {
-                if !self.baby_setup.swap(true, Relaxed) {
-                    self.setup_baby().await;
-                }
-            } else if self.baby_setup.swap(false, Relaxed) {
-                self.setup_adult().await;
-            }
-
-            // `HappyGhastAi.updateActivity` (`HappyGhast.java:400-409`) selects the first valid
-            // non-core activity after the baby Brain tick.
-            if self.is_baby() {
-                self.mob_entity
-                    .brain
-                    .as_ref()
-                    .expect("HappyGhastEntity is always constructed with a brain")
-                    .set_active_activity_to_first_valid(&[Activity::Idle]);
-            }
-
-            let leash_time = self.leash_holder_time.load(Relaxed);
-            if leash_time > 0 {
-                self.leash_holder_time.fetch_sub(1, Relaxed);
-            }
-            self.set_leash_holder(leash_time > 0);
-
-            if self.server_still_timeout.load(Relaxed) > 0 {
-                if self.get_entity().age.load(Relaxed) > 60 {
-                    self.server_still_timeout.fetch_sub(1, Relaxed);
-                }
-                self.sync_stay_still_flag();
-            }
-
-            // `HappyGhast.tick` refreshes the rider-overhead grace timeout from
-            // `scanPlayerAboveGhast` (`HappyGhast.java:432-434,547-568`).
-            if self.scan_player_above_ghast().await {
-                self.set_server_still_timeout(10);
-            }
-
-            // Vanilla `HappyGhast.aiStep` (`HappyGhast.java:438-442`) requests precise position
-            // packets while the still-timeout is active, after its server AI step updates it.
-            self.get_entity()
-                .set_requires_precise_position(self.is_on_still_timeout());
-
-            self.continuous_heal();
-
-            let is_vehicle = !self
-                .mob_entity
-                .living_entity
-                .entity
-                .passengers
-                .lock()
-                .await
-                .is_empty();
-            if !is_vehicle {
-                self.check_restriction().await;
-            }
-        })
+        let is_vehicle = !self
+            .mob_entity
+            .living_entity
+            .entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty();
+        if !is_vehicle {
+            self.check_restriction();
+        }
     }
 }
 

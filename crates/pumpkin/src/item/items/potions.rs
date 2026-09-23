@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::Entity;
@@ -50,14 +49,7 @@ const Y_OFFSET: f32 = -20.0;
 const POWER: f32 = 0.5;
 
 impl ItemBehaviour for PotionItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        _player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        // Drinking is handled by the consumable flow in the server (active hand + consumption tick).
-        Box::pin(async move {})
-    }
+    fn normal_use(&self, _item: &Item, _player: &Player) {}
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -66,157 +58,136 @@ impl ItemBehaviour for PotionItem {
     /// Vanilla `PotionItem.useOn` (`PotionItem.java:35-69`): a water potion clicked on a
     /// non-downward convertible block creates five splash particles, returns a glass bottle,
     /// emits `FLUID_PLACE`, and replaces the block with mud.
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        block: &'a Block,
-        _server: &'a crate::server::Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let is_water =
-                item.get_data_component::<PotionContentsImpl>()
-                    .is_some_and(|contents| {
-                        contents.potion_id == Some(pumpkin_data::potion::Potion::WATER.id as i32)
-                            && contents.custom_effects.is_empty()
-                    });
-            if face == BlockDirection::Down
-                || !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_CONVERTABLE_TO_MUD)
-                || !is_water
-            {
-                return;
-            }
+        block: &Block,
+        _server: &crate::server::Server,
+    ) {
+        let is_water = item
+            .get_data_component::<PotionContentsImpl>()
+            .is_some_and(|contents| {
+                contents.potion_id == Some(pumpkin_data::potion::Potion::WATER.id as i32)
+                    && contents.custom_effects.is_empty()
+            });
+        if face == BlockDirection::Down
+            || !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_CONVERTABLE_TO_MUD)
+            || !is_water
+        {
+            return;
+        }
 
-            let world = player.world();
-            world.play_block_sound(
-                pumpkin_data::sound::Sound::EntityGenericSplash,
-                pumpkin_data::sound::SoundCategory::Blocks,
-                location,
+        let world = player.world();
+        world.play_block_sound(
+            pumpkin_data::sound::Sound::EntityGenericSplash,
+            pumpkin_data::sound::SoundCategory::Blocks,
+            location,
+        );
+
+        for _ in 0..5 {
+            world.spawn_particle(
+                Vector3::new(
+                    f64::from(location.0.x) + rand::random::<f64>(),
+                    f64::from(location.0.y + 1),
+                    f64::from(location.0.z) + rand::random::<f64>(),
+                ),
+                Vector3::new(0.0, 0.0, 0.0),
+                1.0,
+                1,
+                Particle::Splash,
             );
+        }
 
-            for _ in 0..5 {
-                world.spawn_particle(
-                    Vector3::new(
-                        f64::from(location.0.x) + rand::random::<f64>(),
-                        f64::from(location.0.y + 1),
-                        f64::from(location.0.z) + rand::random::<f64>(),
-                    ),
-                    Vector3::new(0.0, 0.0, 0.0),
-                    1.0,
-                    1,
-                    Particle::Splash,
-                );
+        let glass_bottle = ItemStack::new(1, &Item::GLASS_BOTTLE);
+        if player.gamemode.load() == GameMode::Creative {
+            if !player.inventory.contains_item(&Item::GLASS_BOTTLE) {
+                player.inventory.offer_or_drop_stack(glass_bottle, player);
             }
+        } else if item.item_count == 1 {
+            *item = glass_bottle;
+        } else {
+            item.decrement(1);
+            player.inventory.offer_or_drop_stack(glass_bottle, player);
+        }
 
-            let glass_bottle = ItemStack::new(1, &Item::GLASS_BOTTLE);
-            if player.gamemode.load() == GameMode::Creative {
-                if !player.inventory.contains_item(&Item::GLASS_BOTTLE) {
-                    player
-                        .inventory
-                        .offer_or_drop_stack(glass_bottle, player)
-                        .await;
-                }
-            } else if item.item_count == 1 {
-                *item = glass_bottle;
-            } else {
-                item.decrement(1);
-                player
-                    .inventory
-                    .offer_or_drop_stack(glass_bottle, player)
-                    .await;
-            }
-
-            world.play_block_sound(
-                pumpkin_data::sound::Sound::ItemBottleEmpty,
-                pumpkin_data::sound::SoundCategory::Blocks,
-                location,
-            );
-            crate::world::game_event::emit_game_event(
-                &world,
-                GameEvent::FluidPlace,
-                location.to_centered_f64(),
-                crate::world::game_event::GameEventContext::none(),
-            )
-            .await;
-            world
-                .set_block_state(
-                    &location,
-                    Block::MUD.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+        world.play_block_sound(
+            pumpkin_data::sound::Sound::ItemBottleEmpty,
+            pumpkin_data::sound::SoundCategory::Blocks,
+            location,
+        );
+        crate::world::game_event::emit_game_event(
+            &world,
+            GameEvent::FluidPlace,
+            location.to_centered_f64(),
+            crate::world::game_event::GameEventContext::none(),
+        );
+        world.set_block_state(
+            &location,
+            Block::MUD.default_state.id,
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 }
 
 impl ItemBehaviour for SplashPotionItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let position = player.position();
-            let world = player.world();
-            // Vanilla `SplashPotionItem.use` plays this sound before delegating to
-            // `ThrowablePotionItem.use` (`SplashPotionItem.java:21-32`).
-            world.play_sound_fine(
-                pumpkin_data::sound::Sound::EntitySplashPotionThrow,
-                pumpkin_data::sound::SoundCategory::Players,
-                &position,
-                0.5,
-                super::throw_sound_pitch(rand::random()),
-            );
-            let entity = Entity::new(world.clone(), position, &EntityType::SPLASH_POTION);
-            let splash = SplashPotionEntity::new_shot(entity, player.get_entity());
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        let position = player.position();
+        let world = player.world();
+        // Vanilla `SplashPotionItem.use` plays this sound before delegating to
+        // `ThrowablePotionItem.use` (`SplashPotionItem.java:21-32`).
+        world.play_sound_fine(
+            pumpkin_data::sound::Sound::EntitySplashPotionThrow,
+            pumpkin_data::sound::SoundCategory::Players,
+            &position,
+            0.5,
+            super::throw_sound_pitch(rand::random()),
+        );
+        let entity = Entity::new(world.clone(), position, &EntityType::SPLASH_POTION);
+        let splash = SplashPotionEntity::new_shot(entity, player.get_entity());
 
-            // Copy the held item stack data into the projectile
-            let main_s = player.inventory.held_item().await;
-            let mut used_main = true;
-            let mut stack = (!main_s.is_empty()
-                && main_s.item.id == pumpkin_data::item::Item::SPLASH_POTION.id)
-                .then_some(main_s);
-            if stack.is_none() {
-                let off_s = player.inventory.off_hand_item().await;
-                if !off_s.is_empty() && off_s.item.id == pumpkin_data::item::Item::SPLASH_POTION.id
-                {
-                    stack = Some(off_s);
-                    used_main = false;
-                }
+        // Copy the held item stack data into the projectile
+        let main_s = player.inventory.held_item();
+        let mut used_main = true;
+        let mut stack = (!main_s.is_empty()
+            && main_s.item.id == pumpkin_data::item::Item::SPLASH_POTION.id)
+            .then_some(main_s);
+        if stack.is_none() {
+            let off_s = player.inventory.off_hand_item();
+            if !off_s.is_empty() && off_s.item.id == pumpkin_data::item::Item::SPLASH_POTION.id {
+                stack = Some(off_s);
+                used_main = false;
             }
-            let stack = stack.unwrap_or_else(|| ItemStack::EMPTY.clone());
-            splash.set_item_stack(stack).await;
+        }
+        let stack = stack.unwrap_or_else(|| ItemStack::EMPTY.clone());
+        splash.set_item_stack(stack);
 
-            let (yaw, pitch) = player.rotation();
-            splash
-                .thrown
-                .set_velocity_from(player.get_entity(), pitch, yaw, Y_OFFSET, POWER, 1.0);
+        let (yaw, pitch) = player.rotation();
+        splash
+            .thrown
+            .set_velocity_from(player.get_entity(), pitch, yaw, Y_OFFSET, POWER, 1.0);
 
-            world.spawn_entity(Arc::new(splash)).await;
+        world.spawn_entity(Arc::new(splash));
 
-            // Decrement the used stack (clear)
-            if used_main {
-                let mut s = player.inventory.held_item().await;
-                s.decrement_unless_creative(player.gamemode.load(), 1);
-                player.inventory.set_held_item(s).await;
-            } else {
-                let mut s = player.inventory.off_hand_item().await;
-                s.decrement_unless_creative(player.gamemode.load(), 1);
-                player
-                    .inventory
-                    .set_stack_in_hand(pumpkin_util::Hand::Left, s)
-                    .await;
-            }
-
-            // `ThrowablePotionItem.use` awards ITEM_USED after spawning and consuming
-            // (`ThrowablePotionItem.java:23-31`).
+        // Decrement the used stack (clear)
+        if used_main {
+            let mut s = player.inventory.held_item();
+            s.decrement_unless_creative(player.gamemode.load(), 1);
+            player.inventory.set_held_item(s);
+        } else {
+            let mut s = player.inventory.off_hand_item();
+            s.decrement_unless_creative(player.gamemode.load(), 1);
             player
-                .increment_stat(StatisticCategory::Used, Item::SPLASH_POTION.id as i32, 1)
-                .await;
-        })
+                .inventory
+                .set_stack_in_hand(pumpkin_util::Hand::Left, s);
+        }
+
+        // `ThrowablePotionItem.use` awards ITEM_USED after spawning and consuming
+        // (`ThrowablePotionItem.java:23-31`).
+        player.increment_stat(StatisticCategory::Used, Item::SPLASH_POTION.id as i32, 1);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -225,70 +196,59 @@ impl ItemBehaviour for SplashPotionItem {
 }
 
 impl ItemBehaviour for LingeringPotionItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let position = player.position();
-            let world = player.world();
-            // Vanilla `LingeringPotionItem.use` plays this sound before delegating to
-            // `ThrowablePotionItem.use` (`LingeringPotionItem.java:21-32`).
-            world.play_sound_fine(
-                pumpkin_data::sound::Sound::EntityLingeringPotionThrow,
-                pumpkin_data::sound::SoundCategory::Neutral,
-                &position,
-                0.5,
-                super::throw_sound_pitch(rand::random()),
-            );
-            let entity = Entity::new(world.clone(), position, &EntityType::LINGERING_POTION);
-            let ling = LingeringPotionEntity::new_shot(entity, player.get_entity());
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        let position = player.position();
+        let world = player.world();
+        // Vanilla `LingeringPotionItem.use` plays this sound before delegating to
+        // `ThrowablePotionItem.use` (`LingeringPotionItem.java:21-32`).
+        world.play_sound_fine(
+            pumpkin_data::sound::Sound::EntityLingeringPotionThrow,
+            pumpkin_data::sound::SoundCategory::Neutral,
+            &position,
+            0.5,
+            super::throw_sound_pitch(rand::random()),
+        );
+        let entity = Entity::new(world.clone(), position, &EntityType::LINGERING_POTION);
+        let ling = LingeringPotionEntity::new_shot(entity, player.get_entity());
 
-            // Copy the held item stack data into the projectile
-            let main_s = player.inventory.held_item().await;
-            let mut used_main = true;
-            let mut stack = (!main_s.is_empty()
-                && main_s.item.id == pumpkin_data::item::Item::LINGERING_POTION.id)
-                .then_some(main_s);
-            if stack.is_none() {
-                let off_s = player.inventory.off_hand_item().await;
-                if !off_s.is_empty()
-                    && off_s.item.id == pumpkin_data::item::Item::LINGERING_POTION.id
-                {
-                    stack = Some(off_s);
-                    used_main = false;
-                }
+        // Copy the held item stack data into the projectile
+        let main_s = player.inventory.held_item();
+        let mut used_main = true;
+        let mut stack = (!main_s.is_empty()
+            && main_s.item.id == pumpkin_data::item::Item::LINGERING_POTION.id)
+            .then_some(main_s);
+        if stack.is_none() {
+            let off_s = player.inventory.off_hand_item();
+            if !off_s.is_empty() && off_s.item.id == pumpkin_data::item::Item::LINGERING_POTION.id {
+                stack = Some(off_s);
+                used_main = false;
             }
-            let stack = stack.unwrap_or_else(|| ItemStack::EMPTY.clone());
-            ling.set_item_stack(stack).await;
+        }
+        let stack = stack.unwrap_or_else(|| ItemStack::EMPTY.clone());
+        ling.set_item_stack(stack);
 
-            let (yaw, pitch) = player.rotation();
-            ling.thrown
-                .set_velocity_from(player.get_entity(), pitch, yaw, Y_OFFSET, POWER, 1.0);
+        let (yaw, pitch) = player.rotation();
+        ling.thrown
+            .set_velocity_from(player.get_entity(), pitch, yaw, Y_OFFSET, POWER, 1.0);
 
-            world.spawn_entity(Arc::new(ling)).await;
+        world.spawn_entity(Arc::new(ling));
 
-            // Decrement the used stack (clear)
-            if used_main {
-                let mut s = player.inventory.held_item().await;
-                s.decrement_unless_creative(player.gamemode.load(), 1);
-                player.inventory.set_held_item(s).await;
-            } else {
-                let mut s = player.inventory.off_hand_item().await;
-                s.decrement_unless_creative(player.gamemode.load(), 1);
-                player
-                    .inventory
-                    .set_stack_in_hand(pumpkin_util::Hand::Left, s)
-                    .await;
-            }
-
-            // `ThrowablePotionItem.use` awards ITEM_USED after spawning and consuming
-            // (`ThrowablePotionItem.java:23-31`).
+        // Decrement the used stack (clear)
+        if used_main {
+            let mut s = player.inventory.held_item();
+            s.decrement_unless_creative(player.gamemode.load(), 1);
+            player.inventory.set_held_item(s);
+        } else {
+            let mut s = player.inventory.off_hand_item();
+            s.decrement_unless_creative(player.gamemode.load(), 1);
             player
-                .increment_stat(StatisticCategory::Used, Item::LINGERING_POTION.id as i32, 1)
-                .await;
-        })
+                .inventory
+                .set_stack_in_hand(pumpkin_util::Hand::Left, s);
+        }
+
+        // `ThrowablePotionItem.use` awards ITEM_USED after spawning and consuming
+        // (`ThrowablePotionItem.java:23-31`).
+        player.increment_stat(StatisticCategory::Used, Item::LINGERING_POTION.id as i32, 1);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

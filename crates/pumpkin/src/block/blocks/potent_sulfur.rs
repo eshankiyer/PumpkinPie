@@ -8,9 +8,7 @@ use pumpkin_data::{Block, BlockId, BlockStateId};
 use pumpkin_util::math::position::BlockPos;
 
 use crate::block::entities::potent_sulfur::PotentSulfurBlockEntity;
-use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-};
+use crate::block::{BlockBehaviour, BlockMetadata, GetStateForNeighborUpdateArgs, OnPlaceArgs};
 use crate::world::World;
 
 /// `net.minecraft.world.level.block.PotentSulfurBlock`.
@@ -128,21 +126,19 @@ pub fn valid_block_state(
 }
 
 impl BlockBehaviour for PotentSulfurBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            valid_block_state(
-                args.world,
-                args.position,
-                args.block,
-                args.block.default_state.id,
-            )
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        valid_block_state(
+            args.world,
+            args.position,
+            args.block,
+            args.block.default_state.id,
+        )
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
         Box::pin(
             async move { valid_block_state(args.world, args.position, args.block, args.state_id) },
         )

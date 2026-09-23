@@ -32,14 +32,14 @@ use pumpkin_data::{Block, entity::EntityType, tag::Taggable};
 use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::{Inventory, SimpleInventory};
 use rand::RngExt;
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
 pub(crate) fn is_valid_saddle_item(stack: &ItemStack, entity_type: &EntityType) -> bool {
@@ -83,7 +83,7 @@ pub(crate) fn saddle_equip_on_interact(stack: &ItemStack, entity_type: &EntityTy
         })
 }
 
-pub(crate) async fn equip_saddle_item(
+pub(crate) fn equip_saddle_item(
     mob_entity: &MobEntity,
     player: &Arc<Player>,
     item_stack: &mut ItemStack,
@@ -109,14 +109,18 @@ pub(crate) async fn equip_saddle_item(
     };
     let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
     {
-        let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
+        let mut equipment = mob_entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         equipment.put(&EquipmentSlot::SADDLE, new_stack.clone());
     };
     mob_entity
         .living_entity
         .equipment_drop_chances
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         // `Mob.setGuaranteedDrop` stores the preserved `2.0F` marker
         // (`Mob.java:601-603`, `DropChances.java:28-29`).
         .insert(EquipmentSlot::SADDLE, 2.0);
@@ -129,7 +133,7 @@ pub(crate) async fn equip_saddle_item(
     world.play_sound_event(&equip_sound, SoundCategory::Neutral, &entity.pos.load());
 }
 
-pub(crate) async fn equip_body_armor_item(
+pub(crate) fn equip_body_armor_item(
     mob_entity: &MobEntity,
     player: &Arc<Player>,
     item_stack: &mut ItemStack,
@@ -140,14 +144,18 @@ pub(crate) async fn equip_body_armor_item(
             equippable.equip_sound.clone()
         });
     let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
-    let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
+    let mut equipment = mob_entity
+        .living_entity
+        .entity_equipment
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     equipment.put(&EquipmentSlot::BODY, new_stack.clone());
     drop(equipment);
     mob_entity
         .living_entity
         .equipment_drop_chances
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         // `Mob.setGuaranteedDrop` stores the preserved `2.0F` marker
         // (`Mob.java:601-603`, `DropChances.java:28-29`).
         .insert(EquipmentSlot::BODY, 2.0);
@@ -160,8 +168,8 @@ pub(crate) async fn equip_body_armor_item(
     world.play_sound_event(&equip_sound, SoundCategory::Neutral, &entity.pos.load());
 }
 
-pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
-    if !player.get_entity().can_start_riding().await {
+pub(crate) fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
+    if !player.get_entity().can_start_riding() {
         return;
     }
 
@@ -173,14 +181,12 @@ pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
     let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
         return;
     };
-    entity
-        .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-        .await;
+    entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
 }
 
 use crate::entity::{
-    EntityBase, EntityBaseFuture,
-    ai::goal::{Controls, Goal, GoalFuture, escape_danger::EscapeDangerGoal},
+    EntityBase,
+    ai::goal::{Controls, Goal, escape_danger::EscapeDangerGoal},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     player::Player,
@@ -288,32 +294,30 @@ impl<T: AbstractHorse + Mob + ?Sized + Send + Sync + 'static> Goal for MountPani
         true
     }
 
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(horse) = self.horse.upgrade() else {
-                return false;
-            };
-            if !mount_panic_allowed(horse.is_mob_controlled().await) {
-                return false;
-            }
-            self.inner.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(horse) = self.horse.upgrade() else {
+            return false;
+        };
+        if !mount_panic_allowed(horse.is_mob_controlled()) {
+            return false;
+        }
+        self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.inner.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.inner.start(mob).await })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.inner.stop(mob).await })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.inner.tick(mob).await })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.inner.tick(mob)
     }
 
     fn controls(&self) -> Controls {
@@ -424,16 +428,14 @@ fn player_jump_pending_scale(jump_amount: i32) -> i32 {
 struct HorseChestScreenFactory(Arc<dyn Inventory>);
 
 impl ScreenHandlerFactory for HorseChestScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone()).await;
-            Some(Arc::new(TokioMutex::new(handler)) as SharedScreenHandler)
-        })
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone());
+        Some(Arc::new(TokioMutex::new(handler)) as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {
@@ -473,8 +475,8 @@ pub trait AbstractHorse: Animal {
 
     /// `AbstractHorse.isMobControlled`, default `false`. `ZombieHorseEntity` is the only
     /// current override (a non-player mob riding counts as "in control").
-    fn is_mob_controlled(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async { false })
+    fn is_mob_controlled(&self) -> bool {
+        false
     }
 
     fn can_perform_rearing(&self) -> bool {
@@ -488,35 +490,36 @@ pub trait AbstractHorse: Animal {
 
     /// Server-side portion of `AbstractHorse.aiStep` and `tick`: start haystack
     /// eating beneath the horse and expire the 20-tick standing pose.
-    fn tick_horse_ai(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let data = self.horse_data();
-            if data.stand_counter.load(Relaxed) > 0 && data.stand_counter.fetch_sub(1, Relaxed) <= 1
-            {
-                self.clear_standing();
-            }
+    fn tick_horse_ai(&self) {
+        let data = self.horse_data();
+        if data.stand_counter.load(Relaxed) > 0 && data.stand_counter.fetch_sub(1, Relaxed) <= 1 {
+            self.clear_standing();
+        }
 
-            let entity = self.get_entity();
-            let is_vehicle = !entity.passengers.lock().await.is_empty();
-            if self.can_eat_grass()
-                && !data.get_flag(FLAG_EATING)
-                && !is_vehicle
-                && self.get_random().random_range(0..300) == 0
-                && entity
-                    .world
-                    .load()
-                    .get_block(&entity.block_pos.load().down())
-                    .id
-                    == Block::GRASS_BLOCK.id
-            {
-                data.set_flag(FLAG_EATING, true);
-            }
+        let entity = self.get_entity();
+        let is_vehicle = !entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty();
+        if self.can_eat_grass()
+            && !data.get_flag(FLAG_EATING)
+            && !is_vehicle
+            && self.get_random().random_range(0..300) == 0
+            && entity
+                .world
+                .load()
+                .get_block(&entity.block_pos.load().down())
+                .id
+                == Block::GRASS_BLOCK.id
+        {
+            data.set_flag(FLAG_EATING, true);
+        }
 
-            if data.get_flag(FLAG_EATING) && data.eating_counter.fetch_add(1, Relaxed) + 1 > 50 {
-                data.eating_counter.store(0, Relaxed);
-                data.set_flag(FLAG_EATING, false);
-            }
-        })
+        if data.get_flag(FLAG_EATING) && data.eating_counter.fetch_add(1, Relaxed) + 1 > 50 {
+            data.eating_counter.store(0, Relaxed);
+            data.set_flag(FLAG_EATING, false);
+        }
     }
 
     /// `AbstractHorse.isImmobile`: `super.isImmobile() && isVehicle() && isSaddled() ||
@@ -594,43 +597,38 @@ pub trait AbstractHorse: Animal {
         self.get_entity().is_alive() && !self.is_baby() && self.is_tamed()
     }
 
-    fn is_saddled(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move {
-            let equipment = self
-                .get_mob_entity()
-                .living_entity
-                .entity_equipment
-                .lock()
-                .await;
-            let stack = equipment.get(&EquipmentSlot::SADDLE);
-            self.can_use_saddle_slot()
-                && is_valid_saddle_item(&stack, self.get_entity().entity_type)
-        })
+    fn is_saddled(&self) -> bool {
+        let equipment = self
+            .get_mob_entity()
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stack = equipment.get(&EquipmentSlot::SADDLE);
+        self.can_use_saddle_slot() && is_valid_saddle_item(&stack, self.get_entity().entity_type)
     }
 
     /// Vanilla `AbstractHorse.getControllingPassenger`: the first player controls a
     /// saddled horse-family mob, regardless of the player's held item.
-    fn has_saddled_player_passenger(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move {
-            if !AbstractHorse::is_saddled(self).await {
-                return Mob::has_controlling_passenger(self).await;
-            }
-            let passenger = self.get_entity().passengers.lock().await.first().cloned();
-            if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
-                return true;
-            }
-            Mob::has_controlling_passenger(self).await
-        })
+    fn has_saddled_player_passenger(&self) -> bool {
+        if !AbstractHorse::is_saddled(self) {
+            return Mob::has_controlling_passenger(self);
+        }
+        let passenger = self
+            .get_entity()
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first()
+            .cloned();
+        if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
+            return true;
+        }
+        Mob::has_controlling_passenger(self)
     }
 
-    fn equip_saddle<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            equip_saddle_item(self.get_mob_entity(), player, item_stack).await;
-        })
+    fn equip_saddle(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
+        equip_saddle_item(self.get_mob_entity(), player, item_stack);
     }
 
     /// `AbstractHorse.makeMad`.
@@ -747,8 +745,8 @@ pub trait AbstractHorse: Animal {
         self.horse_data().jump_pending_scale.store(pending, Relaxed);
     }
 
-    fn can_jump_now(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move { AbstractHorse::is_saddled(self).await })
+    fn can_jump_now(&self) -> bool {
+        AbstractHorse::is_saddled(self)
     }
 
     /// `AbstractHorse.handleStartJump` (`AbstractHorse.java:897-901`) starts the rearing
@@ -784,205 +782,185 @@ pub trait AbstractHorse: Animal {
 
     /// `AbstractHorse.tickRidden` (`AbstractHorse.java:720-738`) and the existing
     /// `Mob::custom_travel` hook provide the server-side ridden travel path for all horse types.
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let first_passenger = {
-                let passengers = entity.passengers.lock().await;
-                passengers.first().cloned()
-            };
-            let Some(passenger) = first_passenger else {
-                return false;
-            };
-            let Some(player) = passenger.get_player() else {
-                return false;
-            };
-            if !AbstractHorse::is_saddled(self).await {
-                return false;
-            }
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
+        let entity = self.get_entity();
+        let first_passenger = {
+            let passengers = entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            passengers.first().cloned()
+        };
+        let Some(passenger) = first_passenger else {
+            return false;
+        };
+        let Some(player) = passenger.get_player() else {
+            return false;
+        };
+        if !AbstractHorse::is_saddled(self) {
+            return false;
+        }
 
-            let (yaw, pitch) = self.get_ridden_rotation(player);
-            entity.set_rotation(yaw, pitch);
-            entity.head_yaw.store(yaw);
-            entity.body_yaw.store(yaw);
+        let (yaw, pitch) = self.get_ridden_rotation(player);
+        entity.set_rotation(yaw, pitch);
+        entity.head_yaw.store(yaw);
+        entity.body_yaw.store(yaw);
 
-            let input_flags = player.last_input.load(Relaxed);
-            let input = self.get_ridden_input(input_flags);
-            // Vanilla `AbstractHorse.tickRidden` (`AbstractHorse.java:726-729`) resets the
-            // gallop counter whenever the rider is not moving forward.
-            if input.z <= 0.0 {
-                self.horse_data().gallop_sound_counter.store(0, Relaxed);
-            }
-            let pending = self.horse_data().jump_pending_scale.swap(0, Relaxed);
-            if entity.on_ground.load(Relaxed)
-                && pending > 0
-                && !self.get_mob_entity().living_entity.jumping.load(Relaxed)
-            {
-                self.execute_riders_jump(pending, input);
-            }
+        let input_flags = player.last_input.load(Relaxed);
+        let input = self.get_ridden_input(input_flags);
+        // Vanilla `AbstractHorse.tickRidden` (`AbstractHorse.java:726-729`) resets the
+        // gallop counter whenever the rider is not moving forward.
+        if input.z <= 0.0 {
+            self.horse_data().gallop_sound_counter.store(0, Relaxed);
+        }
+        let pending = self.horse_data().jump_pending_scale.swap(0, Relaxed);
+        if entity.on_ground.load(Relaxed)
+            && pending > 0
+            && !self.get_mob_entity().living_entity.jumping.load(Relaxed)
+        {
+            self.execute_riders_jump(pending, input);
+        }
 
-            entity.update_velocity_from_input(input, self.get_ridden_speed());
-            let mut velocity = entity.velocity.load();
-            if !entity.on_ground.load(Relaxed) {
-                velocity.y -= self.get_mob_gravity();
-            }
-            entity.move_entity(caller, velocity).await;
-            let friction = if entity.on_ground.load(Relaxed) {
-                f64::from(entity.get_block_with_y_offset(0.500_001).1.slipperiness) * 0.91
-            } else {
-                0.91
-            };
-            velocity = entity.velocity.load();
-            velocity.x *= friction;
-            velocity.z *= friction;
-            velocity.y *= 0.98;
-            entity.velocity.store(velocity);
-            true
-        })
+        entity.update_velocity_from_input(input, self.get_ridden_speed());
+        let mut velocity = entity.velocity.load();
+        if !entity.on_ground.load(Relaxed) {
+            velocity.y -= self.get_mob_gravity();
+        }
+        entity.move_entity(caller, velocity);
+        let friction = if entity.on_ground.load(Relaxed) {
+            f64::from(entity.get_block_with_y_offset(0.500_001).1.slipperiness) * 0.91
+        } else {
+            0.91
+        };
+        velocity = entity.velocity.load();
+        velocity.x *= friction;
+        velocity.z *= friction;
+        velocity.y *= 0.98;
+        entity.velocity.store(velocity);
+        true
     }
 
     /// `AbstractHorse.doPlayerRide`, using `Entity::add_passenger` the same way
     /// `HappyGhastEntity::try_mount` does (see that file for the established mounting pattern).
-    fn do_player_ride<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.horse_data().set_flag(FLAG_EATING, false);
-            self.clear_standing();
+    fn do_player_ride(&self, player: &Arc<Player>) {
+        self.horse_data().set_flag(FLAG_EATING, false);
+        self.clear_standing();
 
-            if !player.get_entity().can_start_riding().await {
-                return;
-            }
+        if !player.get_entity().can_start_riding() {
+            return;
+        }
 
-            let entity = self.get_entity();
-            let world = entity.world.load();
-            let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
-                return;
-            };
-            let Some(vehicle) = world.get_entity_by_id(entity.entity_id) else {
-                return;
-            };
-            entity
-                .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                .await;
-        })
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
+            return;
+        };
+        let Some(vehicle) = world.get_entity_by_id(entity.entity_id) else {
+            return;
+        };
+        entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
     }
 
     /// `AbstractHorse.handleEating`: the default wheat/sugar/hay/apple/mushroom/carrot/golden
     /// carrot/golden apple table (`AbstractHorse.java:423-493`). Species with a different food
     /// table (Llama, out of scope here) override this instead of extending it.
-    fn handle_eating<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let id = item_stack.item.id;
-            let (heal, age_up_seconds, temper): (f32, i32, i32) = if id == Item::WHEAT.id {
-                (2.0, 20, 3)
-            } else if id == Item::SUGAR.id {
-                (1.0, 30, 3)
-            } else if id == Item::HAY_BLOCK.id {
-                (20.0, 180, 0)
-            } else if id == Item::APPLE.id {
-                (3.0, 60, 3)
-            } else if id == Item::RED_MUSHROOM.id {
-                (3.0, 0, 3)
-            } else if id == Item::CARROT.id {
-                (3.0, 60, 3)
-            } else if id == Item::GOLDEN_CARROT.id {
-                (4.0, 60, 5)
-            } else if id == Item::GOLDEN_APPLE.id || id == Item::ENCHANTED_GOLDEN_APPLE.id {
-                (10.0, 240, 10)
-            } else {
-                return false;
-            };
+    fn handle_eating(&self, player: &Arc<Player>, item_stack: &ItemStack) -> bool {
+        let id = item_stack.item.id;
+        let (heal, age_up_seconds, temper): (f32, i32, i32) = if id == Item::WHEAT.id {
+            (2.0, 20, 3)
+        } else if id == Item::SUGAR.id {
+            (1.0, 30, 3)
+        } else if id == Item::HAY_BLOCK.id {
+            (20.0, 180, 0)
+        } else if id == Item::APPLE.id {
+            (3.0, 60, 3)
+        } else if id == Item::RED_MUSHROOM.id {
+            (3.0, 0, 3)
+        } else if id == Item::CARROT.id {
+            (3.0, 60, 3)
+        } else if id == Item::GOLDEN_CARROT.id {
+            (4.0, 60, 5)
+        } else if id == Item::GOLDEN_APPLE.id || id == Item::ENCHANTED_GOLDEN_APPLE.id {
+            (10.0, 240, 10)
+        } else {
+            return false;
+        };
 
-            let mut item_used = false;
-            let is_golden = id == Item::GOLDEN_CARROT.id
-                || id == Item::GOLDEN_APPLE.id
-                || id == Item::ENCHANTED_GOLDEN_APPLE.id;
+        let mut item_used = false;
+        let is_golden = id == Item::GOLDEN_CARROT.id
+            || id == Item::GOLDEN_APPLE.id
+            || id == Item::ENCHANTED_GOLDEN_APPLE.id;
 
-            let mob_entity = self.get_mob_entity();
-            if is_golden
-                && self.can_fall_in_love()
-                && self.is_tamed()
-                && !self.is_baby()
-                && !mob_entity.is_in_love()
-            {
-                item_used = true;
-                mob_entity.set_love_ticks(600, Some(player.gameprofile.id));
-                let entity = &mob_entity.living_entity.entity;
-                entity.world.load().send_entity_status(
-                    entity,
-                    pumpkin_data::entity::EntityStatus::InLoveHearts,
-                    Some(pumpkin_protocol::bedrock::server::actor_event::ActorEventType::InLoveHearts),
-                );
-            }
+        let mob_entity = self.get_mob_entity();
+        if is_golden
+            && self.can_fall_in_love()
+            && self.is_tamed()
+            && !self.is_baby()
+            && !mob_entity.is_in_love()
+        {
+            item_used = true;
+            mob_entity.set_love_ticks(600, Some(player.gameprofile.id));
+            let entity = &mob_entity.living_entity.entity;
+            entity.world.load().send_entity_status(
+                entity,
+                pumpkin_data::entity::EntityStatus::InLoveHearts,
+                Some(pumpkin_protocol::bedrock::server::actor_event::ActorEventType::InLoveHearts),
+            );
+        }
 
-            let living = &mob_entity.living_entity;
-            if living.health.load() < living.get_max_health() && heal > 0.0 {
-                living.heal(heal);
-                item_used = true;
-            }
+        let living = &mob_entity.living_entity;
+        if living.health.load() < living.get_max_health() && heal > 0.0 {
+            living.heal(heal);
+            item_used = true;
+        }
 
-            if self.is_baby() && age_up_seconds > 0 {
-                let entity = self.get_entity();
-                let world = entity.world.load();
-                let pos = entity.pos.load();
-                world.spawn_particle(
-                    pos + Vector3::new(0.0, f64::from(entity.height()) * 0.5, 0.0),
-                    Vector3::new(0.5, 0.5, 0.5),
-                    1.0,
-                    7,
-                    Particle::HappyVillager,
-                );
-                let new_age = (entity.age.load(Relaxed) + age_up_seconds * 20).min(0);
-                entity.age.store(new_age, Relaxed);
-                item_used = true;
-            }
+        if self.is_baby() && age_up_seconds > 0 {
+            let entity = self.get_entity();
+            let world = entity.world.load();
+            let pos = entity.pos.load();
+            world.spawn_particle(
+                pos + Vector3::new(0.0, f64::from(entity.height()) * 0.5, 0.0),
+                Vector3::new(0.5, 0.5, 0.5),
+                1.0,
+                7,
+                Particle::HappyVillager,
+            );
+            let new_age = (entity.age.load(Relaxed) + age_up_seconds * 20).min(0);
+            entity.age.store(new_age, Relaxed);
+            item_used = true;
+        }
 
-            if temper > 0
-                && (item_used || !self.is_tamed())
-                && self.horse_data().temper.load(Relaxed) < self.max_temper()
-            {
-                let new_temper =
-                    (self.horse_data().temper.load(Relaxed) + temper).clamp(0, self.max_temper());
-                self.horse_data().temper.store(new_temper, Relaxed);
-                item_used = true;
-            }
+        if temper > 0
+            && (item_used || !self.is_tamed())
+            && self.horse_data().temper.load(Relaxed) < self.max_temper()
+        {
+            let new_temper =
+                (self.horse_data().temper.load(Relaxed) + temper).clamp(0, self.max_temper());
+            self.horse_data().temper.store(new_temper, Relaxed);
+            item_used = true;
+        }
 
-            if item_used {
-                self.horse_data().set_flag(FLAG_EATING, true);
-            }
+        if item_used {
+            self.horse_data().set_flag(FLAG_EATING, true);
+        }
 
-            item_used
-        })
+        item_used
     }
 
     /// `AbstractHorse.fedFood`.
-    fn fed_food<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let ate = self.handle_eating(player, item_stack).await;
-            if ate {
-                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-            }
-            ate
-        })
+    fn fed_food(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let ate = self.handle_eating(player, item_stack);
+        if ate {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        }
+        ate
     }
 
     /// Whether this species can currently show an inventory screen. Non-chested horses have
     /// nothing to show (saddle/armor are equipment-slot-only here, see the module doc comment),
     /// so the default is a no-op; `AbstractChestedHorse::chested_mob_interact` overrides this
     /// path with the real chest-inventory screen.
-    fn open_custom_inventory_screen<'a>(
-        &'a self,
-        _player: &'a Arc<Player>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn open_custom_inventory_screen(&self, _player: &Arc<Player>) {}
 
     /// `AbstractHorse.mobInteract` (`AbstractHorse.java:644-669`), shared by Horse, `ZombieHorse`
     /// and (post-tame-gate) `SkeletonHorse` -- the species' own `mobInteract` overrides in
@@ -992,58 +970,61 @@ pub trait AbstractHorse: Animal {
         &'a self,
         player: &'a Arc<Player>,
         item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool>
+    ) -> bool
     where
         Self: Sized,
     {
-        Box::pin(async move {
-            let mob_entity = self.get_mob_entity();
-            let entity = &mob_entity.living_entity.entity;
-            let is_vehicle = !entity.passengers.lock().await.is_empty();
+        let mob_entity = self.get_mob_entity();
+        let entity = &mob_entity.living_entity.entity;
+        let is_vehicle = !entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty();
 
-            if is_vehicle || self.is_baby() {
-                return mob_entity
-                    .mob_interact(player, item_stack, self.can_be_leashed())
-                    .await;
+        if is_vehicle || self.is_baby() {
+            return mob_entity.mob_interact(player, item_stack, self.can_be_leashed());
+        }
+
+        if self.is_tamed() && player.get_entity().is_sneaking() {
+            AbstractHorse::open_custom_inventory_screen(self, player);
+            return true;
+        }
+
+        if !item_stack.is_empty() {
+            if self.is_food(item_stack) {
+                return self.fed_food(player, item_stack);
             }
 
-            if self.is_tamed() && player.get_entity().is_sneaking() {
-                AbstractHorse::open_custom_inventory_screen(self, player).await;
+            if !self.is_tamed() {
+                self.make_mad();
                 return true;
             }
 
-            if !item_stack.is_empty() {
-                if self.is_food(item_stack) {
-                    return self.fed_food(player, item_stack).await;
-                }
-
-                if !self.is_tamed() {
-                    self.make_mad();
-                    return true;
-                }
-
-                let body_armor = {
-                    let equipment = mob_entity.living_entity.entity_equipment.lock().await;
-                    equipment.get(&EquipmentSlot::BODY)
-                };
-                if is_valid_body_armor_item(item_stack, entity.entity_type) && body_armor.is_empty()
-                {
-                    equip_body_armor_item(mob_entity, player, item_stack).await;
-                    return true;
-                }
-
-                if saddle_equip_on_interact(item_stack, entity.entity_type)
-                    && !AbstractHorse::is_saddled(self).await
-                    && self.can_use_saddle_slot()
-                {
-                    self.equip_saddle(player, item_stack).await;
-                    return true;
-                }
+            let body_armor = {
+                let equipment = mob_entity
+                    .living_entity
+                    .entity_equipment
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                equipment.get(&EquipmentSlot::BODY)
+            };
+            if is_valid_body_armor_item(item_stack, entity.entity_type) && body_armor.is_empty() {
+                equip_body_armor_item(mob_entity, player, item_stack);
+                return true;
             }
 
-            self.do_player_ride(player).await;
-            true
-        })
+            if saddle_equip_on_interact(item_stack, entity.entity_type)
+                && !AbstractHorse::is_saddled(self)
+                && self.can_use_saddle_slot()
+            {
+                self.equip_saddle(player, item_stack);
+                return true;
+            }
+        }
+
+        self.do_player_ride(player);
+        true
     }
 
     /// `AbstractHorse.addAdditionalSaveData` (`AbstractHorse.java:788-793`, minus `Owner`/`Tame`
@@ -1184,39 +1165,42 @@ pub trait AbstractChestedHorse: AbstractHorse {
 
     /// `AbstractChestedHorse.setChest` + `createInventory`: replaces the backing inventory,
     /// preserving any existing stacks in the overlapping slot range.
-    fn set_chest(&self, value: bool) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.chested_data().has_chest.store(value, Relaxed);
-            let new_size = if value {
-                usize::from(self.get_inventory_columns()) * 3
-            } else {
-                0
-            };
+    fn set_chest(&self, value: bool) {
+        self.chested_data().has_chest.store(value, Relaxed);
+        let new_size = if value {
+            usize::from(self.get_inventory_columns()) * 3
+        } else {
+            0
+        };
 
-            let mut slot = self.chested_data().inventory.lock().await;
-            let old = slot.clone();
-            let new_inventory = Arc::new(SimpleInventory::new(new_size));
-            let max = old.size().min(new_inventory.size());
-            for i in 0..max {
-                let stack = old.get_stack(i).await;
-                if !stack.is_empty() {
-                    new_inventory.set_stack(i, stack).await;
-                }
+        let mut slot = self
+            .chested_data()
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let old = slot.clone();
+        let new_inventory = Arc::new(SimpleInventory::new(new_size));
+        let max = old.size().min(new_inventory.size());
+        for i in 0..max {
+            let stack = old.get_stack(i);
+            if !stack.is_empty() {
+                new_inventory.set_stack(i, stack);
             }
-            *slot = new_inventory;
-        })
+        }
+        *slot = new_inventory;
     }
 
-    fn open_chest_inventory<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let inventory = self.chested_data().inventory.lock().await.clone();
-            player
-                .open_handled_screen(
-                    &HorseChestScreenFactory(inventory as Arc<dyn Inventory>),
-                    None,
-                )
-                .await;
-        })
+    fn open_chest_inventory(&self, player: &Arc<Player>) {
+        let inventory = self
+            .chested_data()
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        player.open_handled_screen(
+            &HorseChestScreenFactory(inventory as Arc<dyn Inventory>),
+            None,
+        );
     }
 
     /// `AbstractChestedHorse.mobInteract` (`AbstractChestedHorse.java:143-167`).
@@ -1224,60 +1208,57 @@ pub trait AbstractChestedHorse: AbstractHorse {
         &'a self,
         player: &'a Arc<Player>,
         item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool>
+    ) -> bool
     where
         Self: Sized,
     {
-        Box::pin(async move {
-            let mob_entity = self.get_mob_entity();
-            let entity = &mob_entity.living_entity.entity;
-            let is_vehicle = !entity.passengers.lock().await.is_empty();
-            let should_open_inventory =
-                !self.is_baby() && self.is_tamed() && player.get_entity().is_sneaking();
-            let baby_with_dandelion =
-                self.is_baby() && item_stack.item.id == Item::GOLDEN_DANDELION.id;
+        let mob_entity = self.get_mob_entity();
+        let entity = &mob_entity.living_entity.entity;
+        let is_vehicle = !entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty();
+        let should_open_inventory =
+            !self.is_baby() && self.is_tamed() && player.get_entity().is_sneaking();
+        let baby_with_dandelion = self.is_baby() && item_stack.item.id == Item::GOLDEN_DANDELION.id;
 
-            if is_vehicle || should_open_inventory || baby_with_dandelion {
-                if should_open_inventory && !is_vehicle {
-                    self.open_chest_inventory(player).await;
-                    return true;
-                }
-                return mob_entity
-                    .mob_interact(player, item_stack, self.can_be_leashed())
-                    .await;
+        if is_vehicle || should_open_inventory || baby_with_dandelion {
+            if should_open_inventory && !is_vehicle {
+                self.open_chest_inventory(player);
+                return true;
+            }
+            return mob_entity.mob_interact(player, item_stack, self.can_be_leashed());
+        }
+
+        if !item_stack.is_empty() {
+            if self.is_food(item_stack) {
+                return self.fed_food(player, item_stack);
             }
 
-            if !item_stack.is_empty() {
-                if self.is_food(item_stack) {
-                    return self.fed_food(player, item_stack).await;
-                }
-
-                if !self.is_tamed() {
-                    self.make_mad();
-                    return true;
-                }
-
-                if !self.has_chest() && item_stack.item.id == Item::CHEST.id {
-                    self.set_chest(true).await;
-                    self.play_chest_equips_sound();
-                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                    return true;
-                }
+            if !self.is_tamed() {
+                self.make_mad();
+                return true;
             }
 
-            self.abstract_horse_mob_interact(player, item_stack).await
-        })
+            if !self.has_chest() && item_stack.item.id == Item::CHEST.id {
+                self.set_chest(true);
+                self.play_chest_equips_sound();
+                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                return true;
+            }
+        }
+
+        self.abstract_horse_mob_interact(player, item_stack)
     }
 
     fn write_chested_horse_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_bool("ChestedHorse", self.has_chest());
     }
 
-    fn read_chested_horse_nbt<'a>(&'a self, nbt: &'a NbtCompound) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let has_chest = nbt.get_bool("ChestedHorse").unwrap_or(false);
-            self.set_chest(has_chest).await;
-        })
+    fn read_chested_horse_nbt(&self, nbt: &NbtCompound) {
+        let has_chest = nbt.get_bool("ChestedHorse").unwrap_or(false);
+        self.set_chest(has_chest);
     }
 }
 

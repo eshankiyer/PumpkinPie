@@ -75,13 +75,13 @@ impl HostItemStack for PluginHostState {
         res: Resource<ItemStackHandle>,
     ) -> wasmtime::Result<String> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         Ok(stack.item.registry_key.to_string())
     }
 
     async fn get_count(&mut self, res: Resource<ItemStackHandle>) -> wasmtime::Result<u8> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         Ok(stack.item_count)
     }
 
@@ -91,14 +91,14 @@ impl HostItemStack for PluginHostState {
         count: u8,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         stack.item_count = count;
         Ok(())
     }
 
     async fn get_max_count(&mut self, res: Resource<ItemStackHandle>) -> wasmtime::Result<u8> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         // Search in components for MaxStackSize
         if let Some((_, data)) = stack
             .item
@@ -119,7 +119,7 @@ impl HostItemStack for PluginHostState {
         res: Resource<ItemStackHandle>,
     ) -> wasmtime::Result<Vec<WitEnchantmentValue>> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         let mut enchantments = Vec::new();
         if let Some((_, Some(data))) = stack
             .patch
@@ -144,7 +144,7 @@ impl HostItemStack for PluginHostState {
         level: u32,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         let enc = from_wit_enchantment(enchantment);
 
         let mut current_encs = if let Some((_, Some(data))) = stack
@@ -188,7 +188,7 @@ impl HostItemStack for PluginHostState {
         enchantment: WitEnchantment,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         let enc = from_wit_enchantment(enchantment);
 
         if let Some((_, Some(data))) = stack
@@ -209,7 +209,7 @@ impl HostItemStack for PluginHostState {
         res: Resource<ItemStackHandle>,
     ) -> wasmtime::Result<Vec<WitCustomEnchantmentValue>> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         let mut result = Vec::new();
 
         if let Some(compound) = stack.custom_data_compound()
@@ -253,7 +253,7 @@ impl HostItemStack for PluginHostState {
         level: u32,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
 
         stack.set_custom_data(
             "pumpkin:enchantments",
@@ -305,7 +305,7 @@ impl HostItemStack for PluginHostState {
         enchantment_id: String,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
 
         stack.remove_custom_data("pumpkin:enchantments", &enchantment_id);
 
@@ -330,7 +330,7 @@ impl HostItemStack for PluginHostState {
         enchantment_id: String,
     ) -> wasmtime::Result<Option<u32>> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
 
         if let Some(NbtTag::Int(level)) =
             stack.get_custom_data("pumpkin:enchantments", &enchantment_id)
@@ -361,7 +361,7 @@ impl HostItemStack for PluginHostState {
         enchantment_id: String,
     ) -> wasmtime::Result<bool> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
 
         if stack.has_custom_data("pumpkin:enchantments", &enchantment_id) {
             return Ok(true);
@@ -386,7 +386,7 @@ impl HostItemStack for PluginHostState {
     ) -> wasmtime::Result<Vec<Resource<WitTextComponent>>> {
         let stack = self.get_item_stack(&res)?;
         let lines = {
-            let stack = stack.lock().await;
+            let stack = stack.lock();
             stack
                 .get_data_component::<LoreImpl>()
                 .map_or_else(Vec::new, |lore| lore.lines.clone())
@@ -408,7 +408,7 @@ impl HostItemStack for PluginHostState {
             .map(|line| text_component_from_resource(self, line))
             .collect();
         let stack = self.get_item_stack(&res)?;
-        stack.lock().await.set_lore(lore);
+        stack.lock().set_lore(lore);
         Ok(())
     }
 
@@ -419,7 +419,7 @@ impl HostItemStack for PluginHostState {
     ) -> wasmtime::Result<()> {
         let line = text_component_from_resource(self, &line);
         let stack = self.get_item_stack(&res)?;
-        stack.lock().await.add_lore(line);
+        stack.lock().add_lore(line);
         Ok(())
     }
 
@@ -428,7 +428,7 @@ impl HostItemStack for PluginHostState {
         res: Resource<ItemStackHandle>,
     ) -> wasmtime::Result<Option<Resource<WitTextComponent>>> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         if let Some((_, Some(data))) = stack
             .patch
             .iter()
@@ -446,7 +446,7 @@ impl HostItemStack for PluginHostState {
         name: Option<Resource<WitTextComponent>>,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         if let Some(name_res) = name {
             let name = text_component_from_resource(self, &name_res);
             if let Some((_, data)) = stack
@@ -477,7 +477,7 @@ impl HostItemStack for PluginHostState {
         value: WitNbtTree,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         let value = from_wit_nbt_tree(&value).map_err(wasmtime::Error::msg)?;
         stack.set_custom_data(&namespace, &key, value);
         Ok(())
@@ -490,7 +490,7 @@ impl HostItemStack for PluginHostState {
         key: String,
     ) -> wasmtime::Result<Option<WitNbtTree>> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         Ok(stack.get_custom_data(&namespace, &key).map(to_wit_nbt_tree))
     }
 
@@ -501,7 +501,7 @@ impl HostItemStack for PluginHostState {
         key: String,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         stack.remove_custom_data(&namespace, &key);
         Ok(())
     }
@@ -513,7 +513,7 @@ impl HostItemStack for PluginHostState {
         key: String,
     ) -> wasmtime::Result<bool> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         Ok(stack.has_custom_data(&namespace, &key))
     }
 
@@ -522,7 +522,7 @@ impl HostItemStack for PluginHostState {
         res: Resource<ItemStackHandle>,
     ) -> wasmtime::Result<Vec<WitDataComponentValue>> {
         let stack = self.get_item_stack(&res)?;
-        let stack = stack.lock().await;
+        let stack = stack.lock();
         let mut components = Vec::new();
         for (id, data) in &stack.patch {
             if let Some(data) = data {
@@ -545,7 +545,7 @@ impl HostItemStack for PluginHostState {
         value: Vec<u8>,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         let id = from_wit_data_component(component);
         let mut cursor = std::io::Cursor::new(value);
 
@@ -565,7 +565,7 @@ impl HostItemStack for PluginHostState {
         component: WitDataComponent,
     ) -> wasmtime::Result<()> {
         let stack = self.get_item_stack(&res)?;
-        let mut stack = stack.lock().await;
+        let mut stack = stack.lock();
         let id = from_wit_data_component(component);
         stack.patch.retain(|(pid, _)| *pid != id);
         Ok(())

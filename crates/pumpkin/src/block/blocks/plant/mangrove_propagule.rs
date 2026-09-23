@@ -14,8 +14,8 @@ use rand::RngExt;
 
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnPlaceArgs, RandomTickArgs,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    RandomTickArgs,
 };
 use crate::world::World;
 use crate::world::feature_placer::FeatureCache;
@@ -62,7 +62,7 @@ fn mangrove_feature(random: &mut RandomGenerator) -> ConfiguredFeature {
 /// feature, which for a propagule really can be water rather than air - the one case
 /// `plant/sapling.rs` documents as out of its reach. Both the clear and the tree are buffered in
 /// one [`FeatureCache`], so a feature that declines simply never commits.
-async fn grow_tree(world: &Arc<World>, pos: &BlockPos, waterlogged: bool) -> bool {
+fn grow_tree(world: &Arc<World>, pos: &BlockPos, waterlogged: bool) -> bool {
     let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
     let cleared = if waterlogged {
         Block::WATER.default_state.id
@@ -73,7 +73,7 @@ async fn grow_tree(world: &Arc<World>, pos: &BlockPos, waterlogged: bool) -> boo
     let mut cache = FeatureCache::new(world);
     cache.set_block(*pos, cleared);
     if cache.place(feature, *pos, &mut random) {
-        cache.commit().await
+        cache.commit()
     } else {
         false
     }
@@ -81,11 +81,11 @@ async fn grow_tree(world: &Arc<World>, pos: &BlockPos, waterlogged: bool) -> boo
 
 /// `SaplingBlock.advanceTree` (`SaplingBlock.java:51-57`): stage 0 only ticks the stage up; from
 /// stage 1 the tree grows. Fires `StructureGrowEvent` before advancing.
-async fn advance_tree(world: &Arc<World>, pos: &BlockPos, bone_meal: bool) {
+fn advance_tree(world: &Arc<World>, pos: &BlockPos, bone_meal: bool) {
     use crate::plugin::api::events::world::structure_grow::{StructureGrowEvent, TreeType};
     let mut event = StructureGrowEvent::new(*pos, TreeType::Mangrove, bone_meal);
     if let Some(server) = world.server.upgrade() {
-        server.plugin_manager.fire(&server, &mut event).await;
+        server.plugin_manager.fire_blocking(&server, &mut event);
         if event.cancelled {
             return;
         }
@@ -98,12 +98,10 @@ async fn advance_tree(world: &Arc<World>, pos: &BlockPos, bone_meal: bool) {
     let mut props = PropaguleProperties::from_state_id(state_id, block);
     if props.stage == 0 {
         props.stage = 1;
-        world
-            .set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
         return;
     }
-    grow_tree(world, pos, props.waterlogged).await;
+    grow_tree(world, pos, props.waterlogged);
 }
 
 /// `MangrovePropaguleBlock.mayPlaceOn` (non-hanging) / `canSurvive`'s hanging branch.
@@ -125,62 +123,53 @@ impl BlockBehaviour for MangrovePropaguleBlock {
     }
 
     /// `MangrovePropaguleBlock.getStateForPlacement`: `AGE = 4` (fully grown), not hanging.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = PropaguleProperties::default(args.block);
-            props.waterlogged = args.replacing.water_source();
-            props.age = 4;
-            props.hanging = false;
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = PropaguleProperties::default(args.block);
+        props.waterlogged = args.replacing.water_source();
+        props.age = 4;
+        props.hanging = false;
+        props.to_state_id(args.block)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = PropaguleProperties::from_state_id(args.state_id, args.block);
-            if props.waterlogged {
-                args.world.schedule_fluid_tick(
-                    &Fluid::WATER,
-                    *args.position,
-                    Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let props = PropaguleProperties::from_state_id(args.state_id, args.block);
+        if props.waterlogged {
+            args.world.schedule_fluid_tick(
+                &Fluid::WATER,
+                *args.position,
+                Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 
     /// `MangrovePropaguleBlock.randomTick` (`MangrovePropaguleBlock.java:104-113`). Note this
     /// override drops `SaplingBlock`'s brightness gate entirely: a standing propagule grows in
     /// the dark, unlike every other sapling.
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let (block, state_id) = args.world.get_block_and_state_id(args.position);
-            let mut props = PropaguleProperties::from_state_id(state_id, block);
-            if props.hanging {
-                if !is_fully_grown(props.age) {
-                    props.age += 1;
-                    args.world
-                        .set_block_state(
-                            args.position,
-                            props.to_state_id(block),
-                            BlockFlags::NOTIFY_LISTENERS,
-                        )
-                        .await;
-                }
-            } else if rand::rng().random_range(0..7) == 0 {
-                advance_tree(args.world, args.position, false).await;
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let (block, state_id) = args.world.get_block_and_state_id(args.position);
+        let mut props = PropaguleProperties::from_state_id(state_id, block);
+        if props.hanging {
+            if !is_fully_grown(props.age) {
+                props.age += 1;
+                args.world.set_block_state(
+                    args.position,
+                    props.to_state_id(block),
+                    BlockFlags::NOTIFY_LISTENERS,
+                );
             }
-        })
+        } else if rand::rng().random_range(0..7) == 0 {
+            advance_tree(args.world, args.position, false);
+        }
     }
 
     /// `MangrovePropaguleBlock.isValidBonemealTarget` (`MangrovePropaguleBlock.java:116-118`).
@@ -201,22 +190,18 @@ impl BlockBehaviour for MangrovePropaguleBlock {
     }
 
     /// `MangrovePropaguleBlock.performBonemeal` (`MangrovePropaguleBlock.java:126-132`).
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let mut props = PropaguleProperties::from_state_id(args.state_id, args.block);
-            if props.hanging && !is_fully_grown(props.age) {
-                props.age += 1;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
-            } else {
-                advance_tree(args.world, args.position, true).await;
-            }
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let mut props = PropaguleProperties::from_state_id(args.state_id, args.block);
+        if props.hanging && !is_fully_grown(props.age) {
+            props.age += 1;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
+        } else {
+            advance_tree(args.world, args.position, true);
+        }
     }
 }
 

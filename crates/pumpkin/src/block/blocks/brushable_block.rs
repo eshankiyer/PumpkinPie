@@ -7,8 +7,7 @@ use pumpkin_world::tick::TickPriority;
 
 use crate::block::entities::brushable_block::BrushableBlockBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs, OnScheduledTickArgs,
-    PlacedArgs,
+    BlockBehaviour, BlockMetadata, BrokenArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
 };
 
 pub struct BrushableBlock;
@@ -38,49 +37,41 @@ pub fn brush_sound(block: &Block) -> Sound {
 }
 
 impl BlockBehaviour for BrushableBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = SuspiciousSandLikeProperties::default(args.block);
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let props = SuspiciousSandLikeProperties::default(args.block);
+        props.to_state_id(args.block)
     }
 
     /// `BrushableBlock.onPlace` (`BrushableBlock.java:62-65`) schedules the tick that
     /// drives `checkReset`.
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = BrushableBlockBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(entity));
-            args.world.schedule_block_tick(
-                args.block,
-                *args.position,
-                TICK_DELAY,
-                TickPriority::Normal,
-            );
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = BrushableBlockBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(entity));
+        args.world.schedule_block_tick(
+            args.block,
+            *args.position,
+            TICK_DELAY,
+            TickPriority::Normal,
+        );
     }
 
     /// `BrushableBlock.tick` (`BrushableBlock.java:82-92`). The `Fallable` half of the
     /// vanilla tick (turning into a `FallingBlockEntity` over air) is not modelled here.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(be) = args.world.get_block_entity(args.position)
-                && let Some(brush_be) = be.as_any().downcast_ref::<BrushableBlockBlockEntity>()
-            {
-                let game_time = args.world.get_world_age().await;
-                brush_be.check_reset(args.world, game_time).await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        if let Some(be) = args.world.get_block_entity(args.position)
+            && let Some(brush_be) = be.as_any().downcast_ref::<BrushableBlockBlockEntity>()
+        {
+            let game_time = args.world.get_world_age();
+            brush_be.check_reset(args.world, game_time);
+        }
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(be) = args.world.get_block_entity(args.position)
-                && let Some(brush_be) = be.as_any().downcast_ref::<BrushableBlockBlockEntity>()
-                && let Some(contained) = brush_be.take_item().await
-            {
-                args.world.drop_stack(args.position, contained).await;
-            }
-        })
+    fn broken(&self, args: BrokenArgs<'_>) {
+        if let Some(be) = args.world.get_block_entity(args.position)
+            && let Some(brush_be) = be.as_any().downcast_ref::<BrushableBlockBlockEntity>()
+            && let Some(contained) = brush_be.take_item()
+        {
+            args.world.drop_stack(args.position, contained);
+        }
     }
 }

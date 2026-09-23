@@ -15,8 +15,7 @@ impl BedrockClient {
                 self.kick(
                     DisconnectReason::ResourcePackProblem,
                     "You must accept resource packs to join this server.".into(),
-                )
-                .await;
+                );
             }
             SResourcePackClientResponse::STATUS_SEND_PACKS => {
                 debug!("Bedrock: SResourcePackResponse::STATUS_SEND_PACKS");
@@ -64,14 +63,12 @@ impl BedrockClient {
                     tracing::error!(
                         "Got SResourcePackResponse::STATUS_COMPLETED before authentication was completed."
                     );
-                    self.kick(DisconnectReason::Disconnected, String::new())
-                        .await;
+                    self.kick(DisconnectReason::Disconnected, String::new());
                 }
             }
             _ => {
                 tracing::error!("Bedrock: SResourcePackResponse bad response type");
-                self.kick(DisconnectReason::Disconnected, String::new())
-                    .await;
+                self.kick(DisconnectReason::Disconnected, String::new());
             }
         }
     }

@@ -111,7 +111,7 @@ async fn main() {
         }
     });
 
-    let pumpkin_server = PumpkinServer::new(config.basic, config.advanced, vanilla_data).await;
+    let pumpkin_server = PumpkinServer::new(config.basic, config.advanced, vanilla_data);
     let plugin_wait_time = pumpkin_server.init_plugins().await;
 
     let time_elapsed = time.elapsed().saturating_sub(plugin_wait_time);
@@ -161,7 +161,7 @@ async fn main() {
         }
     );
 
-    pumpkin_server.start().await;
+    pumpkin_server.start();
 
     info!(
         "{}",

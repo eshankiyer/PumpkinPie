@@ -17,8 +17,7 @@ const BONEMEAL_SUCCESS_CHANCE: f32 = 0.45;
 
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    RandomTickArgs,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, RandomTickArgs,
 };
 use crate::plugin::api::events::world::structure_grow::{StructureGrowEvent, TreeType};
 use crate::world::World;
@@ -217,7 +216,7 @@ fn has_flowers(world: &World, pos: &BlockPos) -> bool {
 ///
 /// Divergence: vanilla replaces the sapling with `getFluidState(pos).createLegacyBlock()`, which
 /// only differs from air for a waterlogged propagule, and propagules are not grown here.
-async fn grow_tree(world: &Arc<World>, pos: &BlockPos, block: &Block) -> bool {
+fn grow_tree(world: &Arc<World>, pos: &BlockPos, block: &Block) -> bool {
     let Some(grower) = grower_for(block) else {
         return false;
     };
@@ -236,7 +235,7 @@ async fn grow_tree(world: &Arc<World>, pos: &BlockPos, block: &Block) -> bool {
                 }
                 let base = pos.offset(Vector3::new(dx, 0, dz));
                 if cache.place(mega, base, &mut random) {
-                    return cache.commit().await;
+                    return cache.commit();
                 }
                 return false;
             }
@@ -249,7 +248,7 @@ async fn grow_tree(world: &Arc<World>, pos: &BlockPos, block: &Block) -> bool {
     let mut cache = FeatureCache::new(world);
     cache.set_block(*pos, air);
     if cache.place(feature, *pos, &mut random) {
-        cache.commit().await
+        cache.commit()
     } else {
         false
     }
@@ -277,7 +276,7 @@ impl SaplingBlock {
     /// from stage 1 the tree grows. Blocks without a `stage` property (the azaleas) grow straight
     /// away. `StructureGrowEvent` fires only when a tree is actually about to grow, and a
     /// cancelled event leaves the sapling untouched.
-    pub async fn advance_tree(
+    pub fn advance_tree(
         world: &Arc<World>,
         pos: &BlockPos,
         block: &Block,
@@ -286,22 +285,20 @@ impl SaplingBlock {
     ) {
         if stage_of(block, state_id) == Some(0) {
             if let Some(new_state_id) = with_stage(block, state_id, "1") {
-                world
-                    .set_block_state(pos, new_state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
+                world.set_block_state(pos, new_state_id, BlockFlags::NOTIFY_ALL);
             }
             return;
         }
 
         let mut event = StructureGrowEvent::new(*pos, Self::get_tree_type(block), bone_meal);
         if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire(&server, &mut event).await;
+            server.plugin_manager.fire_blocking(&server, &mut event);
         }
         if event.cancelled {
             return;
         }
 
-        grow_tree(world, pos, block).await;
+        grow_tree(world, pos, block);
     }
 }
 
@@ -310,32 +307,27 @@ impl BlockBehaviour for SaplingBlock {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !has_enough_light(args.world.get_raw_brightness(&args.position.up(), 0)) {
-                return;
-            }
-            if rand::rng().random_range(0..7) != 0 {
-                return;
-            }
-            let (block, state_id) = args.world.get_block_and_state_id(args.position);
-            Self::advance_tree(args.world, args.position, block, state_id, false).await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if !has_enough_light(args.world.get_raw_brightness(&args.position.up(), 0)) {
+            return;
+        }
+        if rand::rng().random_range(0..7) != 0 {
+            return;
+        }
+        let (block, state_id) = args.world.get_block_and_state_id(args.position);
+        Self::advance_tree(args.world, args.position, block, state_id, false);
     }
 
     /// `SaplingBlock.isValidBonemealTarget` (`SaplingBlock.java:59-67`) checks that the column up
@@ -356,10 +348,8 @@ impl BlockBehaviour for SaplingBlock {
     }
 
     /// `SaplingBlock.performBonemeal` (`SaplingBlock.java:74-77`).
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            Self::advance_tree(args.world, args.position, args.block, args.state_id, true).await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        Self::advance_tree(args.world, args.position, args.block, args.state_id, true);
     }
 }
 

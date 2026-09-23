@@ -12,7 +12,7 @@ impl JavaClient {
         player.update_last_action_time();
         let slot = held.slot;
         if !(0..=8).contains(&slot) {
-            self.kick(TextComponent::text("Invalid held slot")).await;
+            self.kick(TextComponent::text("Invalid held slot"));
             return;
         }
         let slot = slot as u8;
@@ -31,7 +31,7 @@ impl JavaClient {
 
         let inv = player.inventory();
         inv.set_selected_slot(slot);
-        let stack = inv.held_item().await;
+        let stack = inv.held_item();
         let equipment = &[(EquipmentSlot::MAIN_HAND, stack)];
         player.living_entity.send_equipment_changes(equipment);
     }

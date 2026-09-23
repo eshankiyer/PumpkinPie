@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -43,100 +42,99 @@ impl ItemMetadata for ItemFrameItem {
 
 impl ItemBehaviour for ItemFrameItem {
     /// `HangingEntityItem.useOn` (`HangingEntityItem.java:34-77`).
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let target = BlockPos(location.0 + face.to_offset());
-            // `ItemFrameItem.mayPlace` overrides `HangingEntityItem.mayPlace` and checks
-            // `isInsideBuildHeight(blockPos)` without rejecting vertical directions.
-            let world = player.world();
-            if !world.is_in_height_limit(target.0.y) {
-                return;
-            }
-            // `ItemFrameItem.mayPlace` delegates to `Player.mayUseItemAt`
-            // (`ItemFrameItem.java:14-17`).
-            if !player.may_use_item_at(&target, face, item).await {
-                return;
-            }
+        _block: &Block,
+        _server: &Server,
+    ) {
+        let target = BlockPos(location.0 + face.to_offset());
+        // `ItemFrameItem.mayPlace` overrides `HangingEntityItem.mayPlace` and checks
+        // `isInsideBuildHeight(blockPos)` without rejecting vertical directions.
+        let world = player.world();
+        if !world.is_in_height_limit(target.0.y) {
+            return;
+        }
+        // `ItemFrameItem.mayPlace` delegates to `Player.mayUseItemAt`
+        // (`ItemFrameItem.java:14-17`).
+        if !player.may_use_item_at(&target, face, item) {
+            return;
+        }
 
-            // `Vec3.atCenterOf(blockPos).relative(direction, -0.46875)` (line 116).
-            let offset = face.to_offset();
-            let position = Vector3::new(
-                f64::from(target.0.x) + 0.5 - f64::from(offset.x) * 0.46875,
-                f64::from(target.0.y) + 0.5 - f64::from(offset.y) * 0.46875,
-                f64::from(target.0.z) + 0.5 - f64::from(offset.z) * 0.46875,
+        // `Vec3.atCenterOf(blockPos).relative(direction, -0.46875)` (line 116).
+        let offset = face.to_offset();
+        let position = Vector3::new(
+            f64::from(target.0.x) + 0.5 - f64::from(offset.x) * 0.46875,
+            f64::from(target.0.y) + 0.5 - f64::from(offset.y) * 0.46875,
+            f64::from(target.0.z) + 0.5 - f64::from(offset.z) * 0.46875,
+        );
+
+        let pop_box = ItemFrameEntity::pop_box(position, face);
+        // `HangingEntity.hasLevelCollision` (`HangingEntity.java:107-110`).
+        let inside_border = {
+            let border = world
+                .worldborder
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            border.contains(pop_box.min.x, pop_box.min.z)
+                && border.contains(pop_box.max.x - 1.0e-5, pop_box.max.z - 1.0e-5)
+        };
+        if !inside_border {
+            return;
+        }
+        if !world.is_space_empty(pop_box) {
+            return;
+        }
+        // `HangingEntity.canCoexist` (`HangingEntity.java:98-105`): only other hanging
+        // entities (frames, glow frames, paintings) can block a placement -- unlike
+        // `is_space_empty`, this must not reject the placing player standing in the box.
+        let blocked_by_hanging_entity = world.get_entities_at_box(&pop_box).iter().any(|e| {
+            let entity = e.get_entity();
+            let is_hanging_entity = entity.entity_type == &EntityType::ITEM_FRAME
+                || entity.entity_type == &EntityType::GLOW_ITEM_FRAME
+                || entity.entity_type == &EntityType::PAINTING;
+            is_hanging_entity && entity.data.load(Ordering::Relaxed) == i32::from(face.to_index())
+        });
+        if blocked_by_hanging_entity {
+            return;
+        }
+
+        let entity_type = Self::entity_type(item.item);
+        let entity = Entity::new(world.clone(), position, entity_type);
+        let frame = ItemFrameEntity::new(entity);
+        frame.set_facing(face);
+
+        // `HangingEntity.survives` (`HangingEntity.java:82-92`): support-block check.
+        if !frame.survives() {
+            return;
+        }
+
+        let is_glow = entity_type == &EntityType::GLOW_ITEM_FRAME;
+        world.play_sound(
+            if is_glow {
+                Sound::EntityGlowItemFramePlace
+            } else {
+                Sound::EntityItemFramePlace
+            },
+            SoundCategory::Blocks,
+            &position,
+        );
+
+        if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+            emit_game_event(
+                &world,
+                GameEvent::EntityPlace,
+                position,
+                GameEventContext::of_entity(player_arc),
             );
+        }
 
-            let pop_box = ItemFrameEntity::pop_box(position, face);
-            // `HangingEntity.hasLevelCollision` (`HangingEntity.java:107-110`).
-            let inside_border = {
-                let border = world.worldborder.lock().await;
-                border.contains(pop_box.min.x, pop_box.min.z)
-                    && border.contains(pop_box.max.x - 1.0e-5, pop_box.max.z - 1.0e-5)
-            };
-            if !inside_border {
-                return;
-            }
-            if !world.is_space_empty(pop_box) {
-                return;
-            }
-            // `HangingEntity.canCoexist` (`HangingEntity.java:98-105`): only other hanging
-            // entities (frames, glow frames, paintings) can block a placement -- unlike
-            // `is_space_empty`, this must not reject the placing player standing in the box.
-            let blocked_by_hanging_entity = world.get_entities_at_box(&pop_box).iter().any(|e| {
-                let entity = e.get_entity();
-                let is_hanging_entity = entity.entity_type == &EntityType::ITEM_FRAME
-                    || entity.entity_type == &EntityType::GLOW_ITEM_FRAME
-                    || entity.entity_type == &EntityType::PAINTING;
-                is_hanging_entity
-                    && entity.data.load(Ordering::Relaxed) == i32::from(face.to_index())
-            });
-            if blocked_by_hanging_entity {
-                return;
-            }
-
-            let entity_type = Self::entity_type(item.item);
-            let entity = Entity::new(world.clone(), position, entity_type);
-            let frame = ItemFrameEntity::new(entity);
-            frame.set_facing(face);
-
-            // `HangingEntity.survives` (`HangingEntity.java:82-92`): support-block check.
-            if !frame.survives() {
-                return;
-            }
-
-            let is_glow = entity_type == &EntityType::GLOW_ITEM_FRAME;
-            world.play_sound(
-                if is_glow {
-                    Sound::EntityGlowItemFramePlace
-                } else {
-                    Sound::EntityItemFramePlace
-                },
-                SoundCategory::Blocks,
-                &position,
-            );
-
-            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                emit_game_event(
-                    &world,
-                    GameEvent::EntityPlace,
-                    position,
-                    GameEventContext::of_entity(player_arc),
-                )
-                .await;
-            }
-
-            world.spawn_entity(Arc::new(frame)).await;
-            item.decrement_unless_creative(player.gamemode.load(), 1);
-        })
+        world.spawn_entity(Arc::new(frame));
+        item.decrement_unless_creative(player.gamemode.load(), 1);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

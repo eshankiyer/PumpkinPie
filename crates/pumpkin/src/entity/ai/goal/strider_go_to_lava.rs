@@ -1,9 +1,8 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle};
+use super::{Controls, Goal, ParentHandle};
 use crate::entity::mob::Mob;
 use crate::world::World;
 use pumpkin_data::Block;
@@ -45,36 +44,32 @@ impl StriderGoToLavaGoal {
 }
 
 impl Goal for StriderGoToLavaGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if Self::in_lava(mob) {
-                return false;
-            }
-            self.move_to_target_pos_goal.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if Self::in_lava(mob) {
+            return false;
+        }
+        self.move_to_target_pos_goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if Self::in_lava(mob) {
-                return false;
-            }
-            let world = mob.get_entity().world.load_full();
-            let target = self.move_to_target_pos_goal.target_pos;
-            Self::is_target_valid(&world, target)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        if Self::in_lava(mob) {
+            return false;
+        }
+        let world = mob.get_entity().world.load_full();
+        let target = self.move_to_target_pos_goal.target_pos;
+        Self::is_target_valid(&world, target)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.start(mob).await })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.stop(mob).await })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.tick(mob).await })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.tick(mob)
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -87,11 +82,7 @@ impl Goal for StriderGoToLavaGoal {
 }
 
 impl MoveToTargetPos for StriderGoToLavaGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move { Self::is_target_valid(&world, block_pos) })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        Self::is_target_valid(&world, block_pos)
     }
 }

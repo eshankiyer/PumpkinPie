@@ -22,41 +22,33 @@ const SAVE_FAILED_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
 struct SaveAllExecutor;
 
 impl CommandExecutor for SaveAllExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SAVE_SAVING,
-                        translation::bedrock::COMMANDS_SAVE_START,
-                        [],
-                    ),
-                    false,
-                )
-                .await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SAVE_SAVING,
+                translation::bedrock::COMMANDS_SAVE_START,
+                [],
+            ),
+            false,
+        );
 
-            let server = context.server();
+        let server = context.server();
 
-            if let Err(err) = server.save_all().await {
-                error!("Failed to save server data: {err}");
-                return Err(SAVE_FAILED_ERROR_TYPE.create_without_context());
-            }
+        if let Err(err) = server.save_all().await {
+            error!("Failed to save server data: {err}");
+            return Err(SAVE_FAILED_ERROR_TYPE.create_without_context());
+        }
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SAVE_SUCCESS,
-                        translation::bedrock::COMMANDS_SAVE_SUCCESS,
-                        [],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SAVE_SUCCESS,
+                translation::bedrock::COMMANDS_SAVE_SUCCESS,
+                [],
+            ),
+            true,
+        );
 
-            Ok(1)
-        })
+        Ok(1)
     }
 }
 

@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
-    player::Player,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity, player::Player,
 };
 use crate::server::Server;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -26,7 +25,7 @@ use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 /// An item frame or glow item frame.
 ///
@@ -166,11 +165,9 @@ impl ItemFrameEntity {
 
     /// Vanilla `level.updateNeighbourForOutputSignal(pos, Blocks.AIR)`, run by
     /// `setItem`/`setRotation` so an attached comparator re-reads the frame.
-    async fn update_output_signal(&self) {
+    fn update_output_signal(&self) {
         let world = self.entity.world.load();
-        world
-            .update_comparators(&self.entity.block_pos.load(), &Block::AIR)
-            .await;
+        world.update_comparators(&self.entity.block_pos.load(), &Block::AIR);
     }
 
     fn sync_item(&self, stack: &ItemStack) {
@@ -196,13 +193,16 @@ impl ItemFrameEntity {
     }
 
     /// Vanilla `ItemFrame.setItem`: the frame only ever holds a single item.
-    async fn set_item(&self, stack: ItemStack) {
+    fn set_item(&self, stack: ItemStack) {
         let stack = if stack.is_empty() {
             ItemStack::EMPTY.clone()
         } else {
             stack.copy_with_count(1)
         };
-        *self.item_stack.lock().await = stack.clone();
+        *self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack.clone();
         // `ItemFrame.onItemChanged` (`ItemFrame.java:307-309`) recalculates the hitbox because a
         // map expands the frame from 0.75x0.75 to 1x1.
         self.recalculate_bounding_box(stack.get_data_component::<MapIdImpl>().is_some());
@@ -213,15 +213,15 @@ impl ItemFrameEntity {
                 Sound::EntityGlowItemFrameAddItem,
             );
         }
-        self.update_output_signal().await;
+        self.update_output_signal();
     }
 
     /// Vanilla `ItemFrame.setRotation`, always reduced modulo 8.
-    async fn set_rotation(&self, rotation: u8) {
+    fn set_rotation(&self, rotation: u8) {
         let rotation = rotation % 8;
         self.rotation.store(rotation, Ordering::Relaxed);
         self.sync_rotation(rotation);
-        self.update_output_signal().await;
+        self.update_output_signal();
     }
 
     /// Vanilla `ItemFrame.survives`: fixed frames survive unconditionally; otherwise the
@@ -268,8 +268,13 @@ impl ItemFrameEntity {
     /// The comparator signal this frame produces.
     ///
     /// Vanilla: `getItem().isEmpty() ? 0 : getRotation() % 8 + 1`.
-    pub async fn get_analog_output(&self) -> u8 {
-        if self.item_stack.lock().await.is_empty() {
+    pub fn get_analog_output(&self) -> u8 {
+        if self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
             0
         } else {
             self.rotation.load(Ordering::Relaxed) % 8 + 1
@@ -278,18 +283,23 @@ impl ItemFrameEntity {
 
     /// Vanilla `ItemFrame.dropItem`; spawning depends on the `entity_drops`
     /// game rule and whether the causer is a creative-mode player.
-    async fn drop_item(&self, causer: Option<&dyn EntityBase>, with_frame: bool) {
+    fn drop_item(&self, causer: Option<&dyn EntityBase>, with_frame: bool) {
         if self.fixed.load(Ordering::Relaxed) {
             return;
         }
 
-        let item_stack =
-            std::mem::replace(&mut *self.item_stack.lock().await, ItemStack::EMPTY.clone());
+        let item_stack = std::mem::replace(
+            &mut *self
+                .item_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            ItemStack::EMPTY.clone(),
+        );
         if !item_stack.is_empty() {
             // Vanilla clears the slot through setItem, so the emptied frame is
             // both re-rendered and re-read by any attached comparator.
             self.sync_item(ItemStack::EMPTY);
-            self.update_output_signal().await;
+            self.update_output_signal();
         }
 
         let world = self.entity.world.load();
@@ -305,81 +315,79 @@ impl ItemFrameEntity {
 
         let pos = self.entity.block_pos.load();
         if with_frame {
-            world
-                .drop_stack(&pos, ItemStack::new(1, Self::frame_item(self.is_glow())))
-                .await;
+            world.drop_stack(&pos, ItemStack::new(1, Self::frame_item(self.is_glow())));
         }
         if !item_stack.is_empty() && rand::rng().random::<f32>() < self.item_drop_chance.load() {
-            world.drop_stack(&pos, item_stack).await;
+            world.drop_stack(&pos, item_stack);
         }
     }
 
     /// Vanilla `ItemFrame.hurtServer`/`dropItem`/`interact` all fire
     /// `GameEvent.BLOCK_CHANGE`, attributed to whoever caused the change.
-    async fn emit_block_change(&self, causer: Option<Arc<dyn EntityBase>>) {
+    fn emit_block_change(&self, causer: Option<Arc<dyn EntityBase>>) {
         emit_game_event(
             &self.entity.world.load(),
             GameEvent::BlockChange,
             self.entity.pos.load(),
             causer.map_or_else(GameEventContext::none, GameEventContext::of_entity),
-        )
-        .await;
+        );
     }
 }
 
 impl NBTStorage for ItemFrameEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.write_nbt(nbt).await;
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.write_nbt(nbt);
 
-            let item = self.item_stack.lock().await;
-            if !item.is_empty() {
-                let mut item_compound = NbtCompound::new();
-                item.write_item_stack(&mut item_compound);
-                nbt.put_compound("Item", item_compound);
-                nbt.put_float("ItemDropChance", self.item_drop_chance.load());
-            }
-            nbt.put_byte("ItemRotation", self.rotation.load(Ordering::Relaxed) as i8);
-            nbt.put_byte("Facing", self.facing.load(Ordering::Relaxed) as i8);
-            nbt.put_bool("Invisible", self.entity.invisible.load(Ordering::Relaxed));
-            nbt.put_bool("Fixed", self.fixed.load(Ordering::Relaxed));
-        })
+        let item = self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !item.is_empty() {
+            let mut item_compound = NbtCompound::new();
+            item.write_item_stack(&mut item_compound);
+            nbt.put_compound("Item", item_compound);
+            nbt.put_float("ItemDropChance", self.item_drop_chance.load());
+        }
+        nbt.put_byte("ItemRotation", self.rotation.load(Ordering::Relaxed) as i8);
+        nbt.put_byte("Facing", self.facing.load(Ordering::Relaxed) as i8);
+        nbt.put_bool("Invisible", self.entity.invisible.load(Ordering::Relaxed));
+        nbt.put_bool("Fixed", self.fixed.load(Ordering::Relaxed));
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.read_nbt_non_mut(nbt).await;
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.read_nbt_non_mut(nbt);
 
-            if let Some(item_compound) = nbt.get_compound("Item")
-                && let Some(stack) = ItemStack::read_item_stack(item_compound)
-            {
-                *self.item_stack.lock().await = stack;
-            }
-            let has_framed_map = self
+        if let Some(item_compound) = nbt.get_compound("Item")
+            && let Some(stack) = ItemStack::read_item_stack(item_compound)
+        {
+            *self
                 .item_stack
                 .lock()
-                .await
-                .get_data_component::<MapIdImpl>()
-                .is_some();
-            self.rotation.store(
-                (nbt.get_byte("ItemRotation").unwrap_or(0) as u8) % 8,
-                Ordering::Relaxed,
-            );
-            let facing = nbt.get_byte("Facing").unwrap_or(0) as u8 % 6;
-            self.facing.store(facing, Ordering::Relaxed);
-            // The spawn packet's data field carries the frame's direction.
-            self.entity.data.store(i32::from(facing), Ordering::Relaxed);
-            self.recalculate_bounding_box(has_framed_map);
-            self.item_drop_chance
-                .store(nbt.get_float("ItemDropChance").unwrap_or(1.0));
-            // `setInvisible` is `Entity.setSharedFlag(FLAG_INVISIBLE)`, so this has
-            // to go through the shared-flags metadata or the frame still renders.
-            self.entity
-                .set_invisible(nbt.get_bool("Invisible").unwrap_or(false))
-                .await;
-            self.fixed
-                .store(nbt.get_bool("Fixed").unwrap_or(false), Ordering::Relaxed);
-        })
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+        }
+        let has_framed_map = self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_data_component::<MapIdImpl>()
+            .is_some();
+        self.rotation.store(
+            (nbt.get_byte("ItemRotation").unwrap_or(0) as u8) % 8,
+            Ordering::Relaxed,
+        );
+        let facing = nbt.get_byte("Facing").unwrap_or(0) as u8 % 6;
+        self.facing.store(facing, Ordering::Relaxed);
+        // The spawn packet's data field carries the frame's direction.
+        self.entity.data.store(i32::from(facing), Ordering::Relaxed);
+        self.recalculate_bounding_box(has_framed_map);
+        self.item_drop_chance
+            .store(nbt.get_float("ItemDropChance").unwrap_or(1.0));
+        // `setInvisible` is `Entity.setSharedFlag(FLAG_INVISIBLE)`, so this has
+        // to go through the shared-flags metadata or the frame still renders.
+        self.entity
+            .set_invisible(nbt.get_bool("Invisible").unwrap_or(false));
+        self.fixed
+            .store(nbt.get_bool("Fixed").unwrap_or(false), Ordering::Relaxed);
     }
 }
 
@@ -398,91 +406,88 @@ impl EntityBase for ItemFrameEntity {
 
     /// Vanilla `ItemFrame.getPickResult` (`ItemFrame.java:413-416`) returns the displayed item,
     /// or the matching frame item when the frame is empty.
-    fn get_pick_result(&self) -> EntityBaseFuture<'_, Option<ItemStack>> {
-        Box::pin(async move {
-            let item = self.item_stack.lock().await;
-            if item.is_empty() {
-                Some(ItemStack::new(1, Self::frame_item(self.is_glow())))
-            } else {
-                Some(item.clone())
-            }
-        })
+    fn get_pick_result(&self) -> Option<ItemStack> {
+        let item = self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if item.is_empty() {
+            Some(ItemStack::new(1, Self::frame_item(self.is_glow())))
+        } else {
+            Some(item.clone())
+        }
     }
 
     /// `ItemFrame.move` (`ItemFrame.java:140-145`): fixed frames ignore entity
     /// movement, including movement caused by a piston.
-    fn move_entity<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        motion: Vector3<f64>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.fixed.load(Ordering::Relaxed) {
-                self.entity.move_entity(caller, motion).await;
-            }
-        })
+    fn move_entity(&self, caller: &Arc<dyn EntityBase>, motion: Vector3<f64>) {
+        if !self.fixed.load(Ordering::Relaxed) {
+            self.entity.move_entity(caller, motion);
+        }
     }
 
-    fn damage_with_context<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         _amount: f32,
         damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let causer = cause.or(source);
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        let causer = cause.or(source);
 
-            // ItemFrame.canHurtWhenFixed: a fixed frame can only be hit by
-            // damage that bypasses invulnerability, or a creative player.
-            let can_hurt_when_fixed = damage_type
-                .has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY)
-                || causer
-                    .and_then(EntityBase::get_player)
-                    .is_some_and(|player| player.gamemode.load() == GameMode::Creative);
-            if self.fixed.load(Ordering::Relaxed) && !can_hurt_when_fixed {
-                return false;
-            }
+        // ItemFrame.canHurtWhenFixed: a fixed frame can only be hit by
+        // damage that bypasses invulnerability, or a creative player.
+        let can_hurt_when_fixed = damage_type
+            .has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY)
+            || causer
+                .and_then(EntityBase::get_player)
+                .is_some_and(|player| player.gamemode.load() == GameMode::Creative);
+        if self.fixed.load(Ordering::Relaxed) && !can_hurt_when_fixed {
+            return false;
+        }
 
-            if !self.fixed.load(Ordering::Relaxed)
-                && self.entity.is_invulnerable_to(&damage_type).await
-            {
-                return false;
-            }
+        if !self.fixed.load(Ordering::Relaxed) && self.entity.is_invulnerable_to(&damage_type) {
+            return false;
+        }
 
-            // ItemFrame.shouldDamageDropItem: non-explosion damage against a
-            // frame currently holding an item only pops the item -- the frame
-            // itself survives.
-            let holds_item = !self.item_stack.lock().await.is_empty();
-            let is_explosion = damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_EXPLOSION);
-            if !self.fixed.load(Ordering::Relaxed) && !is_explosion && holds_item {
-                self.drop_item(causer, false).await;
-                self.emit_block_change(None).await;
-                self.play_frame_sound(
-                    Sound::EntityItemFrameRemoveItem,
-                    Sound::EntityGlowItemFrameRemoveItem,
-                );
-                return true;
-            }
+        // ItemFrame.shouldDamageDropItem: non-explosion damage against a
+        // frame currently holding an item only pops the item -- the frame
+        // itself survives.
+        let holds_item = !self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty();
+        let is_explosion = damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_EXPLOSION);
+        if !self.fixed.load(Ordering::Relaxed) && !is_explosion && holds_item {
+            self.drop_item(causer, false);
+            self.emit_block_change(None);
+            self.play_frame_sound(
+                Sound::EntityItemFrameRemoveItem,
+                Sound::EntityGlowItemFrameRemoveItem,
+            );
+            return true;
+        }
 
-            // Otherwise the frame itself breaks: drop the frame item (and the
-            // displayed item, if any), matching ItemFrame.dropItem.
-            self.drop_item(causer, true).await;
-            self.emit_block_change(None).await;
-            self.play_frame_sound(Sound::EntityItemFrameBreak, Sound::EntityGlowItemFrameBreak);
-            self.entity.remove().await;
-            true
-        })
+        // Otherwise the frame itself breaks: drop the frame item (and the
+        // displayed item, if any), matching ItemFrame.dropItem.
+        self.drop_item(causer, true);
+        self.emit_block_change(None);
+        self.play_frame_sound(Sound::EntityItemFrameBreak, Sound::EntityGlowItemFrameBreak);
+        self.entity.remove();
+        true
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {
-            let stack = self.item_stack.lock().await.clone();
-            self.sync_item(&stack);
-            self.sync_rotation(self.rotation.load(Ordering::Relaxed));
-        })
+    fn init_data_tracker(&self) {
+        let stack = self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        self.sync_item(&stack);
+        self.sync_rotation(self.rotation.load(Ordering::Relaxed));
     }
 
     /// The frame's item and rotation have to reach the client together with the spawn
@@ -500,8 +505,12 @@ impl EntityBase for ItemFrameEntity {
 
             let ver = client.version.load();
             if ver >= CURRENT_MC_VERSION {
-                let item_serializer =
-                    ItemStackSerializer::from(self.item_stack.lock().await.clone());
+                let item_serializer = ItemStackSerializer::from(
+                    self.item_stack
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone(),
+                );
                 let rotation = VarInt(i32::from(self.rotation.load(Ordering::Relaxed) % 8));
 
                 let mut data = Vec::new();
@@ -528,62 +537,54 @@ impl EntityBase for ItemFrameEntity {
 
     /// Vanilla `ItemFrame.interact`: an empty frame takes the held item, an
     /// occupied one steps the displayed rotation through its eight positions.
-    fn interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if self.fixed.load(Ordering::Relaxed) {
-                return false;
-            }
+    fn interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if self.fixed.load(Ordering::Relaxed) {
+            return false;
+        }
 
-            let causer = Some(player.clone() as Arc<dyn EntityBase>);
-            if !self.item_stack.lock().await.is_empty() {
-                self.play_frame_sound(
-                    Sound::EntityItemFrameRotateItem,
-                    Sound::EntityGlowItemFrameRotateItem,
-                );
-                self.set_rotation(self.rotation.load(Ordering::Relaxed).wrapping_add(1))
-                    .await;
-                self.emit_block_change(causer).await;
-                return true;
-            }
+        let causer = Some(player.clone() as Arc<dyn EntityBase>);
+        if !self
+            .item_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
+            self.play_frame_sound(
+                Sound::EntityItemFrameRotateItem,
+                Sound::EntityGlowItemFrameRotateItem,
+            );
+            self.set_rotation(self.rotation.load(Ordering::Relaxed).wrapping_add(1));
+            self.emit_block_change(causer);
+            return true;
+        }
 
-            if item_stack.is_empty() || self.entity.removed.load(Ordering::Relaxed) {
-                return false;
-            }
+        if item_stack.is_empty() || self.entity.removed.load(Ordering::Relaxed) {
+            return false;
+        }
 
-            self.set_item(item_stack.clone()).await;
-            self.emit_block_change(causer).await;
-            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-            true
-        })
+        self.set_item(item_stack.clone());
+        self.emit_block_change(causer);
+        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        true
     }
 
     /// `BlockAttachedEntity.tick`: drop the frame once its support is gone.
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.tick(caller, server).await;
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        self.entity.tick(caller, server);
 
-            if self.check_interval.fetch_add(1, Ordering::Relaxed) < 100 {
-                return;
-            }
-            self.check_interval.store(0, Ordering::Relaxed);
+        if self.check_interval.fetch_add(1, Ordering::Relaxed) < 100 {
+            return;
+        }
+        self.check_interval.store(0, Ordering::Relaxed);
 
-            if self.entity.removed.load(Ordering::Relaxed) || self.survives() {
-                return;
-            }
+        if self.entity.removed.load(Ordering::Relaxed) || self.survives() {
+            return;
+        }
 
-            self.entity.remove().await;
-            self.play_frame_sound(Sound::EntityItemFrameBreak, Sound::EntityGlowItemFrameBreak);
-            self.drop_item(None, true).await;
-            self.emit_block_change(None).await;
-        })
+        self.entity.remove();
+        self.play_frame_sound(Sound::EntityItemFrameBreak, Sound::EntityGlowItemFrameBreak);
+        self.drop_item(None, true);
+        self.emit_block_change(None);
     }
 
     fn as_nbt_storage(&self) -> &dyn NBTStorage {

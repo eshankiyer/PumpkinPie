@@ -29,7 +29,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::nbt_compress::{read_gzip_compound_tag, write_gzip_compound_tag};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -342,7 +342,7 @@ fn nearby_players(world: &Arc<World>, pos: &BlockPos) -> Vec<Arc<Player>> {
 ///
 /// Returns the new shared warning level, or `None` when no warning was issued (a warden is
 /// already nearby, or some nearby player is still inside the 200-tick cooldown).
-pub async fn try_warn(world: &Arc<World>, pos: &BlockPos, trigger: &Arc<Player>) -> Option<i32> {
+pub fn try_warn(world: &Arc<World>, pos: &BlockPos, trigger: &Arc<Player>) -> Option<i32> {
     if has_nearby_warden(world, pos) {
         return None;
     }
@@ -355,8 +355,14 @@ pub async fn try_warn(world: &Arc<World>, pos: &BlockPos, trigger: &Arc<Player>)
         players.push(trigger.clone());
     }
 
-    let now = world.level_time.lock().await.world_age;
-    let mut registry = REGISTRY.lock().await;
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
+    let mut registry = REGISTRY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     registry.ensure_loaded(world);
 
     let mut trackers: Vec<(Uuid, WardenSpawnTracker)> = players
@@ -391,18 +397,30 @@ pub async fn try_warn(world: &Arc<World>, pos: &BlockPos, trigger: &Arc<Player>)
 
 /// Current warning level for one player, brought up to date. Exposed for tests and for a
 /// future `/warden_spawn_tracker` command (`WardenSpawnTrackerCommand.java`).
-pub async fn warning_level_of(world: &Arc<World>, uuid: Uuid) -> i32 {
-    let now = world.level_time.lock().await.world_age;
-    let mut registry = REGISTRY.lock().await;
+pub fn warning_level_of(world: &Arc<World>, uuid: Uuid) -> i32 {
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
+    let mut registry = REGISTRY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     registry.ensure_loaded(world);
     registry.advanced(uuid, now).warning_level()
 }
 
 /// Implements the state mutation performed by
 /// `WardenSpawnTrackerCommand.setWarningLevel` (`WardenSpawnTrackerCommand.java:34-43`).
-pub async fn set_warning_level_of(world: &Arc<World>, uuid: Uuid, warning_level: i32) {
-    let now = world.level_time.lock().await.world_age;
-    let mut registry = REGISTRY.lock().await;
+pub fn set_warning_level_of(world: &Arc<World>, uuid: Uuid, warning_level: i32) {
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
+    let mut registry = REGISTRY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     registry.ensure_loaded(world);
     let mut tracker = registry.advanced(uuid, now);
     tracker.set_warning_level(warning_level);
@@ -412,9 +430,15 @@ pub async fn set_warning_level_of(world: &Arc<World>, uuid: Uuid, warning_level:
 
 /// Implements the tracker reset performed by
 /// `WardenSpawnTrackerCommand.resetTracker` (`WardenSpawnTrackerCommand.java:47-58`).
-pub async fn reset_tracker_of(world: &Arc<World>, uuid: Uuid) {
-    let now = world.level_time.lock().await.world_age;
-    let mut registry = REGISTRY.lock().await;
+pub fn reset_tracker_of(world: &Arc<World>, uuid: Uuid) {
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
+    let mut registry = REGISTRY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     registry.ensure_loaded(world);
     let mut tracker = registry.advanced(uuid, now);
     tracker.reset();

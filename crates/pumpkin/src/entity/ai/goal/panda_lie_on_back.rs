@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
 use rand::RngExt;
@@ -39,51 +39,43 @@ impl PandaLieOnBackGoal {
 }
 
 impl Goal for PandaLieOnBackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
-                return false;
-            };
-            if self.cooldown >= panda.get_mob_entity().tick_count.load(Relaxed) {
-                return false;
-            }
-            if !panda.is_lazy() || !panda.can_perform_action().await {
-                return false;
-            }
-            rand::rng().random_range(0..self.get_tick_count(400)) == 1
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
+            return false;
+        };
+        if self.cooldown >= panda.get_mob_entity().tick_count.load(Relaxed) {
+            return false;
+        }
+        if !panda.is_lazy() || !panda.can_perform_action() {
+            return false;
+        }
+        rand::rng().random_range(0..self.get_tick_count(400)) == 1
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
-                return false;
-            };
-            Self::continue_roll(
-                panda.is_lazy(),
-                panda.get_mob_entity().living_entity.is_in_water(),
-                self.get_tick_count(600),
-                self.get_tick_count(2000),
-            )
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
+            return false;
+        };
+        Self::continue_roll(
+            panda.is_lazy(),
+            panda.get_mob_entity().living_entity.is_in_water(),
+            self.get_tick_count(600),
+            self.get_tick_count(2000),
+        )
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() {
-                panda.set_on_back(true);
-            }
-            self.cooldown = 0;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() {
+            panda.set_on_back(true);
+        }
+        self.cooldown = 0;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() {
-                panda.set_on_back(false);
-                self.cooldown = panda.get_mob_entity().tick_count.load(Relaxed) + 200;
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() {
+            panda.set_on_back(false);
+            self.cooldown = panda.get_mob_entity().tick_count.load(Relaxed) + 200;
+        }
     }
 
     fn controls(&self) -> Controls {

@@ -34,14 +34,14 @@ pub type CommandExecutorResult<'a> =
 /// A struct implementing this trait is able to run with a given context.
 pub trait CommandExecutor: Sync + Send {
     /// Executes this executor for a command.
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a>;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult;
 }
 
 impl<F> CommandExecutor for F
 where
     F: for<'c> Fn(&'c CommandContext) -> CommandExecutorResult<'c> + Send + Sync,
 {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         self(context)
     }
 }
@@ -72,7 +72,7 @@ impl RedirectModifier {
     /// Tries to provide a [`Vec`] of [`Arc<CommandSource>`] from a
     /// given [`CommandContext`].
     #[must_use]
-    pub fn sources<'c>(&self, command_context: &'c CommandContext) -> RedirectModifierResult<'c> {
+    pub fn sources(&self, command_context: &CommandContext) -> RedirectModifierResult {
         match self {
             Self::KeepSource => Box::pin(async move { Ok(vec![command_context.source.clone()]) }),
             Self::Custom(function) => function(command_context),
@@ -91,7 +91,7 @@ impl Requirement {
     /// Evaluates the given condition, returning whether the
     /// given [`CommandSource`] satisfies this requirement.
     #[must_use]
-    pub fn evaluate<'a>(&'a self, command_source: &'a CommandSource) -> RequirementResult<'a> {
+    pub fn evaluate(&self, command_source: &CommandSource) -> RequirementResult {
         self.0(command_source)
     }
 }
@@ -113,7 +113,7 @@ impl From<String> for Requirement {
 
             move |source| {
                 let cloned_permission = permission.clone();
-                Box::pin(async move { source.has_permission(&cloned_permission).await })
+                Box::pin(async move { source.has_permission(&cloned_permission) })
             }
         }))
     }
@@ -122,7 +122,7 @@ impl From<String> for Requirement {
 impl From<&'static str> for Requirement {
     fn from(value: &'static str) -> Self {
         Self(Arc::new(move |source| {
-            Box::pin(async move { source.has_permission(value).await })
+            Box::pin(async move { source.has_permission(value) })
         }))
     }
 }
@@ -142,7 +142,7 @@ impl Requirements {
     /// Evaluates the given condition, returning whether the
     /// given [`CommandSource`] satisfies all contained requirements.
     #[must_use]
-    pub fn evaluate<'a>(&'a self, command_source: &'a CommandSource) -> RequirementResult<'a> {
+    pub fn evaluate(&self, command_source: &CommandSource) -> RequirementResult {
         let futures = self
             .0
             .iter()

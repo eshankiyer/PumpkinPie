@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage,
+        Entity, EntityBase, NBTStorage,
         living::LivingEntity,
         projectile::{ProjectileHit, ThrownItemEntity},
         projectile_deflection::ProjectileDeflectionType,
@@ -106,7 +106,7 @@ impl WindChargeEntity {
         }
     }
 
-    pub async fn create_explosion(&self, position: Vector3<f64>) {
+    pub fn create_explosion(&self, position: Vector3<f64>) {
         // WindCharge.java RADIUS = 1.2F vs BreezeWindCharge.java RADIUS = 3.0F.
         let (power, calculator) = match self.kind {
             WindChargeKind::Normal { .. } => (
@@ -129,8 +129,7 @@ impl WindChargeEntity {
                 crate::world::ExplosionInteraction::Trigger,
                 Some(self.get_entity().entity_type),
                 Some(calculator),
-            )
-            .await;
+            );
     }
 
     /// Sets this projectile's velocity from a direction vector, power, and spread.
@@ -175,32 +174,26 @@ impl EntityBase for WindChargeEntity {
         true
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `AbstractWindCharge.tick` (`AbstractWindCharge.java:148-155`): a wind charge more
-            // than 30 blocks above the build limit explodes where it is instead of flying on
-            // forever. It has no gravity and full inertia, so nothing else ever stops it.
-            let entity = self.get_entity();
-            let world = entity.world.load();
-            if entity.block_pos.load().0.y > world.get_top_y() + MAX_Y_EXPLODE_MARGIN {
-                let pos = entity.pos.load();
-                self.create_explosion(pos).await;
-                entity.remove().await;
-                return;
-            }
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        // `AbstractWindCharge.tick` (`AbstractWindCharge.java:148-155`): a wind charge more
+        // than 30 blocks above the build limit explodes where it is instead of flying on
+        // forever. It has no gravity and full inertia, so nothing else ever stops it.
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        if entity.block_pos.load().0.y > world.get_top_y() + MAX_Y_EXPLODE_MARGIN {
+            let pos = entity.pos.load();
+            self.create_explosion(pos);
+            entity.remove();
+            return;
+        }
 
-            self.thrown_item_entity.process_tick(caller, server).await;
+        self.thrown_item_entity.process_tick(caller, server);
 
-            if let Some(cooldown) = self.deflect_cooldown() {
-                // Vanilla `WindCharge.tick` decrements noDeflectTicks once per tick without
-                // changing zero (`WindCharge.java:43-49`).
-                tick_deflect_cooldown(cooldown);
-            }
-        })
+        if let Some(cooldown) = self.deflect_cooldown() {
+            // Vanilla `WindCharge.tick` decrements noDeflectTicks once per tick without
+            // changing zero (`WindCharge.java:43-49`).
+            tick_deflect_cooldown(cooldown);
+        }
     }
 
     fn get_entity(&self) -> &Entity {
@@ -214,31 +207,27 @@ impl EntityBase for WindChargeEntity {
         self
     }
 
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let explosion_pos = match &hit {
-                ProjectileHit::Entity { entity, .. } => {
-                    let _ = entity
-                        .damage(self, 1.0, pumpkin_data::damage::DamageType::WIND_CHARGE)
-                        .await;
-                    // `AbstractWindCharge.onHitEntity` (`AbstractWindCharge.java:92`) explodes at
-                    // `this.position()` - the projectile's own position, not the hit location.
-                    self.get_entity().pos.load()
-                }
-                // `AbstractWindCharge.onHitBlock` (`AbstractWindCharge.java:106-108`) shifts the
-                // impact point by `JUMP_SCALE` along the hit face's unit vector, putting the
-                // explosion centre just outside the block instead of inside it.
-                ProjectileHit::Block { face, hit_pos, .. } => {
-                    let offset = face.to_offset();
-                    hit_pos.add_raw(
-                        f64::from(offset.x) * JUMP_SCALE,
-                        f64::from(offset.y) * JUMP_SCALE,
-                        f64::from(offset.z) * JUMP_SCALE,
-                    )
-                }
-            };
-            self.create_explosion(explosion_pos).await;
-        })
+    fn on_hit(&self, hit: ProjectileHit) {
+        let explosion_pos = match &hit {
+            ProjectileHit::Entity { entity, .. } => {
+                let _ = entity.damage(self, 1.0, pumpkin_data::damage::DamageType::WIND_CHARGE);
+                // `AbstractWindCharge.onHitEntity` (`AbstractWindCharge.java:92`) explodes at
+                // `this.position()` - the projectile's own position, not the hit location.
+                self.get_entity().pos.load()
+            }
+            // `AbstractWindCharge.onHitBlock` (`AbstractWindCharge.java:106-108`) shifts the
+            // impact point by `JUMP_SCALE` along the hit face's unit vector, putting the
+            // explosion centre just outside the block instead of inside it.
+            ProjectileHit::Block { face, hit_pos, .. } => {
+                let offset = face.to_offset();
+                hit_pos.add_raw(
+                    f64::from(offset.x) * JUMP_SCALE,
+                    f64::from(offset.y) * JUMP_SCALE,
+                    f64::from(offset.z) * JUMP_SCALE,
+                )
+            }
+        };
+        self.create_explosion(explosion_pos);
     }
 }
 

@@ -170,80 +170,80 @@ pub const fn named_color_to_str(color: NamedColor) -> &'static str {
 
 #[allow(async_fn_in_trait)]
 pub trait ScoreboardTarget: Send + Sync {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         je_packet: &J,
         be_packet: &B,
     );
-    async fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J);
+    fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J);
 }
 
 impl ScoreboardTarget for World {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         je_packet: &J,
         be_packet: &B,
     ) {
-        self.broadcast_editioned(je_packet, be_packet).await;
+        self.broadcast_editioned(je_packet, be_packet);
     }
 
-    async fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
+    fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
         self.broadcast_packet_all(je_packet);
     }
 }
 
 impl<T: ScoreboardTarget + ?Sized> ScoreboardTarget for &T {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         je_packet: &J,
         be_packet: &B,
     ) {
-        (*self).send_editioned(je_packet, be_packet).await;
+        (*self).send_editioned(je_packet, be_packet);
     }
 
-    async fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
-        (*self).send_je(je_packet).await;
+    fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
+        (*self).send_je(je_packet);
     }
 }
 
 impl ScoreboardTarget for std::sync::Arc<World> {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         je_packet: &J,
         be_packet: &B,
     ) {
-        self.broadcast_editioned(je_packet, be_packet).await;
+        self.broadcast_editioned(je_packet, be_packet);
     }
 
-    async fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
+    fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
         self.broadcast_packet_all(je_packet);
     }
 }
 
 impl ScoreboardTarget for Player {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         je_packet: &J,
         be_packet: &B,
     ) {
-        Self::send_editioned(self, je_packet, be_packet).await;
+        Self::send_editioned(self, je_packet, be_packet);
     }
 
-    async fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
+    fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
         Self::send_client_packet(self, je_packet).await;
     }
 }
 
 impl ScoreboardTarget for std::sync::Arc<Player> {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         je_packet: &J,
         be_packet: &B,
     ) {
-        Player::send_editioned(self, je_packet, be_packet).await;
+        Player::send_editioned(self, je_packet, be_packet);
     }
 
-    async fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
+    fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
         Player::send_client_packet(self, je_packet).await;
     }
 }
@@ -251,14 +251,14 @@ impl ScoreboardTarget for std::sync::Arc<Player> {
 pub struct NoTarget;
 
 impl ScoreboardTarget for NoTarget {
-    async fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
+    fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
         _je_packet: &J,
         _be_packet: &B,
     ) {
     }
 
-    async fn send_je<J: ClientPacket + Sync>(&self, _je_packet: &J) {}
+    fn send_je<J: ClientPacket + Sync>(&self, _je_packet: &J) {}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -381,7 +381,7 @@ impl Scoreboard {
         self.objectives.insert(objective.name.clone(), objective);
     }
 
-    pub async fn update_objective(
+    pub fn update_objective(
         &mut self,
         target: &impl ScoreboardTarget,
         objective: ScoreboardObjective,
@@ -410,12 +410,12 @@ impl Scoreboard {
             sort_order: VarInt(0),
         };
 
-        target.send_editioned(&je_update, &be_update).await;
+        target.send_editioned(&je_update, &be_update);
 
         self.objectives.insert(objective.name.clone(), objective);
     }
 
-    pub async fn set_display_objective(
+    pub fn set_display_objective(
         &mut self,
         target: &impl ScoreboardTarget,
         slot: ScoreboardDisplaySlot,
@@ -466,11 +466,11 @@ impl Scoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            target.send_editioned(&je_update, &be_update).await;
+            target.send_editioned(&je_update, &be_update);
             self.tracked_objectives.insert(name.to_string());
         }
 
-        target.send_editioned(&je_display, &be_display).await;
+        target.send_editioned(&je_display, &be_display);
 
         if let Some(name) = objective_name {
             self.display_slots.insert(slot, name.to_string());
@@ -479,15 +479,15 @@ impl Scoreboard {
         }
     }
 
-    pub async fn clear_display_objective(
+    pub fn clear_display_objective(
         &mut self,
         target: &impl ScoreboardTarget,
         slot: ScoreboardDisplaySlot,
     ) {
-        self.set_display_objective(target, slot, None).await;
+        self.set_display_objective(target, slot, None);
     }
 
-    pub async fn remove_objective(&mut self, target: &impl ScoreboardTarget, name: &str) {
+    pub fn remove_objective(&mut self, target: &impl ScoreboardTarget, name: &str) {
         if !self.objectives.contains_key(name) {
             warn!(
                 "Tried to remove an objective which does not exist: {}",
@@ -508,7 +508,7 @@ impl Scoreboard {
             objective_name: name.to_string(),
         };
 
-        target.send_editioned(&je_packet, &be_packet).await;
+        target.send_editioned(&je_packet, &be_packet);
 
         if let Some(objective) = self.objectives.get(name)
             && let Some(objectives) = self.objectives_by_criterion.get_mut(&objective.criterion)
@@ -525,11 +525,7 @@ impl Scoreboard {
         self.display_slots.retain(|_, obj| obj != name);
     }
 
-    pub async fn update_score(
-        &mut self,
-        target: &impl ScoreboardTarget,
-        mut score: ScoreboardScore,
-    ) {
+    pub fn update_score(&mut self, target: &impl ScoreboardTarget, mut score: ScoreboardScore) {
         if !self.objectives.contains_key(&score.objective_name) {
             warn!(
                 "Tried to place a score into an objective which does not exist: {}",
@@ -569,7 +565,7 @@ impl Scoreboard {
             }],
         };
 
-        target.send_editioned(&je_packet, &be_packet).await;
+        target.send_editioned(&je_packet, &be_packet);
 
         self.scores
             .entry(score.objective_name.clone())
@@ -577,7 +573,7 @@ impl Scoreboard {
             .insert(score.entity_name.clone(), score);
     }
 
-    pub async fn set_score_value(
+    pub fn set_score_value(
         &mut self,
         target: &impl ScoreboardTarget,
         entity_name: impl Into<String>,
@@ -595,10 +591,10 @@ impl Scoreboard {
             number_format: existing.as_ref().and_then(|s| s.number_format.clone()),
             locked: existing.as_ref().is_none_or(|s| s.locked),
         };
-        self.update_score(target, score).await;
+        self.update_score(target, score);
     }
 
-    pub async fn add_score(
+    pub fn add_score(
         &mut self,
         target: &impl ScoreboardTarget,
         entity_name: impl Into<String>,
@@ -609,11 +605,11 @@ impl Scoreboard {
         let obj_s = objective_name.into();
         let current_val = self.get_score_value(&entity_s, &obj_s).unwrap_or(0);
         let new_val = current_val + delta;
-        self.set_score_value(target, entity_s, obj_s, new_val).await;
+        self.set_score_value(target, entity_s, obj_s, new_val);
         new_val
     }
 
-    pub async fn remove_score(
+    pub fn remove_score(
         &mut self,
         target: &impl ScoreboardTarget,
         entity_name: &str,
@@ -633,18 +629,14 @@ impl Scoreboard {
             }],
         };
 
-        target.send_editioned(&je_packet, &be_packet).await;
+        target.send_editioned(&je_packet, &be_packet);
 
         if let Some(objective_scores) = self.scores.get_mut(objective_name) {
             objective_scores.remove(entity_name);
         }
     }
 
-    pub async fn reset_scores_for_entity(
-        &mut self,
-        target: &impl ScoreboardTarget,
-        entity_name: &str,
-    ) {
+    pub fn reset_scores_for_entity(&mut self, target: &impl ScoreboardTarget, entity_name: &str) {
         let je_packet = CResetScore::new(entity_name.to_string(), None);
 
         let mut be_entries = Vec::new();
@@ -666,14 +658,14 @@ impl Scoreboard {
             entries: be_entries,
         };
 
-        target.send_editioned(&je_packet, &be_packet).await;
+        target.send_editioned(&je_packet, &be_packet);
 
         for obj_scores in self.scores.values_mut() {
             obj_scores.remove(entity_name);
         }
     }
 
-    pub async fn add_team(&mut self, target: &impl ScoreboardTarget, team: Team) {
+    pub fn add_team(&mut self, target: &impl ScoreboardTarget, team: Team) {
         if self.teams.contains_key(&team.name) {
             warn!("Tried to create Team which already exists, {}", team.name);
             return;
@@ -689,23 +681,21 @@ impl Scoreboard {
             player_suffix: &team.player_suffix,
         };
 
-        target
-            .send_je(&CSetPlayerTeam {
-                team_name: team.name.clone(),
-                method: TeamMethod::Create,
-                parameters: Some(parameters),
-                players: team.players.clone().into(),
-            })
-            .await;
+        target.send_je(&CSetPlayerTeam {
+            team_name: team.name.clone(),
+            method: TeamMethod::Create,
+            parameters: Some(parameters),
+            players: team.players.clone().into(),
+        });
 
         self.teams.insert(team.name.clone(), team);
     }
 
-    pub async fn create_team(&mut self, target: &impl ScoreboardTarget, team: Team) {
-        self.add_team(target, team).await;
+    pub fn create_team(&mut self, target: &impl ScoreboardTarget, team: Team) {
+        self.add_team(target, team);
     }
 
-    pub async fn update_team(&mut self, target: &impl ScoreboardTarget, team: Team) {
+    pub fn update_team(&mut self, target: &impl ScoreboardTarget, team: Team) {
         if !self.teams.contains_key(&team.name) {
             warn!("Tried to update Team which does not exist, {}", team.name);
             return;
@@ -721,37 +711,33 @@ impl Scoreboard {
             player_suffix: &team.player_suffix,
         };
 
-        target
-            .send_je(&CSetPlayerTeam {
-                team_name: team.name.clone(),
-                method: TeamMethod::Update,
-                parameters: Some(parameters),
-                players: Box::new([]),
-            })
-            .await;
+        target.send_je(&CSetPlayerTeam {
+            team_name: team.name.clone(),
+            method: TeamMethod::Update,
+            parameters: Some(parameters),
+            players: Box::new([]),
+        });
 
         self.teams.insert(team.name.clone(), team);
     }
 
-    pub async fn remove_team(&mut self, target: &impl ScoreboardTarget, name: &str) {
+    pub fn remove_team(&mut self, target: &impl ScoreboardTarget, name: &str) {
         if !self.teams.contains_key(name) {
             warn!("Tried to remove Team which does not exist, {}", name);
             return;
         }
 
-        target
-            .send_je(&CSetPlayerTeam {
-                team_name: name.to_string(),
-                method: TeamMethod::Remove,
-                parameters: None,
-                players: Box::new([]),
-            })
-            .await;
+        target.send_je(&CSetPlayerTeam {
+            team_name: name.to_string(),
+            method: TeamMethod::Remove,
+            parameters: None,
+            players: Box::new([]),
+        });
 
         self.teams.remove(name);
     }
 
-    pub async fn add_player_to_team(
+    pub fn add_player_to_team(
         &mut self,
         target: &impl ScoreboardTarget,
         team_name: &str,
@@ -769,19 +755,17 @@ impl Scoreboard {
             return;
         }
 
-        target
-            .send_je(&CSetPlayerTeam {
-                team_name: team_name.to_string(),
-                method: TeamMethod::AddPlayers,
-                parameters: None,
-                players: vec![player.clone()].into(),
-            })
-            .await;
+        target.send_je(&CSetPlayerTeam {
+            team_name: team_name.to_string(),
+            method: TeamMethod::AddPlayers,
+            parameters: None,
+            players: vec![player.clone()].into(),
+        });
 
         team.players.push(player);
     }
 
-    pub async fn remove_player_from_team(
+    pub fn remove_player_from_team(
         &mut self,
         target: &impl ScoreboardTarget,
         team_name: &str,
@@ -799,19 +783,17 @@ impl Scoreboard {
             return;
         }
 
-        target
-            .send_je(&CSetPlayerTeam {
-                team_name: team_name.to_string(),
-                method: TeamMethod::RemovePlayers,
-                parameters: None,
-                players: vec![player.to_string()].into(),
-            })
-            .await;
+        target.send_je(&CSetPlayerTeam {
+            team_name: team_name.to_string(),
+            method: TeamMethod::RemovePlayers,
+            parameters: None,
+            players: vec![player.to_string()].into(),
+        });
 
         team.players.retain(|p| p != player);
     }
 
-    pub async fn clear_team_players(&mut self, target: &impl ScoreboardTarget, team_name: &str) {
+    pub fn clear_team_players(&mut self, target: &impl ScoreboardTarget, team_name: &str) {
         let Some(team) = self.teams.get_mut(team_name) else {
             warn!(
                 "Tried to clear players from Team which does not exist, {}",
@@ -825,19 +807,17 @@ impl Scoreboard {
         }
 
         let players_to_remove = team.players.clone();
-        target
-            .send_je(&CSetPlayerTeam {
-                team_name: team_name.to_string(),
-                method: TeamMethod::RemovePlayers,
-                parameters: None,
-                players: players_to_remove.into(),
-            })
-            .await;
+        target.send_je(&CSetPlayerTeam {
+            team_name: team_name.to_string(),
+            method: TeamMethod::RemovePlayers,
+            parameters: None,
+            players: players_to_remove.into(),
+        });
 
         team.players.clear();
     }
 
-    pub async fn send_to_player(&self, player: &Player) {
+    pub fn send_to_player(&self, player: &Player) {
         for objective in self.objectives.values() {
             let je_update = CUpdateObjectives::new(
                 objective.name.clone(),
@@ -853,7 +833,7 @@ impl Scoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            player.send_editioned(&je_update, &be_update).await;
+            player.send_editioned(&je_update, &be_update);
         }
 
         for (slot, objective_name) in &self.display_slots {
@@ -874,7 +854,7 @@ impl Scoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            player.send_editioned(&je_display, &be_display).await;
+            player.send_editioned(&je_display, &be_display);
         }
 
         for objective_scores in self.scores.values() {
@@ -897,7 +877,7 @@ impl Scoreboard {
                         custom_name: score.entity_name.clone(),
                     }],
                 };
-                player.send_editioned(&je_packet, &be_packet).await;
+                player.send_editioned(&je_packet, &be_packet);
             }
         }
 
@@ -1016,7 +996,7 @@ impl Scoreboard {
 
     /// Updates all objectives that use the given criterion with the specified value for the
     /// entity. Automatically creates score entries if they don't exist.
-    pub async fn for_all_objectives(
+    pub fn for_all_objectives(
         &mut self,
         world: &World,
         criterion: &str,
@@ -1036,7 +1016,7 @@ impl Scoreboard {
                 number_format: None,
                 locked: false,
             };
-            self.update_score(world, score).await;
+            self.update_score(world, score);
         }
     }
 
@@ -1669,7 +1649,7 @@ pub struct BedrockScoreboard {
 }
 
 impl BedrockScoreboard {
-    pub async fn add_objective(&mut self, player: &Player, objective: BedrockObjective) {
+    pub fn add_objective(&mut self, player: &Player, objective: BedrockObjective) {
         let be_update = BSetDisplayObjective {
             display_slot_name: "sidebar".to_string(),
             objective_name: objective.name.clone(),
@@ -1680,23 +1660,21 @@ impl BedrockScoreboard {
                 BedrockSortOrder::Descending => 1,
             }),
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
-                    objective.name.clone(),
-                    pumpkin_protocol::java::client::play::Mode::Add,
-                    TextComponent::text(objective.display_name.clone()),
-                    pumpkin_protocol::java::client::play::RenderType::Integer,
-                    None,
-                ),
-                &be_update,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
+                objective.name.clone(),
+                pumpkin_protocol::java::client::play::Mode::Add,
+                TextComponent::text(objective.display_name.clone()),
+                pumpkin_protocol::java::client::play::RenderType::Integer,
+                None,
+            ),
+            &be_update,
+        );
 
         self.objectives.insert(objective.name.clone(), objective);
     }
 
-    pub async fn update_objective(&mut self, player: &Player, objective: BedrockObjective) {
+    pub fn update_objective(&mut self, player: &Player, objective: BedrockObjective) {
         let be_update = BSetDisplayObjective {
             display_slot_name: "sidebar".to_string(),
             objective_name: objective.name.clone(),
@@ -1707,44 +1685,40 @@ impl BedrockScoreboard {
                 BedrockSortOrder::Descending => 1,
             }),
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
-                    objective.name.clone(),
-                    pumpkin_protocol::java::client::play::Mode::Update,
-                    TextComponent::text(objective.display_name.clone()),
-                    pumpkin_protocol::java::client::play::RenderType::Integer,
-                    None,
-                ),
-                &be_update,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
+                objective.name.clone(),
+                pumpkin_protocol::java::client::play::Mode::Update,
+                TextComponent::text(objective.display_name.clone()),
+                pumpkin_protocol::java::client::play::RenderType::Integer,
+                None,
+            ),
+            &be_update,
+        );
 
         self.objectives.insert(objective.name.clone(), objective);
     }
 
-    pub async fn remove_objective(&mut self, player: &Player, name: &str) {
+    pub fn remove_objective(&mut self, player: &Player, name: &str) {
         let be_remove = BRemoveObjective {
             objective_name: name.to_string(),
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
-                    name.to_string(),
-                    pumpkin_protocol::java::client::play::Mode::Remove,
-                    TextComponent::text(""),
-                    pumpkin_protocol::java::client::play::RenderType::Integer,
-                    None,
-                ),
-                &be_remove,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
+                name.to_string(),
+                pumpkin_protocol::java::client::play::Mode::Remove,
+                TextComponent::text(""),
+                pumpkin_protocol::java::client::play::RenderType::Integer,
+                None,
+            ),
+            &be_remove,
+        );
         self.objectives.remove(name);
         self.display_slots.retain(|_, v| v != name);
         self.scores.retain(|(_, obj), _| obj != name);
     }
 
-    pub async fn set_display_objective(
+    pub fn set_display_objective(
         &mut self,
         player: &Player,
         slot: BedrockDisplaySlot,
@@ -1762,19 +1736,17 @@ impl BedrockScoreboard {
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(0),
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CDisplayObjective::new(
-                    match slot {
-                        BedrockDisplaySlot::PlayerList => ScoreboardDisplaySlot::List,
-                        BedrockDisplaySlot::Sidebar => ScoreboardDisplaySlot::Sidebar,
-                        BedrockDisplaySlot::BelowName => ScoreboardDisplaySlot::BelowName,
-                    },
-                    obj_name_str.to_string(),
-                ),
-                &be_display,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CDisplayObjective::new(
+                match slot {
+                    BedrockDisplaySlot::PlayerList => ScoreboardDisplaySlot::List,
+                    BedrockDisplaySlot::Sidebar => ScoreboardDisplaySlot::Sidebar,
+                    BedrockDisplaySlot::BelowName => ScoreboardDisplaySlot::BelowName,
+                },
+                obj_name_str.to_string(),
+            ),
+            &be_display,
+        );
 
         if let Some(name) = objective_name {
             self.display_slots.insert(slot, name.to_string());
@@ -1783,11 +1755,11 @@ impl BedrockScoreboard {
         }
     }
 
-    pub async fn clear_display_objective(&mut self, player: &Player, slot: BedrockDisplaySlot) {
-        self.set_display_objective(player, slot, None).await;
+    pub fn clear_display_objective(&mut self, player: &Player, slot: BedrockDisplaySlot) {
+        self.set_display_objective(player, slot, None);
     }
 
-    pub async fn update_score(
+    pub fn update_score(
         &mut self,
         player: &Player,
         entity_name: &str,
@@ -1805,24 +1777,22 @@ impl BedrockScoreboard {
             action: VarInt(0),
             entries: vec![],
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CUpdateScore::new(
-                    score.entity_name.clone(),
-                    score.objective_name.clone(),
-                    score.value,
-                    score.display_name.clone(),
-                    score.number_format.clone(),
-                ),
-                &be_score,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CUpdateScore::new(
+                score.entity_name.clone(),
+                score.objective_name.clone(),
+                score.value,
+                score.display_name.clone(),
+                score.number_format.clone(),
+            ),
+            &be_score,
+        );
 
         self.scores
             .insert((entity_name.to_string(), objective_name.to_string()), value);
     }
 
-    pub async fn add_score(
+    pub fn add_score(
         &mut self,
         player: &Player,
         entity_name: impl Into<String>,
@@ -1837,46 +1807,39 @@ impl BedrockScoreboard {
             .copied()
             .unwrap_or(0);
         let new_val = current + delta;
-        self.update_score(player, &entity_s, &obj_s, new_val).await;
+        self.update_score(player, &entity_s, &obj_s, new_val);
         new_val
     }
 
-    pub async fn remove_score(&mut self, player: &Player, entity_name: &str, objective_name: &str) {
+    pub fn remove_score(&mut self, player: &Player, entity_name: &str, objective_name: &str) {
         let be_score = BSetScore {
             action: VarInt(1),
             entries: vec![],
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CResetScore::new(
-                    entity_name.to_string(),
-                    Some(objective_name.to_string()),
-                ),
-                &be_score,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CResetScore::new(
+                entity_name.to_string(),
+                Some(objective_name.to_string()),
+            ),
+            &be_score,
+        );
         self.scores
             .remove(&(entity_name.to_string(), objective_name.to_string()));
     }
 
-    pub async fn reset_scores_for_entity(&mut self, player: &Player, entity_name: &str) {
+    pub fn reset_scores_for_entity(&mut self, player: &Player, entity_name: &str) {
         let be_score = BSetScore {
             action: VarInt(1),
             entries: vec![],
         };
-        player
-            .send_editioned(
-                &pumpkin_protocol::java::client::play::CResetScore::new(
-                    entity_name.to_string(),
-                    None,
-                ),
-                &be_score,
-            )
-            .await;
+        player.send_editioned(
+            &pumpkin_protocol::java::client::play::CResetScore::new(entity_name.to_string(), None),
+            &be_score,
+        );
         self.scores.retain(|(entity, _), _| entity != entity_name);
     }
 
-    pub async fn send_to_player(&self, player: &Player) {
+    pub fn send_to_player(&self, player: &Player) {
         for objective in self.objectives.values() {
             let be_update = BSetDisplayObjective {
                 display_slot_name: "sidebar".to_string(),
@@ -1888,18 +1851,16 @@ impl BedrockScoreboard {
                     BedrockSortOrder::Descending => 1,
                 }),
             };
-            player
-                .send_editioned(
-                    &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
-                        objective.name.clone(),
-                        pumpkin_protocol::java::client::play::Mode::Add,
-                        TextComponent::text(objective.display_name.clone()),
-                        pumpkin_protocol::java::client::play::RenderType::Integer,
-                        None,
-                    ),
-                    &be_update,
-                )
-                .await;
+            player.send_editioned(
+                &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
+                    objective.name.clone(),
+                    pumpkin_protocol::java::client::play::Mode::Add,
+                    TextComponent::text(objective.display_name.clone()),
+                    pumpkin_protocol::java::client::play::RenderType::Integer,
+                    None,
+                ),
+                &be_update,
+            );
         }
 
         for (slot, objective_name) in &self.display_slots {
@@ -1914,19 +1875,17 @@ impl BedrockScoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            player
-                .send_editioned(
-                    &pumpkin_protocol::java::client::play::CDisplayObjective::new(
-                        match slot {
-                            BedrockDisplaySlot::PlayerList => ScoreboardDisplaySlot::List,
-                            BedrockDisplaySlot::Sidebar => ScoreboardDisplaySlot::Sidebar,
-                            BedrockDisplaySlot::BelowName => ScoreboardDisplaySlot::BelowName,
-                        },
-                        objective_name.clone(),
-                    ),
-                    &be_display,
-                )
-                .await;
+            player.send_editioned(
+                &pumpkin_protocol::java::client::play::CDisplayObjective::new(
+                    match slot {
+                        BedrockDisplaySlot::PlayerList => ScoreboardDisplaySlot::List,
+                        BedrockDisplaySlot::Sidebar => ScoreboardDisplaySlot::Sidebar,
+                        BedrockDisplaySlot::BelowName => ScoreboardDisplaySlot::BelowName,
+                    },
+                    objective_name.clone(),
+                ),
+                &be_display,
+            );
         }
 
         for ((entity_name, objective_name), value) in &self.scores {
@@ -1941,18 +1900,16 @@ impl BedrockScoreboard {
                 action: VarInt(0),
                 entries: vec![],
             };
-            player
-                .send_editioned(
-                    &pumpkin_protocol::java::client::play::CUpdateScore::new(
-                        score.entity_name,
-                        score.objective_name,
-                        score.value,
-                        score.display_name,
-                        score.number_format,
-                    ),
-                    &be_score,
-                )
-                .await;
+            player.send_editioned(
+                &pumpkin_protocol::java::client::play::CUpdateScore::new(
+                    score.entity_name,
+                    score.objective_name,
+                    score.value,
+                    score.display_name,
+                    score.number_format,
+                ),
+                &be_score,
+            );
         }
     }
 }

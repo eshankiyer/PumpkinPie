@@ -6,7 +6,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::math::vector3::Vector3;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::passive::llama::llama_data_of;
@@ -57,11 +57,11 @@ impl RangedLlamaSpitAttackGoal {
         Vector3::new(dx, dy, dz).normalize() * 1.5
     }
 
-    async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-        mob.get_mob_entity().has_line_of_sight(target).await
+    fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+        mob.get_mob_entity().has_line_of_sight(target)
     }
 
-    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
+    fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
         let shooter_pos = shooter.pos.load();
@@ -79,7 +79,7 @@ impl RangedLlamaSpitAttackGoal {
             Vector3::new(target_pos.x, target_y_third, target_pos.z),
         );
         spit.get_entity().set_velocity(velocity);
-        world.spawn_entity(Arc::new(spit)).await;
+        world.spawn_entity(Arc::new(spit));
         world.play_sound(Sound::EntityLlamaSpit, SoundCategory::Neutral, &shooter_pos);
 
         if let Some(data) = llama_data_of(mob as &dyn EntityBase) {
@@ -90,91 +90,88 @@ impl RangedLlamaSpitAttackGoal {
 }
 
 impl Goal for RangedLlamaSpitAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            match target {
-                Some(target) if target.get_entity().is_alive() => {
-                    self.target = Some(target);
-                    true
-                }
-                _ => false,
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        match target {
+            Some(target) if target.get_entity().is_alive() => {
+                self.target = Some(target);
+                true
             }
-        })
+            _ => false,
+        }
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(target) = self.target.clone() else {
-                return false;
-            };
-            if target.get_entity().is_alive() {
-                return true;
-            }
-            !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(target) = self.target.clone() else {
+            return false;
+        };
+        if target.get_entity().is_alive() {
+            return true;
+        }
+        !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
+        self.see_time = 0;
+        self.attack_time = -1;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = self.target.clone() else {
+            return;
+        };
+
+        let mob_entity = mob.get_mob_entity();
+        let shooter_pos = mob.get_entity().pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let dist_sqr = shooter_pos.squared_distance_to_vec(&target_pos);
+
+        let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref());
+        if has_line_of_sight {
+            self.see_time += 1;
+        } else {
             self.see_time = 0;
-            self.attack_time = -1;
-        })
-    }
+        }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = self.target.clone() else {
-                return;
-            };
-
-            let mob_entity = mob.get_mob_entity();
-            let shooter_pos = mob.get_entity().pos.load();
-            let target_pos = target.get_entity().pos.load();
-            let dist_sqr = shooter_pos.squared_distance_to_vec(&target_pos);
-
-            let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref()).await;
-            if has_line_of_sight {
-                self.see_time += 1;
-            } else {
-                self.see_time = 0;
-            }
-
-            let in_range = dist_sqr <= f64::from(self.attack_radius * self.attack_radius);
-            if in_range && self.see_time >= 5 {
-                mob_entity.navigator.lock().unwrap().stop();
-            } else {
-                mob_entity
-                    .navigator
-                    .lock()
-                    .unwrap()
-                    .set_progress(NavigatorGoal::new(shooter_pos, target_pos, self.speed));
-            }
-
+        let in_range = dist_sqr <= f64::from(self.attack_radius * self.attack_radius);
+        if in_range && self.see_time >= 5 {
+            mob_entity.navigator.lock().unwrap().stop();
+        } else {
             mob_entity
-                .look_control
+                .navigator
                 .lock()
                 .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
+                .set_progress(NavigatorGoal::new(shooter_pos, target_pos, self.speed));
+        }
 
-            self.attack_time -= 1;
-            if self.attack_time == 0 {
-                if !has_line_of_sight {
-                    return;
-                }
-                let dist_ratio = (dist_sqr.sqrt() as f32 / self.attack_radius).clamp(0.1, 1.0);
-                self.shoot(mob, target.as_ref()).await;
-                self.attack_time = (dist_ratio
-                    * (self.attack_interval_max - self.attack_interval_min) as f32
-                    + self.attack_interval_min as f32) as i32;
-            } else if self.attack_time < 0 {
-                let t = (dist_sqr.sqrt() / f64::from(self.attack_radius)).clamp(0.0, 1.0);
-                self.attack_time = (f64::from(self.attack_interval_min)
-                    + t * f64::from(self.attack_interval_max - self.attack_interval_min))
-                    as i32;
+        mob_entity
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 30.0, 30.0);
+
+        self.attack_time -= 1;
+        if self.attack_time == 0 {
+            if !has_line_of_sight {
+                return;
             }
-        })
+            let dist_ratio = (dist_sqr.sqrt() as f32 / self.attack_radius).clamp(0.1, 1.0);
+            self.shoot(mob, target.as_ref());
+            self.attack_time = (dist_ratio
+                * (self.attack_interval_max - self.attack_interval_min) as f32
+                + self.attack_interval_min as f32) as i32;
+        } else if self.attack_time < 0 {
+            let t = (dist_sqr.sqrt() / f64::from(self.attack_radius)).clamp(0.0, 1.0);
+            self.attack_time = (f64::from(self.attack_interval_min)
+                + t * f64::from(self.attack_interval_max - self.attack_interval_min))
+                as i32;
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

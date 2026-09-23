@@ -1,5 +1,5 @@
 use super::melee_attack::MeleeAttackGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::polar_bear::PolarBearEntity;
 
@@ -26,67 +26,68 @@ impl PolarBearMeleeAttackGoal {
 }
 
 impl Goal for PolarBearMeleeAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
         self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.inner.stop(mob).await;
-            if let Some(bear) = mob.cast_any().downcast_ref::<PolarBearEntity>() {
-                bear.set_standing(false);
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.inner.stop(mob);
+        if let Some(bear) = mob.cast_any().downcast_ref::<PolarBearEntity>() {
+            bear.set_standing(false);
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let old_cooldown = self.inner.cooldown;
-            self.inner.tick(mob).await;
+    fn tick(&mut self, mob: &dyn Mob) {
+        let old_cooldown = self.inner.cooldown;
+        self.inner.tick(mob);
 
-            let Some(bear) = mob.cast_any().downcast_ref::<PolarBearEntity>() else {
-                return;
-            };
+        let Some(bear) = mob.cast_any().downcast_ref::<PolarBearEntity>() else {
+            return;
+        };
 
-            // The inner goal resets `cooldown` back up to its max only when it actually landed
-            // an attack this tick -- vanilla's `canPerformAttack` branch, which also drops
-            // standing.
-            if self.inner.cooldown > old_cooldown {
-                bear.set_standing(false);
-                return;
+        // The inner goal resets `cooldown` back up to its max only when it actually landed
+        // an attack this tick -- vanilla's `canPerformAttack` branch, which also drops
+        // standing.
+        if self.inner.cooldown > old_cooldown {
+            bear.set_standing(false);
+            return;
+        }
+
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            bear.set_standing(false);
+            return;
+        };
+        let target_entity = target.get_entity();
+
+        let dist_sq = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&target_entity.pos.load());
+        let near_reach = f64::from(target_entity.entity_dimension.load().width) + 3.0;
+
+        if dist_sq < near_reach * near_reach {
+            if self.inner.cooldown <= 10 {
+                bear.set_standing(true);
+                bear.play_warning_sound();
             }
-
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                bear.set_standing(false);
-                return;
-            };
-            let target_entity = target.get_entity();
-
-            let dist_sq = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&target_entity.pos.load());
-            let near_reach = f64::from(target_entity.entity_dimension.load().width) + 3.0;
-
-            if dist_sq < near_reach * near_reach {
-                if self.inner.cooldown <= 10 {
-                    bear.set_standing(true);
-                    bear.play_warning_sound();
-                }
-            } else {
-                bear.set_standing(false);
-            }
-        })
+        } else {
+            bear.set_standing(false);
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -17,6 +17,6 @@ impl JavaClient {
         );
         server.plugin_manager.fire(server, &mut event).await;
 
-        player.mark_recipe_seen(packet.recipe_display_id.0).await;
+        player.mark_recipe_seen(packet.recipe_display_id.0);
     }
 }

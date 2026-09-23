@@ -83,264 +83,253 @@ fn obj_name<'a>(
 }
 
 impl CommandExecutor for ObjectivesAddExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = StringArgumentType::get(context, ARG_OBJECTIVE)?;
-            let criterion = StringArgumentType::get(context, ARG_CRITERION)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = StringArgumentType::get(context, ARG_OBJECTIVE)?;
+        let criterion = StringArgumentType::get(context, ARG_CRITERION)?;
 
-            let display_name = if self.has_display_name {
-                TextComponent::text(StringArgumentType::get(context, ARG_DISPLAY_NAME)?.to_string())
-            } else {
-                TextComponent::text(objective_name.to_string())
-            };
+        let display_name = if self.has_display_name {
+            TextComponent::text(StringArgumentType::get(context, ARG_DISPLAY_NAME)?.to_string())
+        } else {
+            TextComponent::text(objective_name.to_string())
+        };
 
-            if !crate::world::scoreboard::is_valid_criterion(criterion) {
-                return Err(INVALID_CRITERION_ERROR.create_without_context());
-            }
+        if !crate::world::scoreboard::is_valid_criterion(criterion) {
+            return Err(INVALID_CRITERION_ERROR.create_without_context());
+        }
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if scoreboard.get_objectives().contains_key(objective_name) {
-                return Err(DUPLICATE_OBJECTIVE_ERROR.create_without_context());
-            }
+        if scoreboard.get_objectives().contains_key(objective_name) {
+            return Err(DUPLICATE_OBJECTIVE_ERROR.create_without_context());
+        }
 
-            let render_type =
-                crate::world::scoreboard::default_render_type_for_criterion(criterion);
-            let new_objective = ScoreboardObjective::new(
-                objective_name,
-                display_name.clone(),
-                render_type,
-                None,
-                criterion,
-            );
+        let render_type = crate::world::scoreboard::default_render_type_for_criterion(criterion);
+        let new_objective = ScoreboardObjective::new(
+            objective_name,
+            display_name.clone(),
+            render_type,
+            None,
+            criterion,
+        );
 
-            scoreboard.add_objective(new_objective);
+        scoreboard.add_objective(new_objective);
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_ADD_SUCCESS,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_ADD_SUCCESS,
-                        [display_name],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_ADD_SUCCESS,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_ADD_SUCCESS,
+                [display_name],
+            ),
+            true,
+        );
 
-            Ok(1)
-        })
+        Ok(1)
     }
 }
 
 struct PlayersEnableExecutor;
 
 impl CommandExecutor for PlayersEnableExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = ObjectiveArgumentType::get(context, ARG_OBJECTIVE)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = ObjectiveArgumentType::get(context, ARG_OBJECTIVE)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let objective = scoreboard
-                .get_objectives()
+        let objective = scoreboard
+            .get_objectives()
+            .get(objective_name)
+            .ok_or_else(|| OBJECTIVE_NOT_FOUND_ERROR.create_without_context())?;
+
+        if &*objective.criterion != "trigger" {
+            return Err(INVALID_ENABLE_ERROR.create_without_context());
+        }
+
+        let objective_display_name = objective.display_name.clone();
+
+        let mut enabled_count = 0;
+        for player in &targets {
+            let player_name = &player.gameprofile.name;
+            let current_score = scoreboard
+                .get_scores()
                 .get(objective_name)
-                .ok_or_else(|| OBJECTIVE_NOT_FOUND_ERROR.create_without_context())?;
+                .and_then(|m| m.get(player_name));
 
-            if &*objective.criterion != "trigger" {
-                return Err(INVALID_ENABLE_ERROR.create_without_context());
+            let is_already_enabled = current_score.is_some_and(|s| !s.locked);
+
+            if !is_already_enabled {
+                let value = current_score.map_or(0, |s| s.value.0);
+                let display_name = current_score.and_then(|s| s.display_name.clone());
+                let number_format = current_score.and_then(|s| s.number_format.clone());
+
+                let updated_score = ScoreboardScore {
+                    entity_name: player_name.clone(),
+                    objective_name: objective_name.to_string(),
+                    value: VarInt(value),
+                    display_name,
+                    number_format,
+                    locked: false,
+                };
+
+                scoreboard.update_score(world, updated_score);
+                enabled_count += 1;
             }
+        }
 
-            let objective_display_name = objective.display_name.clone();
+        if enabled_count == 0 {
+            return Err(FAILED_ENABLE_ERROR.create_without_context());
+        }
 
-            let mut enabled_count = 0;
-            for player in &targets {
-                let player_name = &player.gameprofile.name;
-                let current_score = scoreboard
-                    .get_scores()
-                    .get(objective_name)
-                    .and_then(|m| m.get(player_name));
+        let msg = if targets.len() == 1 {
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_SINGLE,
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_SINGLE,
+                [
+                    objective_display_name,
+                    TextComponent::text(targets[0].gameprofile.name.clone()),
+                ],
+            )
+        } else {
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_MULTIPLE,
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_MULTIPLE,
+                [
+                    objective_display_name,
+                    TextComponent::text(targets.len().to_string()),
+                ],
+            )
+        };
 
-                let is_already_enabled = current_score.is_some_and(|s| !s.locked);
+        context.source.send_feedback(msg, true);
 
-                if !is_already_enabled {
-                    let value = current_score.map_or(0, |s| s.value.0);
-                    let display_name = current_score.and_then(|s| s.display_name.clone());
-                    let number_format = current_score.and_then(|s| s.number_format.clone());
-
-                    let updated_score = ScoreboardScore {
-                        entity_name: player_name.clone(),
-                        objective_name: objective_name.to_string(),
-                        value: VarInt(value),
-                        display_name,
-                        number_format,
-                        locked: false,
-                    };
-
-                    scoreboard.update_score(world, updated_score).await;
-                    enabled_count += 1;
-                }
-            }
-
-            if enabled_count == 0 {
-                return Err(FAILED_ENABLE_ERROR.create_without_context());
-            }
-
-            let msg = if targets.len() == 1 {
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_SINGLE,
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_SINGLE,
-                    [
-                        objective_display_name,
-                        TextComponent::text(targets[0].gameprofile.name.clone()),
-                    ],
-                )
-            } else {
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_MULTIPLE,
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ENABLE_SUCCESS_MULTIPLE,
-                    [
-                        objective_display_name,
-                        TextComponent::text(targets.len().to_string()),
-                    ],
-                )
-            };
-
-            context.source.send_feedback(msg, true).await;
-
-            Ok(enabled_count)
-        })
+        Ok(enabled_count)
     }
 }
 
 struct ObjectivesListExecutor;
 
 impl CommandExecutor for ObjectivesListExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let scoreboard = context.world().scoreboard.lock().await;
-            let objectives: Vec<&str> = scoreboard
-                .get_objectives()
-                .keys()
-                .map(String::as_str)
-                .collect();
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let scoreboard = context
+            .world()
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let objectives: Vec<&str> = scoreboard
+            .get_objectives()
+            .keys()
+            .map(String::as_str)
+            .collect();
 
-            if objectives.is_empty() {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_EMPTY,
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_EMPTY,
-                            [],
-                        ),
-                        false,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_SUCCESS,
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_SUCCESS,
-                            [
-                                TextComponent::text(objectives.len().to_string()),
-                                TextComponent::text(objectives.join(", ")),
-                            ],
-                        ),
-                        false,
-                    )
-                    .await;
-            }
+        if objectives.is_empty() {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_EMPTY,
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_EMPTY,
+                    [],
+                ),
+                false,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_SUCCESS,
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_LIST_SUCCESS,
+                    [
+                        TextComponent::text(objectives.len().to_string()),
+                        TextComponent::text(objectives.join(", ")),
+                    ],
+                ),
+                false,
+            );
+        }
 
-            Ok(objectives.len() as i32)
-        })
+        Ok(objectives.len() as i32)
     }
 }
 
 struct ObjectivesRemoveExecutor;
 
 impl CommandExecutor for ObjectivesRemoveExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.get_objectives().contains_key(objective_name) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.get_objectives().contains_key(objective_name) {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            scoreboard.remove_objective(world, objective_name).await;
+        scoreboard.remove_objective(world, objective_name);
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_REMOVE_SUCCESS,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_REMOVE_SUCCESS,
-                        [TextComponent::text(objective_name.to_string())],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_REMOVE_SUCCESS,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_REMOVE_SUCCESS,
+                [TextComponent::text(objective_name.to_string())],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 struct ModifyDisplayNameExecutor;
 
 impl CommandExecutor for ModifyDisplayNameExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let new_display = TextComponent::text(
-                StringArgumentType::get(context, ARG_DISPLAY_NAME)?.to_string(),
-            );
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let new_display =
+            TextComponent::text(StringArgumentType::get(context, ARG_DISPLAY_NAME)?.to_string());
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let Some(objective) = scoreboard.get_objective(objective_name) else {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            };
-            let render_type = objective.render_type;
-            let number_format = objective.number_format.clone();
-            let old_display = objective.display_name.clone();
-            let _ = objective;
+        let Some(objective) = scoreboard.get_objective(objective_name) else {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        };
+        let render_type = objective.render_type;
+        let number_format = objective.number_format.clone();
+        let old_display = objective.display_name.clone();
+        let _ = objective;
 
-            if old_display == new_display {
-                return Ok(0);
-            }
+        if old_display == new_display {
+            return Ok(0);
+        }
 
-            scoreboard.modify_objective(
-                world,
-                objective_name,
-                new_display.clone(),
-                render_type,
-                number_format,
-            );
+        scoreboard.modify_objective(
+            world,
+            objective_name,
+            new_display.clone(),
+            render_type,
+            number_format,
+        );
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_DISPLAYNAME,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_DISPLAYNAME,
-                        [TextComponent::text(objective_name.to_string()), new_display],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_DISPLAYNAME,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_DISPLAYNAME,
+                [TextComponent::text(objective_name.to_string()), new_display],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
@@ -349,664 +338,609 @@ struct ModifyRenderTypeExecutor {
 }
 
 impl CommandExecutor for ModifyRenderTypeExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let Some(objective) = scoreboard.get_objective(objective_name) else {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            };
-            let display_name = objective.display_name.clone();
-            let render_type = objective.render_type;
-            let number_format = objective.number_format.clone();
-            let _ = objective;
+        let Some(objective) = scoreboard.get_objective(objective_name) else {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        };
+        let display_name = objective.display_name.clone();
+        let render_type = objective.render_type;
+        let number_format = objective.number_format.clone();
+        let _ = objective;
 
-            if render_type as i32 == self.render_type as i32 {
-                return Ok(0);
-            }
+        if render_type as i32 == self.render_type as i32 {
+            return Ok(0);
+        }
 
-            scoreboard.modify_objective(
-                world,
-                objective_name,
-                display_name.clone(),
-                self.render_type,
-                number_format,
-            );
+        scoreboard.modify_objective(
+            world,
+            objective_name,
+            display_name.clone(),
+            self.render_type,
+            number_format,
+        );
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_RENDERTYPE,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_RENDERTYPE,
-                        [display_name],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_RENDERTYPE,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_RENDERTYPE,
+                [display_name],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 struct ObjectivesSetDisplayExecutor;
 
 impl CommandExecutor for ObjectivesSetDisplayExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let slot = ScoreboardDisplaySlotArgumentType::get(context, ARG_SLOT)?;
-            let objective_name: Option<String> =
-                context.get_argument::<String>(ARG_OBJECTIVE).ok().cloned();
-            let slot_name = display_slot_name(slot);
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let slot = ScoreboardDisplaySlotArgumentType::get(context, ARG_SLOT)?;
+        let objective_name: Option<String> =
+            context.get_argument::<String>(ARG_OBJECTIVE).ok().cloned();
+        let slot_name = display_slot_name(slot);
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if let Some(name) = &objective_name {
-                if !scoreboard.get_objectives().contains_key(name) {
-                    return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-                }
-
-                if scoreboard.get_display_objective(slot) == Some(name.as_str()) {
-                    return Err(DISPLAY_SLOT_ALREADY_SET_ERROR.create_without_context());
-                }
-
-                scoreboard
-                    .set_display_objective(world, slot, Some(name))
-                    .await;
-
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_SET,
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_SET,
-                            [
-                                TextComponent::text(slot_name),
-                                TextComponent::text(name.clone()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                if scoreboard.get_display_objective(slot).is_none() {
-                    return Err(DISPLAY_SLOT_ALREADY_EMPTY_ERROR.create_without_context());
-                }
-
-                scoreboard.set_display_objective(world, slot, None).await;
-
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
-                            translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
-                            [TextComponent::text(slot_name)],
-                        ),
-                        true,
-                    )
-                    .await;
+        if let Some(name) = &objective_name {
+            if !scoreboard.get_objectives().contains_key(name) {
+                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
             }
 
-            Ok(0)
-        })
+            if scoreboard.get_display_objective(slot) == Some(name.as_str()) {
+                return Err(DISPLAY_SLOT_ALREADY_SET_ERROR.create_without_context());
+            }
+
+            scoreboard.set_display_objective(world, slot, Some(name));
+
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_SET,
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_SET,
+                    [
+                        TextComponent::text(slot_name),
+                        TextComponent::text(name.clone()),
+                    ],
+                ),
+                true,
+            );
+        } else {
+            if scoreboard.get_display_objective(slot).is_none() {
+                return Err(DISPLAY_SLOT_ALREADY_EMPTY_ERROR.create_without_context());
+            }
+
+            scoreboard.set_display_objective(world, slot, None);
+
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
+                    translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
+                    [TextComponent::text(slot_name)],
+                ),
+                true,
+            );
+        }
+
+        Ok(0)
     }
 }
 
 struct ObjectivesClearDisplayExecutor;
 
 impl CommandExecutor for ObjectivesClearDisplayExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let slot = ScoreboardDisplaySlotArgumentType::get(context, ARG_SLOT)?;
-            let slot_name = display_slot_name(slot);
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let slot = ScoreboardDisplaySlotArgumentType::get(context, ARG_SLOT)?;
+        let slot_name = display_slot_name(slot);
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if scoreboard.get_display_objective(slot).is_none() {
-                return Err(DISPLAY_SLOT_ALREADY_EMPTY_ERROR.create_without_context());
-            }
+        if scoreboard.get_display_objective(slot).is_none() {
+            return Err(DISPLAY_SLOT_ALREADY_EMPTY_ERROR.create_without_context());
+        }
 
-            scoreboard.set_display_objective(world, slot, None).await;
+        scoreboard.set_display_objective(world, slot, None);
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
-                        [TextComponent::text(slot_name)],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_DISPLAY_CLEARED,
+                [TextComponent::text(slot_name)],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 struct PlayersSetExecutor;
 
 impl CommandExecutor for PlayersSetExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let value = IntegerArgumentType::get(context, ARG_SCORE)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let value = IntegerArgumentType::get(context, ARG_SCORE)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.get_objectives().contains_key(objective_name) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.get_objectives().contains_key(objective_name) {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            for player in &targets {
-                let score = ScoreboardScore {
-                    entity_name: player.gameprofile.name.clone(),
-                    objective_name: objective_name.to_string(),
-                    value: VarInt(value),
-                    display_name: None,
-                    number_format: None,
-                    locked: false,
-                };
-                scoreboard.update_score(world, score).await;
-            }
+        for player in &targets {
+            let score = ScoreboardScore {
+                entity_name: player.gameprofile.name.clone(),
+                objective_name: objective_name.to_string(),
+                value: VarInt(value),
+                display_name: None,
+                number_format: None,
+                locked: false,
+            };
+            scoreboard.update_score(world, score);
+        }
 
-            if targets.len() == 1 {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_SINGLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_SINGLE,
-                            [
-                                TextComponent::text(objective_name.to_string()),
-                                TextComponent::text(targets[0].gameprofile.name.clone()),
-                                TextComponent::text(value.to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_MULTIPLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_MULTIPLE,
-                            [
-                                TextComponent::text(objective_name.to_string()),
-                                TextComponent::text(targets.len().to_string()),
-                                TextComponent::text(value.to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            }
+        if targets.len() == 1 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_SINGLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_SINGLE,
+                    [
+                        TextComponent::text(objective_name.to_string()),
+                        TextComponent::text(targets[0].gameprofile.name.clone()),
+                        TextComponent::text(value.to_string()),
+                    ],
+                ),
+                true,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_MULTIPLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_SET_SUCCESS_MULTIPLE,
+                    [
+                        TextComponent::text(objective_name.to_string()),
+                        TextComponent::text(targets.len().to_string()),
+                        TextComponent::text(value.to_string()),
+                    ],
+                ),
+                true,
+            );
+        }
 
-            Ok(value * targets.len() as i32)
-        })
+        Ok(value * targets.len() as i32)
     }
 }
 
 struct PlayersGetExecutor;
 
 impl CommandExecutor for PlayersGetExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGET).await?;
-            let objective_name = obj_name(context)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGET)?;
+        let objective_name = obj_name(context)?;
 
-            // `players get` with empty targets is a parse error (EntityArgumentType requires at least 1)
-            if targets.is_empty() {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        // `players get` with empty targets is a parse error (EntityArgumentType requires at least 1)
+        if targets.is_empty() {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            let player = &targets[0];
-            let player_name = &player.gameprofile.name;
+        let player = &targets[0];
+        let player_name = &player.gameprofile.name;
 
-            let world = context.world();
-            let scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let Some(score_info) = scoreboard.get_player_score_info(player_name, objective_name)
-            else {
-                return Err(NO_VALUE_ERROR.create_without_context(
+        let Some(score_info) = scoreboard.get_player_score_info(player_name, objective_name) else {
+            return Err(NO_VALUE_ERROR.create_without_context(
+                TextComponent::text(objective_name.to_string()),
+                TextComponent::text(player_name.clone()),
+            ));
+        };
+
+        let value = score_info.value.0;
+
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_GET_SUCCESS,
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_GET_SUCCESS,
+                [
                     TextComponent::text(objective_name.to_string()),
                     TextComponent::text(player_name.clone()),
-                ));
-            };
+                    TextComponent::text(value.to_string()),
+                ],
+            ),
+            false,
+        );
 
-            let value = score_info.value.0;
-
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_PLAYERS_GET_SUCCESS,
-                        translation::java::COMMANDS_SCOREBOARD_PLAYERS_GET_SUCCESS,
-                        [
-                            TextComponent::text(objective_name.to_string()),
-                            TextComponent::text(player_name.clone()),
-                            TextComponent::text(value.to_string()),
-                        ],
-                    ),
-                    false,
-                )
-                .await;
-
-            Ok(value)
-        })
+        Ok(value)
     }
 }
 
 struct PlayersAddExecutor;
 
 impl CommandExecutor for PlayersAddExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let add_value = IntegerArgumentType::get(context, ARG_SCORE)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let add_value = IntegerArgumentType::get(context, ARG_SCORE)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let objective = scoreboard
-                .get_objectives()
-                .get(objective_name)
-                .ok_or_else(|| OBJECTIVE_NOT_FOUND_ERROR.create_without_context())?;
-            let obj_display = objective.display_name.clone();
-            let _ = objective;
+        let objective = scoreboard
+            .get_objectives()
+            .get(objective_name)
+            .ok_or_else(|| OBJECTIVE_NOT_FOUND_ERROR.create_without_context())?;
+        let obj_display = objective.display_name.clone();
+        let _ = objective;
 
-            let mut result = 0;
-            for player in &targets {
-                let player_name = &player.gameprofile.name;
-                let existing = scoreboard.get_player_score_info(player_name, objective_name);
-                let current = existing.map_or(0, |s| s.value.0);
-                let new_value = current + add_value;
+        let mut result = 0;
+        for player in &targets {
+            let player_name = &player.gameprofile.name;
+            let existing = scoreboard.get_player_score_info(player_name, objective_name);
+            let current = existing.map_or(0, |s| s.value.0);
+            let new_value = current + add_value;
 
-                let score = ScoreboardScore {
-                    entity_name: player_name.clone(),
-                    objective_name: objective_name.to_string(),
-                    value: VarInt(new_value),
-                    display_name: existing.and_then(|s| s.display_name.clone()),
-                    number_format: existing.and_then(|s| s.number_format.clone()),
-                    locked: existing.is_none_or(|s| s.locked),
-                };
-                scoreboard.update_score(world, score).await;
-                result += new_value;
-            }
+            let score = ScoreboardScore {
+                entity_name: player_name.clone(),
+                objective_name: objective_name.to_string(),
+                value: VarInt(new_value),
+                display_name: existing.and_then(|s| s.display_name.clone()),
+                number_format: existing.and_then(|s| s.number_format.clone()),
+                locked: existing.is_none_or(|s| s.locked),
+            };
+            scoreboard.update_score(world, score);
+            result += new_value;
+        }
 
-            if targets.len() == 1 {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_SINGLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_SINGLE,
-                            [
-                                TextComponent::text(add_value.to_string()),
-                                obj_display,
-                                TextComponent::text(targets[0].gameprofile.name.clone()),
-                                TextComponent::text(result.to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_MULTIPLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_MULTIPLE,
-                            [
-                                TextComponent::text(add_value.to_string()),
-                                obj_display,
-                                TextComponent::text(targets.len().to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            }
+        if targets.len() == 1 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_SINGLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_SINGLE,
+                    [
+                        TextComponent::text(add_value.to_string()),
+                        obj_display,
+                        TextComponent::text(targets[0].gameprofile.name.clone()),
+                        TextComponent::text(result.to_string()),
+                    ],
+                ),
+                true,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_MULTIPLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_ADD_SUCCESS_MULTIPLE,
+                    [
+                        TextComponent::text(add_value.to_string()),
+                        obj_display,
+                        TextComponent::text(targets.len().to_string()),
+                    ],
+                ),
+                true,
+            );
+        }
 
-            Ok(result)
-        })
+        Ok(result)
     }
 }
 
 struct PlayersRemoveExecutor;
 
 impl CommandExecutor for PlayersRemoveExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let remove_value = IntegerArgumentType::get(context, ARG_SCORE)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let remove_value = IntegerArgumentType::get(context, ARG_SCORE)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            let objective = scoreboard
-                .get_objectives()
-                .get(objective_name)
-                .ok_or_else(|| OBJECTIVE_NOT_FOUND_ERROR.create_without_context())?;
-            let obj_display = objective.display_name.clone();
-            let _ = objective;
+        let objective = scoreboard
+            .get_objectives()
+            .get(objective_name)
+            .ok_or_else(|| OBJECTIVE_NOT_FOUND_ERROR.create_without_context())?;
+        let obj_display = objective.display_name.clone();
+        let _ = objective;
 
-            let mut result = 0;
-            for player in &targets {
-                let player_name = &player.gameprofile.name;
-                let existing = scoreboard.get_player_score_info(player_name, objective_name);
-                let current = existing.map_or(0, |s| s.value.0);
-                let new_value = current - remove_value;
+        let mut result = 0;
+        for player in &targets {
+            let player_name = &player.gameprofile.name;
+            let existing = scoreboard.get_player_score_info(player_name, objective_name);
+            let current = existing.map_or(0, |s| s.value.0);
+            let new_value = current - remove_value;
 
-                let score = ScoreboardScore {
-                    entity_name: player_name.clone(),
-                    objective_name: objective_name.to_string(),
-                    value: VarInt(new_value),
-                    display_name: existing.and_then(|s| s.display_name.clone()),
-                    number_format: existing.and_then(|s| s.number_format.clone()),
-                    locked: existing.is_none_or(|s| s.locked),
-                };
-                scoreboard.update_score(world, score).await;
-                result += new_value;
-            }
+            let score = ScoreboardScore {
+                entity_name: player_name.clone(),
+                objective_name: objective_name.to_string(),
+                value: VarInt(new_value),
+                display_name: existing.and_then(|s| s.display_name.clone()),
+                number_format: existing.and_then(|s| s.number_format.clone()),
+                locked: existing.is_none_or(|s| s.locked),
+            };
+            scoreboard.update_score(world, score);
+            result += new_value;
+        }
 
-            if targets.len() == 1 {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_SINGLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_SINGLE,
-                            [
-                                TextComponent::text(remove_value.to_string()),
-                                obj_display,
-                                TextComponent::text(targets[0].gameprofile.name.clone()),
-                                TextComponent::text(result.to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_MULTIPLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_MULTIPLE,
-                            [
-                                TextComponent::text(remove_value.to_string()),
-                                obj_display,
-                                TextComponent::text(targets.len().to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            }
+        if targets.len() == 1 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_SINGLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_SINGLE,
+                    [
+                        TextComponent::text(remove_value.to_string()),
+                        obj_display,
+                        TextComponent::text(targets[0].gameprofile.name.clone()),
+                        TextComponent::text(result.to_string()),
+                    ],
+                ),
+                true,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_MULTIPLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_REMOVE_SUCCESS_MULTIPLE,
+                    [
+                        TextComponent::text(remove_value.to_string()),
+                        obj_display,
+                        TextComponent::text(targets.len().to_string()),
+                    ],
+                ),
+                true,
+            );
+        }
 
-            Ok(result)
-        })
+        Ok(result)
     }
 }
 
 struct PlayersResetAllExecutor;
 
 impl CommandExecutor for PlayersResetAllExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.reset_all_player_scores(world, &player.gameprofile.name);
-            }
+        for player in &targets {
+            scoreboard.reset_all_player_scores(world, &player.gameprofile.name);
+        }
 
-            if targets.len() == 1 {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_SINGLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_SINGLE,
-                            [TextComponent::text(targets[0].gameprofile.name.clone())],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_MULTIPLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_MULTIPLE,
-                            [TextComponent::text(targets.len().to_string())],
-                        ),
-                        true,
-                    )
-                    .await;
-            }
+        if targets.len() == 1 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_SINGLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_SINGLE,
+                    [TextComponent::text(targets[0].gameprofile.name.clone())],
+                ),
+                true,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_MULTIPLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_ALL_MULTIPLE,
+                    [TextComponent::text(targets.len().to_string())],
+                ),
+                true,
+            );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
 struct PlayersResetSingleExecutor;
 
 impl CommandExecutor for PlayersResetSingleExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.reset_single_player_score(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                );
-            }
+        for player in &targets {
+            scoreboard.reset_single_player_score(world, &player.gameprofile.name, objective_name);
+        }
 
-            let obj_display = TextComponent::text(objective_name.to_string());
-            if targets.len() == 1 {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_SINGLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_SINGLE,
-                            [
-                                obj_display,
-                                TextComponent::text(targets[0].gameprofile.name.clone()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_MULTIPLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_MULTIPLE,
-                            [obj_display, TextComponent::text(targets.len().to_string())],
-                        ),
-                        true,
-                    )
-                    .await;
-            }
+        let obj_display = TextComponent::text(objective_name.to_string());
+        if targets.len() == 1 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_SINGLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_SINGLE,
+                    [
+                        obj_display,
+                        TextComponent::text(targets[0].gameprofile.name.clone()),
+                    ],
+                ),
+                true,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_MULTIPLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_RESET_SPECIFIC_MULTIPLE,
+                    [obj_display, TextComponent::text(targets.len().to_string())],
+                ),
+                true,
+            );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
 struct PlayersListExecutor;
 
 impl CommandExecutor for PlayersListExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let scoreboard = context.world().scoreboard.lock().await;
-            let tracked = scoreboard.get_tracked_players();
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let scoreboard = context
+            .world()
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tracked = scoreboard.get_tracked_players();
 
-            if tracked.is_empty() {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_EMPTY,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_EMPTY,
-                            [],
-                        ),
-                        false,
-                    )
-                    .await;
-            } else {
-                let names = tracked.clone();
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_SUCCESS,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_SUCCESS,
-                            [
-                                TextComponent::text(names.len().to_string()),
-                                TextComponent::text(names.join(", ")),
-                            ],
-                        ),
-                        false,
-                    )
-                    .await;
-            }
+        if tracked.is_empty() {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_EMPTY,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_EMPTY,
+                    [],
+                ),
+                false,
+            );
+        } else {
+            let names = tracked.clone();
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_SUCCESS,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_SUCCESS,
+                    [
+                        TextComponent::text(names.len().to_string()),
+                        TextComponent::text(names.join(", ")),
+                    ],
+                ),
+                false,
+            );
+        }
 
-            Ok(tracked.len() as i32)
-        })
+        Ok(tracked.len() as i32)
     }
 }
 
 struct PlayersListTargetExecutor;
 
 impl CommandExecutor for PlayersListTargetExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            if targets.is_empty() {
-                return Err(INVALID_ENABLE_ERROR.create_without_context());
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        if targets.is_empty() {
+            return Err(INVALID_ENABLE_ERROR.create_without_context());
+        }
+        let player_name = &targets[0].gameprofile.name;
+
+        let scoreboard = context
+            .world()
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let scores = scoreboard.list_scores_for_player(player_name);
+
+        if scores.is_empty() {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_EMPTY,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_EMPTY,
+                    [TextComponent::text(player_name.clone())],
+                ),
+                false,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_SUCCESS,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_SUCCESS,
+                    [
+                        TextComponent::text(player_name.clone()),
+                        TextComponent::text(scores.len().to_string()),
+                    ],
+                ),
+                false,
+            );
+
+            for (obj_name, value) in &scores {
+                context.source.send_feedback(
+                    TextComponent::translate_cross(
+                        translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_ENTRY,
+                        translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_ENTRY,
+                        [
+                            TextComponent::text(obj_name.to_string()),
+                            TextComponent::text(value.to_string()),
+                        ],
+                    ),
+                    false,
+                );
             }
-            let player_name = &targets[0].gameprofile.name;
+        }
 
-            let scoreboard = context.world().scoreboard.lock().await;
-            let scores = scoreboard.list_scores_for_player(player_name);
-
-            if scores.is_empty() {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_EMPTY,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_EMPTY,
-                            [TextComponent::text(player_name.clone())],
-                        ),
-                        false,
-                    )
-                    .await;
-            } else {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_SUCCESS,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_SUCCESS,
-                            [
-                                TextComponent::text(player_name.clone()),
-                                TextComponent::text(scores.len().to_string()),
-                            ],
-                        ),
-                        false,
-                    )
-                    .await;
-
-                for (obj_name, value) in &scores {
-                    context
-                        .source
-                        .send_feedback(
-                            TextComponent::translate_cross(
-                                translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_ENTRY,
-                                translation::java::COMMANDS_SCOREBOARD_PLAYERS_LIST_ENTITY_ENTRY,
-                                [
-                                    TextComponent::text(obj_name.to_string()),
-                                    TextComponent::text(value.to_string()),
-                                ],
-                            ),
-                            false,
-                        )
-                        .await;
-                }
-            }
-
-            Ok(scores.len() as i32)
-        })
+        Ok(scores.len() as i32)
     }
 }
 
 struct PlayersDisplayNameSetExecutor;
 
 impl CommandExecutor for PlayersDisplayNameSetExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let name = TextComponent::text(StringArgumentType::get(context, "name")?.to_string());
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let name = TextComponent::text(StringArgumentType::get(context, "name")?.to_string());
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.set_score_display_name(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                    Some(name.clone()),
-                );
-            }
+        for player in &targets {
+            scoreboard.set_score_display_name(
+                world,
+                &player.gameprofile.name,
+                objective_name,
+                Some(name.clone()),
+            );
+        }
 
-            if targets.len() == 1 {
-                context
-                    .source
-                    .send_feedback(
-                        TextComponent::translate_cross(
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_DISPLAY_NAME_SET_SUCCESS_SINGLE,
-                            translation::java::COMMANDS_SCOREBOARD_PLAYERS_DISPLAY_NAME_SET_SUCCESS_SINGLE,
-                            [
-                                name,
-                                TextComponent::text(targets[0].gameprofile.name.clone()),
-                                TextComponent::text(objective_name.to_string()),
-                            ],
-                        ),
-                        true,
-                    )
-                    .await;
-            } else {
-                context
+        if targets.len() == 1 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_DISPLAY_NAME_SET_SUCCESS_SINGLE,
+                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_DISPLAY_NAME_SET_SUCCESS_SINGLE,
+                    [
+                        name,
+                        TextComponent::text(targets[0].gameprofile.name.clone()),
+                        TextComponent::text(objective_name.to_string()),
+                    ],
+                ),
+                true,
+            );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1019,37 +953,37 @@ impl CommandExecutor for PlayersDisplayNameSetExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
 struct PlayersDisplayNameClearExecutor;
 
 impl CommandExecutor for PlayersDisplayNameClearExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.set_score_display_name(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                    None,
-                );
-            }
+        for player in &targets {
+            scoreboard.set_score_display_name(
+                world,
+                &player.gameprofile.name,
+                objective_name,
+                None,
+            );
+        }
 
-            if targets.len() == 1 {
-                context
+        if targets.len() == 1 {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1061,10 +995,9 @@ impl CommandExecutor for PlayersDisplayNameClearExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            } else {
-                context
+                    );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1076,12 +1009,10 @@ impl CommandExecutor for PlayersDisplayNameClearExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
@@ -1096,17 +1027,20 @@ fn operation_source_args(
 }
 
 /// Applies an operation to all targets. `op` is `|a, b| -> i32`.
-async fn apply_operation(
+fn apply_operation(
     context: &CommandContext<'_>,
     op: impl Fn(i32, i32) -> i32 + Send + Sync,
 ) -> Result<i32, crate::command::errors::command_syntax_error::CommandSyntaxError> {
-    let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
+    let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
     let objective_name = obj_name(context)?;
-    let sources = EntityArgumentType::get_players(context, ARG_SOURCE).await?;
+    let sources = EntityArgumentType::get_players(context, ARG_SOURCE)?;
     let source_objective = obj_name(context)?;
 
     let world = context.world();
-    let mut scoreboard = world.scoreboard.lock().await;
+    let mut scoreboard = world
+        .scoreboard
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut last_new_value = 0;
     for target in &targets {
@@ -1130,41 +1064,35 @@ async fn apply_operation(
                 number_format: None,
                 locked: false,
             };
-            scoreboard.update_score(world, score).await;
+            scoreboard.update_score(world, score);
         }
     }
 
     if targets.len() == 1 {
-        context
-            .source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_SINGLE,
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_SINGLE,
-                    [
-                        TextComponent::text(objective_name.to_string()),
-                        TextComponent::text(targets[0].gameprofile.name.clone()),
-                        TextComponent::text(last_new_value.to_string()),
-                    ],
-                ),
-                true,
-            )
-            .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_SINGLE,
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_SINGLE,
+                [
+                    TextComponent::text(objective_name.to_string()),
+                    TextComponent::text(targets[0].gameprofile.name.clone()),
+                    TextComponent::text(last_new_value.to_string()),
+                ],
+            ),
+            true,
+        );
     } else {
-        context
-            .source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_MULTIPLE,
-                    translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_MULTIPLE,
-                    [
-                        TextComponent::text(objective_name.to_string()),
-                        TextComponent::text(targets.len().to_string()),
-                    ],
-                ),
-                true,
-            )
-            .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_MULTIPLE,
+                translation::java::COMMANDS_SCOREBOARD_PLAYERS_OPERATION_SUCCESS_MULTIPLE,
+                [
+                    TextComponent::text(objective_name.to_string()),
+                    TextComponent::text(targets.len().to_string()),
+                ],
+            ),
+            true,
+        );
     }
 
     Ok(targets.len() as i32)
@@ -1174,7 +1102,7 @@ macro_rules! make_operation_executor {
     ($name:ident, $op:expr) => {
         struct $name;
         impl CommandExecutor for $name {
-            fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
+            fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
                 Box::pin(apply_operation(context, $op))
             }
         }
@@ -1205,154 +1133,145 @@ struct ModifyObjectiveNumberFormatFixedExecutor;
 struct ModifyObjectiveNumberFormatStyledExecutor;
 
 impl CommandExecutor for ModifyObjectiveNumberFormatClearExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.set_objective_number_format(world, objective_name, None) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.set_objective_number_format(world, objective_name, None) {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_CLEAR,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_CLEAR,
-                        [TextComponent::text(objective_name.to_string())],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_CLEAR,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_CLEAR,
+                [TextComponent::text(objective_name.to_string())],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 impl CommandExecutor for ModifyObjectiveNumberFormatBlankExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.set_objective_number_format(
-                world,
-                objective_name,
-                Some(NumberFormat::Blank),
-            ) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.set_objective_number_format(world, objective_name, Some(NumberFormat::Blank))
+        {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
-                        [TextComponent::text(objective_name.to_string())],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
+                [TextComponent::text(objective_name.to_string())],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 impl CommandExecutor for ModifyObjectiveNumberFormatFixedExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let contents =
-                TextComponent::text(StringArgumentType::get(context, "contents")?.to_string());
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let contents =
+            TextComponent::text(StringArgumentType::get(context, "contents")?.to_string());
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.set_objective_number_format(
-                world,
-                objective_name,
-                Some(NumberFormat::Fixed(contents)),
-            ) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.set_objective_number_format(
+            world,
+            objective_name,
+            Some(NumberFormat::Fixed(contents)),
+        ) {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
-                        [TextComponent::text(objective_name.to_string())],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
+                [TextComponent::text(objective_name.to_string())],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 impl CommandExecutor for ModifyObjectiveNumberFormatStyledExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let objective_name = obj_name(context)?;
-            let style_json = StringArgumentType::get(context, "style")?.to_string();
-            let style: pumpkin_util::text::style::Style = serde_json::from_str(&style_json)
-                .map_err(|_| STYLE_PARSE_ERROR.create_without_context())?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let objective_name = obj_name(context)?;
+        let style_json = StringArgumentType::get(context, "style")?.to_string();
+        let style: pumpkin_util::text::style::Style = serde_json::from_str(&style_json)
+            .map_err(|_| STYLE_PARSE_ERROR.create_without_context())?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.set_objective_number_format(
-                world,
-                objective_name,
-                Some(NumberFormat::Styled(style)),
-            ) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.set_objective_number_format(
+            world,
+            objective_name,
+            Some(NumberFormat::Styled(style)),
+        ) {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            context
-                .source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
-                        translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
-                        [TextComponent::text(objective_name.to_string())],
-                    ),
-                    true,
-                )
-                .await;
+        context.source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
+                translation::java::COMMANDS_SCOREBOARD_OBJECTIVES_MODIFY_OBJECTIVEFORMAT_SET,
+                [TextComponent::text(objective_name.to_string())],
+            ),
+            true,
+        );
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
 struct ModifyDisplayAutoUpdateExecutor;
 
 impl CommandExecutor for ModifyDisplayAutoUpdateExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            use crate::command::argument_types::core::bool::BoolArgumentType;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        use crate::command::argument_types::core::bool::BoolArgumentType;
 
-            let objective_name = obj_name(context)?;
-            let value = BoolArgumentType::get(context, "value")?;
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let objective_name = obj_name(context)?;
+        let value = BoolArgumentType::get(context, "value")?;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            if !scoreboard.set_display_auto_update(world, objective_name, value) {
-                return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
-            }
+        if !scoreboard.set_display_auto_update(world, objective_name, value) {
+            return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
+        }
 
-            if value {
-                context
+        if value {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1364,10 +1283,9 @@ impl CommandExecutor for ModifyDisplayAutoUpdateExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            } else {
-                context
+                    );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1376,12 +1294,10 @@ impl CommandExecutor for ModifyDisplayAutoUpdateExecutor {
                             [TextComponent::text(objective_name.to_string())],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
@@ -1391,25 +1307,27 @@ struct PlayersDisplayNumberFormatFixedExecutor;
 struct PlayersDisplayNumberFormatStyledExecutor;
 
 impl CommandExecutor for PlayersDisplayNumberFormatClearExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.set_score_number_format(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                    None,
-                );
-            }
+        for player in &targets {
+            scoreboard.set_score_number_format(
+                world,
+                &player.gameprofile.name,
+                objective_name,
+                None,
+            );
+        }
 
-            if targets.len() == 1 {
-                context
+        if targets.len() == 1 {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1421,10 +1339,9 @@ impl CommandExecutor for PlayersDisplayNumberFormatClearExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            } else {
-                context
+                    );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1436,35 +1353,35 @@ impl CommandExecutor for PlayersDisplayNumberFormatClearExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
 impl CommandExecutor for PlayersDisplayNumberFormatBlankExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.set_score_number_format(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                    Some(NumberFormat::Blank),
-                );
-            }
+        for player in &targets {
+            scoreboard.set_score_number_format(
+                world,
+                &player.gameprofile.name,
+                objective_name,
+                Some(NumberFormat::Blank),
+            );
+        }
 
-            if targets.len() == 1 {
-                context
+        if targets.len() == 1 {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1476,10 +1393,9 @@ impl CommandExecutor for PlayersDisplayNumberFormatBlankExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            } else {
-                context
+                    );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1491,37 +1407,37 @@ impl CommandExecutor for PlayersDisplayNumberFormatBlankExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
 impl CommandExecutor for PlayersDisplayNumberFormatFixedExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let contents =
-                TextComponent::text(StringArgumentType::get(context, "contents")?.to_string());
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let contents =
+            TextComponent::text(StringArgumentType::get(context, "contents")?.to_string());
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.set_score_number_format(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                    Some(NumberFormat::Fixed(contents.clone())),
-                );
-            }
+        for player in &targets {
+            scoreboard.set_score_number_format(
+                world,
+                &player.gameprofile.name,
+                objective_name,
+                Some(NumberFormat::Fixed(contents.clone())),
+            );
+        }
 
-            if targets.len() == 1 {
-                context
+        if targets.len() == 1 {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1533,10 +1449,9 @@ impl CommandExecutor for PlayersDisplayNumberFormatFixedExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            } else {
-                context
+                    );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1548,38 +1463,38 @@ impl CommandExecutor for PlayersDisplayNumberFormatFixedExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 
 impl CommandExecutor for PlayersDisplayNumberFormatStyledExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, ARG_TARGETS).await?;
-            let objective_name = obj_name(context)?;
-            let style_json = StringArgumentType::get(context, "style")?.to_string();
-            let style: pumpkin_util::text::style::Style = serde_json::from_str(&style_json)
-                .map_err(|_| STYLE_PARSE_ERROR.create_without_context())?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, ARG_TARGETS)?;
+        let objective_name = obj_name(context)?;
+        let style_json = StringArgumentType::get(context, "style")?.to_string();
+        let style: pumpkin_util::text::style::Style = serde_json::from_str(&style_json)
+            .map_err(|_| STYLE_PARSE_ERROR.create_without_context())?;
 
-            let world = context.world();
-            let mut scoreboard = world.scoreboard.lock().await;
+        let world = context.world();
+        let mut scoreboard = world
+            .scoreboard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            for player in &targets {
-                scoreboard.set_score_number_format(
-                    world,
-                    &player.gameprofile.name,
-                    objective_name,
-                    Some(NumberFormat::Styled(style.clone())),
-                );
-            }
+        for player in &targets {
+            scoreboard.set_score_number_format(
+                world,
+                &player.gameprofile.name,
+                objective_name,
+                Some(NumberFormat::Styled(style.clone())),
+            );
+        }
 
-            if targets.len() == 1 {
-                context
+        if targets.len() == 1 {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1591,10 +1506,9 @@ impl CommandExecutor for PlayersDisplayNumberFormatStyledExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            } else {
-                context
+                    );
+        } else {
+            context
                     .source
                     .send_feedback(
                         TextComponent::translate_cross(
@@ -1606,12 +1520,10 @@ impl CommandExecutor for PlayersDisplayNumberFormatStyledExecutor {
                             ],
                         ),
                         true,
-                    )
-                    .await;
-            }
+                    );
+        }
 
-            Ok(targets.len() as i32)
-        })
+        Ok(targets.len() as i32)
     }
 }
 

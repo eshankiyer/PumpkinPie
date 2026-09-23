@@ -1,7 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal, to_goal_ticks};
-use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
 use crate::entity::mob::Mob;
@@ -176,7 +175,7 @@ impl ActiveTargetGoal {
         self.target = target;
     }
 
-    async fn find_closest_target(&mut self, mob: &dyn Mob) {
+    fn find_closest_target(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let follow_range = mob_entity
             .living_entity
@@ -207,102 +206,93 @@ impl ActiveTargetGoal {
                 .unwrap()
         };
 
-        self.target =
-            if self.target_types.is_none() && self.target_type == Some(&EntityType::PLAYER) {
-                let mut candidates = world.get_nearby_players(search_pos, follow_range);
-                candidates.sort_by(|a, b| {
-                    sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
-                });
-                let mut result = None;
-                for player in candidates {
-                    // Vanilla `TargetingConditions.test` (combat branch, `TargetingConditions.java:78`)
-                    // consults `targeter.canAttack(target)` before the rest of the predicate.
-                    if !TrackTargetGoal::is_allied(mob, player.as_ref()).await
-                        && mob.can_attack(player.get_entity())
-                        && self
-                            .target_predicate
-                            .test(
-                                &world,
-                                Some(&mob_entity.living_entity),
-                                &player.living_entity,
-                            )
-                            .await
-                    {
-                        result = Some(player as Arc<dyn EntityBase>);
-                        break;
-                    }
+        self.target = if self.target_types.is_none()
+            && self.target_type == Some(&EntityType::PLAYER)
+        {
+            let mut candidates = world.get_nearby_players(search_pos, follow_range);
+            candidates.sort_by(|a, b| {
+                sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
+            });
+            let mut result = None;
+            for player in candidates {
+                // Vanilla `TargetingConditions.test` (combat branch, `TargetingConditions.java:78`)
+                // consults `targeter.canAttack(target)` before the rest of the predicate.
+                if !TrackTargetGoal::is_allied(mob, player.as_ref())
+                    && mob.can_attack(player.get_entity())
+                    && self.target_predicate.test(
+                        &world,
+                        Some(&mob_entity.living_entity),
+                        &player.living_entity,
+                    )
+                {
+                    result = Some(player as Arc<dyn EntityBase>);
+                    break;
                 }
-                result
-            } else {
-                // Vanilla `getTargetSearchArea` inflates the mob's bounding box before
-                // `findTarget` queries entities in that area (`NearestAttackableTargetGoal.java:58-60,66-72`).
-                let search_box = mob_entity
-                    .living_entity
-                    .entity
-                    .bounding_box
-                    .load()
-                    .expand_all(follow_range);
-                let mut candidates: Vec<Arc<dyn EntityBase>> = world
-                    .get_all_at_box(&search_box)
-                    .into_iter()
-                    .filter(|entity| match (self.target_types, self.target_type) {
-                        (Some(target_types), _) => {
-                            target_types.contains(&entity.get_entity().entity_type)
-                        }
-                        (None, Some(target_type)) => entity.get_entity().entity_type == target_type,
-                        (None, None) => false,
-                    })
-                    .collect();
-                candidates.sort_by(|a, b| {
-                    sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
-                });
-                let mut result = None;
-                for entity in candidates {
-                    if let Some(living) = entity.get_living_entity()
-                        && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
-                        && mob.can_attack(entity.get_entity())
-                        && self
-                            .target_predicate
-                            .test(&world, Some(&mob_entity.living_entity), living)
-                            .await
-                    {
-                        result = Some(entity);
-                        break;
+            }
+            result
+        } else {
+            // Vanilla `getTargetSearchArea` inflates the mob's bounding box before
+            // `findTarget` queries entities in that area (`NearestAttackableTargetGoal.java:58-60,66-72`).
+            let search_box = mob_entity
+                .living_entity
+                .entity
+                .bounding_box
+                .load()
+                .expand_all(follow_range);
+            let mut candidates: Vec<Arc<dyn EntityBase>> = world
+                .get_all_at_box(&search_box)
+                .into_iter()
+                .filter(|entity| match (self.target_types, self.target_type) {
+                    (Some(target_types), _) => {
+                        target_types.contains(&entity.get_entity().entity_type)
                     }
+                    (None, Some(target_type)) => entity.get_entity().entity_type == target_type,
+                    (None, None) => false,
+                })
+                .collect();
+            candidates.sort_by(|a, b| {
+                sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
+            });
+            let mut result = None;
+            for entity in candidates {
+                if let Some(living) = entity.get_living_entity()
+                    && !TrackTargetGoal::is_allied(mob, entity.as_ref())
+                    && mob.can_attack(entity.get_entity())
+                    && self
+                        .target_predicate
+                        .test(&world, Some(&mob_entity.living_entity), living)
+                {
+                    result = Some(entity);
+                    break;
                 }
-                result
-            };
+            }
+            result
+        };
     }
 }
 
 impl Goal for ActiveTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            if self.reciprocal_chance > 0
-                && mob.get_random().random_range(0..self.reciprocal_chance) != 0
-            {
-                return false;
-            }
-            self.find_closest_target(mob).await;
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.reciprocal_chance > 0
+            && mob.get_random().random_range(0..self.reciprocal_chance) != 0
+        {
+            return false;
+        }
+        self.find_closest_target(mob);
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

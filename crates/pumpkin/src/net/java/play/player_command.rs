@@ -25,7 +25,7 @@ impl JavaClient {
                         server;
                         PlayerToggleSprintEvent::new(player.clone(), true);
                         'after: {
-                            player.get_entity().set_sprinting(event.is_sprinting).await;
+                            player.get_entity().set_sprinting(event.is_sprinting);
                         }
                     }}
                 }
@@ -36,21 +36,21 @@ impl JavaClient {
                         server;
                         PlayerToggleSprintEvent::new(player.clone(), false);
                         'after: {
-                            player.get_entity().set_sprinting(event.is_sprinting).await;
+                            player.get_entity().set_sprinting(event.is_sprinting);
                         }
                     }}
                 }
             }
-            Action::LeaveBed => player.wake_up().await,
+            Action::LeaveBed => player.wake_up(),
 
             Action::StartHorseJump => {
                 // `ServerGamePacketListenerImpl.handlePlayerCommand` checks `canJump`, then
                 // calls `handleStartJump` (`ServerGamePacketListenerImpl.java:1721-1727`).
-                let vehicle = entity.vehicle.lock().await.clone();
+                let vehicle = entity.vehicle.lock().clone();
                 if let Some(vehicle) = vehicle
                     && let Some(mob) = vehicle.get_mob()
                     && jump_boost > 0
-                    && mob.can_jump().await
+                    && mob.can_jump()
                 {
                     // `AbstractHorse.onPlayerJump` stores the charge for `tickRidden`
                     // (`AbstractHorse.java:720-738,878-895`); the shared Mob hooks expose that
@@ -62,7 +62,7 @@ impl JavaClient {
             Action::StopHorseJump => {
                 // `ServerGamePacketListenerImpl.handlePlayerCommand` forwards stop-jump to the
                 // controlled vehicle (`ServerGamePacketListenerImpl.java:1729-1732`).
-                let vehicle = entity.vehicle.lock().await.clone();
+                let vehicle = entity.vehicle.lock().clone();
                 if let Some(vehicle) = vehicle
                     && let Some(mob) = vehicle.get_mob()
                 {
@@ -74,11 +74,11 @@ impl JavaClient {
                 // hook (`ServerGamePacketListenerImpl.java:1734-1737`); the horse and nautilus
                 // implementations eventually use `ServerPlayer.openHorseInventory` and
                 // `openNautilusInventory` (`ServerPlayer.java:1372-1395`).
-                let vehicle = entity.vehicle.lock().await.clone();
+                let vehicle = entity.vehicle.lock().clone();
                 if let Some(vehicle) = vehicle
                     && let Some(mob) = vehicle.get_mob()
                 {
-                    mob.open_custom_inventory_screen(player).await;
+                    mob.open_custom_inventory_screen(player);
                 }
             }
             Action::StartFlyingElytra => {
@@ -89,7 +89,7 @@ impl JavaClient {
                 // resyncs the shared flag so the client ends its glide animation.
                 let living = &player.living_entity;
                 let caller: Arc<dyn EntityBase> = player.clone();
-                let try_start = player.try_to_start_fall_flying(&caller).await;
+                let try_start = player.try_to_start_fall_flying(&caller);
                 if try_start {
                     let mut event = crate::plugin::api::events::entity::entity_toggle_glide::EntityToggleGlideEvent::new(
                         living.entity.entity_id,
@@ -99,7 +99,7 @@ impl JavaClient {
                     if event.cancelled || !event.is_gliding {
                         living.entity.stop_fall_flying();
                     } else {
-                        player.start_fall_flying().await;
+                        player.start_fall_flying();
                     }
                 } else {
                     living.entity.stop_fall_flying();

@@ -293,14 +293,12 @@ impl pumpkin::plugin::server::HostServer for PluginHostState {
             .as_ref()
             .ok_or_else(|| wasmtime::Error::msg("Server not available"))?;
 
-        server
-            .broadcast_message(
-                &TextComponent::text(message),
-                &TextComponent::text("Server"),
-                0,
-                None,
-            )
-            .await;
+        server.broadcast_message(
+            &TextComponent::text(message),
+            &TextComponent::text("Server"),
+            0,
+            None,
+        );
 
         Ok(())
     }
@@ -349,9 +347,7 @@ impl pumpkin::plugin::server::HostServer for PluginHostState {
         };
 
         let dispatcher = server.command_dispatcher.load();
-        dispatcher
-            .handle_command(&native_sender.into_source(server).await, &command)
-            .await;
+        dispatcher.handle_command(&native_sender.into_source(server), &command);
 
         Ok(())
     }
@@ -549,7 +545,7 @@ impl pumpkin::plugin::server::HostServer for PluginHostState {
             .as_ref()
             .ok_or_else(|| wasmtime::Error::msg("Server not available"))?;
 
-        if let Some(entry) = server.enchantment_manager.get(&id).await {
+        if let Some(entry) = server.enchantment_manager.get(&id) {
             let description = self.add_text_component(entry.description)?;
             return Ok(Some(WitCustomEnchantment {
                 id: entry.id,
@@ -701,9 +697,7 @@ impl pumpkin::plugin::server::HostOpManager for PluginHostState {
 
         if let Some(player) = server.get_player_by_uuid(uuid) {
             let command_dispatcher = server.command_dispatcher.load();
-            player
-                .set_permission_lvl(server, internal_level, &command_dispatcher)
-                .await;
+            player.set_permission_lvl(server, internal_level, &command_dispatcher);
         }
 
         Ok(())
@@ -728,13 +722,11 @@ impl pumpkin::plugin::server::HostOpManager for PluginHostState {
 
             if let Some(player) = server.get_player_by_uuid(uuid) {
                 let command_dispatcher = server.command_dispatcher.load();
-                player
-                    .set_permission_lvl(
-                        server,
-                        pumpkin_util::PermissionLvl::Zero,
-                        &command_dispatcher,
-                    )
-                    .await;
+                player.set_permission_lvl(
+                    server,
+                    pumpkin_util::PermissionLvl::Zero,
+                    &command_dispatcher,
+                );
             }
 
             Ok(true)
@@ -871,12 +863,10 @@ impl pumpkin::plugin::server::HostBanManager for PluginHostState {
         if options.kick_if_online
             && let Some(player) = server.get_player_by_uuid(uuid)
         {
-            player
-                .kick(
-                    crate::net::DisconnectReason::Kicked,
-                    pumpkin_util::text::TextComponent::text(reason_text.clone()),
-                )
-                .await;
+            player.kick(
+                crate::net::DisconnectReason::Kicked,
+                pumpkin_util::text::TextComponent::text(reason_text.clone()),
+            );
         }
 
         if options.log_to_console {
@@ -1041,12 +1031,10 @@ impl pumpkin::plugin::server::HostBanManager for PluginHostState {
         if options.kick_matching_players {
             for player in server.get_all_players() {
                 if player.client.address().ip() == ip_addr {
-                    player
-                        .kick(
-                            crate::net::DisconnectReason::Kicked,
-                            pumpkin_util::text::TextComponent::text(reason_text.clone()),
-                        )
-                        .await;
+                    player.kick(
+                        crate::net::DisconnectReason::Kicked,
+                        pumpkin_util::text::TextComponent::text(reason_text.clone()),
+                    );
                 }
             }
         }
@@ -1148,15 +1136,13 @@ impl pumpkin::plugin::server::HostWhitelistManager for PluginHostState {
             let whitelist = server.data.whitelist_config.read().await;
             for player in server.get_all_players() {
                 if !whitelist.is_whitelisted(&player.gameprofile) {
-                    player
-                        .kick(
-                            crate::net::DisconnectReason::Kicked,
-                            pumpkin_macros::translate_cross!(
-                                pumpkin_data::translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,
-                                pumpkin_data::translation::bedrock::DISCONNECT_KICKED
-                            ),
-                        )
-                        .await;
+                    player.kick(
+                        crate::net::DisconnectReason::Kicked,
+                        pumpkin_macros::translate_cross!(
+                            pumpkin_data::translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,
+                            pumpkin_data::translation::bedrock::DISCONNECT_KICKED
+                        ),
+                    );
                 }
             }
         }

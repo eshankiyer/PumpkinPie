@@ -6,7 +6,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::ai::target_predicate::TargetPredicate;
@@ -98,7 +98,7 @@ impl NearestHostileTargetGoal {
         })
     }
 
-    async fn find_closest_target(&mut self, mob: &dyn Mob) {
+    fn find_closest_target(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let follow_range = mob_entity
             .living_entity
@@ -147,12 +147,11 @@ impl NearestHostileTargetGoal {
             // Vanilla `TargetingConditions.test` (combat branch, `TargetingConditions.java:78`)
             // consults `targeter.canAttack(target)` before the rest of the predicate.
             if let Some(living) = entity.get_living_entity()
-                && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
+                && !TrackTargetGoal::is_allied(mob, entity.as_ref())
                 && mob.can_attack(entity.get_entity())
                 && self
                     .target_predicate
                     .test(&world, Some(&mob_entity.living_entity), living)
-                    .await
             {
                 result = Some(entity);
                 break;
@@ -163,33 +162,27 @@ impl NearestHostileTargetGoal {
 }
 
 impl Goal for NearestHostileTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            if self.reciprocal_chance > 0
-                && mob.get_random().random_range(0..self.reciprocal_chance) != 0
-            {
-                return false;
-            }
-            self.find_closest_target(mob).await;
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.reciprocal_chance > 0
+            && mob.get_random().random_range(0..self.reciprocal_chance) != 0
+        {
+            return false;
+        }
+        self.find_closest_target(mob);
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rand::RngExt;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use pumpkin_data::data_component_impl::EquipmentSlot;
@@ -56,8 +56,8 @@ use super::World;
 use super::bossbar::{Bossbar, BossbarColor, BossbarDivisions, BossbarFlags};
 use crate::entity::EntityBase;
 use crate::entity::living::RaidMembership;
-use crate::entity::mob::raider::create_ominous_banner;
 use crate::entity::mob::equipment::RegionalDifficulty;
+use crate::entity::mob::raider::create_ominous_banner;
 use crate::entity::player::Player;
 use crate::world::natural_spawner::{is_spawn_position_ok, is_valid_empty_spawn_block};
 
@@ -391,21 +391,17 @@ impl Raid {
     }
 
     /// `Raid.stop` (`Raid.java`): deactivates the raid and drops every player from its boss bar.
-    pub async fn stop(&mut self, world: &Arc<World>) {
+    pub fn stop(&mut self, world: &Arc<World>) {
         self.active = false;
-        self.remove_all_bossbars(world).await;
+        self.remove_all_bossbars(world);
         self.status = RaidStatus::Stopped;
     }
 
     /// Raid.java:247-261. Reads `RAID_OMEN` (not `BAD_OMEN` - see
     /// `RaidOmenMobEffect.applyEffectTick`, which triggers this on `RAID_OMEN` expiry after
     /// `BadOmenMobEffect` converted `BAD_OMEN` into `RAID_OMEN` on village entry).
-    async fn absorb_raid_omen(&mut self, player: &Player) -> bool {
-        let Some(effect) = player
-            .living_entity
-            .get_effect(&StatusEffect::RAID_OMEN)
-            .await
-        else {
+    fn absorb_raid_omen(&mut self, player: &Player) -> bool {
+        let Some(effect) = player.living_entity.get_effect(&StatusEffect::RAID_OMEN) else {
             return false;
         };
         self.omen_level = (self.omen_level + i32::from(effect.amplifier) + 1)
@@ -463,7 +459,7 @@ impl Raid {
     }
 
     /// Raid.java:519-570.
-    async fn spawn_group(&mut self, world: &Arc<World>, pos: BlockPos) {
+    fn spawn_group(&mut self, world: &Arc<World>, pos: BlockPos) {
         let group_number = self.groups_spawned + 1;
         self.total_health = 0.0;
         let difficulty = world.level_info.load().difficulty;
@@ -490,12 +486,11 @@ impl Raid {
                 let is_leader = !leader_set && mob.can_be_raid_leader();
                 if is_leader {
                     leader_set = true;
-                    self.set_leader(group_number, uuid, mob.get_mob_entity())
-                        .await;
+                    self.set_leader(group_number, uuid, mob.get_mob_entity());
                 }
                 self.join_raid(group_number, uuid, mob.get_mob_entity(), is_leader);
                 // Raid.java:582 passes `false` unconditionally, regardless of leader status.
-                mob.apply_raid_buffs(group_number, false).await;
+                mob.apply_raid_buffs(group_number, false);
 
                 if raider_type == RaiderType::Ravager {
                     let rider_type =
@@ -524,22 +519,19 @@ impl Raid {
                                 rider_mob.get_mob_entity(),
                                 false,
                             );
-                            rider_mob.apply_raid_buffs(group_number, false).await;
+                            rider_mob.apply_raid_buffs(group_number, false);
                         }
-                        world.spawn_entity(rider.clone()).await;
-                        raider
-                            .get_entity()
-                            .add_passenger(raider.clone(), rider)
-                            .await;
+                        world.spawn_entity(rider.clone());
+                        raider.get_entity().add_passenger(raider.clone(), rider);
                     }
                 }
 
-                world.spawn_entity(raider).await;
+                world.spawn_entity(raider);
             }
         }
 
         self.groups_spawned += 1;
-        self.update_bossbar(world).await;
+        self.update_bossbar(world);
     }
 
     /// `Raid.joinRaid` (`Raid.java`). `pub(crate)` so raider-side AI (`PathfindToRaidGoal`'s
@@ -583,14 +575,14 @@ impl Raid {
     }
 
     /// `Raid.setLeader` (`Raid.java:725-729`).
-    pub(crate) async fn set_leader(
+    pub(crate) fn set_leader(
         &mut self,
         wave: i32,
         uuid: Uuid,
         mob_entity: &crate::entity::mob::MobEntity,
     ) {
         self.group_leaders.insert(wave, uuid);
-        equip_ominous_banner(mob_entity).await;
+        equip_ominous_banner(mob_entity);
     }
 
     /// `Raid.getGroupsSpawned` (`Raid.java:207`).
@@ -621,7 +613,7 @@ impl Raid {
         health
     }
 
-    async fn update_bossbar_health(&self, world: &Arc<World>) {
+    fn update_bossbar_health(&self, world: &Arc<World>) {
         let fraction = if self.total_health > 0.0 {
             (self.get_health_of_living_raiders(world) / self.total_health).clamp(0.0, 1.0)
         } else {
@@ -630,16 +622,14 @@ impl Raid {
         let players = world.players.load();
         for uuid in &self.bossbar_players {
             if let Some(player) = players.iter().find(|p| p.gameprofile.id == *uuid) {
-                player
-                    .update_bossbar_health(&self.bossbar_uuid, fraction)
-                    .await;
+                player.update_bossbar_health(&self.bossbar_uuid, fraction);
             }
         }
     }
 
     /// `Raid.updateBossbar` (`Raid.java:589-591`).
-    pub(crate) async fn update_bossbar(&self, world: &Arc<World>) {
-        self.update_bossbar_health(world).await;
+    pub(crate) fn update_bossbar(&self, world: &Arc<World>) {
+        self.update_bossbar_health(world);
     }
 
     fn make_bossbar(&self) -> Bossbar {
@@ -655,14 +645,14 @@ impl Raid {
 
     /// Raid.java:218-233, approximated with a fixed-radius player scan instead of the exact
     /// per-position raid lookup (`level.getRaidAt(pos) == this`).
-    async fn update_players(&mut self, world: &Arc<World>) {
+    fn update_players(&mut self, world: &Arc<World>) {
         let center = self.center.to_centered_f64();
         let nearby = world.get_nearby_players(center, 64.0);
         let current: Vec<Uuid> = nearby.iter().map(|p| p.gameprofile.id).collect();
 
         for player in &nearby {
             if !self.bossbar_players.contains(&player.gameprofile.id) {
-                player.send_bossbar(&self.make_bossbar()).await;
+                player.send_bossbar(&self.make_bossbar());
                 self.bossbar_players.push(player.gameprofile.id);
             }
         }
@@ -676,17 +666,17 @@ impl Raid {
             .collect();
         for uuid in stale {
             if let Some(player) = world_players.iter().find(|p| p.gameprofile.id == uuid) {
-                player.remove_bossbar(self.bossbar_uuid).await;
+                player.remove_bossbar(self.bossbar_uuid);
             }
             self.bossbar_players.retain(|u| *u != uuid);
         }
     }
 
-    async fn remove_all_bossbars(&mut self, world: &Arc<World>) {
+    fn remove_all_bossbars(&mut self, world: &Arc<World>) {
         let players = world.players.load();
         for uuid in self.bossbar_players.drain(..) {
             if let Some(player) = players.iter().find(|p| p.gameprofile.id == uuid) {
-                player.remove_bossbar(self.bossbar_uuid).await;
+                player.remove_bossbar(self.bossbar_uuid);
             }
         }
     }
@@ -746,7 +736,7 @@ impl Raid {
     }
 
     /// Raid.java:396-407 (Hero of the Village reward on victory).
-    async fn apply_victory_rewards(&self, world: &Arc<World>) {
+    fn apply_victory_rewards(&self, world: &Arc<World>) {
         for uuid in self.heroes_of_the_village.clone() {
             let Some(entity) = world.get_entity_by_uuid(uuid) else {
                 continue;
@@ -754,35 +744,33 @@ impl Raid {
             let Some(living) = entity.get_living_entity() else {
                 continue;
             };
-            living
-                .add_effect(Effect {
-                    effect_type: &StatusEffect::HERO_OF_THE_VILLAGE,
-                    duration: HERO_OF_THE_VILLAGE_DURATION,
-                    amplifier: (self.omen_level - 1).max(0) as u8,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                })
-                .await;
+            living.add_effect(Effect {
+                effect_type: &StatusEffect::HERO_OF_THE_VILLAGE,
+                duration: HERO_OF_THE_VILLAGE_DURATION,
+                amplifier: (self.omen_level - 1).max(0) as u8,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            });
         }
     }
 
     /// Raid.java:269-431.
-    async fn tick(&mut self, world: &Arc<World>) {
+    fn tick(&mut self, world: &Arc<World>) {
         if self.is_stopped() {
             return;
         }
 
         if self.status == RaidStatus::Ongoing {
             if world.level_info.load().difficulty == Difficulty::Peaceful {
-                self.stop(world).await;
+                self.stop(world);
                 return;
             }
 
             self.ticks_active += 1;
             if self.ticks_active >= RAID_TIMEOUT_TICKS {
-                self.stop(world).await;
+                self.stop(world);
                 return;
             }
 
@@ -799,7 +787,7 @@ impl Raid {
             }
 
             if self.ticks_active % 20 == 0 {
-                self.update_players(world).await;
+                self.update_players(world);
                 self.update_raiders(world);
             }
 
@@ -808,13 +796,13 @@ impl Raid {
                 let Some(spawn_pos) = self.find_random_spawn_pos(world, 20) else {
                     attempts += 1;
                     if attempts > NUM_SPAWN_ATTEMPTS {
-                        self.stop(world).await;
+                        self.stop(world);
                         break;
                     }
                     continue;
                 };
                 self.started = true;
-                self.spawn_group(world, spawn_pos).await;
+                self.spawn_group(world, spawn_pos);
                 world.play_sound(
                     Sound::EventRaidHorn,
                     SoundCategory::Neutral,
@@ -828,7 +816,7 @@ impl Raid {
                     self.post_raid_ticks += 1;
                 } else {
                     self.status = RaidStatus::Victory;
-                    self.apply_victory_rewards(world).await;
+                    self.apply_victory_rewards(world);
                 }
             } else if raiders_alive == 0
                 && self.has_first_wave_spawned()
@@ -840,7 +828,7 @@ impl Raid {
         } else if self.is_over() {
             self.celebration_ticks += 1;
             if self.celebration_ticks >= MAX_CELEBRATION_TICKS {
-                self.stop(world).await;
+                self.stop(world);
             }
         }
     }
@@ -855,12 +843,12 @@ impl Raid {
 /// the pattern layers cannot be attached yet; the banner is a plain white banner until that
 /// component carries data. `setDropChance(HEAD, 2.0F)` (PatrollingMonster.java:77) is likewise
 /// not represented - `EntityEquipment` has no per-slot drop chance.
-async fn equip_ominous_banner(mob_entity: &crate::entity::mob::MobEntity) {
+fn equip_ominous_banner(mob_entity: &crate::entity::mob::MobEntity) {
     mob_entity
         .living_entity
         .entity_equipment
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .put(&EquipmentSlot::HEAD, create_ominous_banner());
 }
 
@@ -929,7 +917,7 @@ impl PatrolSpawner {
     }
 
     /// `PatrolSpawner.spawnPatrolMember` (PatrolSpawner.java:67-91).
-    async fn spawn_patrol_member(world: &Arc<World>, pos: BlockPos, is_leader: bool) -> bool {
+    fn spawn_patrol_member(world: &Arc<World>, pos: BlockPos, is_leader: bool) -> bool {
         if !is_valid_empty_spawn_block(world.get_block_state(&pos), &EntityType::PILLAGER) {
             return false;
         }
@@ -958,16 +946,16 @@ impl PatrolSpawner {
             Uuid::new_v4(),
         );
         if is_leader && let Some(mob) = pillager.get_mob() {
-            equip_ominous_banner(mob.get_mob_entity()).await;
+            equip_ominous_banner(mob.get_mob_entity());
         }
-        world.spawn_entity(pillager).await;
+        world.spawn_entity(pillager);
         true
     }
 
     /// `PatrolSpawner.tick` (PatrolSpawner.java:20-65). `spawn_enemies` mirrors
     /// `ServerChunkCache.spawnEnemies`, which `MinecraftServer` sets from
     /// `ServerLevel.isSpawningMonsters` (ServerLevel.java:1776-1778).
-    async fn tick(&mut self, world: &Arc<World>) {
+    fn tick(&mut self, world: &Arc<World>) {
         let level_info = world.level_info.load();
         let game_rules = &level_info.game_rules;
         let spawn_enemies = game_rules.spawn_mobs
@@ -1004,7 +992,7 @@ impl PatrolSpawner {
         }
 
         let player_pos = player.get_entity().block_pos.load();
-        if world.is_close_to_village(player_pos, 2).await {
+        if world.is_close_to_village(player_pos, 2) {
             return;
         }
 
@@ -1028,11 +1016,11 @@ impl PatrolSpawner {
                 spawn_pos.0.z,
             );
             if i == 0 {
-                if !Self::spawn_patrol_member(world, spawn_pos, true).await {
+                if !Self::spawn_patrol_member(world, spawn_pos, true) {
                     break;
                 }
             } else {
-                Self::spawn_patrol_member(world, spawn_pos, false).await;
+                Self::spawn_patrol_member(world, spawn_pos, false);
             }
             spawn_pos = spawn_pos.add(
                 rand::random_range(0..5) - rand::random_range(0..5),
@@ -1147,7 +1135,7 @@ impl RaidManager {
     /// Raids.createOrExtendRaid (Raids.java:102-146). Called from `RaidOmenMobEffect`
     /// (`crate::entity::living::LivingEntity::apply_effect_tick`, `RAID_OMEN` branch) when a
     /// player's `RAID_OMEN` effect expires with a stored `raid_omen_position`.
-    pub async fn create_or_extend_raid(
+    pub fn create_or_extend_raid(
         &mut self,
         world: &Arc<World>,
         player: &Player,
@@ -1160,9 +1148,7 @@ impl RaidManager {
             return None;
         }
 
-        let poi_positions = world
-            .village_poi_positions_in_range(raid_position, 64)
-            .await;
+        let poi_positions = world.village_poi_positions_in_range(raid_position, 64);
         let raid_center = if poi_positions.is_empty() {
             raid_position
         } else {
@@ -1196,22 +1182,24 @@ impl RaidManager {
         };
         if should_absorb {
             let raid = self.raids.get_mut(&raid_id).unwrap();
-            raid.absorb_raid_omen(player).await;
+            raid.absorb_raid_omen(player);
         }
         Some(raid_id)
     }
 
     /// Raids.tick (Raids.java:79-100).
-    pub async fn tick(mgr_mutex: &Mutex<Self>, world: &Arc<World>) {
-        let mut mgr = mgr_mutex.lock().await;
+    pub fn tick(mgr_mutex: &Mutex<Self>, world: &Arc<World>) {
+        let mut mgr = mgr_mutex
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // `ServerLevel.tickCustomSpawners` (ServerLevel.java:483-485). Independent of the
         // `raids` game rule: patrols spawn whether or not raids are enabled.
-        mgr.patrol_spawner.tick(world).await;
+        mgr.patrol_spawner.tick(world);
 
         if !world.level_info.load().game_rules.raids {
             for raid in mgr.raids.values_mut() {
-                raid.stop(world).await;
+                raid.stop(world);
             }
         }
 
@@ -1220,7 +1208,7 @@ impl RaidManager {
             if let Some(raid) = mgr.raids.get_mut(&id)
                 && !raid.is_stopped()
             {
-                raid.tick(world).await;
+                raid.tick(world);
             }
         }
 
@@ -1232,7 +1220,7 @@ impl RaidManager {
             .collect();
         for id in stopped {
             if let Some(mut raid) = mgr.raids.remove(&id) {
-                raid.remove_all_bossbars(world).await;
+                raid.remove_all_bossbars(world);
             }
         }
     }

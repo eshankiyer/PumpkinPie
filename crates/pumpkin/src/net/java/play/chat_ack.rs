@@ -14,12 +14,11 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_CHAT_VALIDATION_FAILED,
                 translation::java::MULTIPLAYER_DISCONNECT_CHAT_VALIDATION_FAILED,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
 
-        let mut cache = player.signature_cache.lock().await;
+        let mut cache = player.signature_cache.lock();
         if let Err(err) = cache.last_seen_validator.apply_offset(offset as usize) {
             warn!(
                 "Failed to validate message acknowledgement offset from {}: {}",
@@ -30,8 +29,7 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_CHAT_VALIDATION_FAILED,
                 translation::java::MULTIPLAYER_DISCONNECT_CHAT_VALIDATION_FAILED,
                 [],
-            ))
-            .await;
+            ));
             return;
         }
 

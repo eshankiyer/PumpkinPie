@@ -88,13 +88,8 @@ pub trait ArgumentConsumer: Sync + Send + GetClientSideArgParser {
     /// Used for tab completion (but only if argument suggestion type is "`minecraft:ask_server`"!).
     ///
     /// NOTE: This is called after this consumer's [`ArgumentConsumer::consume`] method returned None, so if args is used here, make sure [`ArgumentConsumer::consume`] never returns None after mutating args.
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        _input: &'a str,
-    ) -> SuggestResult<'a> {
-        Box::pin(async move { Ok(None) })
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {
+        Ok(None)
     }
 }
 

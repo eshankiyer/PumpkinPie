@@ -157,7 +157,7 @@ impl PendingConnection {
                 if !matches!(err, PacketDecodeError::ConnectionClosed) {
                     debug!("Failed to decode packet from client {}: {}", self.id, err);
                     let text = format!("Error while reading incoming packet {err}");
-                    self.kick(TextComponent::text(text)).await;
+                    self.kick(TextComponent::text(text));
                 }
                 None
             }
@@ -216,8 +216,7 @@ impl PendingConnection {
                         .packet_limiter
                         .kick_message
                         .clone(),
-                ))
-                .await;
+                ));
                 return PacketHandlerResult::Stop;
             }
 
@@ -233,7 +232,7 @@ impl PendingConnection {
                         "Failed to read incoming packet with id {}: {}",
                         packet.id, error
                     );
-                    self.kick(TextComponent::text(text)).await;
+                    self.kick(TextComponent::text(text));
                 }
             }
         }
@@ -416,7 +415,7 @@ impl PendingConnection {
                     .unwrap_or_else(PlayerConfig::create_default);
                 self.connection_state.store(ConnectionState::Play);
                 if let Some(reason) = can_not_join(&profile, &self.address, server).await {
-                    self.kick(reason).await;
+                    self.kick(reason);
                     Ok(Some(PacketHandlerResult::Stop))
                 } else {
                     Ok(Some(PacketHandlerResult::ReadyToPlay(profile, config)))
@@ -465,8 +464,7 @@ impl PendingConnection {
         if client_information.view_distance <= 0 {
             self.kick(TextComponent::text(
                 "Cannot have zero or negative view distance!",
-            ))
-            .await;
+            ));
             return;
         }
 
@@ -486,8 +484,7 @@ impl PendingConnection {
                 server_listing: client_information.server_listing,
             });
         } else {
-            self.kick(TextComponent::text("Invalid hand or chat type"))
-                .await;
+            self.kick(TextComponent::text("Invalid hand or chat type"));
         }
     }
 
@@ -497,7 +494,7 @@ impl PendingConnection {
             debug!("Got a client brand");
             match core::str::from_utf8(plugin_message.data) {
                 Ok(brand) => self.brand = Some(brand.to_string()),
-                Err(e) => self.kick(TextComponent::text(e.to_string())).await,
+                Err(e) => self.kick(TextComponent::text(e.to_string())),
             }
         }
     }
@@ -518,23 +515,19 @@ impl PendingConnection {
                 | ResourcePackResponseResult::Unknown(_) => {}
                 ResourcePackResponseResult::Declined => {
                     if resource_config.force {
-                        self.kick(TextComponent::text("Required resource pack was declined"))
-                            .await;
+                        self.kick(TextComponent::text("Required resource pack was declined"));
                     }
                 }
                 ResourcePackResponseResult::DownloadFail => {
                     if resource_config.force {
-                        self.kick(TextComponent::text("Failed to download resource pack"))
-                            .await;
+                        self.kick(TextComponent::text("Failed to download resource pack"));
                     }
                 }
                 ResourcePackResponseResult::InvalidUrl => {
-                    self.kick(TextComponent::text("Invalid resource pack URL"))
-                        .await;
+                    self.kick(TextComponent::text("Invalid resource pack URL"));
                 }
                 ResourcePackResponseResult::ReloadFailed => {
-                    self.kick(TextComponent::text("Failed to reload resource pack"))
-                        .await;
+                    self.kick(TextComponent::text("Failed to reload resource pack"));
                 }
             }
         }

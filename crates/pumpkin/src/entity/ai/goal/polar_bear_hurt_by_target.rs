@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::goal::revenge::RevengeGoal;
 use crate::entity::mob::Mob;
 
@@ -30,24 +30,22 @@ impl PolarBearHurtByTargetGoal {
 }
 
 impl Goal for PolarBearHurtByTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
         self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.inner.start(mob).await;
-            if mob.get_entity().age.load(Relaxed) < 0 {
-                self.inner.stop(mob).await;
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.inner.start(mob);
+        if mob.get_entity().age.load(Relaxed) < 0 {
+            self.inner.stop(mob);
+        }
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 

@@ -32,10 +32,10 @@ impl GoalSelector {
             .insert(0, PrioritizedGoal::new(TypeId::of::<G>(), priority, goal));
     }
 
-    pub async fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
+    pub fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
         let mut stopped = self.remove_goal_sync::<G>();
         for goal in &mut stopped {
-            goal.stop(mob).await;
+            goal.stop(mob);
         }
     }
 
@@ -119,13 +119,13 @@ impl GoalSelector {
         true
     }
 
-    pub async fn tick(&mut self, mob: &dyn Mob) {
+    pub fn tick(&mut self, mob: &dyn Mob) {
         for prioritized_goal in &mut self.goals {
             if prioritized_goal.running
                 && (Self::uses_any(prioritized_goal, self.disabled_controls)
-                    || !prioritized_goal.should_continue(mob).await)
+                    || !prioritized_goal.should_continue(mob))
             {
-                prioritized_goal.stop(mob).await;
+                prioritized_goal.stop(mob);
             }
         }
 
@@ -139,28 +139,28 @@ impl GoalSelector {
             if !self.goals[i].running
                 && !Self::uses_any(&self.goals[i], self.disabled_controls)
                 && self.can_replace_all(&self.goals[i])
-                && self.goals[i].can_start(mob).await
+                && self.goals[i].can_start(mob)
             {
                 let controls = self.goals[i].controls();
                 for control in Controls::ITER {
                     if controls.get(control) {
                         if let Some(goal) = self.get_goal_by_control(control) {
-                            goal.stop(mob).await;
+                            goal.stop(mob);
                         }
                         self.goals_by_control[control.idx()] = i;
                     }
                 }
-                self.goals[i].start(mob).await;
+                self.goals[i].start(mob);
             }
         }
 
-        self.tick_goals(mob, true).await;
+        self.tick_goals(mob, true);
     }
 
-    pub async fn tick_goals(&mut self, mob: &dyn Mob, tick_all: bool) {
+    pub fn tick_goals(&mut self, mob: &dyn Mob, tick_all: bool) {
         for prioritized_goal in &mut self.goals {
             if prioritized_goal.running && (tick_all || prioritized_goal.should_run_every_tick()) {
-                prioritized_goal.tick(mob).await;
+                prioritized_goal.tick(mob);
             }
         }
     }

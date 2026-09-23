@@ -106,7 +106,7 @@ pub const fn bossbar_bedrock_id(uuid: &Uuid) -> VarLong {
 
 /// Extra methods for [`Player`] to send and manage the bossbar.
 impl Player {
-    pub async fn send_bossbar(&self, bossbar: &Bossbar) {
+    pub fn send_bossbar(&self, bossbar: &Bossbar) {
         match self.client.as_ref() {
             ClientPlatform::Java(java) => {
                 let boss_action = BosseventAction::Add {
@@ -139,7 +139,7 @@ impl Player {
         }
     }
 
-    pub async fn remove_bossbar(&self, uuid: Uuid) {
+    pub fn remove_bossbar(&self, uuid: Uuid) {
         match self.client.as_ref() {
             ClientPlatform::Java(java) => {
                 let boss_action = BosseventAction::Remove;
@@ -159,7 +159,7 @@ impl Player {
         }
     }
 
-    pub async fn update_bossbar_health(&self, uuid: &Uuid, health: f32) {
+    pub fn update_bossbar_health(&self, uuid: &Uuid, health: f32) {
         match self.client.as_ref() {
             ClientPlatform::Java(java) => {
                 let boss_action = BosseventAction::UpdateHealth(health);
@@ -175,7 +175,7 @@ impl Player {
         }
     }
 
-    pub async fn update_bossbar_title(&self, uuid: &Uuid, title: TextComponent) {
+    pub fn update_bossbar_title(&self, uuid: &Uuid, title: TextComponent) {
         match self.client.as_ref() {
             ClientPlatform::Java(java) => {
                 let boss_action = BosseventAction::UpdateTile(title);
@@ -191,7 +191,7 @@ impl Player {
         }
     }
 
-    pub async fn update_bossbar_style(
+    pub fn update_bossbar_style(
         &self,
         uuid: &Uuid,
         color: BossbarColor,
@@ -220,7 +220,7 @@ impl Player {
         }
     }
 
-    pub async fn update_bossbar_flags(&self, uuid: &Uuid, flags: BossbarFlags) {
+    pub fn update_bossbar_flags(&self, uuid: &Uuid, flags: BossbarFlags) {
         match self.client.as_ref() {
             ClientPlatform::Java(java) => {
                 let boss_action = BosseventAction::UpdateFlags(flags.bits());

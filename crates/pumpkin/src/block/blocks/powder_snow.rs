@@ -10,7 +10,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 
-use crate::block::{BlockBehaviour, BlockFuture, OnEntityCollisionArgs, OnLandedUponArgs};
+use crate::block::{BlockBehaviour, OnEntityCollisionArgs, OnLandedUponArgs};
 use crate::entity::EntityBase;
 
 #[pumpkin_block("minecraft:powder_snow")]
@@ -20,7 +20,7 @@ const FALLING_COLLISION_SHAPE: BoundingBox =
     BoundingBox::new_array([0.0, 0.0, 0.0], [1.0, 0.9, 1.0]);
 const WALK_ON_EPSILON: f64 = 1.0e-7;
 
-pub(crate) async fn can_entity_walk_on_powder_snow(entity: &dyn EntityBase) -> bool {
+pub(crate) fn can_entity_walk_on_powder_snow(entity: &dyn EntityBase) -> bool {
     let base = entity.get_entity();
     if base
         .entity_type
@@ -33,7 +33,10 @@ pub(crate) async fn can_entity_walk_on_powder_snow(entity: &dyn EntityBase) -> b
         return false;
     };
 
-    let equipment = living.entity_equipment.lock().await;
+    let equipment = living
+        .entity_equipment
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     equipment
         .equipment
         .get(&EquipmentSlot::FEET)
@@ -50,7 +53,7 @@ fn is_entity_descending(entity: &crate::entity::Entity) -> bool {
     entity.velocity.load().y < 0.0
 }
 
-pub(crate) async fn collision_shape_for_entity(
+pub(crate) fn collision_shape_for_entity(
     entity: &dyn EntityBase,
     position: &BlockPos,
 ) -> Option<BoundingBox> {
@@ -67,7 +70,7 @@ pub(crate) async fn collision_shape_for_entity(
         return Some(BoundingBox::full_block());
     }
 
-    if can_entity_walk_on_powder_snow(entity).await
+    if can_entity_walk_on_powder_snow(entity)
         && is_entity_above_block(base, position)
         && !is_entity_descending(base)
     {
@@ -77,67 +80,58 @@ pub(crate) async fn collision_shape_for_entity(
     None
 }
 
-pub(crate) async fn inside_collision_shape_for_entity(
+pub(crate) fn inside_collision_shape_for_entity(
     entity: &dyn EntityBase,
     position: &BlockPos,
 ) -> BoundingBox {
-    collision_shape_for_entity(entity, position)
-        .await
-        .unwrap_or_else(BoundingBox::full_block)
+    collision_shape_for_entity(entity, position).unwrap_or_else(BoundingBox::full_block)
 }
 
 impl BlockBehaviour for PowderSnowBlock {
-    fn on_landed_upon<'a>(&'a self, args: OnLandedUponArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(living) = args.entity.get_living_entity()
-                && args.fall_distance >= 4.0
-            {
-                let sound = if args.fall_distance < 7.0 {
-                    Sound::EntityGenericSmallFall
-                } else {
-                    Sound::EntityGenericBigFall
-                };
+    fn on_landed_upon(&self, args: OnLandedUponArgs<'_>) {
+        if let Some(living) = args.entity.get_living_entity()
+            && args.fall_distance >= 4.0
+        {
+            let sound = if args.fall_distance < 7.0 {
+                Sound::EntityGenericSmallFall
+            } else {
+                Sound::EntityGenericBigFall
+            };
 
-                living.entity.play_sound(sound);
-            }
-        })
+            living.entity.play_sound(sound);
+        }
     }
 
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = args.entity.get_entity();
-            // `PowderSnowBlock.entityInside`: a living entity is only slowed by the powder snow it
-            // is actually standing in, not by every powder snow block its hitbox touches. Without
-            // the check, snow at head height slowed a player standing on solid ground.
-            let stuck_in_snow = args.entity.get_living_entity().is_none()
-                || args.world.get_block(&entity.block_pos.load()) == &Block::POWDER_SNOW;
-            if stuck_in_snow {
-                let multiplier = Vector3::new(0.9, 1.5, 0.9);
-                if let Some(player) = args.entity.get_player() {
-                    // `Player.makeStuckInBlock` is the player-specific collision hook
-                    // (`Player.java:1515-1520`).
-                    player.make_stuck_in_block(args.state, multiplier).await;
-                } else {
-                    entity.slow_movement(args.state, multiplier).await;
-                }
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        let entity = args.entity.get_entity();
+        // `PowderSnowBlock.entityInside`: a living entity is only slowed by the powder snow it
+        // is actually standing in, not by every powder snow block its hitbox touches. Without
+        // the check, snow at head height slowed a player standing on solid ground.
+        let stuck_in_snow = args.entity.get_living_entity().is_none()
+            || args.world.get_block(&entity.block_pos.load()) == &Block::POWDER_SNOW;
+        if stuck_in_snow {
+            let multiplier = Vector3::new(0.9, 1.5, 0.9);
+            if let Some(player) = args.entity.get_player() {
+                // `Player.makeStuckInBlock` is the player-specific collision hook
+                // (`Player.java:1515-1520`).
+                player.make_stuck_in_block(args.state, multiplier);
+            } else {
+                entity.slow_movement(args.state, multiplier);
             }
+        }
 
-            if entity.fire_ticks.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                let can_destroy = args.entity.get_player().is_some()
-                    || args.world.level_info.load().game_rules.mob_griefing;
-                if can_destroy {
-                    let _ = args
-                        .world
-                        .break_block(
-                            args.position,
-                            None,
-                            BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS,
-                        )
-                        .await;
-                }
+        if entity.fire_ticks.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            let can_destroy = args.entity.get_player().is_some()
+                || args.world.level_info.load().game_rules.mob_griefing;
+            if can_destroy {
+                let _ = args.world.break_block(
+                    args.position,
+                    None,
+                    BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS,
+                );
             }
+        }
 
-            entity.extinguish();
-        })
+        entity.extinguish();
     }
 }

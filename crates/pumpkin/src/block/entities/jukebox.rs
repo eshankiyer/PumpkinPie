@@ -12,14 +12,14 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use rand::RngExt;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::block::entities::BlockEntity;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_util::math::vector3::Vector3;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
+use pumpkin_world::inventory::{Clearable, Inventory};
 
 /// Matches vanilla's `JukeboxBlockEntity`
 pub struct JukeboxBlockEntity {
@@ -87,52 +87,45 @@ impl BlockEntity for JukeboxBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let record = self.record_stack.lock().await;
-            if !record.is_empty() {
-                let mut record_nbt = NbtCompound::new();
-                record.write_item_stack(&mut record_nbt);
-                nbt.put(RECORD_ITEM_NBT_KEY, record_nbt);
-            }
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let record = self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !record.is_empty() {
+            let mut record_nbt = NbtCompound::new();
+            record.write_item_stack(&mut record_nbt);
+            nbt.put(RECORD_ITEM_NBT_KEY, record_nbt);
+        }
 
-            let ticks = self.ticks_since_song_started.load(Ordering::Relaxed);
-            if ticks > 0 {
-                nbt.put_long(TICKS_SINCE_SONG_STARTED_NBT_KEY, ticks as i64);
-            }
-        })
+        let ticks = self.ticks_since_song_started.load(Ordering::Relaxed);
+        if ticks > 0 {
+            nbt.put_long(TICKS_SINCE_SONG_STARTED_NBT_KEY, ticks as i64);
+        }
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Increment ticks if we're playing
-            let song_length = self.song_length_ticks.load(Ordering::Relaxed);
-            if song_length > 0 {
-                let ticks = self
-                    .ticks_since_song_started
-                    .fetch_add(1, Ordering::Relaxed);
-                // Check if song has finished (with vanilla's end-padding grace period)
-                if ticks >= song_length + SONG_END_PADDING_TICKS {
-                    self.stop_playing();
-                    world.update_neighbors(&self.position, None).await;
-                    world
-                        .update_comparators(&self.position, &Block::JUKEBOX)
-                        .await;
-                    self.emit_jukebox_event(world, GameEvent::JukeboxStopPlay)
-                        .await;
-                } else if ticks.is_multiple_of(20) {
-                    // JukeboxSongPlayer.PLAY_EVENT_INTERVAL_TICKS = 20 /
-                    // shouldEmitJukeboxPlayingEvent: ticksSinceSongStarted % 20 == 0,
-                    // checked against the pre-increment tick count (matches `ticks` here).
-                    // This is what keeps a dancing Allay in range considering the jukebox
-                    // "still playing" (Allay.java shouldStopDancing / setJukeboxPlaying).
-                    self.emit_jukebox_event(world, GameEvent::JukeboxPlay).await;
-                }
+    fn tick(&self, world: &Arc<World>) {
+        // Increment ticks if we're playing
+        let song_length = self.song_length_ticks.load(Ordering::Relaxed);
+        if song_length > 0 {
+            let ticks = self
+                .ticks_since_song_started
+                .fetch_add(1, Ordering::Relaxed);
+            // Check if song has finished (with vanilla's end-padding grace period)
+            if ticks >= song_length + SONG_END_PADDING_TICKS {
+                self.stop_playing();
+                world.update_neighbors(&self.position, None);
+                world.update_comparators(&self.position, &Block::JUKEBOX);
+                self.emit_jukebox_event(world, GameEvent::JukeboxStopPlay);
+            } else if ticks.is_multiple_of(20) {
+                // JukeboxSongPlayer.PLAY_EVENT_INTERVAL_TICKS = 20 /
+                // shouldEmitJukeboxPlayingEvent: ticksSinceSongStarted % 20 == 0,
+                // checked against the pre-increment tick count (matches `ticks` here).
+                // This is what keeps a dancing Allay in range considering the jukebox
+                // "still playing" (Allay.java shouldStopDancing / setJukeboxPlaying).
+                self.emit_jukebox_event(world, GameEvent::JukeboxPlay);
             }
-        })
+        }
     }
 
     fn on_block_replaced<'a>(
@@ -148,14 +141,13 @@ impl BlockEntity for JukeboxBlockEntity {
             // while `setRemoved` always emits the stop event and level event
             // (`JukeboxBlockEntity.java:126-155`). Pumpkin invokes this callback at its entity
             // removal point, so perform both actions before the entity is discarded.
-            self.pop_out_the_item(&world).await;
+            self.pop_out_the_item(&world);
             emit_game_event(
                 &world,
                 GameEvent::JukeboxStopPlay,
                 position.to_centered_f64(),
                 GameEventContext::none(),
-            )
-            .await;
+            );
             world.sync_world_event(
                 pumpkin_data::world::WorldEvent::SoundStopJukeboxSong,
                 position,
@@ -208,21 +200,30 @@ impl JukeboxBlockEntity {
     }
 
     /// Get the current record stack
-    pub async fn get_record(&self) -> ItemStack {
-        self.record_stack.lock().await.clone()
+    pub fn get_record(&self) -> ItemStack {
+        self.record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Set the record stack - matches vanilla's `setStack()`
     /// Note: The caller is responsible for updating block state and playing music
-    pub async fn set_record(&self, stack: ItemStack) {
-        *self.record_stack.lock().await = stack;
+    pub fn set_record(&self, stack: ItemStack) {
+        *self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
         self.mark_dirty();
     }
 
     /// Clear the stack and return what was there - used for dropping
-    pub async fn clear_record(&self) -> ItemStack {
+    pub fn clear_record(&self) -> ItemStack {
         self.stop_playing();
-        let mut record = self.record_stack.lock().await;
+        let mut record = self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let taken = record.clone();
         *record = ItemStack::EMPTY.clone();
         self.mark_dirty();
@@ -231,8 +232,8 @@ impl JukeboxBlockEntity {
 
     /// Vanilla `JukeboxBlockEntity.popOutTheItem` removes the record, spawns it above the
     /// block, and uses the normal song-change callback (`JukeboxBlockEntity.java:48-61`).
-    pub(crate) async fn pop_out_the_item(&self, world: &Arc<World>) {
-        let record = self.clear_record().await;
+    pub(crate) fn pop_out_the_item(&self, world: &Arc<World>) {
+        let record = self.clear_record();
         if record.is_empty() {
             return;
         }
@@ -248,7 +249,7 @@ impl JukeboxBlockEntity {
             &pumpkin_data::entity::EntityType::ITEM,
         );
         let item_entity = Arc::new(crate::entity::item::ItemEntity::new(entity, record));
-        world.spawn_entity(item_entity).await;
+        world.spawn_entity(item_entity);
     }
 
     /// Start playing a song with the given length in ticks
@@ -280,7 +281,7 @@ impl JukeboxBlockEntity {
         self.dirty.store(true, Ordering::Relaxed);
     }
 
-    async fn emit_jukebox_event(&self, world: &Arc<World>, event: GameEvent) {
+    fn emit_jukebox_event(&self, world: &Arc<World>, event: GameEvent) {
         emit_game_event(
             world,
             event,
@@ -290,8 +291,7 @@ impl JukeboxBlockEntity {
                 f64::from(self.position.0.z) + 0.5,
             ),
             GameEventContext::none(),
-        )
-        .await;
+        );
     }
 }
 
@@ -301,60 +301,61 @@ impl Inventory for JukeboxBlockEntity {
         1
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move { self.record_stack.lock().await.is_empty() })
+    fn is_empty(&self) -> bool {
+        self.record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
-    fn get_stack(&self, _slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move { self.record_stack.lock().await.clone() })
+    fn get_stack(&self, _slot: usize) -> ItemStack {
+        self.record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    fn remove_stack(&self, _slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            self.stop_playing();
-            let mut record = self.record_stack.lock().await;
-            let taken = record.clone();
-            *record = ItemStack::EMPTY.clone();
-            self.mark_dirty();
-            taken
-        })
+    fn remove_stack(&self, _slot: usize) -> ItemStack {
+        self.stop_playing();
+        let mut record = self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let taken = record.clone();
+        *record = ItemStack::EMPTY.clone();
+        self.mark_dirty();
+        taken
     }
 
-    fn remove_stack_specific(&self, _slot: usize, _amount: u8) -> InventoryFuture<'_, ItemStack> {
+    fn remove_stack_specific(&self, _slot: usize, _amount: u8) -> ItemStack {
         // Jukebox only holds one item, so remove the whole stack
         self.remove_stack(0)
     }
 
-    fn set_stack(&self, _slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            *self.record_stack.lock().await = stack;
-            self.mark_dirty();
-        })
+    fn set_stack(&self, _slot: usize, stack: ItemStack) {
+        *self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+        self.mark_dirty();
     }
 
     /// Vanilla `JukeboxBlockEntity.canPlaceItem` (JukeboxBlockEntity.java:143-145):
     /// hoppers may insert only a playable record, and only into the empty slot.
-    fn can_place_item<'a>(
-        &'a self,
-        slot: usize,
-        stack: &'a ItemStack,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            slot == 0
-                && stack.get_data_component::<JukeboxPlayableImpl>().is_some()
-                && self.record_stack.lock().await.is_empty()
-        })
+    fn can_place_item(&self, slot: usize, stack: &ItemStack) -> bool {
+        slot == 0
+            && stack.get_data_component::<JukeboxPlayableImpl>().is_some()
+            && self
+                .record_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
     }
 
     /// Vanilla `JukeboxBlockEntity.canTakeItem` allows extraction only when the destination
     /// contains an empty slot (`JukeboxBlockEntity.java:147-150`).
-    fn can_take_item<'a>(
-        &'a self,
-        into: &'a dyn Inventory,
-        _slot: usize,
-        _stack: &'a ItemStack,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move { into.contains_any_predicate(&|stack| stack.is_empty()).await })
+    fn can_take_item(&self, into: &dyn Inventory, _slot: usize, _stack: &ItemStack) -> bool {
+        into.contains_any_predicate(&|stack| stack.is_empty())
     }
 
     fn mark_dirty(&self) {
@@ -367,12 +368,13 @@ impl Inventory for JukeboxBlockEntity {
 }
 
 impl Clearable for JukeboxBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            self.stop_playing();
-            *self.record_stack.lock().await = ItemStack::EMPTY.clone();
-            self.mark_dirty();
-        })
+    fn clear(&self) {
+        self.stop_playing();
+        *self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ItemStack::EMPTY.clone();
+        self.mark_dirty();
     }
 }
 
@@ -420,15 +422,13 @@ mod tests {
 
     /// `canTakeItem` requires an empty destination slot (`JukeboxBlockEntity.java:147-150`).
     #[tokio::test]
-    async fn extraction_requires_an_empty_destination_slot() {
+    fn extraction_requires_an_empty_destination_slot() {
         let jukebox = JukeboxBlockEntity::new(BlockPos(Vector3::new(0, 0, 0)));
         let destination = pumpkin_world::inventory::SimpleInventory::new(1);
         let record = ItemStack::new(1, &pumpkin_data::item::Item::MUSIC_DISC_CAT);
 
-        assert!(jukebox.can_take_item(&destination, 0, &record).await);
-        destination
-            .set_stack(0, ItemStack::new(1, &pumpkin_data::item::Item::STONE))
-            .await;
-        assert!(!jukebox.can_take_item(&destination, 0, &record).await);
+        assert!(jukebox.can_take_item(&destination, 0, &record));
+        destination.set_stack(0, ItemStack::new(1, &pumpkin_data::item::Item::STONE));
+        assert!(!jukebox.can_take_item(&destination, 0, &record));
     }
 }

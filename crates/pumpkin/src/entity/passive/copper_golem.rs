@@ -27,7 +27,7 @@ use uuid::Uuid;
 use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::entity::player::Player;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         interact_with_door::InteractWithDoorGoal, look_at_entity::LookAtEntityGoal,
         transport_items::TransportItemsGoal, wander_around::WanderAroundGoal,
@@ -313,7 +313,7 @@ impl CopperGolemEntity {
 
     /// `CopperGolem.updateWeathering`: advances the oxidation stage on a fixed game-time
     /// schedule, then, once fully oxidized, rolls `canTurnToStatue` every tick.
-    async fn update_weathering(&self, world: &Arc<World>) {
+    fn update_weathering(&self, world: &Arc<World>) {
         let next_tick = self.next_weathering_tick.load();
         if next_tick == IGNORE_WEATHERING_TICK {
             return;
@@ -323,11 +323,11 @@ impl CopperGolemEntity {
         let is_fully_oxidized = state == CopperWeatherState::Oxidized;
 
         if next_tick == UNSET_WEATHERING_TICK {
-            let game_time = world.get_world_age().await;
+            let game_time = world.get_world_age();
             let delay = rand::rng().random_range(WEATHERING_TICK_FROM..=WEATHERING_TICK_TO);
             self.next_weathering_tick.store(game_time + delay);
         } else if !is_fully_oxidized {
-            let game_time = world.get_world_age().await;
+            let game_time = world.get_world_age();
             if game_time >= next_tick {
                 let new_state = state.next();
                 self.set_weather_state(new_state);
@@ -341,7 +341,7 @@ impl CopperGolemEntity {
         }
 
         if is_fully_oxidized && Self::can_turn_to_statue(world, &self.position()) {
-            self.turn_to_statue(world).await;
+            self.turn_to_statue(world);
         }
     }
 
@@ -358,7 +358,7 @@ impl CopperGolemEntity {
     /// `CopperGolem.turnToStatue`: replaces the golem with an oxidized copper golem statue
     /// block, always at the fully-oxidized stage (only reachable once the golem itself is
     /// fully oxidized).
-    async fn turn_to_statue(&self, world: &Arc<World>) {
+    fn turn_to_statue(&self, world: &Arc<World>) {
         let pos = self.position();
         let entity = &self.mob_entity.living_entity.entity;
         let facing = entity.get_horizontal_facing();
@@ -374,9 +374,7 @@ impl CopperGolemEntity {
         props.r#facing = facing;
         let state_id = props.to_state_id(&Block::OXIDIZED_COPPER_GOLEM_STATUE);
 
-        world
-            .set_block_state(&pos, state_id, BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(&pos, state_id, BlockFlags::NOTIFY_ALL);
 
         if let Some(block_entity) = world.get_block_entity(&pos)
             && let Some(statue) = block_entity
@@ -386,10 +384,10 @@ impl CopperGolemEntity {
             statue.create_statue();
             // Vanilla `CopperGolem.turnToStatue` drops preserved equipment after creating the
             // statue and before discarding the entity (`CopperGolem.java:286-301`).
-            self.drop_preserved_equipment().await;
+            self.drop_preserved_equipment();
         }
 
-        entity.remove().await;
+        entity.remove();
     }
 
     /// `CopperGolem.mobInteract`: honeycomb waxes (freezes weathering), axe on a waxed golem
@@ -436,25 +434,21 @@ impl CopperGolemEntity {
 }
 
 impl NBTStorage for CopperGolemEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_long("next_weather_age", self.next_weathering_tick.load());
-            nbt.put_string("weather_state", self.weather_state().as_str().to_string());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_long("next_weather_age", self.next_weathering_tick.load());
+        nbt.put_string("weather_state", self.weather_state().as_str().to_string());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.next_weathering_tick.store(
-                nbt.get_long("next_weather_age")
-                    .unwrap_or(UNSET_WEATHERING_TICK),
-            );
-            self.set_weather_state(CopperWeatherState::from_name(
-                nbt.get_string("weather_state").unwrap_or("unaffected"),
-            ));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.next_weathering_tick.store(
+            nbt.get_long("next_weather_age")
+                .unwrap_or(UNSET_WEATHERING_TICK),
+        );
+        self.set_weather_state(CopperWeatherState::from_name(
+            nbt.get_string("weather_state").unwrap_or("unaffected"),
+        ));
     }
 }
 
@@ -484,74 +478,63 @@ impl Mob for CopperGolemEntity {
     }
 
     /// `CopperGolem.thunderHit`: a lightning strike scrubs the golem back to unaffected.
-    fn mob_on_lightning_strike<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
-        lightning: &'a crate::entity::lightning::LightningBoltEntity,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity
-                .living_entity
-                .on_lightning_strike(caller, lightning)
-                .await;
+    fn mob_on_lightning_strike(
+        &self,
+        caller: &dyn EntityBase,
+        lightning: &crate::entity::lightning::LightningBoltEntity,
+    ) {
+        self.mob_entity
+            .living_entity
+            .on_lightning_strike(caller, lightning);
 
-            // `CopperGolem.thunderHit` ignores repeated callbacks for the same bolt and
-            // advances one oxidation stage toward unaffected, rather than clearing all stages.
-            // The compare-exchange keeps that read/modify/write atomic if lightning dispatch
-            // ever reaches this entity concurrently.
-            let lightning_uuid = lightning.get_entity().entity_uuid;
-            loop {
-                let previous = self.last_lightning_bolt_uuid.load();
-                if previous == Some(lightning_uuid) {
-                    return;
-                }
-                if self
-                    .last_lightning_bolt_uuid
-                    .compare_exchange(previous, Some(lightning_uuid))
-                    .is_ok()
-                {
-                    break;
-                }
+        // `CopperGolem.thunderHit` ignores repeated callbacks for the same bolt and
+        // advances one oxidation stage toward unaffected, rather than clearing all stages.
+        // The compare-exchange keeps that read/modify/write atomic if lightning dispatch
+        // ever reaches this entity concurrently.
+        let lightning_uuid = lightning.get_entity().entity_uuid;
+        loop {
+            let previous = self.last_lightning_bolt_uuid.load();
+            if previous == Some(lightning_uuid) {
+                return;
             }
+            if self
+                .last_lightning_bolt_uuid
+                .compare_exchange(previous, Some(lightning_uuid))
+                .is_ok()
+            {
+                break;
+            }
+        }
 
-            let state = self.weather_state();
-            if state != CopperWeatherState::Unaffected {
-                self.next_weathering_tick.store(UNSET_WEATHERING_TICK);
-                self.set_weather_state(state.previous());
-            }
-        })
+        let state = self.weather_state();
+        if state != CopperWeatherState::Unaffected {
+            self.next_weathering_tick.store(UNSET_WEATHERING_TICK);
+            self.set_weather_state(state.previous());
+        }
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[
-                    Metadata::new(
-                        pumpkin_data::tracked_data::copper_golem::WEATHER_STATE,
-                        VarInt(self.weather_state().id()),
-                    ),
-                    Metadata::new(
-                        pumpkin_data::tracked_data::copper_golem::COPPER_GOLEM_STATE,
-                        VarInt(self.get_state().id()),
-                    ),
-                ],
-                None,
-            );
-        })
+    fn mob_init_data_tracker(&self) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[
+                Metadata::new(
+                    pumpkin_data::tracked_data::copper_golem::WEATHER_STATE,
+                    VarInt(self.weather_state().id()),
+                ),
+                Metadata::new(
+                    pumpkin_data::tracked_data::copper_golem::COPPER_GOLEM_STATE,
+                    VarInt(self.get_state().id()),
+                ),
+            ],
+            None,
+        );
     }
 
     /// `CopperGolem.actuallyHurt` (CopperGolem.java:450-453): once damage is applied, the
     /// synched animation state snaps back to IDLE, cancelling any in-progress chest
     /// interaction animation. `Mob::on_damage` only runs after the damage landed, which is
     /// exactly vanilla's `actuallyHurt` position in the hurt pipeline.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        _source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.set_state(CopperGolemState::Idle);
-        })
+    fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {
+        self.set_state(CopperGolemState::Idle);
     }
 
     fn mob_tick<'a>(
@@ -560,7 +543,7 @@ impl Mob for CopperGolemEntity {
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let world = self.mob_entity.living_entity.entity.world.load();
-            self.update_weathering(&world).await;
+            self.update_weathering(&world);
         })
     }
 
@@ -575,7 +558,6 @@ impl Mob for CopperGolemEntity {
             }
             self.get_mob_entity()
                 .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
         })
     }
 }

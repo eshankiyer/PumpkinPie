@@ -6,7 +6,7 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::GameMode;
 use rand::RngExt;
 
-use crate::block::{BlockBehaviour, BlockFuture, BrokenArgs, OnSyncedBlockEventArgs, PlacedArgs};
+use crate::block::{BlockBehaviour, BrokenArgs, OnSyncedBlockEventArgs, PlacedArgs};
 
 /// Vanilla `SpawnerBlock.spawnAfterBreak` (`SpawnerBlock.java:41-47`) only awards
 /// experience when the break may drop it; `Block.popExperience` also requires
@@ -28,39 +28,31 @@ impl BlockBehaviour for SpawnerBlock {
     /// the spawner block (`SpawnerBlockEntity.java:21-25`). The client uses it to
     /// reset the visual spawn delay; accepting it here also makes the queued Java
     /// block event reachable through `World::flush_synced_block_events`.
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { args.r#type == 1 })
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        args.r#type == 1
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let spawner_block_entity = MobSpawnerBlockEntity::new(*args.position, None);
-            args.world.add_block_entity(Arc::new(spawner_block_entity));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let spawner_block_entity = MobSpawnerBlockEntity::new(*args.position, None);
+        args.world.add_block_entity(Arc::new(spawner_block_entity));
     }
 
     /// Vanilla `SpawnerBlock.spawnAfterBreak` (`SpawnerBlock.java:41-47`) awards two
     /// independent `nextInt(15)` rolls plus 15 experience when allowed to drop experience.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let block_drops = args.world.level_info.load().game_rules.block_drops;
-            let game_mode = args.player.gamemode.load();
-            if !should_drop_experience(args.drop_experience, block_drops, game_mode) {
-                return;
-            }
+    fn broken(&self, args: BrokenArgs<'_>) {
+        let block_drops = args.world.level_info.load().game_rules.block_drops;
+        let game_mode = args.player.gamemode.load();
+        if !should_drop_experience(args.drop_experience, block_drops, game_mode) {
+            return;
+        }
 
-            let amount = {
-                let mut random = rand::rng();
-                15 + random.random_range(0..15) + random.random_range(0..15)
-            };
-            // `popExperience` (`Block.java:446-449`): `ExperienceOrb.award(level,
-            // Vec3.atCenterOf(pos), amount)`.
-            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount as u32)
-                .await;
-        })
+        let amount = {
+            let mut random = rand::rng();
+            15 + random.random_range(0..15) + random.random_range(0..15)
+        };
+        // `popExperience` (`Block.java:446-449`): `ExperienceOrb.award(level,
+        // Vec3.atCenterOf(pos), amount)`.
+        ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount as u32);
     }
 }
 

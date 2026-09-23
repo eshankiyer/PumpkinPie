@@ -17,7 +17,6 @@ use pumpkin_world::world::BlockFlags;
 
 type ButtonLikeProperties = pumpkin_data::block_properties::LeverLikeProperties;
 
-use crate::block::BlockFuture;
 use crate::block::CanPlaceAtArgs;
 use crate::block::EmitsRedstonePowerArgs;
 use crate::block::ExplodeArgs;
@@ -99,7 +98,7 @@ fn has_arrow_in_button(
         })
 }
 
-async fn click_button(
+fn click_button(
     world: &Arc<World>,
     block_pos: &BlockPos,
     block: &Block,
@@ -110,13 +109,11 @@ async fn click_button(
     let mut button_props = ButtonLikeProperties::from_state_id(state, block);
     if !button_props.powered {
         button_props.powered = true;
-        world
-            .set_block_state(
-                block_pos,
-                button_props.to_state_id(block),
-                BlockFlags::NOTIFY_ALL,
-            )
-            .await;
+        world.set_block_state(
+            block_pos,
+            button_props.to_state_id(block),
+            BlockFlags::NOTIFY_ALL,
+        );
         // Vanilla `ticksToStayPressed`: 20 for the stone button (`ButtonBlock.java`
         // registration in `Blocks.java`), 30 for every other set.
         let delay = if *block == Block::STONE_BUTTON {
@@ -125,7 +122,7 @@ async fn click_button(
             30
         };
         world.schedule_block_tick(block, *block_pos, delay, TickPriority::Normal);
-        ButtonBlock::update_neighbors(world, block_pos, &button_props).await;
+        ButtonBlock::update_neighbors(world, block_pos, &button_props);
 
         // Vanilla `press` (ButtonBlock.java:94-100): click-on sound and a BLOCK_ACTIVATE
         // game event whose source is the pressing player (null for explosions,
@@ -157,8 +154,7 @@ async fn click_button(
             player.map_or_else(GameEventContext::none, |player| {
                 GameEventContext::of_entity(player.clone())
             }),
-        )
-        .await;
+        );
     }
 }
 
@@ -168,167 +164,131 @@ pub struct ButtonBlock;
 impl BlockBehaviour for ButtonBlock {
     /// Vanilla `useWithoutItem` (ButtonBlock.java:76-83): an already-pressed button only
     /// consumes the interaction; otherwise it presses and succeeds.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let props = ButtonLikeProperties::from_state_id(state.id, args.block);
-            if props.powered {
-                return BlockActionResult::Consume;
-            }
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        let state = args.world.get_block_state(args.position);
+        let props = ButtonLikeProperties::from_state_id(state.id, args.block);
+        if props.powered {
+            return BlockActionResult::Consume;
+        }
 
-            click_button(args.world, args.position, args.block, Some(args.player)).await;
+        click_button(args.world, args.position, args.block, Some(args.player));
 
-            BlockActionResult::Success
-        })
+        BlockActionResult::Success
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let props = ButtonLikeProperties::from_state_id(state.id, args.block);
-            if !props.powered {
-                return;
-            }
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let props = ButtonLikeProperties::from_state_id(state.id, args.block);
+        if !props.powered {
+            return;
+        }
 
-            if can_be_activated_by_arrows(args.block)
-                && has_arrow_in_button(args.world, args.position, state)
-            {
-                let delay = if *args.block == Block::STONE_BUTTON {
-                    20
-                } else {
-                    30
-                };
-                args.world.schedule_block_tick(
-                    args.block,
-                    *args.position,
-                    delay,
-                    TickPriority::Normal,
-                );
-                return;
-            }
-
-            let mut props = props;
-            props.powered = false;
+        if can_be_activated_by_arrows(args.block)
+            && has_arrow_in_button(args.world, args.position, state)
+        {
+            let delay = if *args.block == Block::STONE_BUTTON {
+                20
+            } else {
+                30
+            };
             args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-            Self::update_neighbors(args.world, args.position, &props).await;
+                .schedule_block_tick(args.block, *args.position, delay, TickPriority::Normal);
+            return;
+        }
 
-            // Vanilla `checkPressed` (ButtonBlock.java:162-177): releasing plays the click-off
-            // sound with no source and fires BLOCK_DEACTIVATE. Arrow-activatable buttons remain
-            // powered while an arrow is still lodged in the button shape above.
-            args.world.play_sound(
-                button_click_sound(args.block, false),
-                SoundCategory::Blocks,
-                &Vector3::new(
-                    f64::from(args.position.0.x) + 0.5,
-                    f64::from(args.position.0.y) + 0.5,
-                    f64::from(args.position.0.z) + 0.5,
-                ),
-            );
-            emit_game_event(
-                args.world,
-                GameEvent::BlockDeactivate,
-                Vector3::new(
-                    f64::from(args.position.0.x) + 0.5,
-                    f64::from(args.position.0.y) + 0.5,
-                    f64::from(args.position.0.z) + 0.5,
-                ),
-                GameEventContext::none(),
-            )
-            .await;
-        })
+        let mut props = props;
+        props.powered = false;
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_ALL,
+        );
+        Self::update_neighbors(args.world, args.position, &props);
+
+        // Vanilla `checkPressed` (ButtonBlock.java:162-177): releasing plays the click-off
+        // sound with no source and fires BLOCK_DEACTIVATE. Arrow-activatable buttons remain
+        // powered while an arrow is still lodged in the button shape above.
+        args.world.play_sound(
+            button_click_sound(args.block, false),
+            SoundCategory::Blocks,
+            &Vector3::new(
+                f64::from(args.position.0.x) + 0.5,
+                f64::from(args.position.0.y) + 0.5,
+                f64::from(args.position.0.z) + 0.5,
+            ),
+        );
+        emit_game_event(
+            args.world,
+            GameEvent::BlockDeactivate,
+            Vector3::new(
+                f64::from(args.position.0.x) + 0.5,
+                f64::from(args.position.0.y) + 0.5,
+                f64::from(args.position.0.z) + 0.5,
+            ),
+            GameEventContext::none(),
+        );
     }
 
     /// Vanilla `entityInside` (`ButtonBlock.java:153-160`) checks arrow-activatable button sets
     /// on the server and delegates to `checkPressed`. `AbstractArrow` entities (arrow, spectral
     /// arrow, thrown trident) are the only headless-server entities that can trigger this path.
-    fn on_entity_collision<'a>(
-        &'a self,
-        args: crate::block::OnEntityCollisionArgs<'a>,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !can_be_activated_by_arrows(args.block) {
-                return;
-            }
+    fn on_entity_collision(&self, args: crate::block::OnEntityCollisionArgs<'_>) {
+        if !can_be_activated_by_arrows(args.block) {
+            return;
+        }
 
-            if !is_abstract_arrow(args.entity.get_entity().entity_type) {
-                return;
-            }
+        if !is_abstract_arrow(args.entity.get_entity().entity_type) {
+            return;
+        }
 
-            let props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
-            if !props.powered {
-                click_button(args.world, args.position, args.block, None).await;
-            }
-        })
+        let props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
+        if !props.powered {
+            click_button(args.world, args.position, args.block, None);
+        }
     }
 
     /// Vanilla `onExplosionHit` (ButtonBlock.java:85-92): a blast that can trigger blocks
     /// presses the button if it is not already pressed (`press` with a null player).
-    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.can_trigger_blocks {
-                click_button(args.world, args.position, args.block, None).await;
+    fn explode(&self, args: ExplodeArgs<'_>) {
+        if args.can_trigger_blocks {
+            click_button(args.world, args.position, args.block, None);
+        }
+    }
+
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
+        true
+    }
+
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        let button_props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
+        if button_props.powered { 15 } else { 0 }
+    }
+
+    fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        let button_props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
+        if button_props.powered && button_props.get_direction() == args.direction {
+            15
+        } else {
+            0
+        }
+    }
+
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        if !args.moved {
+            let button_props = ButtonLikeProperties::from_state_id(args.old_state_id, args.block);
+            if button_props.powered {
+                Self::update_neighbors(args.world, args.position, &button_props);
             }
-        })
+        }
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { true })
-    }
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props =
+            ButtonLikeProperties::from_state_id(args.block.default_state.id, args.block);
+        (props.face, props.facing) =
+            WallMountedBlock::get_placement_face(self, args.player, args.direction);
 
-    fn get_weak_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            let button_props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
-            if button_props.powered { 15 } else { 0 }
-        })
-    }
-
-    fn get_strong_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            let button_props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
-            if button_props.powered && button_props.get_direction() == args.direction {
-                15
-            } else {
-                0
-            }
-        })
-    }
-
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !args.moved {
-                let button_props =
-                    ButtonLikeProperties::from_state_id(args.old_state_id, args.block);
-                if button_props.powered {
-                    Self::update_neighbors(args.world, args.position, &button_props).await;
-                }
-            }
-        })
-    }
-
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props =
-                ButtonLikeProperties::from_state_id(args.block.default_state.id, args.block);
-            (props.face, props.facing) =
-                WallMountedBlock::get_placement_face(self, args.player, args.direction);
-
-            props.to_state_id(args.block)
-        })
+        props.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -340,11 +300,11 @@ impl BlockBehaviour for ButtonBlock {
         WallMountedBlock::can_place_at(self, args.block_accessor, args.position, direction)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { WallMountedBlock::get_state_for_neighbor_update(self, args).await })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        WallMountedBlock::get_state_for_neighbor_update(self, args)
     }
 }
 
@@ -360,15 +320,9 @@ impl WallMountedBlock for ButtonBlock {
 }
 
 impl ButtonBlock {
-    async fn update_neighbors(
-        world: &Arc<World>,
-        block_pos: &BlockPos,
-        props: &ButtonLikeProperties,
-    ) {
+    fn update_neighbors(world: &Arc<World>, block_pos: &BlockPos, props: &ButtonLikeProperties) {
         let direction = props.get_direction().opposite();
-        world.update_neighbors(block_pos, None).await;
-        world
-            .update_neighbors(&block_pos.offset(direction.to_offset()), None)
-            .await;
+        world.update_neighbors(block_pos, None);
+        world.update_neighbors(&block_pos.offset(direction.to_offset()), None);
     }
 }

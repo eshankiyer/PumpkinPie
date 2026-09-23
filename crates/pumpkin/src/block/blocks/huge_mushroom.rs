@@ -1,6 +1,4 @@
-use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-};
+use crate::block::{BlockBehaviour, BlockMetadata, GetStateForNeighborUpdateArgs, OnPlaceArgs};
 use pumpkin_data::block_properties::{BlockProperties, BrownMushroomBlockLikeProperties};
 use pumpkin_data::{BlockDirection, BlockId, BlockStateId};
 
@@ -40,34 +38,30 @@ impl BlockBehaviour for HugeMushroomBlock {
     /// `HugeMushroomBlock.getStateForPlacement`: every face starts "outward" (true) except
     /// the ones touching an already-placed block of the exact same type (checked with `is(this)`,
     /// i.e. same block id, not just any huge-mushroom block).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = MushroomProperties::default(args.block);
-            for direction in BlockDirection::all() {
-                let neighbor_pos = args.position.offset(direction.to_offset());
-                let neighbor_block = args.world.get_block(&neighbor_pos);
-                set_face(&mut props, direction, neighbor_block != args.block);
-            }
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = MushroomProperties::default(args.block);
+        for direction in BlockDirection::all() {
+            let neighbor_pos = args.position.offset(direction.to_offset());
+            let neighbor_block = args.world.get_block(&neighbor_pos);
+            set_face(&mut props, direction, neighbor_block != args.block);
+        }
+        props.to_state_id(args.block)
     }
 
     /// `HugeMushroomBlock.updateShape`: only ever clears a face to `false` when the neighbor in
     /// that direction is the exact same block; it never restores `true` (a one-way quirk that
     /// matches vanilla and must not be "fixed").
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let neighbor_block = args.world.get_block(args.neighbor_position);
-            if neighbor_block != args.block {
-                return args.state_id;
-            }
-            let mut props = MushroomProperties::from_state_id(args.state_id, args.block);
-            set_face(&mut props, args.direction, false);
-            props.to_state_id(args.block)
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let neighbor_block = args.world.get_block(args.neighbor_position);
+        if neighbor_block != args.block {
+            return args.state_id;
+        }
+        let mut props = MushroomProperties::from_state_id(args.state_id, args.block);
+        set_face(&mut props, args.direction, false);
+        props.to_state_id(args.block)
     }
 }
 

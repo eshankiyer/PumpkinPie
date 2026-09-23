@@ -19,7 +19,7 @@ use rand::{RngExt, rng};
 use uuid::Uuid;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
@@ -502,15 +502,14 @@ impl PandaEntity {
     }
 
     /// `Panda.canPerformAction`, resolving the weather itself. Goals call this one.
-    pub async fn can_perform_action(&self) -> bool {
+    pub fn can_perform_action(&self) -> bool {
         let thundering = self
             .mob_entity
             .living_entity
             .entity
             .world
             .load()
-            .is_thundering()
-            .await;
+            .is_thundering();
         self.can_perform_action_with(thundering)
     }
 
@@ -552,24 +551,24 @@ impl PandaEntity {
     }
 
     /// `Panda.getItemBySlot(MAINHAND)`.
-    pub async fn held_stack(&self) -> ItemStack {
+    pub fn held_stack(&self) -> ItemStack {
         self.mob_entity
             .living_entity
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&EquipmentSlot::MAIN_HAND)
     }
 
     /// `Panda.setItemSlot(MAINHAND, ...)` plus the equipment resync the client needs to render
     /// the held bamboo.
-    pub async fn set_held_stack(&self, stack: ItemStack) {
+    pub fn set_held_stack(&self, stack: ItemStack) {
         self.hand_occupied.store(!stack.is_empty(), Relaxed);
         self.mob_entity
             .living_entity
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .put(&EquipmentSlot::MAIN_HAND, stack.clone());
         self.mob_entity
             .living_entity
@@ -674,8 +673,8 @@ impl PandaEntity {
 
     /// `Panda.handleEating` (`Panda.java:424-450`) plus the sound half of
     /// `Panda.addEatingParticles`.
-    async fn handle_eating(&self, thundering: bool) {
-        let held = self.held_stack().await;
+    fn handle_eating(&self, thundering: bool) {
+        let held = self.held_stack();
         let held_empty = held.is_empty();
 
         if !self.is_eating()
@@ -705,7 +704,7 @@ impl PandaEntity {
 
         if counter > 80 && rng().random_range(0..20) == 1 {
             if counter > 100 && Self::can_pick_up_and_eat(&held) {
-                self.set_held_stack(ItemStack::EMPTY.clone()).await;
+                self.set_held_stack(ItemStack::EMPTY.clone());
                 self.sit(false);
             }
             self.eat(false);
@@ -717,13 +716,13 @@ impl PandaEntity {
 
     /// `Panda.afterSneeze` (`Panda.java:505-528`): startles nearby adult pandas into a jump and
     /// rolls the sneeze gift loot table.
-    async fn after_sneeze(&self) {
+    fn after_sneeze(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load();
         let pos = entity.pos.load();
         world.play_sound(Sound::EntityPandaSneeze, SoundCategory::Neutral, &pos);
 
-        let thundering = world.is_thundering().await;
+        let thundering = world.is_thundering();
         let area = entity.bounding_box.load().expand_all(10.0);
         for candidate in world.get_entities_at_box(&area) {
             let Some(other) = candidate.cast_any().downcast_ref::<Self>() else {
@@ -744,12 +743,10 @@ impl PandaEntity {
         // Inlined `gameplay/panda_sneeze` gift loot table (see the type doc): slime ball at
         // weight 1 against an empty entry at weight 699.
         if world.level_info.load().game_rules.mob_drops && rng().random_range(0..700) == 0 {
-            world
-                .drop_stack(
-                    &entity.block_pos.load(),
-                    ItemStack::new(1, &Item::SLIME_BALL),
-                )
-                .await;
+            world.drop_stack(
+                &entity.block_pos.load(),
+                ItemStack::new(1, &Item::SLIME_BALL),
+            );
         }
     }
 }
@@ -774,32 +771,28 @@ impl Animal for PandaEntity {
 }
 
 impl NBTStorage for PandaEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            // `Panda.addAdditionalSaveData`.
-            nbt.put_string("MainGene", self.main_gene().name().to_string());
-            nbt.put_string("HiddenGene", self.hidden_gene().name().to_string());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        // `Panda.addAdditionalSaveData`.
+        nbt.put_string("MainGene", self.main_gene().name().to_string());
+        nbt.put_string("HiddenGene", self.hidden_gene().name().to_string());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            // `Panda.readAdditionalSaveData`: an absent or unrecognised name is NORMAL.
-            let main = nbt
-                .get_string("MainGene")
-                .map_or(PandaGene::Normal, PandaGene::from_name);
-            let hidden = nbt
-                .get_string("HiddenGene")
-                .map_or(PandaGene::Normal, PandaGene::from_name);
-            self.set_main_gene(main);
-            self.set_hidden_gene(hidden);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        // `Panda.readAdditionalSaveData`: an absent or unrecognised name is NORMAL.
+        let main = nbt
+            .get_string("MainGene")
+            .map_or(PandaGene::Normal, PandaGene::from_name);
+        let hidden = nbt
+            .get_string("HiddenGene")
+            .map_or(PandaGene::Normal, PandaGene::from_name);
+        self.set_main_gene(main);
+        self.set_hidden_gene(hidden);
     }
 }
 
@@ -811,19 +804,17 @@ impl Mob for PandaEntity {
     /// `Panda.doHurtTarget` (`Panda.java:365-372`): a panda that is not AGGRESSIVE-gened records
     /// that it has bitten, which makes `PandaHurtByTargetGoal` drop the grudge. This runs on a
     /// landed hit rather than on the swing, which is what vanilla keys off.
-    fn on_successful_attack<'a>(&'a self, _target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.is_aggressive_gene() {
-                self.set_did_bite(true);
-            }
-            let entity = &self.mob_entity.living_entity.entity;
-            // `Panda.playAttackSound`.
-            entity.world.load().play_sound(
-                Sound::EntityPandaBite,
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        })
+    fn on_successful_attack(&self, _target: &dyn EntityBase) {
+        if !self.is_aggressive_gene() {
+            self.set_did_bite(true);
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        // `Panda.playAttackSound`.
+        entity.world.load().play_sound(
+            Sound::EntityPandaBite,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
     }
 
     /// `Panda.canBeLeashed`.
@@ -864,203 +855,196 @@ impl Mob for PandaEntity {
                 return 0;
             }
             let count = stack.item_count;
-            self.set_held_stack(stack.clone()).await;
+            self.set_held_stack(stack.clone());
             count
         })
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            // `Panda.finalizeSpawn`: both genes rolled independently at spawn, then
-            // `setAttributes`. An NBT restore has already written real ids, so the sentinel check
-            // keeps a loaded panda's genes instead of re-rolling them.
-            if self.main_gene.load(Relaxed) == GENE_UNSET {
-                self.set_main_gene(PandaGene::random());
-            } else {
-                self.set_main_gene(self.main_gene());
-            }
-            if self.hidden_gene.load(Relaxed) == GENE_UNSET {
-                self.set_hidden_gene(PandaGene::random());
-            } else {
-                self.set_hidden_gene(self.hidden_gene());
-            }
-            self.set_attributes();
-            // `entity_equipment` is restored by `LivingEntity::read_nbt`, which does not go
-            // through `set_held_stack`, so the mirror has to be re-derived once here.
-            self.hand_occupied
-                .store(!self.held_stack().await.is_empty(), Relaxed);
+    fn mob_init_data_tracker(&self) {
+        // `Panda.finalizeSpawn`: both genes rolled independently at spawn, then
+        // `setAttributes`. An NBT restore has already written real ids, so the sentinel check
+        // keeps a loaded panda's genes instead of re-rolling them.
+        if self.main_gene.load(Relaxed) == GENE_UNSET {
+            self.set_main_gene(PandaGene::random());
+        } else {
+            self.set_main_gene(self.main_gene());
+        }
+        if self.hidden_gene.load(Relaxed) == GENE_UNSET {
+            self.set_hidden_gene(PandaGene::random());
+        } else {
+            self.set_hidden_gene(self.hidden_gene());
+        }
+        self.set_attributes();
+        // `entity_equipment` is restored by `LivingEntity::read_nbt`, which does not go
+        // through `set_held_stack`, so the mirror has to be re-derived once here.
+        self.hand_occupied
+            .store(!self.held_stack().is_empty(), Relaxed);
 
-            let entity = &self.mob_entity.living_entity.entity;
-            if entity.age.load(Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::panda::DATA_BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+        let entity = &self.mob_entity.living_entity.entity;
+        if entity.age.load(Relaxed) < 0 {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::panda::DATA_ID_FLAGS,
-                    self.flags.load(Relaxed) as i8,
+                    pumpkin_data::tracked_data::panda::DATA_BABY_ID,
+                    true,
                 )],
                 None,
             );
-        })
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::panda::DATA_ID_FLAGS,
+                self.flags.load(Relaxed) as i8,
+            )],
+            None,
+        );
     }
 
     /// `Panda.tick` (`Panda.java:379-422`).
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            let thundering = world.is_thundering().await;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let thundering = world.is_thundering();
 
-            if self.is_worried() {
-                if thundering && !self.mob_entity.living_entity.is_in_water() {
-                    self.sit(true);
-                    self.eat(false);
-                } else if !self.is_eating() {
-                    self.sit(false);
-                }
+        if self.is_worried() {
+            if thundering && !self.mob_entity.living_entity.is_in_water() {
+                self.sit(true);
+                self.eat(false);
+            } else if !self.is_eating() {
+                self.sit(false);
             }
+        }
 
-            let target = self.mob_entity.target.lock().await.clone();
-            if target.is_none() {
-                self.got_bamboo.store(false, Relaxed);
-                self.did_bite.store(false, Relaxed);
+        let target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if target.is_none() {
+            self.got_bamboo.store(false, Relaxed);
+            self.did_bite.store(false, Relaxed);
+        }
+
+        let unhappy = self.get_unhappy_counter();
+        if unhappy > 0 {
+            if let Some(target) = &target {
+                entity.look_at(target.get_entity().pos.load());
             }
-
-            let unhappy = self.get_unhappy_counter();
-            if unhappy > 0 {
-                if let Some(target) = &target {
-                    entity.look_at(target.get_entity().pos.load());
-                }
-                if unhappy == 29 || unhappy == 14 {
-                    world.play_sound(
-                        Sound::EntityPandaCantBreed,
-                        SoundCategory::Neutral,
-                        &entity.pos.load(),
-                    );
-                }
-                self.set_unhappy_counter(unhappy - 1);
+            if unhappy == 29 || unhappy == 14 {
+                world.play_sound(
+                    Sound::EntityPandaCantBreed,
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
+                );
             }
+            self.set_unhappy_counter(unhappy - 1);
+        }
 
-            if self.is_sneezing() {
-                let counter = self.get_sneeze_counter() + 1;
-                self.set_sneeze_counter(counter);
-                if counter > 20 {
-                    self.sneeze(false);
-                    self.after_sneeze().await;
-                } else if counter == 1 {
-                    world.play_sound(
-                        Sound::EntityPandaPreSneeze,
-                        SoundCategory::Neutral,
-                        &entity.pos.load(),
-                    );
-                }
+        if self.is_sneezing() {
+            let counter = self.get_sneeze_counter() + 1;
+            self.set_sneeze_counter(counter);
+            if counter > 20 {
+                self.sneeze(false);
+                self.after_sneeze();
+            } else if counter == 1 {
+                world.play_sound(
+                    Sound::EntityPandaPreSneeze,
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
+                );
             }
+        }
 
-            if self.is_rolling() {
-                self.handle_roll();
-            } else {
-                self.roll_counter.store(0, Relaxed);
-            }
+        if self.is_rolling() {
+            self.handle_roll();
+        } else {
+            self.roll_counter.store(0, Relaxed);
+        }
 
-            if self.is_sitting_panda() {
-                // `this.setXRot(0.0F)`.
-                entity.set_rotation(entity.yaw.load(), 0.0);
-            }
+        if self.is_sitting_panda() {
+            // `this.setXRot(0.0F)`.
+            entity.set_rotation(entity.yaw.load(), 0.0);
+        }
 
-            self.handle_eating(thundering).await;
-        })
+        self.handle_eating(thundering);
     }
 
     /// `Panda.mobInteract` (`Panda.java:611-663`).
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            if self.is_scared_with(world.is_thundering().await) {
-                return false;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        if self.is_scared_with(world.is_thundering()) {
+            return false;
+        }
 
-            if self.is_on_back() {
-                self.set_on_back(false);
-                return true;
-            }
+        if self.is_on_back() {
+            self.set_on_back(false);
+            return true;
+        }
 
-            if !self.is_food(item_stack) {
-                return false;
-            }
+        if !self.is_food(item_stack) {
+            return false;
+        }
 
-            // `if (this.getTarget() != null) this.gotBamboo = true;`
-            if self.mob_entity.target.lock().await.is_some() {
-                self.got_bamboo.store(true, Relaxed);
-            }
+        // `if (this.getTarget() != null) this.gotBamboo = true;`
+        if self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
+            self.got_bamboo.store(true, Relaxed);
+        }
 
-            // Growing a cub up and entering love mode both live in `animal_interact`, which
-            // returns true when it consumed the item for either.
-            if self
-                .animal_interact(player, item_stack, Sound::EntityPandaAmbient)
-                .await
-            {
-                return true;
-            }
+        // Growing a cub up and entering love mode both live in `animal_interact`, which
+        // returns true when it consumed the item for either.
+        if self.animal_interact(player, item_stack, Sound::EntityPandaAmbient) {
+            return true;
+        }
 
-            // Vanilla's remaining branch: an adult that can neither age up nor fall in love sits
-            // down and starts eating the offered bamboo, dropping whatever it already held.
-            if self.is_baby()
-                || self.is_sitting_panda()
-                || self.mob_entity.living_entity.is_in_water()
-            {
-                return false;
-            }
+        // Vanilla's remaining branch: an adult that can neither age up nor fall in love sits
+        // down and starts eating the offered bamboo, dropping whatever it already held.
+        if self.is_baby() || self.is_sitting_panda() || self.mob_entity.living_entity.is_in_water()
+        {
+            return false;
+        }
 
-            self.try_to_sit();
-            self.eat(true);
-            let current = self.held_stack().await;
-            // `!player.hasInfiniteMaterials()`: a creative player's feeding does not spit the old
-            // stack back onto the ground.
-            if !current.is_empty() && player.gamemode.load() != pumpkin_util::GameMode::Creative {
-                world.drop_stack(&entity.block_pos.load(), current).await;
-            }
-            self.set_held_stack(ItemStack::new(1, item_stack.item))
-                .await;
-            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-            true
-        })
+        self.try_to_sit();
+        self.eat(true);
+        let current = self.held_stack();
+        // `!player.hasInfiniteMaterials()`: a creative player's feeding does not spit the old
+        // stack back onto the ground.
+        if !current.is_empty() && player.gamemode.load() != pumpkin_util::GameMode::Creative {
+            world.drop_stack(&entity.block_pos.load(), current);
+        }
+        self.set_held_stack(ItemStack::new(1, item_stack.item));
+        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        true
     }
 
     /// `Panda.getBreedOffspring`: the cub's genes come from both parents via
     /// `setGeneFromParents`, then `setAttributes` applies the weak/lazy stat overrides.
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            Uuid::new_v4(),
+        );
 
-            if let Some(cub) = baby.cast_any().downcast_ref::<Self>() {
-                let mate_panda = mate.cast_any().downcast_ref::<Self>();
-                cub.set_gene_from_parents(self, mate_panda);
-                cub.set_attributes();
-            }
+        if let Some(cub) = baby.cast_any().downcast_ref::<Self>() {
+            let mate_panda = mate.cast_any().downcast_ref::<Self>();
+            cub.set_gene_from_parents(self, mate_panda);
+            cub.set_attributes();
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 }
 

@@ -316,7 +316,7 @@ impl PluginManager {
                             if path.extension().is_some_and(|ext| ext == "wasm") {
                                 debug!("Detected change in plugin: {:?}", path);
                                 // Give it a small delay to ensure file is completely written
-                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                tokio::time::sleep(Duration::from_millis(100));
 
                                 // We need to find if this plugin is already loaded to unload it first
                                 let plugin_name = {
@@ -619,7 +619,7 @@ impl PluginManager {
                     // Try to unload the plugin data
                     if let Some(data) = loader_data {
                         tokio::spawn(async move {
-                            loader_clone.unload(data).await.ok();
+                            loader_clone.unload(data).ok();
                         });
                     }
 
@@ -658,7 +658,7 @@ impl PluginManager {
         }
 
         let cache_path = path.join("permission_cache.json");
-        let mut cache = cache::PermissionCache::load(&cache_path).await;
+        let mut cache = cache::PermissionCache::load(&cache_path);
 
         let mut prepared_plugins = Vec::new();
 
@@ -682,7 +682,7 @@ impl PluginManager {
             let mut loader_found = false;
             for loader in loaders.iter() {
                 if loader.can_load(&path) {
-                    match loader.load(&path).await {
+                    match loader.load(&path) {
                         Ok((instance, metadata, loader_data)) => {
                             let plugin_override =
                                 server.advanced_config.plugins.overrides.get(&metadata.name);
@@ -863,7 +863,7 @@ impl PluginManager {
                     approved: true,
                 },
             );
-            let _ = cache.save(cache_path).await;
+            let _ = cache.save(cache_path);
             return (true, std::time::Duration::ZERO);
         }
 
@@ -876,7 +876,7 @@ impl PluginManager {
                     approved: allowed,
                 },
             );
-            let _ = cache.save(cache_path).await;
+            let _ = cache.save(cache_path);
         }
         (allowed, wait_time)
     }
@@ -895,7 +895,7 @@ impl PluginManager {
 
         for loader in self.loaders.read().await.iter() {
             if loader.can_load(path) {
-                let (instance, metadata, loader_data) = loader.load(path).await?;
+                let (instance, metadata, loader_data) = loader.load(path)?;
 
                 let plugin_override = server.advanced_config.plugins.overrides.get(&metadata.name);
 
@@ -928,7 +928,7 @@ impl PluginManager {
                 }
 
                 let cache_path = Path::new(PLUGIN_DIR).join("permission_cache.json");
-                let mut cache = cache::PermissionCache::load(&cache_path).await;
+                let mut cache = cache::PermissionCache::load(&cache_path);
 
                 let (allowed, _) = self
                     .check_permissions_cached(path, &metadata, &mut cache, &cache_path, server)
@@ -1064,7 +1064,7 @@ impl PluginManager {
 
         if plugin.loader.can_unload() {
             if let Some(data) = plugin.loader_data {
-                plugin.loader.unload(data).await?;
+                plugin.loader.unload(data)?;
             }
         } else {
             plugin.is_active = false;

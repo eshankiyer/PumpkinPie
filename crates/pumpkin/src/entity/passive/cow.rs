@@ -12,7 +12,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::AgeableMob,
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal,
@@ -166,33 +166,29 @@ impl crate::entity::ageable::AgeableMob for CowEntity {
 }
 
 impl NBTStorage for CowEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            // `VariantUtils.writeVariant` (VariantUtils.java:26-28, Cow.java:57): the variant
-            // resource key under the `variant` key. The pre-roll sentinel normalizes to
-            // temperate, the registry default `define`d in the constructor (Cow.java:49) --
-            // same unavoidable-default reasoning as sheep.rs:57-63.
-            nbt.put_string("variant", cow_variant::name(self.get_variant()).to_string());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        // `VariantUtils.writeVariant` (VariantUtils.java:26-28, Cow.java:57): the variant
+        // resource key under the `variant` key. The pre-roll sentinel normalizes to
+        // temperate, the registry default `define`d in the constructor (Cow.java:49) --
+        // same unavoidable-default reasoning as sheep.rs:57-63.
+        nbt.put_string("variant", cow_variant::name(self.get_variant()).to_string());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            // `VariantUtils.readVariant` (VariantUtils.java:30-32, Cow.java:66): an absent or
-            // unknown id leaves the sentinel so `mob_init_data_tracker` still rolls a
-            // biome-based variant for legacy saves that never stored one.
-            if let Some(name) = nbt.get_string("variant")
-                && let Some(variant) = cow_variant::from_name(name)
-            {
-                self.variant.store(variant, Ordering::Relaxed);
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        // `VariantUtils.readVariant` (VariantUtils.java:30-32, Cow.java:66): an absent or
+        // unknown id leaves the sentinel so `mob_init_data_tracker` still rolls a
+        // biome-based variant for legacy saves that never stored one.
+        if let Some(name) = nbt.get_string("variant")
+            && let Some(variant) = cow_variant::from_name(name)
+        {
+            self.variant.store(variant, Ordering::Relaxed);
+        }
     }
 }
 
@@ -224,35 +220,33 @@ impl Mob for CowEntity {
     /// Cow.java:85). This override replaces `Mob::mob_init_data_tracker`'s default body, so
     /// the `BABY_ID` send from mob/mod.rs:2276-2294 is replicated here exactly like
     /// sheep.rs:378-404 does.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
+    fn mob_init_data_tracker(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
 
-            if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
-                let world = entity.world.load();
-                let pos = entity.block_pos.load();
-                let variant = Self::select_spawn_variant(world.get_biome(&pos));
-                self.variant.store(variant, Ordering::Relaxed);
-            }
+        if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
+            let world = entity.world.load();
+            let pos = entity.block_pos.load();
+            let variant = Self::select_spawn_variant(world.get_biome(&pos));
+            self.variant.store(variant, Ordering::Relaxed);
+        }
 
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cow::VARIANT,
+                VarInt(i32::from(self.get_variant())),
+            )],
+            None,
+        );
+
+        if entity.age.load(Ordering::Relaxed) < 0 {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::cow::VARIANT,
-                    VarInt(i32::from(self.get_variant())),
+                    pumpkin_data::tracked_data::ageable_mob::DATA_BABY_ID,
+                    true,
                 )],
                 None,
             );
-
-            if entity.age.load(Ordering::Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::ageable_mob::DATA_BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
-        })
+        }
     }
 
     fn get_walk_target_value(&self, pos: &pumpkin_util::math::position::BlockPos) -> f64 {
@@ -261,40 +255,34 @@ impl Mob for CowEntity {
 
     /// Vanilla `Cow.getBreedOffspring` (Cow.java:75): the calf takes one of its parents'
     /// variants at random.
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                uuid::Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            uuid::Uuid::new_v4(),
+        );
 
-            if let Some(mate_cow) = mate.cast_any().downcast_ref::<Self>() {
-                let picked = if rand::rng().random_bool(0.5) {
-                    self.get_variant()
-                } else {
-                    mate_cow.get_variant()
-                };
-                if let Some(calf) = baby.cast_any().downcast_ref::<Self>() {
-                    calf.variant.store(picked, Ordering::Relaxed);
-                }
+        if let Some(mate_cow) = mate.cast_any().downcast_ref::<Self>() {
+            let picked = if rand::rng().random_bool(0.5) {
+                self.get_variant()
+            } else {
+                mate_cow.get_variant()
+            };
+            if let Some(calf) = baby.cast_any().downcast_ref::<Self>() {
+                calf.variant.store(picked, Ordering::Relaxed);
             }
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         use super::animal::Animal;
         self.animal_interact(player, item_stack, Sound::EntityCowAmbient)
     }

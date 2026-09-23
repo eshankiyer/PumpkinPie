@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::block::entities::sign::DyeColor;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, breed::BreedGoal, cat_lie_on_bed::CatLieOnBedGoal,
         cat_relax_on_owner::CatRelaxOnOwnerGoal, cat_sit_on_block::CatSitOnBlockGoal,
@@ -297,12 +297,12 @@ impl CatEntity {
     /// called from `mob_interact`'s taming branch). Uses the take/put-back pattern `mob_tick`
     /// itself uses (see `mob/mod.rs`) since `GoalSelector` sits behind a non-async `Mutex` that
     /// can't be held across the `.await` `remove_goal` needs.
-    async fn reassess_tame_goals(&self) {
+    fn reassess_tame_goals(&self) {
         let mut goal_selector = {
             let mut guard = self.mob_entity.goals_selector.lock().unwrap();
             std::mem::take(&mut *guard)
         };
-        goal_selector.remove_goal::<AvoidEntityGoal>(self).await;
+        goal_selector.remove_goal::<AvoidEntityGoal>(self);
         *self.mob_entity.goals_selector.lock().unwrap() = goal_selector;
     }
 
@@ -400,112 +400,108 @@ impl TamableAnimal for CatEntity {
 }
 
 impl NBTStorage for CatEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            let variant_str = match self.variant.load(Ordering::Relaxed) {
-                0 => "minecraft:all_black",
-                1 => "minecraft:black",
-                2 => "minecraft:british_shorthair",
-                3 => "minecraft:calico",
-                4 => "minecraft:jellie",
-                5 => "minecraft:persian",
-                6 => "minecraft:ragdoll",
-                7 => "minecraft:red",
-                8 => "minecraft:siamese",
-                10 => "minecraft:white",
-                _ => "minecraft:tabby",
-            };
-            nbt.put_string("variant", variant_str.to_string());
-            // Vanilla Cat.java persists collar color as a legacy dye-color id (0-15), the same
-            // "CollarColor" key/codec Wolf uses.
-            nbt.put_byte(
-                "CollarColor",
-                self.collar_color.load(Ordering::Relaxed) as i8,
-            );
-            // Vanilla `TamableAnimal.addAdditionalSaveData` (TamableAnimal.java:58-63) stores only
-            // the owner reference and `Sitting`; tameness is derived from the owner on load.
-            self.write_tamable_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        let variant_str = match self.variant.load(Ordering::Relaxed) {
+            0 => "minecraft:all_black",
+            1 => "minecraft:black",
+            2 => "minecraft:british_shorthair",
+            3 => "minecraft:calico",
+            4 => "minecraft:jellie",
+            5 => "minecraft:persian",
+            6 => "minecraft:ragdoll",
+            7 => "minecraft:red",
+            8 => "minecraft:siamese",
+            10 => "minecraft:white",
+            _ => "minecraft:tabby",
+        };
+        nbt.put_string("variant", variant_str.to_string());
+        // Vanilla Cat.java persists collar color as a legacy dye-color id (0-15), the same
+        // "CollarColor" key/codec Wolf uses.
+        nbt.put_byte(
+            "CollarColor",
+            self.collar_color.load(Ordering::Relaxed) as i8,
+        );
+        // Vanilla `TamableAnimal.addAdditionalSaveData` (TamableAnimal.java:58-63) stores only
+        // the owner reference and `Sitting`; tameness is derived from the owner on load.
+        self.write_tamable_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            if let Some(variant_str) = nbt.get_string("variant") {
-                let variant = match variant_str
-                    .strip_prefix("minecraft:")
-                    .unwrap_or(variant_str)
-                {
-                    "all_black" => 0,
-                    "black" => 1,
-                    "british_shorthair" => 2,
-                    "calico" => 3,
-                    "jellie" => 4,
-                    "persian" => 5,
-                    "ragdoll" => 6,
-                    "red" => 7,
-                    "siamese" => 8,
-                    "white" => 10,
-                    _ => 9,
-                };
-                self.variant.store(variant, Ordering::Relaxed);
-            }
-            if let Some(collar) = nbt.get_byte("CollarColor") {
-                self.collar_color.store(collar as u8, Ordering::Relaxed);
-            } else if let Some(collar_int) = nbt.get_int("CollarColor") {
-                self.collar_color.store(collar_int as u8, Ordering::Relaxed);
-            }
-            // Vanilla `TamableAnimal.readAdditionalSaveData` (TamableAnimal.java:66-83) derives
-            // tameness purely from the stored owner reference, and
-            // `EntityReference.readWithOldOwnerConversion` accepts both the current UUID
-            // representation and the legacy owner name. Resolve the latter through the
-            // server user cache, just as vanilla resolves old owner names to profiles.
-            let owner = if let Some(owner) = nbt.get_uuid("Owner") {
-                Some(owner)
-            } else if let Some(owner_name) = nbt.get_string("Owner") {
-                let owner_name = owner_name.to_owned();
-                let world = self.mob_entity.living_entity.entity.world.load();
-                if let Some(server) = world.server.upgrade() {
-                    server
-                        .data
-                        .user_cache
-                        .write()
-                        .await
-                        .get_by_name(&owner_name)
-                        .map(|profile| profile.uuid)
-                } else {
-                    None
-                }
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(variant_str) = nbt.get_string("variant") {
+            let variant = match variant_str
+                .strip_prefix("minecraft:")
+                .unwrap_or(variant_str)
+            {
+                "all_black" => 0,
+                "black" => 1,
+                "british_shorthair" => 2,
+                "calico" => 3,
+                "jellie" => 4,
+                "persian" => 5,
+                "ragdoll" => 6,
+                "red" => 7,
+                "siamese" => 8,
+                "white" => 10,
+                _ => 9,
+            };
+            self.variant.store(variant, Ordering::Relaxed);
+        }
+        if let Some(collar) = nbt.get_byte("CollarColor") {
+            self.collar_color.store(collar as u8, Ordering::Relaxed);
+        } else if let Some(collar_int) = nbt.get_int("CollarColor") {
+            self.collar_color.store(collar_int as u8, Ordering::Relaxed);
+        }
+        // Vanilla `TamableAnimal.readAdditionalSaveData` (TamableAnimal.java:66-83) derives
+        // tameness purely from the stored owner reference, and
+        // `EntityReference.readWithOldOwnerConversion` accepts both the current UUID
+        // representation and the legacy owner name. Resolve the latter through the
+        // server user cache, just as vanilla resolves old owner names to profiles.
+        let owner = if let Some(owner) = nbt.get_uuid("Owner") {
+            Some(owner)
+        } else if let Some(owner_name) = nbt.get_string("Owner") {
+            let owner_name = owner_name.to_owned();
+            let world = self.mob_entity.living_entity.entity.world.load();
+            if let Some(server) = world.server.upgrade() {
+                server
+                    .data
+                    .user_cache
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_by_name(&owner_name)
+                    .map(|profile| profile.uuid)
             } else {
                 None
-            };
-
-            self.tamable_data.owner.store(owner);
-            self.tamable_data
-                .is_tame
-                .store(owner.is_some(), Ordering::Relaxed);
-            // `SitGoal` and `MobEntity::is_tamed` read the shared `MobEntity` taming state, so
-            // keep it in step with the cat-local `tamable_data` the metadata path uses.
-            if let Some(owner) = owner {
-                self.mob_entity.set_owner(owner);
-            } else {
-                self.mob_entity.clear_owner();
             }
-            let sitting = nbt.get_bool("Sitting").unwrap_or(false);
-            self.tamable_data
-                .ordered_to_sit
-                .store(sitting, Ordering::Relaxed);
-            self.mob_entity.set_ordered_to_sit(sitting);
+        } else {
+            None
+        };
 
-            // Vanilla calls `reassessTameGoals` from `setTame` during load, so a restored
-            // tamed cat must lose its untamed player-avoidance goal before it starts ticking.
-            if self.is_tame() {
-                self.reassess_tame_goals().await;
-            }
-        })
+        self.tamable_data.owner.store(owner);
+        self.tamable_data
+            .is_tame
+            .store(owner.is_some(), Ordering::Relaxed);
+        // `SitGoal` and `MobEntity::is_tamed` read the shared `MobEntity` taming state, so
+        // keep it in step with the cat-local `tamable_data` the metadata path uses.
+        if let Some(owner) = owner {
+            self.mob_entity.set_owner(owner);
+        } else {
+            self.mob_entity.clear_owner();
+        }
+        let sitting = nbt.get_bool("Sitting").unwrap_or(false);
+        self.tamable_data
+            .ordered_to_sit
+            .store(sitting, Ordering::Relaxed);
+        self.mob_entity.set_ordered_to_sit(sitting);
+
+        // Vanilla calls `reassessTameGoals` from `setTame` during load, so a restored
+        // tamed cat must lose its untamed player-avoidance goal before it starts ticking.
+        if self.is_tame() {
+            self.reassess_tame_goals();
+        }
     }
 }
 
@@ -535,7 +531,7 @@ pub fn feline_pose_for(has_wanted: bool, speed_modifier: f64) -> (EntityPose, bo
 }
 
 /// Applies [`feline_pose_for`] to a live cat or ocelot.
-pub async fn feline_pose_step(mob: &dyn Mob) {
+pub fn feline_pose_step(mob: &dyn Mob) {
     let mob_entity = mob.get_mob_entity();
     let (has_wanted, speed) = {
         let control = mob_entity.move_control.lock().unwrap();
@@ -552,7 +548,7 @@ pub async fn feline_pose_step(mob: &dyn Mob) {
         entity.set_pose(pose);
     }
     if entity.is_sprinting() != sprinting {
-        entity.set_sprinting(sprinting).await;
+        entity.set_sprinting(sprinting);
     }
 }
 
@@ -572,10 +568,8 @@ impl Mob for CatEntity {
         &self.mob_entity
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            feline_pose_step(self).await;
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        feline_pose_step(self);
     }
 
     fn get_owner_uuid(&self) -> Option<Uuid> {
@@ -603,153 +597,143 @@ impl Mob for CatEntity {
         self.variant.store(variant, Ordering::Relaxed);
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::cat::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
                 &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::TAMEABLE_FLAGS,
-                    self.get_tame_flags(),
+                    pumpkin_data::tracked_data::cat::BABY_ID,
+                    true,
                 )],
                 None,
             );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::OWNER_UUID,
-                    self.get_owner(),
-                )],
-                None,
-            );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::CAT_VARIANT,
-                    VarInt(self.variant.load(Ordering::Relaxed) as i32),
-                )],
-                None,
-            );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::IS_LYING,
-                    self.is_lying.load(Ordering::Relaxed),
-                )],
-                None,
-            );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::RELAX_STATE_ONE,
-                    self.relax_state_one.load(Ordering::Relaxed),
-                )],
-                None,
-            );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::CAT_COLLAR_COLOR,
-                    VarInt(self.collar_color.load(Ordering::Relaxed) as i32),
-                )],
-                None,
-            );
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cat::SOUND_VARIANT,
-                    VarInt(self.sound_variant.load(Ordering::Relaxed) as i32),
-                )],
-                None,
-            );
-        })
+        }
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::TAMEABLE_FLAGS,
+                self.get_tame_flags(),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::OWNER_UUID,
+                self.get_owner(),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::CAT_VARIANT,
+                VarInt(self.variant.load(Ordering::Relaxed) as i32),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::IS_LYING,
+                self.is_lying.load(Ordering::Relaxed),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::RELAX_STATE_ONE,
+                self.relax_state_one.load(Ordering::Relaxed),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::CAT_COLLAR_COLOR,
+                VarInt(self.collar_color.load(Ordering::Relaxed) as i32),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::cat::SOUND_VARIANT,
+                VarInt(self.sound_variant.load(Ordering::Relaxed) as i32),
+            )],
+            None,
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let item = item_stack.get_item();
-            let is_food = self.is_food(item_stack);
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        let item = item_stack.get_item();
+        let is_food = self.is_food(item_stack);
 
-            if self.is_tame() {
-                if self.get_owner_uuid() == Some(player.gameprofile.id) {
-                    if item.has_tag(&tag::Item::MINECRAFT_CAT_COLLAR_DYES)
-                        || item.has_tag(&tag::Item::C_DYES)
+        if self.is_tame() {
+            if self.get_owner_uuid() == Some(player.gameprofile.id) {
+                if item.has_tag(&tag::Item::MINECRAFT_CAT_COLLAR_DYES)
+                    || item.has_tag(&tag::Item::C_DYES)
+                {
+                    if let Some(color) = get_dye_color_from_item(item)
+                        && color != self.get_collar_color()
                     {
-                        if let Some(color) = get_dye_color_from_item(item)
-                            && color != self.get_collar_color()
-                        {
-                            self.set_collar_color(color);
-                            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                            return true;
-                        }
-                    } else if is_food
-                        && self.mob_entity.living_entity.health.load()
-                            < self.mob_entity.living_entity.get_max_health()
-                    {
-                        // TamableAnimal.feed (TamableAnimal.java:135-140) uses the food
-                        // component's nutrition, rather than a fixed two-health heal.
-                        crate::entity::passive::tamable::feed(
-                            player,
-                            item_stack,
-                            &self.mob_entity.living_entity,
-                            1.0,
-                            1.0,
-                            Some(Sound::EntityCatEat),
-                        );
+                        self.set_collar_color(color);
+                        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
                         return true;
                     }
-
-                    let parent_interaction = self
-                        .mob_entity
-                        .mob_interact(player, item_stack, self.can_be_leashed())
-                        .await;
-                    if !parent_interaction {
-                        self.set_sitting(!self.is_sitting());
-                        return true;
-                    }
-                    return parent_interaction;
-                }
-            } else if is_food {
-                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                self.play_eating_sound();
-
-                // `ThreadRng` is not `Send`, so the roll has to finish before the
-                // `reassess_tame_goals` await below. Vanilla `Cat.mobInteract`:
-                // `this.random.nextInt(3) == 0`.
-                let tames = rand::rng().random_range(0..3) == 0;
-                if tames {
-                    self.set_tame(true, Some(player.gameprofile.id));
-                    self.set_sitting(true);
-                    // Vanilla `Cat.setTame` -> `reassessTameGoals`: a tamed cat stops
-                    // fleeing from players.
-                    self.reassess_tame_goals().await;
-                    self.get_entity().world.load().send_entity_status(
-                        self.get_entity(),
-                        EntityStatus::TamingSucceeded,
-                        Some(ActorEventID::TamingSucceeded),
+                } else if is_food
+                    && self.mob_entity.living_entity.health.load()
+                        < self.mob_entity.living_entity.get_max_health()
+                {
+                    // TamableAnimal.feed (TamableAnimal.java:135-140) uses the food
+                    // component's nutrition, rather than a fixed two-health heal.
+                    crate::entity::passive::tamable::feed(
+                        player,
+                        item_stack,
+                        &self.mob_entity.living_entity,
+                        1.0,
+                        1.0,
+                        Some(Sound::EntityCatEat),
                     );
-                } else {
-                    self.get_entity().world.load().send_entity_status(
-                        self.get_entity(),
-                        EntityStatus::TamingFailed,
-                        Some(ActorEventID::TamingFailed),
-                    );
+                    return true;
                 }
 
-                return true;
+                let parent_interaction =
+                    self.mob_entity
+                        .mob_interact(player, item_stack, self.can_be_leashed());
+                if !parent_interaction {
+                    self.set_sitting(!self.is_sitting());
+                    return true;
+                }
+                return parent_interaction;
+            }
+        } else if is_food {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            self.play_eating_sound();
+
+            // `ThreadRng` is not `Send`, so the roll has to finish before the
+            // `reassess_tame_goals` await below. Vanilla `Cat.mobInteract`:
+            // `this.random.nextInt(3) == 0`.
+            let tames = rand::rng().random_range(0..3) == 0;
+            if tames {
+                self.set_tame(true, Some(player.gameprofile.id));
+                self.set_sitting(true);
+                // Vanilla `Cat.setTame` -> `reassessTameGoals`: a tamed cat stops
+                // fleeing from players.
+                self.reassess_tame_goals();
+                self.get_entity().world.load().send_entity_status(
+                    self.get_entity(),
+                    EntityStatus::TamingSucceeded,
+                    Some(ActorEventID::TamingSucceeded),
+                );
+            } else {
+                self.get_entity().world.load().send_entity_status(
+                    self.get_entity(),
+                    EntityStatus::TamingFailed,
+                    Some(ActorEventID::TamingFailed),
+                );
             }
 
-            self.mob_entity
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-        })
+            return true;
+        }
+
+        self.mob_entity
+            .mob_interact(player, item_stack, self.can_be_leashed())
     }
 }
 

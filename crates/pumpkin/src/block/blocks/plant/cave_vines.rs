@@ -12,7 +12,7 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, NormalUseArgs, RandomTickArgs,
+    BlockBehaviour, BlockMetadata, BonemealArgs, NormalUseArgs, RandomTickArgs,
     registry::BlockActionResult,
 };
 use crate::world::World;
@@ -65,107 +65,92 @@ impl BlockBehaviour for CaveVinesBlock {
     /// `GrowingPlantHeadBlock.performBonemeal` grows one segment for the cave-vine head
     /// (`GrowingPlantHeadBlock.java:124-135`, `CaveVinesBlock.java:33-36`); the body override
     /// sets BERRIES directly (`CaveVinesPlantBlock.java:69-72`).
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block == &Block::CAVE_VINES {
-                let grow_pos = args.position.down();
-                if !args.world.is_in_height_limit(grow_pos.0.y)
-                    || !args.world.get_block_state(&grow_pos).is_air()
-                {
-                    return;
-                }
-
-                let props = CaveVinesLikeProperties::from_state_id(args.state_id, args.block);
-                let new_head = CaveVinesLikeProperties {
-                    age: bonemeal_age(props.age),
-                    berries: props.berries,
-                };
-                args.world
-                    .set_block_state(
-                        &grow_pos,
-                        new_head.to_state_id(&Block::CAVE_VINES),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-
-                // `GrowingPlantHeadBlock.updateShape` converts the old head to its body
-                // (`GrowingPlantHeadBlock.java:86-95`); apply that conversion explicitly because
-                // the cave-vine growth path owns both writes in Pumpkin.
-                let new_body = CaveVinesPlantLikeProperties {
-                    berries: props.berries,
-                };
-                args.world
-                    .set_block_state(
-                        args.position,
-                        new_body.to_state_id(&Block::CAVE_VINES_PLANT),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        if args.block == &Block::CAVE_VINES {
+            let grow_pos = args.position.down();
+            if !args.world.is_in_height_limit(grow_pos.0.y)
+                || !args.world.get_block_state(&grow_pos).is_air()
+            {
                 return;
             }
 
-            let Some(false) = has_berries(args.block, args.state_id) else {
-                return;
+            let props = CaveVinesLikeProperties::from_state_id(args.state_id, args.block);
+            let new_head = CaveVinesLikeProperties {
+                age: bonemeal_age(props.age),
+                berries: props.berries,
             };
-            let state_id = set_berries(args.block, args.state_id, true);
-            args.world
-                .set_block_state(args.position, state_id, BlockFlags::NOTIFY_LISTENERS)
-                .await;
-        })
+            args.world.set_block_state(
+                &grow_pos,
+                new_head.to_state_id(&Block::CAVE_VINES),
+                BlockFlags::NOTIFY_ALL,
+            );
+
+            // `GrowingPlantHeadBlock.updateShape` converts the old head to its body
+            // (`GrowingPlantHeadBlock.java:86-95`); apply that conversion explicitly because
+            // the cave-vine growth path owns both writes in Pumpkin.
+            let new_body = CaveVinesPlantLikeProperties {
+                berries: props.berries,
+            };
+            args.world.set_block_state(
+                args.position,
+                new_body.to_state_id(&Block::CAVE_VINES_PLANT),
+                BlockFlags::NOTIFY_ALL,
+            );
+            return;
+        }
+
+        let Some(false) = has_berries(args.block, args.state_id) else {
+            return;
+        };
+        let state_id = set_berries(args.block, args.state_id, true);
+        args.world
+            .set_block_state(args.position, state_id, BlockFlags::NOTIFY_LISTENERS);
     }
 
     /// `CaveVines.useWithoutItem` delegates to `CaveVines.use`
     /// (`CaveVinesBlock.java:63-68`, `CaveVinesPlantBlock.java:47-52`).
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let Some(true) = has_berries(args.block, state_id) else {
-                return BlockActionResult::Pass;
-            };
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        let state_id = args.world.get_block_state_id(args.position);
+        let Some(true) = has_berries(args.block, state_id) else {
+            return BlockActionResult::Pass;
+        };
 
-            // `CaveVines.use` (`CaveVines.java:23-45`) drops the harvest loot, plays the
-            // pick-berries sound, clears BERRIES, and emits BLOCK_CHANGE with the new state.
-            args.world
-                .drop_stack(
-                    args.position,
-                    ItemStack::new(1, &pumpkin_data::item::Item::GLOW_BERRIES),
-                )
-                .await;
-            let pitch = rand::rng().random_range(0.8f32..1.2f32);
-            args.world.play_sound_fine(
-                Sound::BlockCaveVinesPickBerries,
-                SoundCategory::Blocks,
-                &args.position.to_centered_f64(),
-                1.0,
-                pitch,
-            );
+        // `CaveVines.use` (`CaveVines.java:23-45`) drops the harvest loot, plays the
+        // pick-berries sound, clears BERRIES, and emits BLOCK_CHANGE with the new state.
+        args.world.drop_stack(
+            args.position,
+            ItemStack::new(1, &pumpkin_data::item::Item::GLOW_BERRIES),
+        );
+        let pitch = rand::rng().random_range(0.8f32..1.2f32);
+        args.world.play_sound_fine(
+            Sound::BlockCaveVinesPickBerries,
+            SoundCategory::Blocks,
+            &args.position.to_centered_f64(),
+            1.0,
+            pitch,
+        );
 
-            let new_state_id = set_berries(args.block, state_id, false);
-            args.world
-                .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_LISTENERS)
-                .await;
-            crate::world::game_event::emit_game_event(
-                args.world,
-                GameEvent::BlockChange,
-                args.position.to_centered_f64(),
-                crate::world::game_event::GameEventContext::of_entity_with_block_state(
-                    args.player.clone(),
-                    new_state_id,
-                ),
-            )
-            .await;
+        let new_state_id = set_berries(args.block, state_id, false);
+        args.world
+            .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_LISTENERS);
+        crate::world::game_event::emit_game_event(
+            args.world,
+            GameEvent::BlockChange,
+            args.position.to_centered_f64(),
+            crate::world::game_event::GameEventContext::of_entity_with_block_state(
+                args.player.clone(),
+                new_state_id,
+            ),
+        );
 
-            BlockActionResult::Success
-        })
+        BlockActionResult::Success
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block != &Block::CAVE_VINES {
-                return;
-            }
-            grow(args.world.clone(), args.position).await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if args.block != &Block::CAVE_VINES {
+            return;
+        }
+        grow(args.world.clone(), args.position);
     }
 }
 
@@ -207,7 +192,7 @@ fn set_berries(block: &Block, state_id: BlockStateId, berries: bool) -> BlockSta
 /// `updateBodyAfterConvertedFromHead`, which `CaveVinesBlock` overrides to carry the old
 /// head's berries onto the new body state. Both writes are applied explicitly below
 /// since pumpkin has no registered neighbor-update chain for cave vines to rely on.
-async fn grow(world: Arc<World>, pos: &BlockPos) {
+fn grow(world: Arc<World>, pos: &BlockPos) {
     let (block, state_id) = world.get_block_and_state_id(pos);
     if block != &Block::CAVE_VINES {
         return;
@@ -228,25 +213,21 @@ async fn grow(world: Arc<World>, pos: &BlockPos) {
         age: new_age,
         berries: new_berries,
     };
-    world
-        .set_block_state(
-            &grow_pos,
-            new_head_props.to_state_id(&Block::CAVE_VINES),
-            BlockFlags::NOTIFY_NEIGHBORS,
-        )
-        .await;
+    world.set_block_state(
+        &grow_pos,
+        new_head_props.to_state_id(&Block::CAVE_VINES),
+        BlockFlags::NOTIFY_NEIGHBORS,
+    );
 
     // Old head converts into the body block, carrying over its own (pre-growth) berries.
     let new_body_props = CaveVinesPlantLikeProperties {
         berries: props.berries,
     };
-    world
-        .set_block_state(
-            pos,
-            new_body_props.to_state_id(&Block::CAVE_VINES_PLANT),
-            BlockFlags::NOTIFY_NEIGHBORS,
-        )
-        .await;
+    world.set_block_state(
+        pos,
+        new_body_props.to_state_id(&Block::CAVE_VINES_PLANT),
+        BlockFlags::NOTIFY_NEIGHBORS,
+    );
 }
 
 /// Pure growth gate mirroring `state.getValue(AGE) < 25 && random.nextDouble() < growPerTickProbability`.

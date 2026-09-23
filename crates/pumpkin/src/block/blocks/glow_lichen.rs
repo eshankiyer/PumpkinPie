@@ -30,8 +30,8 @@ use crate::block::blocks::multiface_spreader::{
     self, SpreadConfig, SpreadPos, SpreadTarget, can_spread_in_any_direction,
 };
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, BonemealArgs, CanPlaceAtArgs,
-    CanUpdateAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    BlockBehaviour, BlockIsReplacing, BlockMetadata, BonemealArgs, CanPlaceAtArgs, CanUpdateAtArgs,
+    GetStateForNeighborUpdateArgs, OnPlaceArgs,
 };
 use crate::entity::EntityBase;
 use crate::world::World;
@@ -138,69 +138,64 @@ impl SpreadTarget for WorldSpreadTarget<'_> {
         self.world.as_ref()
     }
 
-    fn place(&self, spread_pos: SpreadPos) -> BlockFuture<'_, bool> {
-        Box::pin(async move {
-            let existing_state = self.world.get_block_state(&spread_pos.pos);
-            let Some(new_state_id) = state_for_placement(
-                self.world.as_ref(),
-                self.block,
-                existing_state,
-                &spread_pos.pos,
-                spread_pos.face,
-            ) else {
-                return false;
-            };
-            self.world
-                .set_block_state(&spread_pos.pos, new_state_id, BlockFlags::NOTIFY_LISTENERS)
-                .await;
-            true
-        })
+    fn place(&self, spread_pos: SpreadPos) -> bool {
+        let existing_state = self.world.get_block_state(&spread_pos.pos);
+        let Some(new_state_id) = state_for_placement(
+            self.world.as_ref(),
+            self.block,
+            existing_state,
+            &spread_pos.pos,
+            spread_pos.face,
+        ) else {
+            return false;
+        };
+        self.world
+            .set_block_state(&spread_pos.pos, new_state_id, BlockFlags::NOTIFY_LISTENERS);
+        true
     }
 }
 
 impl BlockBehaviour for MultifaceGrowthBlock {
     /// `MultifaceBlock#getStateForPlacement(BlockPlaceContext)` (MultifaceBlock.java:179-189):
     /// try the player's nearest looking directions in order and take the first that works.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let old_state = args.world.get_block_state(args.position);
-            let existing = match args.replacing {
-                BlockIsReplacing::Itself(state_id) => {
-                    Some(GlowLichenLikeProperties::from_state_id(state_id, args.block).faces())
-                }
-                _ => None,
-            };
-
-            let mut candidates: Vec<BlockDirection> = args
-                .player
-                .get_entity()
-                .get_entity_facing_order()
-                .into_iter()
-                .map(|f| f.to_block_direction())
-                .collect();
-            if let Some(idx) = candidates.iter().position(|&d| d == args.direction) {
-                candidates.remove(idx);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let old_state = args.world.get_block_state(args.position);
+        let existing = match args.replacing {
+            BlockIsReplacing::Itself(state_id) => {
+                Some(GlowLichenLikeProperties::from_state_id(state_id, args.block).faces())
             }
-            candidates.insert(0, args.direction);
+            _ => None,
+        };
 
-            for direction in candidates {
-                if let Some(new_faces) =
-                    self.faces_for_placement(args.world, existing, args.position, direction)
-                {
-                    let mut props = if existing.is_some() {
-                        GlowLichenLikeProperties::from_state_id(old_state.id, args.block)
-                    } else {
-                        let mut default_props = GlowLichenLikeProperties::default(args.block);
-                        default_props.r#waterlogged = args.replacing.water_source();
-                        default_props
-                    };
-                    props.set_faces(new_faces);
-                    return props.to_state_id(args.block);
-                }
+        let mut candidates: Vec<BlockDirection> = args
+            .player
+            .get_entity()
+            .get_entity_facing_order()
+            .into_iter()
+            .map(|f| f.to_block_direction())
+            .collect();
+        if let Some(idx) = candidates.iter().position(|&d| d == args.direction) {
+            candidates.remove(idx);
+        }
+        candidates.insert(0, args.direction);
+
+        for direction in candidates {
+            if let Some(new_faces) =
+                self.faces_for_placement(args.world, existing, args.position, direction)
+            {
+                let mut props = if existing.is_some() {
+                    GlowLichenLikeProperties::from_state_id(old_state.id, args.block)
+                } else {
+                    let mut default_props = GlowLichenLikeProperties::default(args.block);
+                    default_props.r#waterlogged = args.replacing.water_source();
+                    default_props
+                };
+                props.set_faces(new_faces);
+                return props.to_state_id(args.block);
             }
+        }
 
-            Block::AIR.default_state.id
-        })
+        Block::AIR.default_state.id
     }
 
     /// `MultifaceBlock#canSurvive` (MultifaceBlock.java:154-167).
@@ -229,29 +224,27 @@ impl BlockBehaviour for MultifaceGrowthBlock {
     }
 
     /// `MultifaceBlock#updateShape` (MultifaceBlock.java:118-141).
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = GlowLichenLikeProperties::from_state_id(args.state_id, args.block);
-            if props.r#waterlogged {
-                args.world.schedule_fluid_tick(
-                    &pumpkin_data::fluid::Fluid::WATER,
-                    *args.position,
-                    pumpkin_data::fluid::Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let mut props = GlowLichenLikeProperties::from_state_id(args.state_id, args.block);
+        if props.r#waterlogged {
+            args.world.schedule_fluid_tick(
+                &pumpkin_data::fluid::Fluid::WATER,
+                *args.position,
+                pumpkin_data::fluid::Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
 
-            let faces = props.faces();
-            let neighbor_state = args.neighbor_state_id.to_state();
-            self.update_faces_for_neighbor(faces, neighbor_state, args.direction)
-                .map_or(Block::AIR.default_state.id, |new_faces| {
-                    props.set_faces(new_faces);
-                    props.to_state_id(args.block)
-                })
-        })
+        let faces = props.faces();
+        let neighbor_state = args.neighbor_state_id.to_state();
+        self.update_faces_for_neighbor(faces, neighbor_state, args.direction)
+            .map_or(Block::AIR.default_state.id, |new_faces| {
+                props.set_faces(new_faces);
+                props.to_state_id(args.block)
+            })
     }
 
     /// `GlowLichenBlock#isValidBonemealTarget` (GlowLichenBlock.java:31-34). `resin_clump` is a
@@ -277,29 +270,26 @@ impl BlockBehaviour for MultifaceGrowthBlock {
 
     /// `GlowLichenBlock#performBonemeal` (GlowLichenBlock.java:41-44):
     /// `spreader.spreadFromRandomFaceTowardRandomDirection(state, level, pos, random)`.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block != &Block::GLOW_LICHEN {
-                return;
-            }
-            let faces = GlowLichenLikeProperties::from_state_id(args.state_id, args.block).faces();
-            let config = DefaultSpreaderConfig {
-                block: &Block::GLOW_LICHEN,
-            };
-            let target = WorldSpreadTarget {
-                world: args.world,
-                block: &Block::GLOW_LICHEN,
-            };
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
-            multiface_spreader::spread_from_random_face_toward_random_direction(
-                &config,
-                &target,
-                faces,
-                *args.position,
-                &mut random,
-            )
-            .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        if args.block != &Block::GLOW_LICHEN {
+            return;
+        }
+        let faces = GlowLichenLikeProperties::from_state_id(args.state_id, args.block).faces();
+        let config = DefaultSpreaderConfig {
+            block: &Block::GLOW_LICHEN,
+        };
+        let target = WorldSpreadTarget {
+            world: args.world,
+            block: &Block::GLOW_LICHEN,
+        };
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
+        multiface_spreader::spread_from_random_face_toward_random_direction(
+            &config,
+            &target,
+            faces,
+            *args.position,
+            &mut random,
+        );
     }
 }
 

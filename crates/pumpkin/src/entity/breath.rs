@@ -30,7 +30,7 @@ impl Default for BreathManager {
 }
 
 impl BreathManager {
-    pub async fn tick(&self, player: &Player) {
+    pub fn tick(&self, player: &Player) {
         let mode = player.gamemode.load();
 
         if matches!(mode, GameMode::Creative | GameMode::Spectator) {
@@ -56,17 +56,18 @@ impl BreathManager {
         if in_water {
             let has_water_breathing = player
                 .living_entity
-                .has_effect(&StatusEffect::WATER_BREATHING)
-                .await;
+                .has_effect(&StatusEffect::WATER_BREATHING);
             let has_conduit_power = player
                 .living_entity
-                .has_effect(&StatusEffect::CONDUIT_POWER)
-                .await;
+                .has_effect(&StatusEffect::CONDUIT_POWER);
             let has_breath_of_the_nautilus = player
                 .living_entity
-                .has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS)
-                .await;
-            let player_invulnerable = player.abilities.lock().await.invulnerable;
+                .has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS);
+            let player_invulnerable = player
+                .abilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .invulnerable;
             if player.living_entity.dead.load(Ordering::Relaxed)
                 || player.living_entity.health.load() <= 0.0
                 || player.get_entity().is_removed()
@@ -122,8 +123,7 @@ impl BreathManager {
                 world.send_entity_status(player.get_entity(), EntityStatus::DrownParticles, None);
                 player
                     .living_entity
-                    .damage(player, DROWNING_DAMAGE, DamageType::DROWN)
-                    .await;
+                    .damage(player, DROWNING_DAMAGE, DamageType::DROWN);
             }
         } else {
             let prev = self.air_supply.load(Ordering::Relaxed);

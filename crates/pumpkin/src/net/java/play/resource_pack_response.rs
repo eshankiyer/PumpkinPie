@@ -31,8 +31,7 @@ impl JavaClient {
         {
             self.kick(TextComponent::text(
                 "You must accept the resource pack to play on this server.",
-            ))
-            .await;
+            ));
         }
     }
 }

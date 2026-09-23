@@ -4,7 +4,7 @@ use pumpkin_data::particle::Particle;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 
 /// Vanilla: `Squid.SquidFleeGoal` (`Squid.java:239-292`). Squids flee from whatever last
@@ -48,67 +48,63 @@ impl SquidFleeGoal {
 }
 
 impl Goal for SquidFleeGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::can_flee(mob) })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::can_flee(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::can_flee(mob) })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        Self::can_flee(mob)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.flee_ticks = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.flee_ticks = 0;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.flee_ticks += 1;
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.flee_ticks += 1;
 
-            let Some(attacker_pos) = Self::attacker_pos(mob) else {
-                return;
-            };
+        let Some(attacker_pos) = Self::attacker_pos(mob) else {
+            return;
+        };
 
-            let entity = mob.get_entity();
-            let my_pos = entity.pos.load();
-            let mut flee_to = my_pos - attacker_pos;
-            let target = my_pos + flee_to;
+        let entity = mob.get_entity();
+        let my_pos = entity.pos.load();
+        let mut flee_to = my_pos - attacker_pos;
+        let target = my_pos + flee_to;
 
-            let world = entity.world.load();
-            let target_block = BlockPos::new(
-                target.x.floor() as i32,
-                target.y.floor() as i32,
-                target.z.floor() as i32,
-            );
-            let state = world.get_block_state(&target_block);
-            if state.is_liquid() || state.is_air() {
-                let length = flee_to.length();
-                if length > 0.0 {
-                    // Vanilla scales the normalized flee vector after five blocks, then clears
-                    // its vertical component when the candidate block is air.
-                    let mut speed = FLEE_SPEED;
-                    if length > FLEE_MIN_DISTANCE {
-                        speed = (speed - (length - FLEE_MIN_DISTANCE) / FLEE_MIN_DISTANCE).max(0.1);
-                    }
-                    if state.is_air() {
-                        flee_to.y = 0.0;
-                    }
-                    let movement = flee_to.normalize() * (speed / 20.0);
-                    mob.set_movement_vector(movement);
+        let world = entity.world.load();
+        let target_block = BlockPos::new(
+            target.x.floor() as i32,
+            target.y.floor() as i32,
+            target.z.floor() as i32,
+        );
+        let state = world.get_block_state(&target_block);
+        if state.is_liquid() || state.is_air() {
+            let length = flee_to.length();
+            if length > 0.0 {
+                // Vanilla scales the normalized flee vector after five blocks, then clears
+                // its vertical component when the candidate block is air.
+                let mut speed = FLEE_SPEED;
+                if length > FLEE_MIN_DISTANCE {
+                    speed = (speed - (length - FLEE_MIN_DISTANCE) / FLEE_MIN_DISTANCE).max(0.1);
                 }
+                if state.is_air() {
+                    flee_to.y = 0.0;
+                }
+                let movement = flee_to.normalize() * (speed / 20.0);
+                mob.set_movement_vector(movement);
             }
+        }
 
-            if self.flee_ticks % 10 == 5 {
-                world.spawn_particle(
-                    my_pos,
-                    Vector3::new(0.0, 0.0, 0.0),
-                    0.0,
-                    1,
-                    Particle::Bubble,
-                );
-            }
-        })
+        if self.flee_ticks % 10 == 5 {
+            world.spawn_particle(
+                my_pos,
+                Vector3::new(0.0, 0.0, 0.0),
+                0.0,
+                1,
+                Particle::Bubble,
+            );
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

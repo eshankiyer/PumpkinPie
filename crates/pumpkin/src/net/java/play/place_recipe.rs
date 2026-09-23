@@ -43,11 +43,11 @@ impl JavaClient {
             .count();
         let cooking_display_count = RECIPES_COOKING.len();
         let stonecutting_display_count = pumpkin_data::recipes::RECIPES_STONECUTTING.len();
-        let dynamic_recipes = server.recipe_manager.get_dynamic_recipes().await;
+        let dynamic_recipes = server.recipe_manager.get_dynamic_recipes();
 
         let (grid_width, crafting_inv) = {
-            let screen_handler_arc = player.current_screen_handler.lock().await.clone();
-            let handler = screen_handler_arc.lock().await;
+            let screen_handler_arc = player.current_screen_handler.lock().clone();
+            let handler = screen_handler_arc.lock();
             let grid_width: usize = match handler.window_type() {
                 Some(WindowType::Crafting) => 3,
                 None => 2, // player inventory 2x2
@@ -198,7 +198,7 @@ impl JavaClient {
         let recipe_matches = {
             let mut ok = true;
             for (idx, ing) in ingredient_slots.iter().enumerate() {
-                let stack = crafting_inv.get_stack(idx).await;
+                let stack = crafting_inv.get_stack(idx);
                 match ing {
                     None => {
                         if !stack.is_empty() {
@@ -222,7 +222,7 @@ impl JavaClient {
             let mut min = u8::MAX;
             for (idx, ing) in ingredient_slots.iter().enumerate() {
                 if ing.is_some() {
-                    let stack = crafting_inv.get_stack(idx).await;
+                    let stack = crafting_inv.get_stack(idx);
                     if !stack.is_empty() {
                         min = min.min(stack.item_count);
                     }
@@ -235,17 +235,16 @@ impl JavaClient {
 
         // Always clear the grid first, returning items to inventory.
         for i in 0..grid_size {
-            let stack = crafting_inv.remove_stack(i).await;
+            let stack = crafting_inv.remove_stack(i);
             if !stack.is_empty() {
-                player.inventory.offer(stack, false, player.as_ref()).await;
+                player.inventory.offer(stack, false, player.as_ref());
             }
         }
 
         // Determine how many of each ingredient to place per slot.
         let active_ingredients: Vec<GenericIngredient<'_>> =
             ingredient_slots.iter().flatten().copied().collect();
-        let biggest_craftable =
-            compute_biggest_craftable(&active_ingredients, &player.inventory).await;
+        let biggest_craftable = compute_biggest_craftable(&active_ingredients, &player.inventory);
 
         // Vanilla ServerPlaceRecipe.tryPlaceRecipe: if the player can't craft the recipe
         // at all, the grid (already cleared above) stays empty and the client is told to
@@ -255,21 +254,15 @@ impl JavaClient {
                 self.enqueue_client_packet(
                     &pumpkin_protocol::java::client::play::CPlaceGhostRecipe::new(
                         VarInt(i32::from(
-                            player
-                                .current_screen_handler
-                                .lock()
-                                .await
-                                .lock()
-                                .await
-                                .sync_id(),
+                            player.current_screen_handler.lock().lock().sync_id(),
                         )),
                         source,
                     ),
                 )
                 .await;
             }
-            let screen_handler_arc = player.current_screen_handler.lock().await.clone();
-            screen_handler_arc.lock().await.send_content_updates().await;
+            let screen_handler_arc = player.current_screen_handler.lock().clone();
+            screen_handler_arc.lock().send_content_updates();
             return;
         }
 
@@ -284,13 +277,13 @@ impl JavaClient {
         // Fill each grid slot with exactly `amount_to_craft` matching items.
         for (idx, ing) in ingredient_slots.iter().enumerate() {
             let Some(ingredient) = ing else { continue };
-            let taken = take_n_ingredient(&player.inventory, ingredient, amount_to_craft).await;
+            let taken = take_n_ingredient(&player.inventory, ingredient, amount_to_craft);
             if !taken.is_empty() {
-                crafting_inv.set_stack(idx, taken).await;
+                crafting_inv.set_stack(idx, taken);
             }
         }
 
-        let screen_handler_arc = player.current_screen_handler.lock().await.clone();
-        screen_handler_arc.lock().await.send_content_updates().await;
+        let screen_handler_arc = player.current_screen_handler.lock().clone();
+        screen_handler_arc.lock().send_content_updates();
     }
 }

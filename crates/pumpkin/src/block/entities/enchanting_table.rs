@@ -3,8 +3,7 @@ use pumpkin_data::data_component_impl::CustomNameImpl;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 pub struct EnchantingTableBlockEntity {
     pub position: BlockPos,
@@ -31,15 +30,15 @@ impl BlockEntity for EnchantingTableBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(name) = self.custom_name.lock().await.as_ref() {
-                nbt.put_string("CustomName", name.clone());
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(name) = self
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            nbt.put_string("CustomName", name.clone());
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

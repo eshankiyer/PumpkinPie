@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ageable::AgeableMob;
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
@@ -37,48 +37,44 @@ impl PandaRollGoal {
 }
 
 impl Goal for PandaRollGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
-                return false;
-            };
-            let entity = &panda.get_mob_entity().living_entity.entity;
-            if (!panda.is_baby() && !panda.is_playful()) || !entity.on_ground.load(Relaxed) {
-                return false;
-            }
-            if !panda.can_perform_action().await {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
+            return false;
+        };
+        let entity = &panda.get_mob_entity().living_entity.entity;
+        if (!panda.is_baby() && !panda.is_playful()) || !entity.on_ground.load(Relaxed) {
+            return false;
+        }
+        if !panda.can_perform_action() {
+            return false;
+        }
 
-            let angle = f64::from(entity.yaw.load()).to_radians();
-            let x_step = Self::step(-angle.sin());
-            let z_step = Self::step(angle.cos());
-            let ahead = entity
-                .block_pos
-                .load()
-                .offset(Vector3::new(x_step, -1, z_step));
-            if entity.world.load().get_block_state(&ahead).is_air() {
-                return true;
-            }
+        let angle = f64::from(entity.yaw.load()).to_radians();
+        let x_step = Self::step(-angle.sin());
+        let z_step = Self::step(angle.cos());
+        let ahead = entity
+            .block_pos
+            .load()
+            .offset(Vector3::new(x_step, -1, z_step));
+        if entity.world.load().get_block_state(&ahead).is_air() {
+            return true;
+        }
 
-            let mut rng = rand::rng();
-            if panda.is_playful() && rng.random_range(0..self.get_tick_count(60)) == 1 {
-                return true;
-            }
-            rng.random_range(0..self.get_tick_count(500)) == 1
-        })
+        let mut rng = rand::rng();
+        if panda.is_playful() && rng.random_range(0..self.get_tick_count(60)) == 1 {
+            return true;
+        }
+        rng.random_range(0..self.get_tick_count(500)) == 1
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() {
-                panda.roll(true);
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() {
+            panda.roll(true);
+        }
     }
 
     /// `Goal.isInterruptable() == false`.

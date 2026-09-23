@@ -938,7 +938,6 @@ impl ChunkEntityData {
         let entities_tag: Vec<pumpkin_nbt::tag::NbtTag> = self
             .data
             .lock()
-            .await
             .iter()
             .map(|c| pumpkin_nbt::tag::NbtTag::Compound(c.clone()))
             .collect();

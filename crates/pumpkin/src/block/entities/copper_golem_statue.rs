@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use pumpkin_data::Block;
@@ -35,12 +34,7 @@ impl BlockEntity for CopperGolemStatueBlockEntity {
         Self { position }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        _nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn write_nbt(&self, _nbt: &mut NbtCompound) {}
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -76,12 +70,7 @@ impl CopperGolemStatueBlockEntity {
     /// `waterlogged` mirrors `Level.removeBlock(pos, false)`, which replaces the block with
     /// `getFluidState(pos).createLegacyBlock()`: a waterlogged statue leaves a water source
     /// behind, not air.
-    pub async fn remove_statue(
-        &self,
-        world: &Arc<World>,
-        facing: HorizontalFacing,
-        waterlogged: bool,
-    ) {
+    pub fn remove_statue(&self, world: &Arc<World>, facing: HorizontalFacing, waterlogged: bool) {
         let pos = self.position;
         let center = Vector3::new(
             f64::from(pos.0.x) + 0.5,
@@ -95,16 +84,14 @@ impl CopperGolemStatueBlockEntity {
         entity.head_yaw.store(yaw);
 
         let golem = CopperGolemEntity::new(entity);
-        world.spawn_entity(golem).await;
+        world.spawn_entity(golem);
 
         let remaining = if waterlogged {
             Block::WATER.default_state.id
         } else {
             Block::AIR.default_state.id
         };
-        world
-            .set_block_state(&pos, remaining, BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(&pos, remaining, BlockFlags::NOTIFY_ALL);
     }
 }
 

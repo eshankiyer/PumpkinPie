@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use super::drowned_util::is_bright_outside;
 use super::zombie_attack::ZombieAttackGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 
 /// `Drowned.DrownedAttackGoal` (`Drowned.java:323-340`): the same melee behavior as
@@ -21,8 +21,14 @@ impl DrownedAttackGoal {
     }
 
     /// `Drowned#okTarget`: `target != null && (!level.isBrightOutside() || target.isInWater())`.
-    async fn ok_target(mob: &dyn Mob) -> bool {
-        let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
+    fn ok_target(mob: &dyn Mob) -> bool {
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
             return false;
         };
         let world = mob.get_entity().world.load();
@@ -31,24 +37,24 @@ impl DrownedAttackGoal {
 }
 
 impl Goal for DrownedAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.melee.can_start(mob).await && Self::ok_target(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.melee.can_start(mob) && Self::ok_target(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.melee.should_continue(mob).await && Self::ok_target(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.melee.should_continue(mob) && Self::ok_target(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.melee.start(mob).await })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.melee.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.melee.stop(mob).await })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.melee.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.melee.tick(mob).await })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.melee.tick(mob)
     }
 
     fn should_run_every_tick(&self) -> bool {

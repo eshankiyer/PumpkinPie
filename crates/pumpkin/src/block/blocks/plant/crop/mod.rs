@@ -71,27 +71,25 @@ trait CropBlockBase: PlantBlockBase {
         self.get_age(state, block) < self.max_age()
     }
 
-    async fn perform_bonemeal(&self, world: &Arc<World>, pos: &BlockPos) {
+    fn perform_bonemeal(&self, world: &Arc<World>, pos: &BlockPos) {
         let (block, state) = world.get_block_and_state_id(pos);
         let age = self.get_age(state, block);
         let new_age = (age + self.bonemeal_age_increase()).min(self.max_age());
-        world
-            .set_block_state(
-                pos,
-                self.state_with_age(block, state, new_age),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        world.set_block_state(
+            pos,
+            self.state_with_age(block, state, new_age),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
-    async fn random_tick(&self, world: &Arc<World>, pos: &BlockPos) {
+    fn random_tick(&self, world: &Arc<World>, pos: &BlockPos) {
         if world.get_raw_brightness(pos, 0) < MIN_GROWTH_LIGHT {
             return;
         }
         let (block, state) = world.get_block_and_state_id(pos);
         let age = self.get_age(state, block);
         if age < self.max_age() {
-            let f = get_available_moisture(world, pos, block).await;
+            let f = get_available_moisture(world, pos, block);
             if rand::rng().random_range(0..=(25.0 / f).floor() as i64) == 0 {
                 let mut new_state_id = self.state_with_age(block, state, age + 1);
                 if let Some(server) = world.server.upgrade() {
@@ -103,15 +101,13 @@ trait CropBlockBase: PlantBlockBase {
                         new_state_id,
                         *pos,
                     );
-                    server.plugin_manager.fire(&server, &mut event).await;
+                    server.plugin_manager.fire_blocking(&server, &mut event);
                     if event.cancelled {
                         return;
                     }
                     new_state_id = event.new_state_id;
                 }
-                world
-                    .set_block_state(pos, new_state_id, BlockFlags::NOTIFY_NEIGHBORS)
-                    .await;
+                world.set_block_state(pos, new_state_id, BlockFlags::NOTIFY_NEIGHBORS);
             }
         }
     }
@@ -130,15 +126,11 @@ pub(super) fn clone_seed_stack(item: &'static Item) -> ItemStack {
 /// (`net/minecraft/world/level/block/CropBlock.java:154-162`): a ravager destroys the crop when
 /// `mobGriefing` is enabled. The collision dispatcher already supplies the server world and the
 /// colliding entity, so this is shared by the concrete crops that extend vanilla `CropBlock`.
-pub async fn ravager_destroy_crop(
-    world: &Arc<World>,
-    position: &BlockPos,
-    entity: &dyn EntityBase,
-) {
+pub fn ravager_destroy_crop(world: &Arc<World>, position: &BlockPos, entity: &dyn EntityBase) {
     if entity.get_entity().entity_type == &EntityType::RAVAGER
         && world.level_info.load().game_rules.mob_griefing
     {
-        world.break_block(position, None, BlockFlags::empty()).await;
+        world.break_block(position, None, BlockFlags::empty());
     }
 }
 
@@ -165,7 +157,7 @@ pub const MIN_SURVIVE_LIGHT: u8 = 8;
 /// by the time of day and crops keep growing at night.
 pub const MIN_GROWTH_LIGHT: u8 = 9;
 
-pub async fn get_available_moisture(world: &Arc<World>, pos: &BlockPos, block: &Block) -> f32 {
+pub fn get_available_moisture(world: &Arc<World>, pos: &BlockPos, block: &Block) -> f32 {
     let mut moisture = 1.0;
     let down_pos = pos.down();
 

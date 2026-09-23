@@ -14,8 +14,8 @@ impl BedrockClient {
         };
         use pumpkin_protocol::bedrock::server::item_stack_request::ItemStackRequestAction;
 
-        let current_screen_handler = player.current_screen_handler.lock().await.clone();
-        let mut screen_handler = current_screen_handler.lock().await;
+        let current_screen_handler = player.current_screen_handler.lock().clone();
+        let mut screen_handler = current_screen_handler.lock();
 
         let mut responses = Vec::with_capacity(packet.requests.len());
 
@@ -77,7 +77,7 @@ impl BedrockClient {
                         destination,
                     } => {
                         let mut source_stack =
-                            get_slot_stack(&*screen_handler, &source, created_item.as_ref()).await;
+                            get_slot_stack(&*screen_handler, &source, created_item.as_ref());
                         if source_stack.is_empty() && created_item.is_none() {
                             tracing::debug!("Source stack is empty in Take/Place");
                             result = 1;
@@ -89,8 +89,7 @@ impl BedrockClient {
                                 &*screen_handler,
                                 &destination,
                                 created_item.as_ref(),
-                            )
-                            .await;
+                            );
                             if dest_stack.is_empty() {
                                 dest_stack = source_stack.copy_with_count(count);
                             } else if dest_stack.are_items_and_components_equal(&source_stack) {
@@ -123,7 +122,7 @@ impl BedrockClient {
                                     result = 1;
                                     break;
                                 };
-                                if !handler.complete_bedrock_trade(player.as_ref()).await {
+                                if !handler.complete_bedrock_trade(player.as_ref()) {
                                     result = 1;
                                     break;
                                 }
@@ -133,16 +132,14 @@ impl BedrockClient {
                                     handler,
                                     &destination,
                                     dest_stack.clone(),
-                                )
-                                .await;
+                                );
                                 for (container_name, slot_id, screen_slot) in [
                                     (ContainerName::Trade2Ingredient1, 4, 0),
                                     (ContainerName::Trade2Ingredient2, 5, 1),
                                     (ContainerName::Trade2ResultPreview, 50, 2),
                                 ] {
                                     let stack = handler.get_behaviour().slots[screen_slot]
-                                        .get_cloned_stack()
-                                        .await;
+                                        .get_cloned_stack();
                                     record_update(
                                         &mut updates,
                                         FullContainerName {
@@ -188,15 +185,13 @@ impl BedrockClient {
                                 &mut *screen_handler,
                                 &source,
                                 source_stack.clone(),
-                            )
-                            .await;
+                            );
                             update_slot_stack(
                                 player,
                                 &mut *screen_handler,
                                 &destination,
                                 dest_stack.clone(),
-                            )
-                            .await;
+                            );
 
                             record_update(
                                 &mut updates,
@@ -214,14 +209,12 @@ impl BedrockClient {
                     }
                     ItemStackRequestAction::Swap { slot1, slot2 } => {
                         let stack1 =
-                            get_slot_stack(&*screen_handler, &slot1, created_item.as_ref()).await;
+                            get_slot_stack(&*screen_handler, &slot1, created_item.as_ref());
                         let stack2 =
-                            get_slot_stack(&*screen_handler, &slot2, created_item.as_ref()).await;
+                            get_slot_stack(&*screen_handler, &slot2, created_item.as_ref());
 
-                        update_slot_stack(player, &mut *screen_handler, &slot1, stack2.clone())
-                            .await;
-                        update_slot_stack(player, &mut *screen_handler, &slot2, stack1.clone())
-                            .await;
+                        update_slot_stack(player, &mut *screen_handler, &slot1, stack2.clone());
+                        update_slot_stack(player, &mut *screen_handler, &slot2, stack1.clone());
 
                         record_update(
                             &mut updates,
@@ -242,7 +235,7 @@ impl BedrockClient {
                         randomly: _,
                     } => {
                         let mut source_stack =
-                            get_slot_stack(&*screen_handler, &source, created_item.as_ref()).await;
+                            get_slot_stack(&*screen_handler, &source, created_item.as_ref());
                         if source_stack.is_empty() {
                             result = 1;
                             break;
@@ -250,7 +243,7 @@ impl BedrockClient {
                         let count = count.min(source_stack.item_count);
                         if count > 0 {
                             let dropped_stack = source_stack.copy_with_count(count);
-                            player.drop_item(dropped_stack).await;
+                            player.drop_item(dropped_stack);
 
                             source_stack.decrement(count);
                             let source_stack = if source_stack.is_empty() {
@@ -264,8 +257,7 @@ impl BedrockClient {
                                 &mut *screen_handler,
                                 &source,
                                 source_stack.clone(),
-                            )
-                            .await;
+                            );
 
                             record_update(
                                 &mut updates,
@@ -295,8 +287,7 @@ impl BedrockClient {
                             && source.container_name.container_name == ContainerName::CraftingInput
                         {
                             let source_stack =
-                                get_slot_stack(&*screen_handler, &source, created_item.as_ref())
-                                    .await;
+                                get_slot_stack(&*screen_handler, &source, created_item.as_ref());
                             record_update(
                                 &mut updates,
                                 source.container_name.clone(),
@@ -307,7 +298,7 @@ impl BedrockClient {
                         }
 
                         let mut source_stack =
-                            get_slot_stack(&*screen_handler, &source, created_item.as_ref()).await;
+                            get_slot_stack(&*screen_handler, &source, created_item.as_ref());
                         if source_stack.is_empty() {
                             result = 1;
                             break;
@@ -326,8 +317,7 @@ impl BedrockClient {
                                 &mut *screen_handler,
                                 &source,
                                 source_stack.clone(),
-                            )
-                            .await;
+                            );
 
                             record_update(
                                 &mut updates,
@@ -360,15 +350,14 @@ impl BedrockClient {
                                 result = 1;
                                 break;
                             }
-                            handler.set_selected_offer(trade).await;
+                            handler.set_selected_offer(trade);
                             for (container_name, slot_id, screen_slot) in [
                                 (ContainerName::Trade2Ingredient1, 4, 0),
                                 (ContainerName::Trade2Ingredient2, 5, 1),
                                 (ContainerName::Trade2ResultPreview, 50, 2),
                             ] {
-                                let stack = handler.get_behaviour().slots[screen_slot]
-                                    .get_cloned_stack()
-                                    .await;
+                                let stack =
+                                    handler.get_behaviour().slots[screen_slot].get_cloned_stack();
                                 record_update(
                                     &mut updates,
                                     FullContainerName {
@@ -383,7 +372,7 @@ impl BedrockClient {
                         }
 
                         if repetitions > 0 {
-                            screen_handler.update_to_client().await;
+                            screen_handler.update_to_client();
 
                             let is_player = screen_handler.window_type().is_none();
                             let grid_size = if is_player { 4 } else { 9 };
@@ -392,7 +381,7 @@ impl BedrockClient {
                                 let grid_slot_index = 1 + i;
                                 let grid_slot =
                                     screen_handler.get_behaviour().slots[grid_slot_index].clone();
-                                let grid_stack = grid_slot.get_cloned_stack().await;
+                                let grid_stack = grid_slot.get_cloned_stack();
                                 tracing::info!(
                                     "Crafting Grid slot {i} (slot index {grid_slot_index}): Item ID: {}, Count: {}",
                                     grid_stack.item.id,
@@ -401,10 +390,10 @@ impl BedrockClient {
                             }
 
                             let output_slot = screen_handler.get_behaviour().slots[0].clone();
-                            let output_stack = output_slot.get_cloned_stack().await;
+                            let output_stack = output_slot.get_cloned_stack();
 
                             if output_stack.is_empty()
-                                || repetitions > output_slot.get_max_item_count().await
+                                || repetitions > output_slot.get_max_item_count()
                             {
                                 tracing::warn!("Client sent an invalid crafting request");
                                 result = 1;
@@ -417,9 +406,7 @@ impl BedrockClient {
                             created_item = Some(total_crafted);
 
                             for _ in 0..repetitions {
-                                output_slot
-                                    .on_take_item(player.as_ref(), &output_stack)
-                                    .await;
+                                output_slot.on_take_item(player.as_ref(), &output_stack);
                             }
                             crafting_inputs_consumed = true;
 
@@ -430,7 +417,7 @@ impl BedrockClient {
                                 let grid_slot_index = 1 + i;
                                 let grid_slot =
                                     screen_handler.get_behaviour().slots[grid_slot_index].clone();
-                                let grid_stack = grid_slot.get_cloned_stack().await;
+                                let grid_stack = grid_slot.get_cloned_stack();
                                 record_update(
                                     &mut updates,
                                     FullContainerName {
@@ -495,7 +482,7 @@ impl BedrockClient {
         }
 
         // Send updates to Java client
-        screen_handler.send_content_updates().await;
+        screen_handler.send_content_updates();
 
         // Collect inventory updates if we modified player inventory
         let mut inventory_updated = false;
@@ -832,7 +819,7 @@ pub(crate) fn record_update(
     }
 }
 
-async fn get_slot_stack(
+fn get_slot_stack(
     screen_handler: &dyn ScreenHandler,
     slot_info: &pumpkin_protocol::bedrock::server::item_stack_request::ItemStackRequestSlotInfo,
     created_item: Option<&ItemStack>,
@@ -843,35 +830,28 @@ async fn get_slot_stack(
         return stack.clone();
     }
     if slot_info.container_name.container_name == ContainerName::Cursor {
-        return screen_handler
-            .get_behaviour()
-            .cursor_stack
-            .lock()
-            .await
-            .clone();
+        return screen_handler.get_behaviour().cursor_stack.lock().clone();
     }
     if let Some(screen_slot) = map_bedrock_container_slot(
         screen_handler,
         slot_info.container_name.container_name,
         slot_info.slot_id,
     ) {
-        screen_handler.get_behaviour().slots[screen_slot]
-            .get_cloned_stack()
-            .await
+        screen_handler.get_behaviour().slots[screen_slot].get_cloned_stack()
     } else {
         ItemStack::EMPTY.clone()
     }
 }
 
 #[allow(clippy::unreachable)]
-async fn update_slot_stack(
+fn update_slot_stack(
     player: &Player,
     screen_handler: &mut dyn ScreenHandler,
     slot_info: &pumpkin_protocol::bedrock::server::item_stack_request::ItemStackRequestSlotInfo,
     new_stack: ItemStack,
 ) {
     if slot_info.container_name.container_name == ContainerName::Cursor {
-        let mut cursor_lock = screen_handler.get_behaviour().cursor_stack.lock().await;
+        let mut cursor_lock = screen_handler.get_behaviour().cursor_stack.lock();
         *cursor_lock = new_stack;
         return;
     }
@@ -882,23 +862,20 @@ async fn update_slot_stack(
     ) {
         let is_player_screen = screen_handler.window_type().is_none();
         if is_player_screen {
-            let current_stack = screen_handler.get_behaviour().slots[screen_slot]
-                .get_cloned_stack()
-                .await;
+            let current_stack =
+                screen_handler.get_behaviour().slots[screen_slot].get_cloned_stack();
             if !current_stack.are_items_and_components_equal(&new_stack) {
                 if (5..9).contains(&screen_slot) {
-                    player
-                        .enqueue_equipment_change(
-                            &match screen_slot {
-                                5 => EquipmentSlot::HEAD,
-                                6 => EquipmentSlot::CHEST,
-                                7 => EquipmentSlot::LEGS,
-                                8 => EquipmentSlot::FEET,
-                                _ => unreachable!(),
-                            },
-                            &new_stack,
-                        )
-                        .await;
+                    player.enqueue_equipment_change(
+                        &match screen_slot {
+                            5 => EquipmentSlot::HEAD,
+                            6 => EquipmentSlot::CHEST,
+                            7 => EquipmentSlot::LEGS,
+                            8 => EquipmentSlot::FEET,
+                            _ => unreachable!(),
+                        },
+                        &new_stack,
+                    );
                 } else if (36..45).contains(&screen_slot) {
                     let hotbar_slot = screen_slot - 36;
                     if player.inventory().get_selected_slot() == hotbar_slot as u8 {
@@ -909,9 +886,7 @@ async fn update_slot_stack(
             }
         }
 
-        screen_handler.get_behaviour().slots[screen_slot]
-            .set_stack(new_stack.clone())
-            .await;
+        screen_handler.get_behaviour().slots[screen_slot].set_stack(new_stack.clone());
         screen_handler.set_received_stack(screen_slot, new_stack);
     }
 }
@@ -932,7 +907,7 @@ mod tests {
             Arc::new(Mutex::new(EntityEquipment::new())),
             Arc::new(build_equipment_slots()),
         ));
-        let handler = CraftingTableScreenHandler::new(1, &inventory, None).await;
+        let handler = CraftingTableScreenHandler::new(1, &inventory, None);
 
         assert_eq!(
             map_bedrock_container_slot(&handler, ContainerName::Inventory, 26),

@@ -1,4 +1,3 @@
-use crate::block::BlockFuture;
 use crate::block::blocks::copper_weathering;
 use crate::block::{BlockBehaviour, OnPlaceArgs, RandomTickArgs};
 use pumpkin_data::Block;
@@ -17,47 +16,42 @@ type ChainLikeProperties = pumpkin_data::block_properties::IronChainLikeProperti
 pub struct ChainBlock;
 
 impl BlockBehaviour for ChainBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = ChainLikeProperties::default(args.block);
-            props.r#waterlogged = args.replacing.water_source();
-            props.r#axis = match args.direction {
-                BlockDirection::East | BlockDirection::West => Axis::X,
-                BlockDirection::Up | BlockDirection::Down => Axis::Y,
-                BlockDirection::North | BlockDirection::South => Axis::Z,
-            };
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = ChainLikeProperties::default(args.block);
+        props.r#waterlogged = args.replacing.water_source();
+        props.r#axis = match args.direction {
+            BlockDirection::East | BlockDirection::West => Axis::X,
+            BlockDirection::Up | BlockDirection::Down => Axis::Y,
+            BlockDirection::North | BlockDirection::South => Axis::Z,
+        };
 
-            props.to_state_id(args.block)
-        })
+        props.to_state_id(args.block)
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // No tag gate needed: the oxidation_stages table below only contains the
-            // copper_chain family, so this is a no-op for iron_chain.
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let current_props = ChainLikeProperties::from_state_id(current_state_id, args.block);
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        // No tag gate needed: the oxidation_stages table below only contains the
+        // copper_chain family, so this is a no-op for iron_chain.
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let current_props = ChainLikeProperties::from_state_id(current_state_id, args.block);
 
-            let oxidation_stages = [
-                &Block::COPPER_CHAIN,
-                &Block::EXPOSED_COPPER_CHAIN,
-                &Block::WEATHERED_COPPER_CHAIN,
-                &Block::OXIDIZED_COPPER_CHAIN,
-            ];
+        let oxidation_stages = [
+            &Block::COPPER_CHAIN,
+            &Block::EXPOSED_COPPER_CHAIN,
+            &Block::WEATHERED_COPPER_CHAIN,
+            &Block::OXIDIZED_COPPER_CHAIN,
+        ];
 
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = ChainLikeProperties::default(next_block);
-                    new_props.r#waterlogged = current_props.r#waterlogged;
-                    new_props.r#axis = current_props.r#axis;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = ChainLikeProperties::default(next_block);
+                new_props.r#waterlogged = current_props.r#waterlogged;
+                new_props.r#axis = current_props.r#axis;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 }

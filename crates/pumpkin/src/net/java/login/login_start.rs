@@ -15,14 +15,12 @@ impl PendingConnection {
                 translation::java::MULTIPLAYER_DISCONNECT_SERVER_FULL,
                 translation::bedrock::DISCONNECTIONSCREEN_SERVERFULL,
                 [],
-            ))
-            .await;
+            ));
             return Some(PacketHandlerResult::Stop);
         }
 
         if !is_valid_player_name(&login_start.name) {
-            self.kick(TextComponent::text("Invalid characters in username"))
-                .await;
+            self.kick(TextComponent::text("Invalid characters in username"));
             return Some(PacketHandlerResult::Stop);
         }
 
@@ -35,8 +33,7 @@ impl PendingConnection {
                 } else {
                     self.kick(TextComponent::text(
                         "Modern forwarding is not supported for client versions older than 1.13",
-                    ))
-                    .await;
+                    ));
                     Some(PacketHandlerResult::Stop)
                 }
             } else if proxy.bungeecord.enabled {
@@ -51,7 +48,7 @@ impl PendingConnection {
                         self.finish_login(server, &profile).await
                     }
                     Err(error) => {
-                        self.kick(TextComponent::text(error.to_string())).await;
+                        self.kick(TextComponent::text(error.to_string()));
                         Some(PacketHandlerResult::Stop)
                     }
                 }

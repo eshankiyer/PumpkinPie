@@ -69,7 +69,7 @@ impl PortalType {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub async fn get_portal_destination(
+    pub fn get_portal_destination(
         &self,
         current_level: &World,
         dest_world: Arc<World>,
@@ -113,13 +113,11 @@ impl PortalType {
                                         platform_pos.0.y + dy,
                                         platform_pos.0.z + dz,
                                     );
-                                    dest_world
-                                        .set_block_state(
-                                            &target_pos,
-                                            block.default_state.id,
-                                            BlockFlags::NOTIFY_ALL,
-                                        )
-                                        .await;
+                                    dest_world.set_block_state(
+                                        &target_pos,
+                                        block.default_state.id,
+                                        BlockFlags::NOTIFY_ALL,
+                                    );
                                 }
                             }
                         }
@@ -224,7 +222,7 @@ impl PortalType {
                 let source_axis = source_portal.as_ref().map(|p| p.axis);
 
                 let (final_pos, yaw) = if let Some(dest_result) =
-                    NetherPortal::search_for_portal(&dest_world, target_pos).await
+                    NetherPortal::search_for_portal(&dest_world, target_pos)
                 {
                     let base_pos = source_portal.as_ref().map_or_else(
                         || dest_result.get_teleport_position(),
@@ -257,10 +255,8 @@ impl PortalType {
                         target_pos,
                         pumpkin_data::block_properties::HorizontalAxis::X,
                     )
-                    .await
                 {
-                    NetherPortal::build_portal_frame(&dest_world, build_pos, axis, is_fallback)
-                        .await;
+                    NetherPortal::build_portal_frame(&dest_world, build_pos, axis, is_fallback);
                     let new_portal = PortalSearchResult {
                         lower_corner: build_pos,
                         axis,

@@ -24,11 +24,8 @@ use pumpkin_world::inventory::Inventory;
 
 use crate::{
     player::player_inventory::PlayerInventory,
-    screen_handler::{
-        InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
-        ScreenHandlerFuture,
-    },
-    slot::{BoxFuture, Slot},
+    screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour},
+    slot::Slot,
 };
 
 /// Number of slots inside a shulker box (`ShulkerBoxMenu.java:10`).
@@ -76,15 +73,13 @@ impl Slot for ShulkerBoxSlot {
         self.id.store(id as u8, Ordering::Relaxed);
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 
     /// `ShulkerBoxSlot.java:11-14`: only items that fit inside container items.
-    fn can_insert<'a>(&'a self, stack: &'a ItemStack) -> BoxFuture<'a, bool> {
-        Box::pin(async move { can_fit_inside_container_items(stack) })
+    fn can_insert(&self, stack: &ItemStack) -> bool {
+        can_fit_inside_container_items(stack)
     }
 }
 
@@ -100,7 +95,7 @@ impl ShulkerBoxScreenHandler {
     ///
     /// `ShulkerBoxMenu.java:17-32`: 27 shulker slots in a 3x9 grid, then the
     /// standard player inventory slots.
-    pub async fn new(
+    pub fn new(
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
         inventory: Arc<dyn Inventory>,
@@ -110,7 +105,7 @@ impl ShulkerBoxScreenHandler {
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(WindowType::ShulkerBox)),
         };
 
-        inventory.on_open().await;
+        inventory.on_open();
 
         for index in 0..SHULKER_BOX_SIZE {
             handler.add_slot(Arc::new(ShulkerBoxSlot::new(inventory.clone(), index)));
@@ -150,57 +145,43 @@ impl ScreenHandler for ShulkerBoxScreenHandler {
         &mut self.behaviour
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            self.inventory.on_close().await;
-        })
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        self.inventory.on_close();
     }
 
     /// `ShulkerBoxMenu.java:39-62`. Note it has no `onTake`/count-equality tail,
     /// unlike `DispenserMenu.quickMoveStack`.
-    fn quick_move<'a>(
-        &'a mut self,
-        _player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            let mut stack_left = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots[slot_index as usize].clone();
-            let container_size = SHULKER_BOX_SIZE as i32;
+    fn quick_move(&mut self, _player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack_left = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots[slot_index as usize].clone();
+        let container_size = SHULKER_BOX_SIZE as i32;
 
-            if slot.has_stack().await {
-                let mut slot_stack = slot.get_stack().await;
-                stack_left = slot_stack.clone();
+        if slot.has_stack() {
+            let mut slot_stack = slot.get_stack();
+            stack_left = slot_stack.clone();
 
-                if slot_index < container_size {
-                    if !self
-                        .insert_item(
-                            &mut slot_stack,
-                            container_size,
-                            self.get_behaviour().slots.len() as i32,
-                            true,
-                        )
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if !self
-                    .insert_item(&mut slot_stack, 0, container_size, false)
-                    .await
-                {
+            if slot_index < container_size {
+                if !self.insert_item(
+                    &mut slot_stack,
+                    container_size,
+                    self.get_behaviour().slots.len() as i32,
+                    true,
+                ) {
                     return ItemStack::EMPTY.clone();
                 }
-
-                if slot_stack.is_empty() {
-                    slot.set_stack(ItemStack::EMPTY.clone()).await;
-                } else {
-                    slot.set_stack(slot_stack).await;
-                }
+            } else if !self.insert_item(&mut slot_stack, 0, container_size, false) {
+                return ItemStack::EMPTY.clone();
             }
 
-            stack_left
-        })
+            if slot_stack.is_empty() {
+                slot.set_stack(ItemStack::EMPTY.clone());
+            } else {
+                slot.set_stack(slot_stack);
+            }
+        }
+
+        stack_left
     }
 }
 
@@ -210,19 +191,19 @@ mod tests {
 
     use pumpkin_data::item::Item;
     use pumpkin_world::inventory::SimpleInventory;
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
 
     use crate::entity_equipment::EntityEquipment;
 
     use super::*;
 
-    async fn handler() -> (ShulkerBoxScreenHandler, Arc<SimpleInventory>) {
+    fn handler() -> (ShulkerBoxScreenHandler, Arc<SimpleInventory>) {
         let player_inventory = Arc::new(PlayerInventory::new(
             Arc::new(Mutex::new(EntityEquipment::new())),
             Arc::new(HashMap::new()),
         ));
         let inventory = Arc::new(SimpleInventory::new(SHULKER_BOX_SIZE));
-        let handler = ShulkerBoxScreenHandler::new(0, &player_inventory, inventory.clone()).await;
+        let handler = ShulkerBoxScreenHandler::new(0, &player_inventory, inventory.clone());
         (handler, inventory)
     }
 
@@ -255,43 +236,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shulker_slots_reject_nested_shulker_boxes() {
-        let (handler, _) = handler().await;
+    fn shulker_slots_reject_nested_shulker_boxes() {
+        let (handler, _) = handler();
         for index in 0..SHULKER_BOX_SIZE {
             let slot = handler.get_behaviour().slots[index].clone();
-            assert!(
-                !slot
-                    .can_insert(&ItemStack::new(1, &Item::SHULKER_BOX))
-                    .await
-            );
-            assert!(slot.can_insert(&ItemStack::new(1, &Item::STONE)).await);
+            assert!(!slot.can_insert(&ItemStack::new(1, &Item::SHULKER_BOX)));
+            assert!(slot.can_insert(&ItemStack::new(1, &Item::STONE)));
         }
     }
 
     #[tokio::test]
-    async fn player_slots_still_accept_shulker_boxes() {
-        let (handler, _) = handler().await;
+    fn player_slots_still_accept_shulker_boxes() {
+        let (handler, _) = handler();
         let player_slot = handler.get_behaviour().slots[SHULKER_BOX_SIZE].clone();
-        assert!(
-            player_slot
-                .can_insert(&ItemStack::new(1, &Item::SHULKER_BOX))
-                .await
-        );
+        assert!(player_slot.can_insert(&ItemStack::new(1, &Item::SHULKER_BOX)));
     }
 
     #[tokio::test]
-    async fn layout_is_27_container_slots_plus_36_player_slots() {
-        let (handler, _) = handler().await;
+    fn layout_is_27_container_slots_plus_36_player_slots() {
+        let (handler, _) = handler();
         assert_eq!(handler.get_behaviour().slots.len(), SHULKER_BOX_SIZE + 36);
         assert_eq!(handler.window_type(), Some(WindowType::ShulkerBox));
     }
 
     #[tokio::test]
-    async fn quick_move_from_container_reaches_player_inventory() {
-        let (mut handler, inventory) = handler().await;
-        inventory
-            .set_stack(0, ItemStack::new(6, &Item::STONE))
-            .await;
+    fn quick_move_from_container_reaches_player_inventory() {
+        let (mut handler, inventory) = handler();
+        inventory.set_stack(0, ItemStack::new(6, &Item::STONE));
 
         // `quick_move` ignores the player argument for this handler.
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -301,26 +272,22 @@ mod tests {
         let player = crate::shulker_box_screen_handler::tests::TestPlayer {
             inventory: player_inventory,
         };
-        handler.quick_move(&player, 0).await;
+        handler.quick_move(&player, 0);
 
-        assert!(inventory.get_stack(0).await.is_empty());
+        assert!(inventory.get_stack(0).is_empty());
         let last = handler.get_behaviour().slots.len() - 1;
         assert_eq!(
-            handler.get_behaviour().slots[last]
-                .get_stack()
-                .await
-                .item_count,
+            handler.get_behaviour().slots[last].get_stack().item_count,
             6
         );
     }
 
     #[tokio::test]
-    async fn quick_move_from_player_reaches_container() {
-        let (mut handler, inventory) = handler().await;
+    fn quick_move_from_player_reaches_container() {
+        let (mut handler, inventory) = handler();
         let player_slot = SHULKER_BOX_SIZE as i32;
         handler.get_behaviour().slots[player_slot as usize]
-            .set_stack(ItemStack::new(3, &Item::STONE))
-            .await;
+            .set_stack(ItemStack::new(3, &Item::STONE));
 
         let player_inventory = Arc::new(PlayerInventory::new(
             Arc::new(Mutex::new(EntityEquipment::new())),
@@ -329,9 +296,9 @@ mod tests {
         let player = crate::shulker_box_screen_handler::tests::TestPlayer {
             inventory: player_inventory,
         };
-        handler.quick_move(&player, player_slot).await;
+        handler.quick_move(&player, player_slot);
 
-        assert_eq!(inventory.get_stack(0).await.item_count, 3);
+        assert_eq!(inventory.get_stack(0).item_count, 3);
     }
 
     pub struct TestPlayer {

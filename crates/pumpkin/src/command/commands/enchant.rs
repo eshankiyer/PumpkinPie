@@ -20,95 +20,93 @@ const MIN_ENCHANTMENT_LEVEL: i32 = 0;
 struct Executor;
 
 impl CommandExecutor for Executor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let targets = EntitiesArgumentConsumer.find_arg_default_name(args)?;
-            let enchantment = EnchantmentArgumentConsumer.find_arg_default_name(args)?;
-            let level = match enchantment_level_consumer().find_arg_default_name(args) {
-                Err(_) => 1,
-                Ok(Ok(level)) => level,
-                Ok(Err(err)) => {
-                    let err_msg = match err {
-                        NotInBounds::LowerBound(val, min) => TextComponent::translate_cross(
-                            "argument.integer.low",
-                            "argument.integer.low",
-                            &[
-                                TextComponent::text(min.to_string()),
-                                TextComponent::text(val.to_string()),
-                            ],
-                        ),
-                        NotInBounds::UpperBound(val, max) => TextComponent::translate_cross(
-                            "argument.integer.big",
-                            "argument.integer.big",
-                            &[
-                                TextComponent::text(max.to_string()),
-                                TextComponent::text(val.to_string()),
-                            ],
-                        ),
-                    };
-
-                    return Err(CommandError::CommandFailed(err_msg));
-                }
-            };
-
-            if level > enchantment.max_level {
-                let msg = TextComponent::translate_cross(
-                    translation::java::COMMANDS_ENCHANT_FAILED_LEVEL,
-                    translation::bedrock::COMMANDS_ENCHANT_INVALIDLEVEL,
-                    [
-                        TextComponent::text(level.to_string()),
-                        TextComponent::text(enchantment.max_level.to_string()),
-                    ],
-                );
-                return Err(CommandError::CommandFailed(msg));
-            }
-
-            let mut successful_targets = 0;
-
-            if targets.len() == 1 {
-                return match enchant_target(&targets[0], enchantment, level).await {
-                    Ok(()) => {
-                        let msg = TextComponent::translate_cross(
-                            translation::java::COMMANDS_ENCHANT_SUCCESS_SINGLE,
-                            translation::bedrock::COMMANDS_ENCHANT_SUCCESS,
-                            [
-                                enchantment.get_fullname(level),
-                                targets[0].get_display_name().await,
-                            ],
-                        );
-                        sender.send_message(msg).await;
-                        Ok(1)
-                    }
-                    Err(e) => Err(e),
+    fn execute(
+        &self,
+        sender: &CommandSender,
+        _server: &crate::server::Server,
+        args: &ConsumedArgs,
+    ) -> CommandResult {
+        let targets = EntitiesArgumentConsumer.find_arg_default_name(args)?;
+        let enchantment = EnchantmentArgumentConsumer.find_arg_default_name(args)?;
+        let level = match enchantment_level_consumer().find_arg_default_name(args) {
+            Err(_) => 1,
+            Ok(Ok(level)) => level,
+            Ok(Err(err)) => {
+                let err_msg = match err {
+                    NotInBounds::LowerBound(val, min) => TextComponent::translate_cross(
+                        "argument.integer.low",
+                        "argument.integer.low",
+                        &[
+                            TextComponent::text(min.to_string()),
+                            TextComponent::text(val.to_string()),
+                        ],
+                    ),
+                    NotInBounds::UpperBound(val, max) => TextComponent::translate_cross(
+                        "argument.integer.big",
+                        "argument.integer.big",
+                        &[
+                            TextComponent::text(max.to_string()),
+                            TextComponent::text(val.to_string()),
+                        ],
+                    ),
                 };
-            }
 
-            for target in targets {
-                if enchant_target(target, enchantment, level).await.is_ok() {
-                    successful_targets += 1;
-                }
+                return Err(CommandError::CommandFailed(err_msg));
             }
+        };
 
-            if successful_targets == 0 {
-                return Err(commands_enchant_failed());
-            }
-
+        if level > enchantment.max_level {
             let msg = TextComponent::translate_cross(
-                translation::java::COMMANDS_ENCHANT_SUCCESS_MULTIPLE,
-                translation::bedrock::COMMANDS_ENCHANT_SUCCESS,
+                translation::java::COMMANDS_ENCHANT_FAILED_LEVEL,
+                translation::bedrock::COMMANDS_ENCHANT_INVALIDLEVEL,
                 [
-                    enchantment.get_fullname(level),
-                    TextComponent::text(targets.len().to_string()),
+                    TextComponent::text(level.to_string()),
+                    TextComponent::text(enchantment.max_level.to_string()),
                 ],
             );
-            sender.send_message(msg).await;
-            Ok(successful_targets)
-        })
+            return Err(CommandError::CommandFailed(msg));
+        }
+
+        let mut successful_targets = 0;
+
+        if targets.len() == 1 {
+            return match enchant_target(&targets[0], enchantment, level) {
+                Ok(()) => {
+                    let msg = TextComponent::translate_cross(
+                        translation::java::COMMANDS_ENCHANT_SUCCESS_SINGLE,
+                        translation::bedrock::COMMANDS_ENCHANT_SUCCESS,
+                        [
+                            enchantment.get_fullname(level),
+                            targets[0].get_display_name(),
+                        ],
+                    );
+                    sender.send_message(msg);
+                    Ok(1)
+                }
+                Err(e) => Err(e),
+            };
+        }
+
+        for target in targets {
+            if enchant_target(target, enchantment, level).is_ok() {
+                successful_targets += 1;
+            }
+        }
+
+        if successful_targets == 0 {
+            return Err(commands_enchant_failed());
+        }
+
+        let msg = TextComponent::translate_cross(
+            translation::java::COMMANDS_ENCHANT_SUCCESS_MULTIPLE,
+            translation::bedrock::COMMANDS_ENCHANT_SUCCESS,
+            [
+                enchantment.get_fullname(level),
+                TextComponent::text(targets.len().to_string()),
+            ],
+        );
+        sender.send_message(msg);
+        Ok(successful_targets)
     }
 }
 
@@ -128,7 +126,7 @@ fn commands_enchant_failed() -> CommandError {
     CommandError::CommandFailed(msg)
 }
 
-async fn enchant_target(
+fn enchant_target(
     target: &Arc<dyn EntityBase>,
     enchantment: &'static Enchantment,
     level: i32,
@@ -137,19 +135,19 @@ async fn enchant_target(
         let msg = TextComponent::translate_cross(
             translation::java::COMMANDS_ENCHANT_FAILED_ENTITY,
             translation::java::COMMANDS_ENCHANT_FAILED_ENTITY,
-            [target.get_display_name().await],
+            [target.get_display_name()],
         );
         return Err(CommandError::CommandFailed(msg));
     };
 
     let player = target.get_player();
     let mut item = if let Some(player) = player {
-        player.inventory().held_item().await
+        player.inventory().held_item()
     } else {
         living
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&EquipmentSlot::MAIN_HAND)
     };
 
@@ -157,7 +155,7 @@ async fn enchant_target(
         let msg = TextComponent::translate_cross(
             translation::java::COMMANDS_ENCHANT_FAILED_ITEMLESS,
             translation::bedrock::COMMANDS_ENCHANT_NOITEM,
-            [target.get_display_name().await],
+            [target.get_display_name()],
         );
         return Err(CommandError::CommandFailed(msg));
     }
@@ -189,13 +187,11 @@ async fn enchant_target(
     item.enchant(enchantment, level);
     let updated_item = item.clone();
     if let Some(player) = player {
-        player.inventory().set_held_item(updated_item.clone()).await;
-        player
-            .sync_hand_slot(
-                player.inventory().get_selected_slot() as usize,
-                updated_item,
-            )
-            .await;
+        player.inventory().set_held_item(updated_item.clone());
+        player.sync_hand_slot(
+            player.inventory().get_selected_slot() as usize,
+            updated_item,
+        );
     } else {
         living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, updated_item)]);
     }

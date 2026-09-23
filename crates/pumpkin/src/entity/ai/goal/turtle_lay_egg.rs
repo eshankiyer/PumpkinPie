@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::Block;
@@ -10,7 +9,7 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle, to_goal_ticks};
+use super::{Controls, Goal, ParentHandle, to_goal_ticks};
 use crate::entity::mob::Mob;
 use crate::entity::passive::turtle::TurtleEntity;
 use crate::world::World;
@@ -68,77 +67,67 @@ impl TurtleLayEggGoal {
 }
 
 impl Goal for TurtleLayEggGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !self.near_home_with_egg(mob) {
-                return false;
-            }
-            self.move_to_target_pos_goal.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !self.near_home_with_egg(mob) {
+            return false;
+        }
+        self.move_to_target_pos_goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.near_home_with_egg(mob) && self.move_to_target_pos_goal.should_continue(mob).await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.near_home_with_egg(mob) && self.move_to_target_pos_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.start(mob).await })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.move_to_target_pos_goal.stop(mob).await;
-            if let Some(turtle) = self.turtle.upgrade() {
-                turtle.set_laying_egg(false);
-            }
-            self.lay_egg_counter = 0;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob);
+        if let Some(turtle) = self.turtle.upgrade() {
+            turtle.set_laying_egg(false);
+        }
+        self.lay_egg_counter = 0;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.move_to_target_pos_goal.tick(mob).await;
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.tick(mob);
 
-            let Some(turtle) = self.turtle.upgrade() else {
-                return;
-            };
-            let entity = mob.get_entity();
-            if entity
-                .touching_water
-                .load(std::sync::atomic::Ordering::SeqCst)
-                || !self.move_to_target_pos_goal.reached
-            {
-                return;
-            }
+        let Some(turtle) = self.turtle.upgrade() else {
+            return;
+        };
+        let entity = mob.get_entity();
+        if entity
+            .touching_water
+            .load(std::sync::atomic::Ordering::SeqCst)
+            || !self.move_to_target_pos_goal.reached
+        {
+            return;
+        }
 
-            if self.lay_egg_counter < 1 {
-                turtle.set_laying_egg(true);
-            } else if self.lay_egg_counter > to_goal_ticks(LAY_EGG_TICKS) {
-                let world = entity.world.load();
-                let pos = entity.pos.load();
-                world.play_sound(Sound::EntityTurtleLayEgg, SoundCategory::Blocks, &pos);
+        if self.lay_egg_counter < 1 {
+            turtle.set_laying_egg(true);
+        } else if self.lay_egg_counter > to_goal_ticks(LAY_EGG_TICKS) {
+            let world = entity.world.load();
+            let pos = entity.pos.load();
+            world.play_sound(Sound::EntityTurtleLayEgg, SoundCategory::Blocks, &pos);
 
-                let egg_pos = self.move_to_target_pos_goal.target_pos.up();
-                let eggs = mob.get_random().random_range(1u8..=4);
-                let props = TurtleEggLikeProperties { eggs, hatch: 0 };
-                let state_id = props.to_state_id(&Block::TURTLE_EGG);
-                world
-                    .set_block_state(&egg_pos, state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
+            let egg_pos = self.move_to_target_pos_goal.target_pos.up();
+            let eggs = mob.get_random().random_range(1u8..=4);
+            let props = TurtleEggLikeProperties { eggs, hatch: 0 };
+            let state_id = props.to_state_id(&Block::TURTLE_EGG);
+            world.set_block_state(&egg_pos, state_id, BlockFlags::NOTIFY_ALL);
 
-                turtle.set_has_egg(false);
-                turtle.set_laying_egg(false);
-                turtle
-                    .get_mob_entity()
-                    .set_love_ticks(POST_LAY_LOVE_COOLDOWN, None);
-            }
+            turtle.set_has_egg(false);
+            turtle.set_laying_egg(false);
+            turtle
+                .get_mob_entity()
+                .set_love_ticks(POST_LAY_LOVE_COOLDOWN, None);
+        }
 
-            if turtle.is_laying_egg() {
-                self.lay_egg_counter += 1;
-            }
-        })
+        if turtle.is_laying_egg() {
+            self.lay_egg_counter += 1;
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -162,11 +151,7 @@ impl TurtleLayEggGoal {
 }
 
 impl MoveToTargetPos for TurtleLayEggGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move { Self::is_valid(&world, block_pos) })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        Self::is_valid(&world, block_pos)
     }
 }

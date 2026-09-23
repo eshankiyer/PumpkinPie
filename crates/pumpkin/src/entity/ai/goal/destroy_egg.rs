@@ -1,8 +1,6 @@
 use crate::entity::ai::goal::move_to_target_pos::MoveToTargetPos;
-use crate::entity::ai::goal::step_and_destroy_block::{
-    StepAndDestroyBlockGoal, Stepping, SteppingFuture,
-};
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture, ParentHandle};
+use crate::entity::ai::goal::step_and_destroy_block::{StepAndDestroyBlockGoal, Stepping};
+use crate::entity::ai::goal::{Controls, Goal, ParentHandle};
 use crate::entity::mob::Mob;
 use crate::world::World;
 use pumpkin_data::item::Item;
@@ -14,7 +12,6 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 use rand::{RngExt, rng};
-use std::pin::Pin;
 use std::sync::Arc;
 
 pub struct DestroyEggGoal {
@@ -87,30 +84,24 @@ impl DestroyEggGoal {
 }
 
 impl Goal for DestroyEggGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.step_and_destroy_block_goal.can_start(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.step_and_destroy_block_goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.step_and_destroy_block_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.step_and_destroy_block_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.step_and_destroy_block_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.step_and_destroy_block_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.step_and_destroy_block_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.step_and_destroy_block_goal.stop(mob);
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.step_and_destroy_block_goal.tick(mob).await;
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.step_and_destroy_block_goal.tick(mob);
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -123,118 +114,99 @@ impl Goal for DestroyEggGoal {
 }
 
 impl Stepping for DestroyEggGoal {
-    fn tick_stepping(&self, world: Arc<World>, block_pos: BlockPos) -> SteppingFuture<'_> {
-        Box::pin(async move {
-            let random = rng().random::<f32>();
+    fn tick_stepping(&self, world: Arc<World>, block_pos: BlockPos) {
+        let random = rng().random::<f32>();
 
-            // NOTE: block_pos.0.to_f64() is assumed to be the correct way to get Vector3<f64>
-            let pos_f64 = (block_pos.0).to_f64();
+        // NOTE: block_pos.0.to_f64() is assumed to be the correct way to get Vector3<f64>
+        let pos_f64 = (block_pos.0).to_f64();
 
-            world.play_sound_raw(
-                Sound::EntityZombieDestroyEgg as u16,
-                SoundCategory::Hostile,
-                &pos_f64,
-                0.7,
-                random.mul_add(0.2, 0.9),
-            );
-        })
+        world.play_sound_raw(
+            Sound::EntityZombieDestroyEgg as u16,
+            SoundCategory::Hostile,
+            &pos_f64,
+            0.7,
+            random.mul_add(0.2, 0.9),
+        );
     }
 
-    fn on_destroy_block(&self, world: Arc<World>, block_pos: BlockPos) -> SteppingFuture<'_> {
-        Box::pin(async move {
-            let random = rng().random::<f32>();
+    fn on_destroy_block(&self, world: Arc<World>, block_pos: BlockPos) {
+        let random = rng().random::<f32>();
 
-            let expected_state = world.get_block_state(&block_pos).id;
-            if Block::from_state_id(expected_state).id != Block::TURTLE_EGG.id
-                || !world
-                    .set_block_state_if(
-                        &block_pos,
-                        expected_state,
-                        BlockStateId::AIR,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await
-            {
-                return;
-            }
+        let expected_state = world.get_block_state(&block_pos).id;
+        if Block::from_state_id(expected_state).id != Block::TURTLE_EGG.id
+            || !world.set_block_state_if(
+                &block_pos,
+                expected_state,
+                BlockStateId::AIR,
+                BlockFlags::NOTIFY_ALL,
+            )
+        {
+            return;
+        }
 
-            // Vanilla RemoveBlockGoal calls Level.removeBlock(pos, false), which
-            // replaces the block with its fluid state without drops or a player
-            // break event.
-            let position = Vector3::new(
-                f64::from(block_pos.0.x) + 0.5,
-                f64::from(block_pos.0.y),
-                f64::from(block_pos.0.z) + 0.5,
-            );
-            let mut particle_random = rng();
-            for _ in 0..20 {
-                let mut next_gaussian = || {
-                    let u1 = particle_random.random::<f64>().max(f64::MIN_POSITIVE);
-                    let u2 = particle_random.random::<f64>();
-                    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
-                };
-                Self::spawn_nearby_particle(
-                    &world,
-                    position,
-                    Vector3::new(
-                        (next_gaussian() * 0.02) as f32,
-                        (next_gaussian() * 0.02) as f32,
-                        (next_gaussian() * 0.02) as f32,
-                    ),
-                    0.15,
-                    1,
-                    Particle::Poof,
-                );
-            }
-
-            // NOTE: block_pos.0.to_f64() is assumed to be the correct way to get Vector3<f64>
-            let pos_f64 = (block_pos.0).to_f64();
-
-            world.play_sound_raw(
-                Sound::EntityTurtleEggBreak as u16,
-                SoundCategory::Blocks,
-                &pos_f64,
-                0.7,
-                random.mul_add(0.2, 0.9),
-            );
-        })
-    }
-
-    fn tick_stepping_particles(
-        &self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> SteppingFuture<'_> {
-        Box::pin(async move {
-            let mut random = rng();
-            Self::spawn_nearby_item_particle(
+        // Vanilla RemoveBlockGoal calls Level.removeBlock(pos, false), which
+        // replaces the block with its fluid state without drops or a player
+        // break event.
+        let position = Vector3::new(
+            f64::from(block_pos.0.x) + 0.5,
+            f64::from(block_pos.0.y),
+            f64::from(block_pos.0.z) + 0.5,
+        );
+        let mut particle_random = rng();
+        for _ in 0..20 {
+            let mut next_gaussian = || {
+                let u1 = particle_random.random::<f64>().max(f64::MIN_POSITIVE);
+                let u2 = particle_random.random::<f64>();
+                (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+            };
+            Self::spawn_nearby_particle(
                 &world,
+                position,
                 Vector3::new(
-                    f64::from(block_pos.0.x) + 0.5,
-                    f64::from(block_pos.0.y) + 0.7,
-                    f64::from(block_pos.0.z) + 0.5,
+                    (next_gaussian() * 0.02) as f32,
+                    (next_gaussian() * 0.02) as f32,
+                    (next_gaussian() * 0.02) as f32,
                 ),
-                Vector3::new(
-                    (random.random::<f32>() - 0.5) * 0.08,
-                    (random.random::<f32>() - 0.5) * 0.08,
-                    (random.random::<f32>() - 0.5) * 0.08,
-                ),
+                0.15,
+                1,
+                Particle::Poof,
             );
-        })
+        }
+
+        // NOTE: block_pos.0.to_f64() is assumed to be the correct way to get Vector3<f64>
+        let pos_f64 = (block_pos.0).to_f64();
+
+        world.play_sound_raw(
+            Sound::EntityTurtleEggBreak as u16,
+            SoundCategory::Blocks,
+            &pos_f64,
+            0.7,
+            random.mul_add(0.2, 0.9),
+        );
+    }
+
+    fn tick_stepping_particles(&self, world: Arc<World>, block_pos: BlockPos) {
+        let mut random = rng();
+        Self::spawn_nearby_item_particle(
+            &world,
+            Vector3::new(
+                f64::from(block_pos.0.x) + 0.5,
+                f64::from(block_pos.0.y) + 0.7,
+                f64::from(block_pos.0.z) + 0.5,
+            ),
+            Vector3::new(
+                (random.random::<f32>() - 0.5) * 0.08,
+                (random.random::<f32>() - 0.5) * 0.08,
+                (random.random::<f32>() - 0.5) * 0.08,
+            ),
+        );
     }
 }
 
 impl MoveToTargetPos for DestroyEggGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move {
-            self.step_and_destroy_block_goal
-                .is_target_pos(world, block_pos)
-                .await
-        })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        self.step_and_destroy_block_goal
+            .is_target_pos(world, block_pos)
     }
 
     fn get_desired_distance_to_target(&self) -> f64 {

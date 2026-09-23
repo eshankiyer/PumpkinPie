@@ -1,13 +1,12 @@
 //! Port of `CatLieOnBedGoal.java`.
 
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle};
+use super::{Controls, Goal, ParentHandle};
 use crate::entity::mob::Mob;
 use crate::entity::passive::cat::CatEntity;
 use crate::entity::passive::tamable::TamableAnimal;
@@ -69,78 +68,66 @@ impl CatLieOnBedGoal {
 }
 
 impl MoveToTargetPos for CatLieOnBedGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move { Self::is_valid(&world, block_pos) })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        Self::is_valid(&world, block_pos)
     }
 }
 
 impl Goal for CatLieOnBedGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            if !self.cat_may_lie() {
-                return false;
-            }
-            // `MoveToBlockGoal.canUse` (lines 37-44) with this goal's `nextStartTick` override
-            // (line 32). `MoveToTargetPosGoal::can_start` would use the base class's randomised
-            // 200..400 interval, so the cooldown is driven here instead.
-            let goal = &mut self.move_to_target_pos_goal;
-            if goal.cooldown > 0 {
-                goal.cooldown -= 1;
-                return false;
-            }
-            goal.cooldown = NEXT_START_TICK;
-            goal.find_target_pos(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !self.cat_may_lie() {
+            return false;
+        }
+        // `MoveToBlockGoal.canUse` (lines 37-44) with this goal's `nextStartTick` override
+        // (line 32). `MoveToTargetPosGoal::can_start` would use the base class's randomised
+        // 200..400 interval, so the cooldown is driven here instead.
+        let goal = &mut self.move_to_target_pos_goal;
+        if goal.cooldown > 0 {
+            goal.cooldown -= 1;
+            return false;
+        }
+        goal.cooldown = NEXT_START_TICK;
+        goal.find_target_pos(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.move_to_target_pos_goal.should_continue(mob).await })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.move_to_target_pos_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.start(mob).await;
-            // `start` line 28: `this.cat.setInSittingPose(false)`.
-            if let Some(cat) = self.cat.upgrade()
-                && cat.is_sitting()
-            {
-                cat.set_sitting(false);
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob);
+        // `start` line 28: `this.cat.setInSittingPose(false)`.
+        if let Some(cat) = self.cat.upgrade()
+            && cat.is_sitting()
+        {
+            cat.set_sitting(false);
+        }
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.stop(mob).await;
-            // `stop` line 39: `this.cat.setLying(false)`.
-            if let Some(cat) = self.cat.upgrade()
-                && cat.is_lying()
-            {
-                cat.set_lying(false);
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob);
+        // `stop` line 39: `this.cat.setLying(false)`.
+        if let Some(cat) = self.cat.upgrade()
+            && cat.is_lying()
+        {
+            cat.set_lying(false);
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.tick(mob).await;
-            let Some(cat) = self.cat.upgrade() else {
-                return;
-            };
-            // `tick` lines 44-50. The `set_*` calls send metadata packets unconditionally here
-            // (vanilla's `SynchedEntityData` drops no-op writes), so each is change-guarded.
-            if cat.is_sitting() {
-                cat.set_sitting(false);
-            }
-            let lying = self.move_to_target_pos_goal.reached;
-            if cat.is_lying() != lying {
-                cat.set_lying(lying);
-            }
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.tick(mob);
+        let Some(cat) = self.cat.upgrade() else {
+            return;
+        };
+        // `tick` lines 44-50. The `set_*` calls send metadata packets unconditionally here
+        // (vanilla's `SynchedEntityData` drops no-op writes), so each is change-guarded.
+        if cat.is_sitting() {
+            cat.set_sitting(false);
+        }
+        let lying = self.move_to_target_pos_goal.reached;
+        if cat.is_lying() != lying {
+            cat.set_lying(lying);
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

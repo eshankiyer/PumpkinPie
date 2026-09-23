@@ -42,25 +42,23 @@ impl PendingConnection {
                 "Rejecting encryption response from '{}': {error}",
                 self.address
             );
-            self.kick(TextComponent::text("Failed to verify encryption token"))
-                .await;
+            self.kick(TextComponent::text("Failed to verify encryption token"));
             return Some(PacketHandlerResult::Stop);
         }
 
         let Ok(shared_secret) = server.decrypt(&encryption_response.shared_secret).await else {
-            self.kick(TextComponent::text("Failed to decrypt shared secret"))
-                .await;
+            self.kick(TextComponent::text("Failed to decrypt shared secret"));
             return Some(PacketHandlerResult::Stop);
         };
 
         if let Err(error) = self.set_encryption(&shared_secret) {
-            self.kick(TextComponent::text(error.to_string())).await;
+            self.kick(TextComponent::text(error.to_string()));
             return Some(PacketHandlerResult::Stop);
         }
 
         let profile_name = {
             let Some(profile) = self.gameprofile.as_ref() else {
-                self.kick(TextComponent::text("No `GameProfile`")).await;
+                self.kick(TextComponent::text("No `GameProfile`"));
                 return Some(PacketHandlerResult::Stop);
             };
             profile.name.clone()
@@ -85,8 +83,7 @@ impl PendingConnection {
                             [],
                         ),
                         e => TextComponent::text(e.to_string()),
-                    })
-                    .await;
+                    });
                     return Some(PacketHandlerResult::Stop);
                 }
             }
@@ -105,8 +102,7 @@ impl PendingConnection {
                 translation::java::MULTIPLAYER_DISCONNECT_DUPLICATE_LOGIN,
                 translation::bedrock::DISCONNECTIONSCREEN_LOGGEDINOTHERLOCATION,
                 [],
-            ))
-            .await;
+            ));
             return Some(PacketHandlerResult::Stop);
         }
 
@@ -119,8 +115,7 @@ impl PendingConnection {
                 translation::java::MULTIPLAYER_DISCONNECT_DUPLICATE_LOGIN,
                 translation::bedrock::DISCONNECTIONSCREEN_LOGGEDINOTHERLOCATION,
                 [],
-            ))
-            .await;
+            ));
             return Some(PacketHandlerResult::Stop);
         }
 
@@ -171,7 +166,7 @@ impl PendingConnection {
             .clone()
             .unwrap_or_else(PlayerConfig::create_default);
         if let Some(reason) = can_not_join(profile, &self.address, server).await {
-            self.kick(reason).await;
+            self.kick(reason);
             return Some(PacketHandlerResult::Stop);
         }
         Some(PacketHandlerResult::ReadyToPlay(profile.clone(), config))

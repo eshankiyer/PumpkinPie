@@ -11,7 +11,7 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
     Entity, EntityBase,
-    ai::goal::{Controls, Goal, GoalFuture},
+    ai::goal::{Controls, Goal},
     mob::{Mob, breeze::BreezeEntity},
     projectile::ThrownItemEntity,
     projectile::wind_charge::{WIND_CHARGE_GRAVITY, WindChargeEntity},
@@ -66,7 +66,7 @@ impl BreezeShootGoal {
 
         // `target.getY(passenger ? 0.8 : 0.3)` == `y + bbHeight * fraction`.
         let target_entity = target.get_entity();
-        let target_y_fraction: f64 = if target_entity.has_vehicle().await {
+        let target_y_fraction: f64 = if target_entity.has_vehicle() {
             0.8
         } else {
             0.3
@@ -83,7 +83,7 @@ impl BreezeShootGoal {
         let uncertainty = f64::from(5 - (difficulty as i32) * 4);
         charge.set_velocity(dx, dy, dz, PROJECTILE_MOVEMENT_SCALE, uncertainty);
 
-        world.spawn_entity(std::sync::Arc::new(charge)).await;
+        world.spawn_entity(std::sync::Arc::new(charge));
         world.play_sound(
             Sound::EntityBreezeShoot,
             SoundCategory::Hostile,
@@ -93,96 +93,103 @@ impl BreezeShootGoal {
 }
 
 impl Goal for BreezeShootGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return false;
-            };
-            // `BREEZE_SHOOT` present + no cooldown, mirroring `Shoot.java`'s memory
-            // requirements; the window is opened by `BreezeJumpGoal` on landing.
-            if breeze.shoot_window_ticks() <= 0 || breeze.shoot_cooldown_ticks() > 0 {
-                return false;
-            }
-            let Some(target) = breeze.mob_entity.target.lock().await.clone() else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return false;
+        };
+        // `BREEZE_SHOOT` present + no cooldown, mirroring `Shoot.java`'s memory
+        // requirements; the window is opened by `BreezeJumpGoal` on landing.
+        if breeze.shoot_window_ticks() <= 0 || breeze.shoot_cooldown_ticks() > 0 {
+            return false;
+        }
+        let Some(target) = breeze
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
 
-            let distance_sqr = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&target.get_entity().pos.load());
-            if !Self::is_target_within_range(distance_sqr) {
-                breeze.set_shoot_window(0);
-                return false;
-            }
+        let distance_sqr = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&target.get_entity().pos.load());
+        if !Self::is_target_within_range(distance_sqr) {
+            breeze.set_shoot_window(0);
+            return false;
+        }
 
-            true
-        })
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return false;
-            };
-            self.elapsed_ticks < SHOOT_INITIAL_DELAY_TICKS + 1 + SHOOT_RECOVER_DELAY_TICKS
-                && breeze.mob_entity.target.lock().await.is_some()
-        })
-    }
-
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.elapsed_ticks = 0;
-            self.fired = false;
-            let entity = mob.get_entity();
-            entity.set_pose(EntityPose::Shooting);
-            let pos = entity.pos.load();
-            entity
-                .world
-                .load()
-                .play_sound(Sound::EntityBreezeInhale, SoundCategory::Hostile, &pos);
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = mob.get_entity();
-            if entity.pose.load() == EntityPose::Shooting {
-                entity.set_pose(EntityPose::Standing);
-            }
-            if let Some(breeze) = self.breeze.upgrade() {
-                breeze.set_shoot_cooldown(SHOOT_COOLDOWN_TICKS);
-                breeze.set_shoot_window(0);
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return;
-            };
-            let Some(target) = breeze.mob_entity.target.lock().await.clone() else {
-                return;
-            };
-
-            self.elapsed_ticks += 1;
-            mob.get_mob_entity()
-                .look_control
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return false;
+        };
+        self.elapsed_ticks < SHOOT_INITIAL_DELAY_TICKS + 1 + SHOOT_RECOVER_DELAY_TICKS
+            && breeze
+                .mob_entity
+                .target
                 .lock()
-                .unwrap()
-                .look_at_entity(mob, &target);
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+    }
 
-            // Fires the tick after the `SHOOT_INITIAL_DELAY_TICKS`-tick charge-up ends.
-            if !self.fired && self.elapsed_ticks == SHOOT_INITIAL_DELAY_TICKS + 1 {
-                self.fired = true;
-                Self::fire(&breeze, target.as_ref()).await;
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.elapsed_ticks = 0;
+        self.fired = false;
+        let entity = mob.get_entity();
+        entity.set_pose(EntityPose::Shooting);
+        let pos = entity.pos.load();
+        entity
+            .world
+            .load()
+            .play_sound(Sound::EntityBreezeInhale, SoundCategory::Hostile, &pos);
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        let entity = mob.get_entity();
+        if entity.pose.load() == EntityPose::Shooting {
+            entity.set_pose(EntityPose::Standing);
+        }
+        if let Some(breeze) = self.breeze.upgrade() {
+            breeze.set_shoot_cooldown(SHOOT_COOLDOWN_TICKS);
+            breeze.set_shoot_window(0);
+        }
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return;
+        };
+        let Some(target) = breeze
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+
+        self.elapsed_ticks += 1;
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity(mob, &target);
+
+        // Fires the tick after the `SHOOT_INITIAL_DELAY_TICKS`-tick charge-up ends.
+        if !self.fired && self.elapsed_ticks == SHOOT_INITIAL_DELAY_TICKS + 1 {
+            self.fired = true;
+            Self::fire_blocking(&breeze, target.as_ref());
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

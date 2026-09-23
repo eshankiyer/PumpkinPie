@@ -15,7 +15,6 @@ use pumpkin_util::text::{
     TextComponent,
     color::{Color, NamedColor},
 };
-use std::pin::Pin;
 use std::sync::atomic::Ordering;
 
 const DESCRIPTION: &str = "Controls or queries the game's ticking state.";
@@ -40,7 +39,7 @@ enum SubCommand {
 struct TickExecutor(SubCommand);
 
 impl TickExecutor {
-    async fn handle_query(
+    fn handle_query(
         source: &CommandSource,
         manager: &crate::server::tick_rate_manager::ServerTickRateManager,
     ) -> Result<i32, CommandSyntaxError> {
@@ -49,99 +48,87 @@ impl TickExecutor {
         let avg_mspt_str = nanos_to_millis_string(avg_tick_nanos);
 
         if manager.is_sprinting() {
-            source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_STATUS_SPRINTING,
-                        translation::java::COMMANDS_TICK_STATUS_SPRINTING,
-                        [],
-                    ),
-                    false,
-                )
-                .await;
-            source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_QUERY_RATE_SPRINTING,
-                        translation::java::COMMANDS_TICK_QUERY_RATE_SPRINTING,
-                        [
-                            TextComponent::text(format!("{tick_rate:.1}")),
-                            TextComponent::text(avg_mspt_str),
-                        ],
-                    ),
-                    false,
-                )
-                .await;
+            source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_STATUS_SPRINTING,
+                    translation::java::COMMANDS_TICK_STATUS_SPRINTING,
+                    [],
+                ),
+                false,
+            );
+            source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_QUERY_RATE_SPRINTING,
+                    translation::java::COMMANDS_TICK_QUERY_RATE_SPRINTING,
+                    [
+                        TextComponent::text(format!("{tick_rate:.1}")),
+                        TextComponent::text(avg_mspt_str),
+                    ],
+                ),
+                false,
+            );
         } else {
-            Self::handle_non_sprinting_status(source, manager, avg_tick_nanos).await;
+            Self::handle_non_sprinting_status(source, manager, avg_tick_nanos);
 
             let target_mspt_str = nanos_to_millis_string(manager.nanoseconds_per_tick());
-            source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_QUERY_RATE_RUNNING,
-                        translation::java::COMMANDS_TICK_QUERY_RATE_RUNNING,
-                        [
-                            TextComponent::text(format!("{tick_rate:.1}")),
-                            TextComponent::text(avg_mspt_str),
-                            TextComponent::text(target_mspt_str),
-                        ],
-                    ),
-                    false,
-                )
-                .await;
+            source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_QUERY_RATE_RUNNING,
+                    translation::java::COMMANDS_TICK_QUERY_RATE_RUNNING,
+                    [
+                        TextComponent::text(format!("{tick_rate:.1}")),
+                        TextComponent::text(avg_mspt_str),
+                        TextComponent::text(target_mspt_str),
+                    ],
+                ),
+                false,
+            );
         }
 
-        Self::send_percentiles(source, source.server()).await;
+        Self::send_percentiles(source, source.server());
         Ok(tick_rate as i32)
     }
-    async fn handle_non_sprinting_status(
+    fn handle_non_sprinting_status(
         sender: &CommandSource,
         manager: &crate::server::tick_rate_manager::ServerTickRateManager,
         avg_tick_nanos: i64,
     ) {
         if manager.is_frozen() {
-            sender
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_STATUS_FROZEN,
-                        translation::java::COMMANDS_TICK_STATUS_FROZEN,
-                        [],
-                    ),
-                    false,
-                )
-                .await;
+            sender.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_STATUS_FROZEN,
+                    translation::java::COMMANDS_TICK_STATUS_FROZEN,
+                    [],
+                ),
+                false,
+            );
         } else if avg_tick_nanos > manager.nanoseconds_per_tick() {
-            sender
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_STATUS_LAGGING,
-                        translation::java::COMMANDS_TICK_STATUS_LAGGING,
-                        [],
-                    ),
-                    false,
-                )
-                .await;
+            sender.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_STATUS_LAGGING,
+                    translation::java::COMMANDS_TICK_STATUS_LAGGING,
+                    [],
+                ),
+                false,
+            );
         } else {
-            sender
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_STATUS_RUNNING,
-                        translation::java::COMMANDS_TICK_STATUS_RUNNING,
-                        [],
-                    ),
-                    false,
-                )
-                .await;
+            sender.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_STATUS_RUNNING,
+                    translation::java::COMMANDS_TICK_STATUS_RUNNING,
+                    [],
+                ),
+                false,
+            );
         }
     }
 
-    async fn send_percentiles(sender: &CommandSource, server: &crate::server::Server) {
+    fn send_percentiles(sender: &CommandSource, server: &crate::server::Server) {
         let tick_count = server.tick_count.load(Ordering::Relaxed);
         let sample_size = (tick_count as usize).min(100);
 
         if sample_size > 0 {
-            let mut tick_times = server.get_tick_times_nanos_copy().await;
+            let mut tick_times = server.get_tick_times_nanos_copy();
             let relevant_ticks = &mut tick_times[..sample_size];
             relevant_ticks.sort_unstable();
 
@@ -149,208 +136,179 @@ impl TickExecutor {
             let p95_nanos = relevant_ticks[(sample_size as f32 * 0.95).floor() as usize];
             let p99_nanos = relevant_ticks[(sample_size as f32 * 0.99).floor() as usize];
 
-            sender
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_QUERY_PERCENTILES,
-                        translation::java::COMMANDS_TICK_QUERY_PERCENTILES,
-                        [
-                            TextComponent::text(nanos_to_millis_string(p50_nanos)),
-                            TextComponent::text(nanos_to_millis_string(p95_nanos)),
-                            TextComponent::text(nanos_to_millis_string(p99_nanos)),
-                            TextComponent::text(sample_size.to_string()),
-                        ],
-                    ),
-                    true,
-                )
-                .await;
+            sender.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_QUERY_PERCENTILES,
+                    translation::java::COMMANDS_TICK_QUERY_PERCENTILES,
+                    [
+                        TextComponent::text(nanos_to_millis_string(p50_nanos)),
+                        TextComponent::text(nanos_to_millis_string(p95_nanos)),
+                        TextComponent::text(nanos_to_millis_string(p99_nanos)),
+                        TextComponent::text(sample_size.to_string()),
+                    ],
+                ),
+                true,
+            );
         }
     }
-    async fn handle_step_command(
+    fn handle_step_command(
         source: &CommandSource,
         manager: &crate::server::tick_rate_manager::ServerTickRateManager,
         ticks: i32,
     ) {
         if manager.step_game_if_paused(source.server(), ticks) {
-            source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_STEP_SUCCESS,
-                        translation::java::COMMANDS_TICK_STEP_SUCCESS,
-                        [TextComponent::text(ticks.to_string())],
-                    ),
-                    true,
-                )
-                .await;
+            source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_STEP_SUCCESS,
+                    translation::java::COMMANDS_TICK_STEP_SUCCESS,
+                    [TextComponent::text(ticks.to_string())],
+                ),
+                true,
+            );
         } else {
-            source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_STEP_FAIL,
-                        translation::java::COMMANDS_TICK_STEP_FAIL,
-                        [],
-                    )
-                    .color_named(NamedColor::Red),
-                    true,
+            source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_TICK_STEP_FAIL,
+                    translation::java::COMMANDS_TICK_STEP_FAIL,
+                    [],
                 )
-                .await;
+                .color_named(NamedColor::Red),
+                true,
+            );
         }
     }
-    async fn handle_sprint_command(
+    fn handle_sprint_command(
         source: &CommandSource,
         manager: &crate::server::tick_rate_manager::ServerTickRateManager,
         ticks: i32,
     ) {
         if manager.request_game_to_sprint(source.server(), i64::from(ticks)) {
-            source
-                .send_feedback(
-                    TextComponent::translate_cross(
-                        translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
-                        translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
-                        [],
-                    ),
-                    true,
-                )
-                .await;
-        }
-        source
-            .send_feedback(
+            source.send_feedback(
                 TextComponent::translate_cross(
-                    translation::java::COMMANDS_TICK_STATUS_SPRINTING,
-                    translation::java::COMMANDS_TICK_STATUS_SPRINTING,
+                    translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
+                    translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
                     [],
                 ),
                 true,
-            )
-            .await;
+            );
+        }
+        source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_TICK_STATUS_SPRINTING,
+                translation::java::COMMANDS_TICK_STATUS_SPRINTING,
+                [],
+            ),
+            true,
+        );
     }
 
-    async fn handle_set_tick_rate(
+    fn handle_set_tick_rate(
         source: &CommandSource,
         manager: &crate::server::tick_rate_manager::ServerTickRateManager,
         rate: f32,
     ) -> Result<i32, CommandSyntaxError> {
         manager.set_tick_rate(source.server(), rate);
-        source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_TICK_RATE_SUCCESS,
-                    translation::java::COMMANDS_TICK_RATE_SUCCESS,
-                    [TextComponent::text(format!("{rate:.1}"))],
-                ),
-                true,
-            )
-            .await;
+        source.send_feedback(
+            TextComponent::translate_cross(
+                translation::java::COMMANDS_TICK_RATE_SUCCESS,
+                translation::java::COMMANDS_TICK_RATE_SUCCESS,
+                [TextComponent::text(format!("{rate:.1}"))],
+            ),
+            true,
+        );
         Ok(rate as i32)
     }
 }
 
 impl CommandExecutor for TickExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let manager = &context.server().tick_rate_manager;
-            let source = context.source.as_ref();
-            let server = source.server();
-            match self.0 {
-                SubCommand::Query => Self::handle_query(source, manager).await,
-                SubCommand::Rate => {
-                    let rate = FloatArgumentType::get(context, "rate")?;
-                    Self::handle_set_tick_rate(source, manager, rate).await
-                }
-                SubCommand::Freeze(freeze) => {
-                    manager.set_frozen(server, freeze);
-                    let message_key = if freeze {
-                        "commands.tick.status.frozen"
-                    } else {
-                        "commands.tick.status.running"
-                    };
-                    source
-                        .send_feedback(TextComponent::translate(message_key, []), true)
-                        .await;
-                    Ok(freeze as i32)
-                }
-                SubCommand::StepDefault => {
-                    Self::handle_step_command(source, manager, 1).await;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let manager = &context.server().tick_rate_manager;
+        let source = context.source.as_ref();
+        let server = source.server();
+        match self.0 {
+            SubCommand::Query => Self::handle_query(source, manager),
+            SubCommand::Rate => {
+                let rate = FloatArgumentType::get(context, "rate")?;
+                Self::handle_set_tick_rate(source, manager, rate)
+            }
+            SubCommand::Freeze(freeze) => {
+                manager.set_frozen(server, freeze);
+                let message_key = if freeze {
+                    "commands.tick.status.frozen"
+                } else {
+                    "commands.tick.status.running"
+                };
+                source.send_feedback(TextComponent::translate(message_key, []), true);
+                Ok(freeze as i32)
+            }
+            SubCommand::StepDefault => {
+                Self::handle_step_command(source, manager, 1);
+                Ok(1)
+            }
+            SubCommand::StepTimed => {
+                let ticks = TimeArgumentType::get(context, "time")?;
+                Self::handle_step_command(source, manager, ticks);
+                Ok(1)
+            }
+            SubCommand::StepStop => {
+                if manager.stop_stepping(server) {
+                    source.send_feedback(
+                        TextComponent::translate_cross(
+                            translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
+                            translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
+                            [],
+                        ),
+                        true,
+                    );
                     Ok(1)
-                }
-                SubCommand::StepTimed => {
-                    let ticks = TimeArgumentType::get(context, "time")?;
-                    Self::handle_step_command(source, manager, ticks).await;
-                    Ok(1)
-                }
-                SubCommand::StepStop => {
-                    if manager.stop_stepping(server) {
-                        source
-                            .send_feedback(
-                                TextComponent::translate_cross(
-                                    translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
-                                    translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
-                                    [],
-                                ),
-                                true,
-                            )
-                            .await;
-                        Ok(1)
-                    } else {
-                        source
-                            .send_error(TextComponent::translate_cross(
-                                translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
-                                translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
-                                [],
-                            ))
-                            .await;
-                        Ok(0)
-                    }
-                }
-                SubCommand::SprintTimed => {
-                    Self::handle_sprint_command(
-                        source,
-                        manager,
-                        TimeArgumentType::get(context, "time")?,
-                    )
-                    .await;
-                    Ok(1)
-                }
-                SubCommand::SprintStop => {
-                    if manager.stop_sprinting(server) {
-                        source
-                            .send_feedback(
-                                TextComponent::translate_cross(
-                                    translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
-                                    translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
-                                    [],
-                                ),
-                                true,
-                            )
-                            .await;
-                        Ok(1)
-                    } else {
-                        source
-                            .send_error(
-                                TextComponent::translate_cross(
-                                    translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
-                                    translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
-                                    [],
-                                )
-                                .color(Color::Named(NamedColor::Red)),
-                            )
-                            .await;
-                        Ok(0)
-                    }
+                } else {
+                    source.send_error(TextComponent::translate_cross(
+                        translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
+                        translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
+                        [],
+                    ));
+                    Ok(0)
                 }
             }
-        })
+            SubCommand::SprintTimed => {
+                Self::handle_sprint_command(
+                    source,
+                    manager,
+                    TimeArgumentType::get(context, "time")?,
+                );
+                Ok(1)
+            }
+            SubCommand::SprintStop => {
+                if manager.stop_sprinting(server) {
+                    source.send_feedback(
+                        TextComponent::translate_cross(
+                            translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
+                            translation::java::COMMANDS_TICK_SPRINT_STOP_SUCCESS,
+                            [],
+                        ),
+                        true,
+                    );
+                    Ok(1)
+                } else {
+                    source.send_error(
+                        TextComponent::translate_cross(
+                            translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
+                            translation::java::COMMANDS_TICK_SPRINT_STOP_FAIL,
+                            [],
+                        )
+                        .color(Color::Named(NamedColor::Red)),
+                    );
+                    Ok(0)
+                }
+            }
+        }
     }
 }
 
 struct TickSuggestionProvider(&'static [&'static str]);
 
 impl SuggestionProvider for TickSuggestionProvider {
-    fn suggest(
-        &self,
-        _context: &CommandContext,
-        mut builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send>> {
+    fn suggest(&self, _context: &CommandContext, mut builder: SuggestionsBuilder) -> Suggestions {
         let names = self.0;
 
         Box::pin(async move {

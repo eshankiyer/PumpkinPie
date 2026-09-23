@@ -12,7 +12,7 @@ use rand::RngExt;
 
 use crate::block::entities::sign::DyeColor;
 use crate::entity::ai::goal::spellcaster::{IllagerSpell, SpellCastTimer};
-use crate::entity::ai::goal::{Controls, Goal, GoalFuture};
+use crate::entity::ai::goal::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::mob::evoker::EvokerEntity;
 use crate::entity::mob::vex::VexEntity;
@@ -35,63 +35,62 @@ impl EvokerCastingSpellGoal {
 }
 
 impl Goal for EvokerCastingSpellGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.evoker
-                .upgrade()
-                .is_some_and(|evoker| evoker.spellcaster.is_casting_spell())
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        self.evoker
+            .upgrade()
+            .is_some_and(|evoker| evoker.spellcaster.is_casting_spell())
     }
 
     // Vanilla's base `Goal#canContinueToUse` defaults to `canUse()` when not overridden, and
     // `SpellcasterCastingSpellGoal` doesn't override it.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.evoker
-                .upgrade()
-                .is_some_and(|evoker| evoker.spellcaster.is_casting_spell())
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.evoker
+            .upgrade()
+            .is_some_and(|evoker| evoker.spellcaster.is_casting_spell())
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(evoker) = self.evoker.upgrade() {
-                evoker.mob_entity.navigator.lock().unwrap().stop();
-            }
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        if let Some(evoker) = self.evoker.upgrade() {
+            evoker.mob_entity.navigator.lock().unwrap().stop();
+        }
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(evoker) = self.evoker.upgrade() {
-                evoker.spellcaster.set_current_spell(IllagerSpell::None);
-            }
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        if let Some(evoker) = self.evoker.upgrade() {
+            evoker.spellcaster.set_current_spell(IllagerSpell::None);
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            let look_target = evoker.mob_entity.target.lock().await.clone();
-            let look_target = match look_target {
-                Some(target) => Some(target),
-                None => evoker.wololo_target.lock().await.clone(),
-            };
-            if let Some(target) = look_target {
-                evoker
-                    .mob_entity
-                    .look_control
-                    .lock()
-                    .unwrap()
-                    .look_at_entity_with_range(
-                        &target,
-                        mob.get_max_look_yaw_change(),
-                        mob.get_max_look_pitch_change(),
-                    );
-            }
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        let look_target = evoker
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let look_target = match look_target {
+            Some(target) => Some(target),
+            None => evoker
+                .wololo_target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        };
+        if let Some(target) = look_target {
+            evoker
+                .mob_entity
+                .look_control
+                .lock()
+                .unwrap()
+                .look_at_entity_with_range(
+                    &target,
+                    mob.get_max_look_yaw_change(),
+                    mob.get_max_look_pitch_change(),
+                );
+        }
     }
 
     fn controls(&self) -> Controls {
@@ -101,8 +100,13 @@ impl Goal for EvokerCastingSpellGoal {
 
 /// Vanilla: `SpellcasterIllager.SpellcasterUseSpellGoal#canUse`, minus the spell-specific extra
 /// gate (e.g. the vex-count check `EvokerSummonSpellGoal` adds on top).
-async fn generic_use_spell_can_use(evoker: &EvokerEntity, next_attack_tick_count: i32) -> bool {
-    let target = evoker.mob_entity.target.lock().await.clone();
+fn generic_use_spell_can_use(evoker: &EvokerEntity, next_attack_tick_count: i32) -> bool {
+    let target = evoker
+        .mob_entity
+        .target
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     let Some(target) = target else {
         return false;
     };
@@ -185,7 +189,7 @@ impl EvokerAttackSpellGoal {
     /// Scope reduction: vanilla additionally raises the fang by the target block's collision-shape
     /// top Y (e.g. a slab or stair beneath it); Pumpkin has no generic per-block collision-shape
     /// query reachable here, so the fang always sits flush on the sturdy block's top face.
-    async fn create_spell_entity(
+    fn create_spell_entity(
         evoker: &EvokerEntity,
         x: f64,
         z: f64,
@@ -222,12 +226,18 @@ impl EvokerAttackSpellGoal {
                 delay_ticks,
                 &evoker.mob_entity.living_entity.entity,
             );
-            world.spawn_entity(Arc::new(fangs)).await;
+            world.spawn_entity(Arc::new(fangs));
         }
     }
 
-    async fn perform_spell_casting(evoker: &EvokerEntity) {
-        let Some(target) = evoker.mob_entity.target.lock().await.clone() else {
+    fn perform_spell_casting(evoker: &EvokerEntity) {
+        let Some(target) = evoker
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
             return;
         };
         let evoker_pos = evoker.mob_entity.living_entity.entity.pos.load();
@@ -244,46 +254,65 @@ impl EvokerAttackSpellGoal {
             distance_sq,
         );
         for (x, z, angle, delay) in fangs {
-            Self::create_spell_entity(evoker, x, z, min_y, max_y, angle, delay).await;
+            Self::create_spell_entity(evoker, x, z, min_y, max_y, angle, delay);
         }
     }
 }
 
 impl Goal for EvokerAttackSpellGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return false;
-            };
-            generic_use_spell_can_use(&evoker, self.timer.next_attack_tick_count).await
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return false;
+        };
+        generic_use_spell_can_use(&evoker, self.timer.next_attack_tick_count)
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return false;
-            };
-            let target = evoker.mob_entity.target.lock().await.clone();
-            target.is_some_and(|target| target.get_entity().is_alive())
-                && self.timer.attack_warmup_delay > 0
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return false;
+        };
+        let target = evoker
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        target.is_some_and(|target| target.get_entity().is_alive())
+            && self.timer.attack_warmup_delay > 0
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
-            self.timer.start(
-                tick_count,
-                20,
-                Self::CASTING_TIME,
-                Self::CASTING_INTERVAL,
-                &evoker.spellcaster,
-                IllagerSpell::Fangs,
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
+        self.timer.start(
+            tick_count,
+            20,
+            Self::CASTING_TIME,
+            Self::CASTING_INTERVAL,
+            &evoker.spellcaster,
+            IllagerSpell::Fangs,
+        );
+        evoker
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .play_sound(
+                Sound::EntityEvokerPrepareAttack,
+                SoundCategory::Hostile,
+                &evoker.mob_entity.living_entity.entity.pos.load(),
             );
+    }
+
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        if self.timer.tick() {
+            Self::perform_spell_casting(&evoker);
             evoker
                 .mob_entity
                 .living_entity
@@ -291,33 +320,11 @@ impl Goal for EvokerAttackSpellGoal {
                 .world
                 .load()
                 .play_sound(
-                    Sound::EntityEvokerPrepareAttack,
+                    Sound::EntityEvokerCastSpell,
                     SoundCategory::Hostile,
                     &evoker.mob_entity.living_entity.entity.pos.load(),
                 );
-        })
-    }
-
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            if self.timer.tick() {
-                Self::perform_spell_casting(&evoker).await;
-                evoker
-                    .mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .play_sound(
-                        Sound::EntityEvokerCastSpell,
-                        SoundCategory::Hostile,
-                        &evoker.mob_entity.living_entity.entity.pos.load(),
-                    );
-            }
-        })
+        }
     }
 }
 
@@ -356,7 +363,7 @@ impl EvokerSummonSpellGoal {
             .count()
     }
 
-    async fn perform_spell_casting(evoker: &EvokerEntity) {
+    fn perform_spell_casting(evoker: &EvokerEntity) {
         let entity = &evoker.mob_entity.living_entity.entity;
         let world = entity.world.load();
         let origin = entity.block_pos.load();
@@ -382,50 +389,69 @@ impl EvokerSummonSpellGoal {
             // Scope reduction: vanilla also adds the vex to the evoker's scoreboard team
             // (`serverLevel.getScoreboard().addPlayerToTeam`); Pumpkin has no team system to
             // mirror that into.
-            world.spawn_entity(vex_base).await;
+            world.spawn_entity(vex_base);
         }
     }
 }
 
 impl Goal for EvokerSummonSpellGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return false;
-            };
-            if !generic_use_spell_can_use(&evoker, self.timer.next_attack_tick_count).await {
-                return false;
-            }
-            let nearby_vexes = Self::nearby_vex_count(&evoker);
-            Self::vex_summon_allowed(nearby_vexes, rand::rng().random_range(1..=8))
-        })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return false;
+        };
+        if !generic_use_spell_can_use(&evoker, self.timer.next_attack_tick_count) {
+            return false;
+        }
+        let nearby_vexes = Self::nearby_vex_count(&evoker);
+        Self::vex_summon_allowed(nearby_vexes, rand::rng().random_range(1..=8))
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return false;
-            };
-            let target = evoker.mob_entity.target.lock().await.clone();
-            target.is_some_and(|target| target.get_entity().is_alive())
-                && self.timer.attack_warmup_delay > 0
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return false;
+        };
+        let target = evoker
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        target.is_some_and(|target| target.get_entity().is_alive())
+            && self.timer.attack_warmup_delay > 0
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
-            self.timer.start(
-                tick_count,
-                20,
-                Self::CASTING_TIME,
-                Self::CASTING_INTERVAL,
-                &evoker.spellcaster,
-                IllagerSpell::SummonVex,
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
+        self.timer.start(
+            tick_count,
+            20,
+            Self::CASTING_TIME,
+            Self::CASTING_INTERVAL,
+            &evoker.spellcaster,
+            IllagerSpell::SummonVex,
+        );
+        evoker
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .play_sound(
+                Sound::EntityEvokerPrepareSummon,
+                SoundCategory::Hostile,
+                &evoker.mob_entity.living_entity.entity.pos.load(),
             );
+    }
+
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        if self.timer.tick() {
+            Self::perform_spell_casting(&evoker);
             evoker
                 .mob_entity
                 .living_entity
@@ -433,33 +459,11 @@ impl Goal for EvokerSummonSpellGoal {
                 .world
                 .load()
                 .play_sound(
-                    Sound::EntityEvokerPrepareSummon,
+                    Sound::EntityEvokerCastSpell,
                     SoundCategory::Hostile,
                     &evoker.mob_entity.living_entity.entity.pos.load(),
                 );
-        })
-    }
-
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            if self.timer.tick() {
-                Self::perform_spell_casting(&evoker).await;
-                evoker
-                    .mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .play_sound(
-                        Sound::EntityEvokerCastSpell,
-                        SoundCategory::Hostile,
-                        &evoker.mob_entity.living_entity.entity.pos.load(),
-                    );
-            }
-        })
+        }
     }
 }
 
@@ -508,56 +512,102 @@ impl EvokerWololoSpellGoal {
 }
 
 impl Goal for EvokerWololoSpellGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return false;
-            };
-            if evoker.mob_entity.target.lock().await.is_some()
-                || evoker.spellcaster.is_casting_spell()
-            {
-                return false;
-            }
-            let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
-            if tick_count < self.timer.next_attack_tick_count {
-                return false;
-            }
-            let world = evoker.mob_entity.living_entity.entity.world.load();
-            if !world.level_info.load().game_rules.mob_griefing {
-                return false;
-            }
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return false;
+        };
+        if evoker
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+            || evoker.spellcaster.is_casting_spell()
+        {
+            return false;
+        }
+        let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
+        if tick_count < self.timer.next_attack_tick_count {
+            return false;
+        }
+        let world = evoker.mob_entity.living_entity.entity.world.load();
+        if !world.level_info.load().game_rules.mob_griefing {
+            return false;
+        }
 
-            let Some(sheep) = Self::find_blue_sheep(&evoker) else {
-                return false;
-            };
-            *evoker.wololo_target.lock().await = Some(sheep);
-            true
-        })
+        let Some(sheep) = Self::find_blue_sheep(&evoker) else {
+            return false;
+        };
+        *evoker
+            .wololo_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sheep);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return false;
-            };
-            evoker.wololo_target.lock().await.is_some() && self.timer.attack_warmup_delay > 0
-        })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return false;
+        };
+        evoker
+            .wololo_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+            && self.timer.attack_warmup_delay > 0
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
-            self.timer.start(
-                tick_count,
-                Self::CAST_WARMUP_TIME,
-                Self::CASTING_TIME,
-                Self::CASTING_INTERVAL,
-                &evoker.spellcaster,
-                IllagerSpell::Wololo,
+    fn start(&mut self, _mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        let tick_count = evoker.mob_entity.living_entity.entity.age.load(Relaxed);
+        self.timer.start(
+            tick_count,
+            Self::CAST_WARMUP_TIME,
+            Self::CASTING_TIME,
+            Self::CASTING_INTERVAL,
+            &evoker.spellcaster,
+            IllagerSpell::Wololo,
+        );
+        evoker
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .play_sound(
+                Sound::EntityEvokerPrepareWololo,
+                SoundCategory::Hostile,
+                &evoker.mob_entity.living_entity.entity.pos.load(),
             );
+    }
+
+    fn stop(&mut self, _mob: &dyn Mob) {
+        if let Some(evoker) = self.evoker.upgrade() {
+            *evoker
+                .wololo_target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
+
+    fn tick(&mut self, _mob: &dyn Mob) {
+        let Some(evoker) = self.evoker.upgrade() else {
+            return;
+        };
+        if self.timer.tick() {
+            let target = evoker
+                .wololo_target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(target) = target
+                && target.get_entity().is_alive()
+                && let Some(sheep) = target.cast_any().downcast_ref::<SheepEntity>()
+            {
+                sheep.set_color(DyeColor::Red as u8);
+            }
             evoker
                 .mob_entity
                 .living_entity
@@ -565,47 +615,11 @@ impl Goal for EvokerWololoSpellGoal {
                 .world
                 .load()
                 .play_sound(
-                    Sound::EntityEvokerPrepareWololo,
+                    Sound::EntityEvokerCastSpell,
                     SoundCategory::Hostile,
                     &evoker.mob_entity.living_entity.entity.pos.load(),
                 );
-        })
-    }
-
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(evoker) = self.evoker.upgrade() {
-                *evoker.wololo_target.lock().await = None;
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(evoker) = self.evoker.upgrade() else {
-                return;
-            };
-            if self.timer.tick() {
-                let target = evoker.wololo_target.lock().await.clone();
-                if let Some(target) = target
-                    && target.get_entity().is_alive()
-                    && let Some(sheep) = target.cast_any().downcast_ref::<SheepEntity>()
-                {
-                    sheep.set_color(DyeColor::Red as u8);
-                }
-                evoker
-                    .mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .play_sound(
-                        Sound::EntityEvokerCastSpell,
-                        SoundCategory::Hostile,
-                        &evoker.mob_entity.living_entity.entity.pos.load(),
-                    );
-            }
-        })
+        }
     }
 }
 

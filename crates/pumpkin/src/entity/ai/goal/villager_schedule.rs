@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_util::math::vector3::Vector3;
 
@@ -70,9 +70,9 @@ impl VillagerScheduleGoal {
         }
     }
 
-    async fn scheduled_target(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    fn scheduled_target(mob: &dyn Mob) -> Option<Vector3<f64>> {
         let world = mob.get_entity().world.load();
-        let time = world.get_time_of_day().await;
+        let time = world.get_time_of_day();
         let pos = match villager_activity_for_time(time) {
             VillagerActivity::Work => mob.get_job_site(),
             VillagerActivity::Rest => mob.get_home(),
@@ -94,64 +94,54 @@ impl VillagerScheduleGoal {
 }
 
 impl Goal for VillagerScheduleGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(target) = Self::scheduled_target(mob).await else {
-                return false;
-            };
-            if Self::has_arrived(target, mob) {
-                return false;
-            }
-            self.target = Some(target);
-            true
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(target) = Self::scheduled_target(mob) else {
+            return false;
+        };
+        if Self::has_arrived(target, mob) {
+            return false;
+        }
+        self.target = Some(target);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(target) = self.target else {
-                return false;
-            };
-            if Self::has_arrived(target, mob) {
-                return false;
-            }
-            Self::scheduled_target(mob).await == Some(target)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let Some(target) = self.target else {
+            return false;
+        };
+        if Self::has_arrived(target, mob) {
+            return false;
+        }
+        Self::scheduled_target(mob) == Some(target)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_since_path = 0;
-            if let Some(target) = self.target {
-                let pos = mob.get_entity().pos.load();
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.ticks_since_path = 0;
+        if let Some(target) = self.target {
+            let pos = mob.get_entity().pos.load();
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.ticks_since_path += 1;
-            if self.ticks_since_path % REPATH_INTERVAL != 0 {
-                return;
-            }
-            let Some(target) = self.target else {
-                return;
-            };
-            let is_idle = mob.get_mob_entity().navigator.lock().unwrap().is_idle();
-            if is_idle {
-                let pos = mob.get_entity().pos.load();
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.ticks_since_path += 1;
+        if self.ticks_since_path % REPATH_INTERVAL != 0 {
+            return;
+        }
+        let Some(target) = self.target else {
+            return;
+        };
+        let is_idle = mob.get_mob_entity().navigator.lock().unwrap().is_idle();
+        if is_idle {
+            let pos = mob.get_entity().pos.load();
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
     }
 
     fn should_run_every_tick(&self) -> bool {

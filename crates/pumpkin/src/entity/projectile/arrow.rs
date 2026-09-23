@@ -5,16 +5,13 @@ use pumpkin_data::BlockStateId;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
-use tokio::sync::RwLock;
 
 use crate::block::blocks::redstone::target_block::TargetBlock;
 use crate::entity::projectile::{ProjectileHit, on_target_block_hit};
 use crate::{
-    entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
-        player::Player,
-    },
+    entity::{Entity, EntityBase, NBTStorage, living::LivingEntity, player::Player},
     server::Server,
 };
 use pumpkin_data::damage::DamageType;
@@ -148,7 +145,9 @@ impl ArrowEntity {
         if let Some(server) = entity.world.load().server.upgrade() {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
-                    server.plugin_manager.fire(&server, &mut launch_event).await;
+                    server
+                        .plugin_manager
+                        .fire_blocking(&server, &mut launch_event);
                 });
             });
         }
@@ -239,10 +238,13 @@ impl ArrowEntity {
     }
 
     /// `Arrow.setPickupItemStack` (`Arrow.java:53-57`).
-    pub async fn set_pickup_item_stack(&self, item_stack: ItemStack) {
+    pub fn set_pickup_item_stack(&self, item_stack: ItemStack) {
         let item_stack = item_stack.copy_with_count(1);
         let color = Self::potion_effect_color(&item_stack);
-        *self.item_stack.write().await = item_stack;
+        *self
+            .item_stack
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = item_stack;
         self.effect_color.store(color, Ordering::Relaxed);
         self.entity.send_meta_data(
             &[Metadata::new(
@@ -368,359 +370,471 @@ impl ArrowEntity {
 /// `inBlockState`, `SoundEvent` and `weapon` are not stored: the first is re-derived from the
 /// world on the next tick, and the other two have no field on this entity.
 impl NBTStorage for ArrowEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.write_nbt(nbt).await;
-            let item_stack = self.item_stack.read().await;
-            Self::write_item_stack_nbt(&item_stack, nbt);
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.entity.write_nbt(nbt);
+        let item_stack = self
+            .item_stack
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Self::write_item_stack_nbt(&item_stack, nbt);
 
-            nbt.put_short("life", self.life.load(Ordering::Relaxed) as i16);
-            nbt.put_byte("shake", self.shake_time.load(Ordering::Relaxed) as i8);
-            nbt.put_bool("inGround", self.in_ground.load(Ordering::Relaxed));
-            nbt.put_byte("pickup", self.pickup.load().to_byte() as i8);
-            nbt.put_double("damage", self.base_damage.load());
-            nbt.put_bool("crit", self.is_critical.load(Ordering::Relaxed));
-            nbt.put_byte(
-                "PierceLevel",
-                self.pierce_level.load(Ordering::Relaxed) as i8,
-            );
-        })
+        nbt.put_short("life", self.life.load(Ordering::Relaxed) as i16);
+        nbt.put_byte("shake", self.shake_time.load(Ordering::Relaxed) as i8);
+        nbt.put_bool("inGround", self.in_ground.load(Ordering::Relaxed));
+        nbt.put_byte("pickup", self.pickup.load().to_byte() as i8);
+        nbt.put_double("damage", self.base_damage.load());
+        nbt.put_bool("crit", self.is_critical.load(Ordering::Relaxed));
+        nbt.put_byte(
+            "PierceLevel",
+            self.pierce_level.load(Ordering::Relaxed) as i8,
+        );
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.read_nbt_non_mut(nbt).await;
-            if let Some(item_stack) = Self::read_item_stack_nbt(nbt) {
-                self.set_pickup_item_stack(item_stack).await;
-            }
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.entity.read_nbt_non_mut(nbt);
+        if let Some(item_stack) = Self::read_item_stack_nbt(nbt) {
+            self.set_pickup_item_stack(item_stack);
+        }
 
-            self.life.store(
-                u32::from(nbt.get_short("life").unwrap_or(0).max(0) as u16),
-                Ordering::Relaxed,
-            );
-            // `AbstractArrow.java:626` masks the stored byte with 255.
-            self.shake_time
-                .store(nbt.get_byte("shake").unwrap_or(0) as u8, Ordering::Relaxed);
-            self.in_ground
-                .store(nbt.get_bool("inGround").unwrap_or(false), Ordering::Relaxed);
-            self.pickup.store(ArrowPickup::from_byte(
-                nbt.get_byte("pickup").unwrap_or(0) as u8
-            ));
-            // `AbstractArrow.java:628` defaults `damage` to 2.0, not to 0.0.
-            self.base_damage
-                .store(nbt.get_double("damage").unwrap_or(2.0));
-            self.is_critical
-                .store(nbt.get_bool("crit").unwrap_or(false), Ordering::Relaxed);
-            self.pierce_level.store(
-                nbt.get_byte("PierceLevel").unwrap_or(0) as u8,
-                Ordering::Relaxed,
-            );
-        })
+        self.life.store(
+            u32::from(nbt.get_short("life").unwrap_or(0).max(0) as u16),
+            Ordering::Relaxed,
+        );
+        // `AbstractArrow.java:626` masks the stored byte with 255.
+        self.shake_time
+            .store(nbt.get_byte("shake").unwrap_or(0) as u8, Ordering::Relaxed);
+        self.in_ground
+            .store(nbt.get_bool("inGround").unwrap_or(false), Ordering::Relaxed);
+        self.pickup.store(ArrowPickup::from_byte(
+            nbt.get_byte("pickup").unwrap_or(0) as u8
+        ));
+        // `AbstractArrow.java:628` defaults `damage` to 2.0, not to 0.0.
+        self.base_damage
+            .store(nbt.get_double("damage").unwrap_or(2.0));
+        self.is_critical
+            .store(nbt.get_bool("crit").unwrap_or(false), Ordering::Relaxed);
+        self.pierce_level.store(
+            nbt.get_byte("PierceLevel").unwrap_or(0) as u8,
+            Ordering::Relaxed,
+        );
     }
 }
 
 impl EntityBase for ArrowEntity {
     /// `Arrow.defineSynchedData` (`Arrow.java:68-72`).
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::arrow::ID_EFFECT_COLOR,
-                    self.effect_color.load(Ordering::Relaxed),
-                )],
-                None,
-            );
-        })
+    fn init_data_tracker(&self) {
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::arrow::ID_EFFECT_COLOR,
+                self.effect_color.load(Ordering::Relaxed),
+            )],
+            None,
+        );
     }
 
     #[allow(clippy::too_many_lines)]
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let world = entity.world.load();
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
 
-            // Handle shake time
-            let shake = self.shake_time.load(Ordering::Relaxed);
-            if shake > 0 {
-                self.shake_time.store(shake - 1, Ordering::Relaxed);
-            }
+        // Handle shake time
+        let shake = self.shake_time.load(Ordering::Relaxed);
+        if shake > 0 {
+            self.shake_time.store(shake - 1, Ordering::Relaxed);
+        }
 
-            if self.in_ground.load(Ordering::Relaxed) {
-                // `AbstractArrow.tick`: when the block the arrow is stuck in changes and nothing
-                // collides where the arrow sits any more, it comes loose and falls again instead
-                // of hanging in the air until it despawns.
-                let stuck_pos = *self
-                    .last_block_pos
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let block_changed = stuck_pos.is_some_and(|pos| {
-                    self.last_block_state_id.load() != Some(world.get_block_state_id(&pos))
-                });
+        if self.in_ground.load(Ordering::Relaxed) {
+            // `AbstractArrow.tick`: when the block the arrow is stuck in changes and nothing
+            // collides where the arrow sits any more, it comes loose and falls again instead
+            // of hanging in the air until it despawns.
+            let stuck_pos = *self
+                .last_block_pos
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let block_changed = stuck_pos.is_some_and(|pos| {
+                self.last_block_state_id.load() != Some(world.get_block_state_id(&pos))
+            });
 
-                let pos = entity.pos.load();
-                if block_changed
-                    && world.is_space_empty(BoundingBox::new(pos, pos).expand_all(0.06))
-                {
-                    self.in_ground.store(false, Ordering::Relaxed);
-                    self.in_ground_time.store(0, Ordering::Relaxed);
-                    self.life.store(0, Ordering::Relaxed);
-                } else {
-                    // Increment in-ground time and life
-                    let in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed) + 1;
-                    let life = self.life.fetch_add(1, Ordering::Relaxed);
+            let pos = entity.pos.load();
+            if block_changed && world.is_space_empty(BoundingBox::new(pos, pos).expand_all(0.06)) {
+                self.in_ground.store(false, Ordering::Relaxed);
+                self.in_ground_time.store(0, Ordering::Relaxed);
+                self.life.store(0, Ordering::Relaxed);
+            } else {
+                // Increment in-ground time and life
+                let in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed) + 1;
+                let life = self.life.fetch_add(1, Ordering::Relaxed);
 
-                    if in_ground_time >= 600
+                if in_ground_time >= 600
                         && self
                             .item_stack
                             .read()
-                            .await
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .get_data_component::<
                                 pumpkin_data::data_component_impl::PotionContentsImpl,
                             >()
                             .is_some()
                     {
-                        self.set_pickup_item_stack(Self::default_pickup_item()).await;
+                        self.set_pickup_item_stack(Self::default_pickup_item());
                     }
 
-                    // Despawn after enough time
-                    if life >= Self::DESPAWN_TIME {
-                        entity.remove().await;
-                    }
-                    return;
+                // Despawn after enough time
+                if life >= Self::DESPAWN_TIME {
+                    entity.remove();
                 }
+                return;
             }
+        }
 
-            // Arrow is flying
-            let start_pos = entity.pos.load();
-            let mut velocity = entity.velocity.load();
+        // Arrow is flying
+        let start_pos = entity.pos.load();
+        let mut velocity = entity.velocity.load();
 
-            // Apply gravity
-            velocity.y -= Self::GRAVITY;
+        // Apply gravity
+        velocity.y -= Self::GRAVITY;
 
-            // Apply inertia (air resistance or water drag)
-            let inertia = if entity.touching_water.load(Ordering::Relaxed) {
-                Self::WATER_INERTIA
-            } else {
-                Self::AIR_INERTIA
-            };
-            velocity = velocity.multiply(inertia, inertia, inertia);
+        // Apply inertia (air resistance or water drag)
+        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+            Self::WATER_INERTIA
+        } else {
+            Self::AIR_INERTIA
+        };
+        velocity = velocity.multiply(inertia, inertia, inertia);
 
-            entity.velocity.store(velocity);
+        entity.velocity.store(velocity);
 
-            // `Projectile.checkLeftOwner` runs before `AbstractArrow` scans for a hit
-            // (`Projectile.java:105-127`; `AbstractArrow.java:243-257`).
-            crate::entity::projectile::check_left_owner(entity, self.owner_id, velocity).await;
+        // `Projectile.checkLeftOwner` runs before `AbstractArrow` scans for a hit
+        // (`Projectile.java:105-127`; `AbstractArrow.java:243-257`).
+        crate::entity::projectile::check_left_owner(entity, self.owner_id, velocity);
 
-            // Update rotation based on velocity
-            let len = velocity.horizontal_length();
-            entity.set_rotation(
-                velocity.x.atan2(velocity.z) as f32 * 57.295_776,
-                velocity.y.atan2(len) as f32 * 57.295_776,
+        // Update rotation based on velocity
+        let len = velocity.horizontal_length();
+        entity.set_rotation(
+            velocity.x.atan2(velocity.z) as f32 * 57.295_776,
+            velocity.y.atan2(len) as f32 * 57.295_776,
+        );
+
+        // Move arrow
+        let new_pos = start_pos.add(&velocity);
+        entity.set_pos(new_pos);
+
+        // Spawn critical particle trail while arrow is flying and critical
+        if self.is_critical.load(Ordering::Relaxed) {
+            world.spawn_particle(
+                entity.pos.load(),
+                Vector3::new(0.0f32, 0.0f32, 0.0f32),
+                0.0,
+                1,
+                Particle::Crit,
             );
+        }
 
-            // Move arrow
-            let new_pos = start_pos.add(&velocity);
-            entity.set_pos(new_pos);
+        // Broadcast velocity update
+        let packet = CEntityVelocity::new(entity.entity_id.into(), velocity);
 
-            // Spawn critical particle trail while arrow is flying and critical
-            if self.is_critical.load(Ordering::Relaxed) {
-                world.spawn_particle(
-                    entity.pos.load(),
-                    Vector3::new(0.0f32, 0.0f32, 0.0f32),
-                    0.0,
-                    1,
-                    Particle::Crit,
-                );
-            }
+        let chunk_pos = entity.chunk_pos.load();
+        world.broadcast_to_chunk(chunk_pos, &packet);
 
-            // Broadcast velocity update
-            let packet = CEntityVelocity::new(entity.entity_id.into(), velocity);
+        // Check for collisions using raycasting
+        let search_box = BoundingBox::new(
+            Vector3::new(
+                start_pos.x.min(new_pos.x),
+                start_pos.y.min(new_pos.y),
+                start_pos.z.min(new_pos.z),
+            ),
+            Vector3::new(
+                start_pos.x.max(new_pos.x),
+                start_pos.y.max(new_pos.y),
+                start_pos.z.max(new_pos.z),
+            ),
+        )
+        .expand(0.3, 0.3, 0.3);
 
-            let chunk_pos = entity.chunk_pos.load();
-            world.broadcast_to_chunk(chunk_pos, &packet);
+        let mut closest_t = 1.0f64;
+        let mut hit = None;
 
-            // Check for collisions using raycasting
-            let search_box = BoundingBox::new(
-                Vector3::new(
-                    start_pos.x.min(new_pos.x),
-                    start_pos.y.min(new_pos.y),
-                    start_pos.z.min(new_pos.z),
-                ),
-                Vector3::new(
-                    start_pos.x.max(new_pos.x),
-                    start_pos.y.max(new_pos.y),
-                    start_pos.z.max(new_pos.z),
-                ),
-            )
-            .expand(0.3, 0.3, 0.3);
+        // Block collisions
+        let (block_cols, block_positions) =
+            world.get_block_collisions(search_box, self.get_entity());
+        for (idx, bb) in block_cols.iter().enumerate() {
+            if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, bb)
+                && t < closest_t
+            {
+                closest_t = t;
 
-            let mut closest_t = 1.0f64;
-            let mut hit = None;
-
-            // Block collisions
-            let (block_cols, block_positions) = world
-                .get_block_collisions(search_box, self.get_entity())
-                .await;
-            for (idx, bb) in block_cols.iter().enumerate() {
-                if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, bb)
-                    && t < closest_t
-                {
-                    closest_t = t;
-
-                    // Map back to block pos
-                    let mut curr = 0;
-                    for (len, pos) in &block_positions {
-                        curr += len;
-                        if idx < curr {
-                            let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
-                            hit = Some(ProjectileHit::Block {
-                                pos: *pos,
-                                face: get_hit_face(hit_pos, *pos),
-                                hit_pos,
-                                normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
-                            });
-                            break;
-                        }
+                // Map back to block pos
+                let mut curr = 0;
+                for (len, pos) in &block_positions {
+                    curr += len;
+                    if idx < curr {
+                        let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
+                        hit = Some(ProjectileHit::Block {
+                            pos: *pos,
+                            face: get_hit_face(hit_pos, *pos),
+                            hit_pos,
+                            normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
+                        });
+                        break;
                     }
                 }
             }
+        }
 
-            // Entity collisions
-            let candidates = world.get_all_at_box(&search_box);
-            for cand in candidates {
-                if self.should_skip_collision(entity, &cand) {
-                    continue;
-                }
+        // Entity collisions
+        let candidates = world.get_all_at_box(&search_box);
+        for cand in candidates {
+            if self.should_skip_collision(entity, &cand) {
+                continue;
+            }
 
-                // `ProjectileUtil.getEntityHitResult` inflates the target by its pick radius
-                // (`ProjectileUtil.java:109-120`).
-                let pick_radius =
-                    crate::entity::projectile::projectile_target_pick_radius(cand.as_ref());
-                let ebb = cand.get_entity().bounding_box.load().expand(
-                    pick_radius,
-                    pick_radius,
-                    pick_radius,
+            // `ProjectileUtil.getEntityHitResult` inflates the target by its pick radius
+            // (`ProjectileUtil.java:109-120`).
+            let pick_radius =
+                crate::entity::projectile::projectile_target_pick_radius(cand.as_ref());
+            let ebb =
+                cand.get_entity()
+                    .bounding_box
+                    .load()
+                    .expand(pick_radius, pick_radius, pick_radius);
+            if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, &ebb)
+                && t < closest_t
+            {
+                closest_t = t;
+                let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
+                hit = Some(ProjectileHit::Entity {
+                    entity: cand.clone(),
+                    hit_pos,
+                    normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
+                });
+            }
+        }
+
+        // Handle hit
+        if let Some(h) = hit {
+            // `Projectile.hitTargetOrDeflectSelf`: a deflected arrow is not consumed. The
+            // arrow has its own hit path, so the dispatch is repeated here for the same
+            // reason `PROJECTILE_LAND` is emitted separately below.
+            if crate::entity::projectile::try_deflect(&h, caller) {
+                return;
+            }
+
+            let is_piercing_entity = self.pierce_level.load(Ordering::Relaxed) > 0
+                && matches!(&h, ProjectileHit::Entity { .. });
+            if !is_piercing_entity && self.has_hit.swap(true, Ordering::SeqCst) {
+                return;
+            }
+
+            // Arrow has its own hit path (doesn't go through
+            // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
+            // emission mirroring the one in projectile::mod.
+            let land_pos = crate::entity::projectile::projectile_land_pos(&h);
+            if let ProjectileHit::Block {
+                pos, face, hit_pos, ..
+            } = &h
+            {
+                crate::entity::projectile::on_projectile_block_hit(
+                    &world, server, caller, *pos, *face, *hit_pos,
                 );
-                if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, &ebb)
-                    && t < closest_t
-                {
-                    closest_t = t;
-                    let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
-                    hit = Some(ProjectileHit::Entity {
-                        entity: cand.clone(),
-                        hit_pos,
-                        normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
-                    });
-                }
             }
-
-            // Handle hit
-            if let Some(h) = hit {
-                // `Projectile.hitTargetOrDeflectSelf`: a deflected arrow is not consumed. The
-                // arrow has its own hit path, so the dispatch is repeated here for the same
-                // reason `PROJECTILE_LAND` is emitted separately below.
-                if crate::entity::projectile::try_deflect(&h, caller) {
-                    return;
-                }
-
-                let is_piercing_entity = self.pierce_level.load(Ordering::Relaxed) > 0
-                    && matches!(&h, ProjectileHit::Entity { .. });
-                if !is_piercing_entity && self.has_hit.swap(true, Ordering::SeqCst) {
-                    return;
-                }
-
-                // Arrow has its own hit path (doesn't go through
-                // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
-                // emission mirroring the one in projectile::mod.
-                let land_pos = crate::entity::projectile::projectile_land_pos(&h);
-                if let ProjectileHit::Block {
-                    pos, face, hit_pos, ..
-                } = &h
-                {
-                    crate::entity::projectile::on_projectile_block_hit(
-                        &world, server, caller, *pos, *face, *hit_pos,
-                    )
-                    .await;
-                }
-                caller.on_hit(h).await;
-                crate::entity::projectile::emit_projectile_land(&world, caller, land_pos).await;
-            }
-        })
+            caller.on_hit(h);
+            crate::entity::projectile::emit_projectile_land(&world, caller, land_pos);
+        }
     }
 
     #[expect(
         clippy::too_many_lines,
         reason = "projectile hit handling keeps vanilla branches together"
     )]
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let (hit_pos, hit_entity) = match hit {
-                ProjectileHit::Block { hit_pos, .. } => (hit_pos, None),
-                ProjectileHit::Entity {
-                    ref entity,
-                    hit_pos,
-                    ..
-                } => (hit_pos, Some(entity.get_entity().entity_id)),
-            };
-            let mut hit_event =
-                crate::plugin::api::events::entity::projectile_hit::ProjectileHitEvent::new(
-                    self.entity.entity_id,
-                    hit_pos,
-                    hit_entity,
+    fn on_hit(&self, hit: ProjectileHit) {
+        let (hit_pos, hit_entity) = match hit {
+            ProjectileHit::Block { hit_pos, .. } => (hit_pos, None),
+            ProjectileHit::Entity {
+                ref entity,
+                hit_pos,
+                ..
+            } => (hit_pos, Some(entity.get_entity().entity_id)),
+        };
+        let mut hit_event =
+            crate::plugin::api::events::entity::projectile_hit::ProjectileHitEvent::new(
+                self.entity.entity_id,
+                hit_pos,
+                hit_entity,
+            );
+        if let Some(server) = self.entity.world.load().server.upgrade() {
+            server.plugin_manager.fire_blocking(&server, &mut hit_event);
+        }
+        if hit_event.cancelled {
+            return;
+        }
+
+        let entity = self.get_entity();
+        let world = entity.world.load();
+
+        match hit {
+            ProjectileHit::Block {
+                pos, face, hit_pos, ..
+            } => {
+                // Arrow hit a block - stick into it
+                self.in_ground.store(true, Ordering::Relaxed);
+                self.shake_time.store(7, Ordering::Relaxed);
+                *self
+                    .last_block_pos
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pos);
+                self.last_block_state_id
+                    .store(Some(world.get_block_state_id(&pos)));
+
+                let block = world.get_block(&pos);
+                if block == &pumpkin_data::Block::TARGET {
+                    on_target_block_hit(
+                        &world,
+                        &pos,
+                        face,
+                        hit_pos,
+                        self.owner_id,
+                        TargetBlock::PERSISTENT_PROJECTILE_DELAY,
+                    );
+                }
+
+                // Stop the arrow
+                entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
+                entity.set_pos(hit_pos);
+
+                // Vanilla `AbstractArrow.onHitBlock` plays the current sound and then resets
+                // it to ARROW_HIT (`AbstractArrow.java:533-552`).
+                let sound_packet = CSoundEffect::new(
+                    IdOr::Id(self.sound_event.load() as u16),
+                    SoundCategory::Neutral,
+                    &hit_pos,
+                    1.0,
+                    1.0,
+                    0.0,
                 );
-            if let Some(server) = self.entity.world.load().server.upgrade() {
-                server.plugin_manager.fire(&server, &mut hit_event).await;
+                let chunk_pos = entity.chunk_pos.load();
+                world.broadcast_to_chunk(chunk_pos, &sound_packet);
+                self.sound_event.store(Sound::EntityArrowHit);
+
+                // Reset critical flag
+                self.is_critical.store(false, Ordering::Relaxed);
             }
-            if hit_event.cancelled {
-                return;
-            }
+            ProjectileHit::Entity {
+                entity: target,
+                hit_pos,
+                ..
+            } => {
+                let pierce = self.pierce_level.load(Ordering::Relaxed);
+                if pierce > 0 {
+                    let target_id = target.get_entity().entity_id;
+                    if !self.register_piercing_hit(target_id, pierce) {
+                        entity.remove();
+                        return;
+                    }
+                }
 
-            let entity = self.get_entity();
-            let world = entity.world.load();
+                // Calculate damage
+                let velocity = entity.velocity.load();
+                let power = velocity.length();
+                let mut damage = calculate_arrow_damage(power, self.base_damage.load());
 
-            match hit {
-                ProjectileHit::Block {
-                    pos, face, hit_pos, ..
-                } => {
-                    // Arrow hit a block - stick into it
-                    self.in_ground.store(true, Ordering::Relaxed);
-                    self.shake_time.store(7, Ordering::Relaxed);
-                    *self
-                        .last_block_pos
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pos);
-                    self.last_block_state_id
-                        .store(Some(world.get_block_state_id(&pos)));
+                // Apply critical hit bonus
+                if self.is_critical.load(Ordering::Relaxed) {
+                    let bonus = (rand::random::<u32>() % (damage / 2 + 2) as u32) as i32;
+                    damage = damage.saturating_add(bonus);
+                }
+                // `AbstractArrow.onHitEntity` (`AbstractArrow.java:463-467`) skips the
+                // ignite for endermen and remembers the target's fire ticks so they can be
+                // put back if the damage does not land.
+                let is_enderman = *target.get_entity().entity_type == EntityType::ENDERMAN;
+                let remaining_fire_ticks = target.get_entity().fire_ticks.load(Ordering::Relaxed);
+                if self.is_flame.load(Ordering::Relaxed) && !is_enderman {
+                    target.get_entity().set_on_fire_for_ticks(100);
+                }
 
-                    let block = world.get_block(&pos);
-                    if block == &pumpkin_data::Block::TARGET {
-                        on_target_block_hit(
-                            &world,
-                            &pos,
-                            face,
-                            hit_pos,
-                            self.owner_id,
-                            TargetBlock::PERSISTENT_PROJECTILE_DELAY,
-                        )
-                        .await;
+                let damage_succeeded = target.damage_with_context(
+                    &*target,
+                    damage as f32,
+                    DamageType::ARROW,
+                    Some(hit_pos),
+                    None,
+                    Some(self),
+                );
+
+                if !damage_succeeded {
+                    // `AbstractArrow.java:506-517`: damage that does not land (invulnerable
+                    // target, or one still in its damage-immunity window) bounces the arrow
+                    // off instead of consuming it. Restore the fire ticks, reverse-deflect,
+                    // damp the flight to a fifth, and only drop the arrow once it has
+                    // effectively stopped.
+                    target
+                        .get_entity()
+                        .fire_ticks
+                        .store(remaining_fire_ticks, Ordering::Relaxed);
+                    crate::entity::projectile_deflection::ProjectileDeflectionType::Simple
+                        .deflect(self, Some(target.as_ref()));
+                    let bounced = entity.velocity.load().multiply(0.2, 0.2, 0.2);
+                    entity.velocity.store(bounced);
+                    if bounced.length_squared() < 1.0e-7 {
+                        if self.pickup.load() == ArrowPickup::Allowed {
+                            let stack = self
+                                .item_stack
+                                .read()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .clone();
+                            let pos = entity.pos.load();
+                            world.drop_stack(
+                                &BlockPos::floored(pos.x, pos.y, pos.z),
+                                Self::pickup_item_stack(&stack),
+                            );
+                        }
+                        entity.remove();
+                    } else {
+                        // The tick loop latches `has_hit` before dispatching, so a bounced
+                        // arrow has to be re-armed or it would never collide again.
+                        self.has_hit.store(false, Ordering::SeqCst);
+                    }
+                    return;
+                }
+
+                if is_enderman {
+                    // `AbstractArrow.java:470-472` returns before the arrow count, the
+                    // knockback, the post-hurt effects and the `discard()` at `:503-504`,
+                    // so an arrow that hits an enderman keeps flying.
+                    self.has_hit.store(false, Ordering::SeqCst);
+                    return;
+                }
+
+                if let Some(living) = target.get_living_entity() {
+                    // Vanilla `AbstractArrow.onHitEntity` increments the victim's tracked
+                    // arrow count for non-piercing hits (`AbstractArrow.java:474-477`).
+                    if pierce == 0 {
+                        living.add_arrow();
                     }
 
-                    // Stop the arrow
-                    entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
-                    entity.set_pos(hit_pos);
+                    // `AbstractArrow.doKnockback`: the push follows the ARROW's horizontal
+                    // flight, scaled by the target's knockback resistance, and the shooter is
+                    // never touched. Routing this through the melee helper aimed the knockback
+                    // along the shooter's yaw and damped the shooter's own velocity to 60%.
+                    let punch = self.punch_level.load(Ordering::Relaxed);
+                    if punch > 0 {
+                        let resistance = (1.0
+                            - living.get_attribute_value(
+                                &pumpkin_data::attributes::Attributes::KNOCKBACK_RESISTANCE,
+                            ))
+                        .max(0.0);
+                        let strength = f64::from(punch) * 0.6 * resistance;
+                        let push = velocity
+                            .multiply(1.0, 0.0, 1.0)
+                            .normalize()
+                            .multiply(strength, 0.0, strength);
+                        if push.length_squared() > 0.0 {
+                            target
+                                .get_entity()
+                                .add_velocity(Vector3::new(push.x, 0.1, push.z));
+                        }
+                    }
 
-                    // Vanilla `AbstractArrow.onHitBlock` plays the current sound and then resets
-                    // it to ARROW_HIT (`AbstractArrow.java:533-552`).
+                    // Vanilla `AbstractArrow.onHitEntity` plays its configured sound event
+                    // (`AbstractArrow.java:425-426,502-503`).
                     let sound_packet = CSoundEffect::new(
                         IdOr::Id(self.sound_event.load() as u16),
                         SoundCategory::Neutral,
@@ -729,186 +843,51 @@ impl EntityBase for ArrowEntity {
                         1.0,
                         0.0,
                     );
-                    let chunk_pos = entity.chunk_pos.load();
-                    world.broadcast_to_chunk(chunk_pos, &sound_packet);
-                    self.sound_event.store(Sound::EntityArrowHit);
+                    world.broadcast_packet_all(&sound_packet);
 
-                    // Reset critical flag
-                    self.is_critical.store(false, Ordering::Relaxed);
-                }
-                ProjectileHit::Entity {
-                    entity: target,
-                    hit_pos,
-                    ..
-                } => {
-                    let pierce = self.pierce_level.load(Ordering::Relaxed);
-                    if pierce > 0 {
-                        let target_id = target.get_entity().entity_id;
-                        if !self.register_piercing_hit(target_id, pierce) {
-                            entity.remove().await;
-                            return;
-                        }
-                    }
+                    if Self::should_apply_post_hurt_effects(damage_succeeded) {
+                        let item_stack = self
+                            .item_stack
+                            .read()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .clone();
+                        let scale = item_stack
+                            .get_data_component::<PotionDurationScaleImpl>()
+                            .map_or(1.0, |component| component.scale);
 
-                    // Calculate damage
-                    let velocity = entity.velocity.load();
-                    let power = velocity.length();
-                    let mut damage = calculate_arrow_damage(power, self.base_damage.load());
-
-                    // Apply critical hit bonus
-                    if self.is_critical.load(Ordering::Relaxed) {
-                        let bonus = (rand::random::<u32>() % (damage / 2 + 2) as u32) as i32;
-                        damage = damage.saturating_add(bonus);
-                    }
-                    // `AbstractArrow.onHitEntity` (`AbstractArrow.java:463-467`) skips the
-                    // ignite for endermen and remembers the target's fire ticks so they can be
-                    // put back if the damage does not land.
-                    let is_enderman = *target.get_entity().entity_type == EntityType::ENDERMAN;
-                    let remaining_fire_ticks =
-                        target.get_entity().fire_ticks.load(Ordering::Relaxed);
-                    if self.is_flame.load(Ordering::Relaxed) && !is_enderman {
-                        target.get_entity().set_on_fire_for_ticks(100);
-                    }
-
-                    let damage_succeeded = target
-                        .damage_with_context(
-                            &*target,
-                            damage as f32,
-                            DamageType::ARROW,
-                            Some(hit_pos),
-                            None,
-                            Some(self),
-                        )
-                        .await;
-
-                    if !damage_succeeded {
-                        // `AbstractArrow.java:506-517`: damage that does not land (invulnerable
-                        // target, or one still in its damage-immunity window) bounces the arrow
-                        // off instead of consuming it. Restore the fire ticks, reverse-deflect,
-                        // damp the flight to a fifth, and only drop the arrow once it has
-                        // effectively stopped.
-                        target
-                            .get_entity()
-                            .fire_ticks
-                            .store(remaining_fire_ticks, Ordering::Relaxed);
-                        crate::entity::projectile_deflection::ProjectileDeflectionType::Simple
-                            .deflect(self, Some(target.as_ref()));
-                        let bounced = entity.velocity.load().multiply(0.2, 0.2, 0.2);
-                        entity.velocity.store(bounced);
-                        if bounced.length_squared() < 1.0e-7 {
-                            if self.pickup.load() == ArrowPickup::Allowed {
-                                let stack = self.item_stack.read().await.clone();
-                                let pos = entity.pos.load();
-                                world
-                                    .drop_stack(
-                                        &BlockPos::floored(pos.x, pos.y, pos.z),
-                                        Self::pickup_item_stack(&stack),
-                                    )
-                                    .await;
-                            }
-                            entity.remove().await;
-                        } else {
-                            // The tick loop latches `has_hit` before dispatching, so a bounced
-                            // arrow has to be re-armed or it would never collide again.
-                            self.has_hit.store(false, Ordering::SeqCst);
-                        }
-                        return;
-                    }
-
-                    if is_enderman {
-                        // `AbstractArrow.java:470-472` returns before the arrow count, the
-                        // knockback, the post-hurt effects and the `discard()` at `:503-504`,
-                        // so an arrow that hits an enderman keeps flying.
-                        self.has_hit.store(false, Ordering::SeqCst);
-                        return;
-                    }
-
-                    if let Some(living) = target.get_living_entity() {
-                        // Vanilla `AbstractArrow.onHitEntity` increments the victim's tracked
-                        // arrow count for non-piercing hits (`AbstractArrow.java:474-477`).
-                        if pierce == 0 {
-                            living.add_arrow();
-                        }
-
-                        // `AbstractArrow.doKnockback`: the push follows the ARROW's horizontal
-                        // flight, scaled by the target's knockback resistance, and the shooter is
-                        // never touched. Routing this through the melee helper aimed the knockback
-                        // along the shooter's yaw and damped the shooter's own velocity to 60%.
-                        let punch = self.punch_level.load(Ordering::Relaxed);
-                        if punch > 0 {
-                            let resistance = (1.0
-                                - living.get_attribute_value(
-                                    &pumpkin_data::attributes::Attributes::KNOCKBACK_RESISTANCE,
-                                ))
-                            .max(0.0);
-                            let strength = f64::from(punch) * 0.6 * resistance;
-                            let push = velocity
-                                .multiply(1.0, 0.0, 1.0)
-                                .normalize()
-                                .multiply(strength, 0.0, strength);
-                            if push.length_squared() > 0.0 {
-                                target
-                                    .get_entity()
-                                    .add_velocity(Vector3::new(push.x, 0.1, push.z));
-                            }
-                        }
-
-                        // Vanilla `AbstractArrow.onHitEntity` plays its configured sound event
-                        // (`AbstractArrow.java:425-426,502-503`).
-                        let sound_packet = CSoundEffect::new(
-                            IdOr::Id(self.sound_event.load() as u16),
-                            SoundCategory::Neutral,
-                            &hit_pos,
-                            1.0,
-                            1.0,
-                            0.0,
-                        );
-                        world.broadcast_packet_all(&sound_packet);
-
-                        if Self::should_apply_post_hurt_effects(damage_succeeded) {
-                            let item_stack = self.item_stack.read().await.clone();
-                            let scale = item_stack
-                                .get_data_component::<PotionDurationScaleImpl>()
-                                .map_or(1.0, |component| component.scale);
-
-                            for (
+                        for (
+                            effect_type,
+                            duration,
+                            amplifier,
+                            ambient,
+                            show_particles,
+                            show_icon,
+                        ) in
+                            crate::item::potion::PotionContents::read_potion_effects(&item_stack)
+                        {
+                            living.add_effect(pumpkin_data::potion::Effect {
                                 effect_type,
-                                duration,
+                                duration: Self::scale_arrow_effect_duration(duration, scale),
                                 amplifier,
                                 ambient,
                                 show_particles,
                                 show_icon,
-                            ) in crate::item::potion::PotionContents::read_potion_effects(
-                                &item_stack,
-                            ) {
-                                living
-                                    .add_effect(pumpkin_data::potion::Effect {
-                                        effect_type,
-                                        duration: Self::scale_arrow_effect_duration(
-                                            duration, scale,
-                                        ),
-                                        amplifier,
-                                        ambient,
-                                        show_particles,
-                                        show_icon,
-                                        blend: false,
-                                    })
-                                    .await;
-                            }
+                                blend: false,
+                            });
+                        }
 
-                            if entity.entity_type.id == EntityType::SPECTRAL_ARROW.id {
-                                living.add_effect(Self::spectral_glowing_effect()).await;
-                            }
+                        if entity.entity_type.id == EntityType::SPECTRAL_ARROW.id {
+                            living.add_effect(Self::spectral_glowing_effect());
                         }
                     }
+                }
 
-                    if pierce == 0 {
-                        // No piercing - remove arrow
-                        entity.remove().await;
-                    }
+                if pierce == 0 {
+                    // No piercing - remove arrow
+                    entity.remove();
                 }
             }
-        })
+        }
     }
 
     fn get_entity(&self) -> &Entity {
@@ -925,34 +904,35 @@ impl EntityBase for ArrowEntity {
         self
     }
 
-    fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // Only allow picking up grounded arrows
-            if !self.in_ground.load(Ordering::Relaxed) {
-                return;
-            }
+    fn on_player_collision(&self, player: &Arc<Player>) {
+        // Only allow picking up grounded arrows
+        if !self.in_ground.load(Ordering::Relaxed) {
+            return;
+        }
 
-            if player.living_entity.health.load() <= 0.0 {
-                return;
-            }
+        if player.living_entity.health.load() <= 0.0 {
+            return;
+        }
 
-            // Check pickup rules
-            match self.pickup.load() {
-                ArrowPickup::Disallowed => return,
-                ArrowPickup::CreativeOnly if !player.is_creative() => return,
-                _ => {}
-            }
+        // Check pickup rules
+        match self.pickup.load() {
+            ArrowPickup::Disallowed => return,
+            ArrowPickup::CreativeOnly if !player.is_creative() => return,
+            _ => {}
+        }
 
-            // Try to insert an arrow into the player's inventory
-            let item_stack = self.item_stack.read().await;
-            let mut stack = Self::pickup_item_stack(&item_stack);
-            if player.is_creative() || player.inventory.insert_stack_anywhere(&mut stack).await {
-                player.living_entity.pickup(&self.entity, 1);
+        // Try to insert an arrow into the player's inventory
+        let item_stack = self
+            .item_stack
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut stack = Self::pickup_item_stack(&item_stack);
+        if player.is_creative() || player.inventory.insert_stack_anywhere(&mut stack) {
+            player.living_entity.pickup(&self.entity, 1);
 
-                // Remove arrow entity after pickup
-                self.get_entity().remove().await;
-            }
-        })
+            // Remove arrow entity after pickup
+            self.get_entity().remove();
+        }
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {

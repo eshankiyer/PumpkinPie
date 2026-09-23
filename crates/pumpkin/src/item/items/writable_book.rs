@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::future::Future;
-use std::pin::Pin;
 
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
@@ -21,30 +20,22 @@ impl ItemMetadata for WritableBookItem {
 impl ItemBehaviour for WritableBookItem {
     /// `WritableBookItem.use` (`WritableBookItem.java:14-20`): opens the book editing GUI
     /// and awards the `ITEM_USED` statistic.
-    fn normal_use<'a>(
-        &'a self,
-        item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if item.id == Item::WRITABLE_BOOK.id {
-                player
-                    .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
-                    .await;
-                player
-                    .increment_stat(StatisticCategory::Used, item.id as i32, 1)
-                    .await;
-            } else if item.id == Item::WRITTEN_BOOK.id {
-                player
-                    .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
-                    .await;
-                player.world().play_sound(
-                    Sound::ItemBookPageTurn,
-                    SoundCategory::Players,
-                    &player.position(),
-                );
-            }
-        })
+    fn normal_use(&self, item: &Item, player: &Player) {
+        if item.id == Item::WRITABLE_BOOK.id {
+            player
+                .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
+                .await;
+            player.increment_stat(StatisticCategory::Used, item.id as i32, 1);
+        } else if item.id == Item::WRITTEN_BOOK.id {
+            player
+                .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
+                .await;
+            player.world().play_sound(
+                Sound::ItemBookPageTurn,
+                SoundCategory::Players,
+                &player.position(),
+            );
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

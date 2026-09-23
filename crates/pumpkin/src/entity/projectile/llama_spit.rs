@@ -6,7 +6,7 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage,
+        Entity, EntityBase, NBTStorage,
         living::LivingEntity,
         projectile::{ProjectileHit, ThrownItemEntity},
     },
@@ -58,19 +58,13 @@ impl LlamaSpitEntity {
 impl NBTStorage for LlamaSpitEntity {}
 
 impl EntityBase for LlamaSpitEntity {
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `LlamaSpit.tick` (`LlamaSpit.java:52-55`): discarded once in water.
-            if self.get_entity().touching_water.load(Ordering::Relaxed) {
-                self.get_entity().remove().await;
-                return;
-            }
-            self.thrown.process_tick(caller, server).await;
-        })
+    fn tick(&self, caller: &Arc<dyn EntityBase>, server: &Server) {
+        // `LlamaSpit.tick` (`LlamaSpit.java:52-55`): discarded once in water.
+        if self.get_entity().touching_water.load(Ordering::Relaxed) {
+            self.get_entity().remove();
+            return;
+        }
+        self.thrown.process_tick(caller, server);
     }
 
     fn get_entity(&self) -> &Entity {
@@ -91,38 +85,34 @@ impl EntityBase for LlamaSpitEntity {
 
     /// `LlamaSpit.onHitEntity` (`LlamaSpit.java:65-72`): 1 damage from the `spit` damage source,
     /// attributed to the owner, and only when the owner is a living entity.
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            if let ProjectileHit::Entity {
-                ref entity,
-                hit_pos,
-                ..
-            } = hit
-            {
-                let world = self.get_entity().world.load();
-                let Some(owner) = self
-                    .thrown
-                    .owner_id
-                    .and_then(|id| world.get_entity_by_id(id))
-                    .filter(|owner| owner.get_living_entity().is_some())
-                else {
-                    return;
-                };
-                let entity_clone = entity.clone();
+    fn on_hit(&self, hit: ProjectileHit) {
+        if let ProjectileHit::Entity {
+            ref entity,
+            hit_pos,
+            ..
+        } = hit
+        {
+            let world = self.get_entity().world.load();
+            let Some(owner) = self
+                .thrown
+                .owner_id
+                .and_then(|id| world.get_entity_by_id(id))
+                .filter(|owner| owner.get_living_entity().is_some())
+            else {
+                return;
+            };
+            let entity_clone = entity.clone();
 
-                tokio::spawn(async move {
-                    let _ = entity_clone
-                        .damage_with_context(
-                            entity_clone.as_ref(),
-                            1.0,
-                            DamageType::SPIT,
-                            Some(hit_pos),
-                            Some(owner.as_ref()),
-                            None,
-                        )
-                        .await;
-                });
-            }
-        })
+            tokio::spawn(async move {
+                let _ = entity_clone.damage_with_context(
+                    entity_clone.as_ref(),
+                    1.0,
+                    DamageType::SPIT,
+                    Some(hit_pos),
+                    Some(owner.as_ref()),
+                    None,
+                );
+            });
+        }
     }
 }

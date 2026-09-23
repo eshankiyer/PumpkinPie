@@ -1,5 +1,5 @@
 use super::melee_attack::MeleeAttackGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
 
@@ -20,33 +20,31 @@ impl PandaAttackGoal {
 }
 
 impl Goal for PandaAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
-                return false;
-            };
-            if !panda.can_perform_action().await {
-                return false;
-            }
-            self.inner.can_start(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
+            return false;
+        };
+        if !panda.can_perform_action() {
+            return false;
+        }
+        self.inner.can_start(mob)
     }
 
     /// Vanilla `PandaAttackGoal` only overrides `canUse`; an attack already under way is not
     /// cancelled by the panda sitting down mid-swing.
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

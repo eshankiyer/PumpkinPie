@@ -69,26 +69,30 @@ impl CommandBlockMinecart {
     /// `ACTIVATION_DELAY` ticks. The caller only invokes this while the rail is
     /// powered, matching vanilla's `state` argument
     /// (NewMinecartBehavior.java:249-251).
-    pub(super) async fn activate(&self, world: &Arc<World>, entity: &Entity) {
+    pub(super) fn activate(&self, world: &Arc<World>, entity: &Entity) {
         let tick_count = self.tick_count.load(Ordering::Relaxed);
         if tick_count.saturating_sub(self.last_activated.load(Ordering::Relaxed))
             < Self::ACTIVATION_DELAY
         {
             return;
         }
-        self.perform_command(world, entity).await;
+        self.perform_command(world, entity);
         self.last_activated.store(tick_count, Ordering::Relaxed);
     }
 
     /// Port of `BaseCommandBlock.performCommand`
     /// (net/minecraft/world/level/BaseCommandBlock.java:89-130) as reached
     /// through the minecart's `performCommand` call site.
-    async fn perform_command(&self, world: &Arc<World>, entity: &Entity) {
+    fn perform_command(&self, world: &Arc<World>, entity: &Entity) {
         // `level.isCommandBlockEnabled()` gates on the COMMAND_BLOCKS_WORK
         // gamerule (BaseCommandBlock.java:101).
         let command_blocks_work = { world.level_info.load().game_rules.command_blocks_work };
 
-        let command = self.command_block.command.lock().await;
+        let command = self
+            .command_block
+            .command
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !command_blocks_work || command.is_empty() {
             // Vanilla zeroes the success count before dispatching
             // (BaseCommandBlock.java:100).
@@ -98,9 +102,13 @@ impl CommandBlockMinecart {
 
         // "Searge" easter egg (BaseCommandBlock.java:94-98).
         if command.eq_ignore_ascii_case("Searge") {
-            *self.command_block.last_output.lock().await = "#itzlipofutzli".to_string();
+            *self
+                .command_block
+                .last_output
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = "#itzlipofutzli".to_string();
             self.command_block.success_count.store(1, Ordering::Relaxed);
-            self.sync_metadata(entity).await;
+            self.sync_metadata(entity);
             return;
         }
 
@@ -115,27 +123,35 @@ impl CommandBlockMinecart {
             return;
         };
         let source = CommandSender::CommandBlock(self.command_block.clone(), world.clone())
-            .into_source(&server)
-            .await;
+            .into_source(&server);
         server
             .command_dispatcher
             .load()
-            .handle_command(&source, &command)
-            .await;
+            .handle_command(&source, &command);
         drop(command);
 
         // `MinecartCommandBase.onUpdated` (MinecartCommandBlock.java:116-119):
         // push the (possibly changed) command/output back into synced data so
         // clients editing the cart see fresh state.
-        self.sync_metadata(entity).await;
+        self.sync_metadata(entity);
     }
 
     /// Sends `DATA_ID_COMMAND_NAME`/`DATA_ID_LAST_OUTPUT`
     /// (MinecartCommandBlock.java:28-29, defined at :51-55) to tracking
     /// clients; the vanilla client builds its edit screen purely from these.
-    pub(super) async fn sync_metadata(&self, entity: &Entity) {
-        let command = self.command_block.command.lock().await.clone();
-        let last_output = self.command_block.last_output.lock().await.clone();
+    pub(super) fn sync_metadata(&self, entity: &Entity) {
+        let command = self
+            .command_block
+            .command
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let last_output = self
+            .command_block
+            .last_output
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         entity.send_meta_data(
             &[
                 Metadata::new(
@@ -155,10 +171,18 @@ impl CommandBlockMinecart {
     /// (MinecartCommandBlock.java:58-63) -> `BaseCommandBlock.load`
     /// (BaseCommandBlock.java:61-78). Only the keys modelled by
     /// [`CommandBlockEntity`] are read; unknown ones are ignored, as in vanilla.
-    pub(super) async fn read_nbt(&self, nbt: &NbtCompound) {
-        *self.command_block.command.lock().await =
+    pub(super) fn read_nbt(&self, nbt: &NbtCompound) {
+        *self
+            .command_block
+            .command
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
             nbt.get_string("Command").unwrap_or("").to_string();
-        *self.command_block.last_output.lock().await =
+        *self
+            .command_block
+            .last_output
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
             nbt.get_string("LastOutput").unwrap_or("").to_string();
         self.command_block.success_count.store(
             nbt.get_int("SuccessCount").unwrap_or(0) as u32,
@@ -174,10 +198,14 @@ impl CommandBlockMinecart {
     /// (MinecartCommandBlock.java:66-69) -> `BaseCommandBlock.save`
     /// (BaseCommandBlock.java:46-59). `LastOutput` is written only when output
     /// tracking is enabled (BaseCommandBlock.java:51-53).
-    pub(super) async fn write_nbt(&self, nbt: &mut NbtCompound) {
+    pub(super) fn write_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_string(
             "Command",
-            self.command_block.command.lock().await.to_string(),
+            self.command_block
+                .command
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .to_string(),
         );
         nbt.put_int(
             "SuccessCount",
@@ -188,7 +216,11 @@ impl CommandBlockMinecart {
         if track_output {
             nbt.put_string(
                 "LastOutput",
-                self.command_block.last_output.lock().await.to_string(),
+                self.command_block
+                    .last_output
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .to_string(),
             );
         }
         nbt.put_bool("UpdateLastExecution", false);

@@ -4,7 +4,7 @@ use rand::RngExt;
 use std::sync::atomic::Ordering;
 
 use super::random_pos::default_get_pos_towards;
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::world::World;
@@ -61,9 +61,12 @@ impl VillageSectionScan {
     /// `section_radius` is how far from `center` the caller intends to evaluate sections; the
     /// scan covers that plus `MAX_VILLAGE_DISTANCE`, so every evaluated section sees every POI
     /// that could give it a non-saturated distance.
-    pub(crate) async fn around(world: &World, center: BlockPos, section_radius: i32) -> Self {
+    pub(crate) fn around(world: &World, center: BlockPos, section_radius: i32) -> Self {
         let block_radius = (section_radius + MAX_VILLAGE_DISTANCE + 1) * 16;
-        let mut storage = world.portal_poi.lock().await;
+        let mut storage = world
+            .portal_poi
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut occupied = Vec::new();
         for poi_type in VILLAGE_TAG_POI_TYPES {
             occupied.extend(
@@ -153,13 +156,13 @@ impl MoveBackToVillageGoal {
     }
 
     /// `MoveBackToVillageGoal.getPosition` (`MoveBackToVillageGoal.java:27-36`).
-    async fn get_position(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    fn get_position(mob: &dyn Mob) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
         let world = entity.world.load();
         let pos = entity.block_pos.load();
         let here = section_of(pos);
 
-        let scan = VillageSectionScan::around(&world, pos, Self::SECTION_SCAN_RADIUS).await;
+        let scan = VillageSectionScan::around(&world, pos, Self::SECTION_SCAN_RADIUS);
         // `BehaviorUtils.findSectionClosestToVillage` (`BehaviorUtils.java:107-113`): among
         // the cube, keep only sections strictly closer to a village than the mob's own
         // section, then take the minimum. `Stream.min` keeps the first of equal minima, so
@@ -191,75 +194,67 @@ impl MoveBackToVillageGoal {
 }
 
 impl Goal for MoveBackToVillageGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // `MoveBackToVillageGoal.canUse` (`MoveBackToVillageGoal.java:20-25`): already in
-            // a village, nothing to do. `ServerLevel.isVillage(pos)` is
-            // `isCloseToVillage(pos, 1)` (`ServerLevel.java:1542-1543`).
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let world = entity.world.load();
-            if world.is_close_to_village(entity.block_pos.load(), 1).await {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // `MoveBackToVillageGoal.canUse` (`MoveBackToVillageGoal.java:20-25`): already in
+        // a village, nothing to do. `ServerLevel.isVillage(pos)` is
+        // `isCloseToVillage(pos, 1)` (`ServerLevel.java:1542-1543`).
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let world = entity.world.load();
+        if world.is_close_to_village(entity.block_pos.load(), 1) {
+            return false;
+        }
+
+        // `RandomStrollGoal.canUse` (`RandomStrollGoal.java:36-62`).
+        if mob.has_controlling_passenger() {
+            return false;
+        }
+        if !self.force_trigger {
+            if self.check_no_action_time
+                && mob.get_mob_entity().no_action_time.load(Ordering::Relaxed) >= 100
+            {
                 return false;
             }
-
-            // `RandomStrollGoal.canUse` (`RandomStrollGoal.java:36-62`).
-            if mob.has_controlling_passenger().await {
+            if mob.get_random().random_range(0..self.chance) != 0 {
                 return false;
             }
-            if !self.force_trigger {
-                if self.check_no_action_time
-                    && mob.get_mob_entity().no_action_time.load(Ordering::Relaxed) >= 100
-                {
-                    return false;
-                }
-                if mob.get_random().random_range(0..self.chance) != 0 {
-                    return false;
-                }
-            }
+        }
 
-            self.wanted = Self::get_position(mob).await;
-            if self.wanted.is_none() {
-                return false;
-            }
-            self.force_trigger = false;
-            true
-        })
+        self.wanted = Self::get_position(mob);
+        if self.wanted.is_none() {
+            return false;
+        }
+        self.force_trigger = false;
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let navigator_idle = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            !navigator_idle && !mob.has_controlling_passenger().await
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let navigator_idle = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        !navigator_idle && !mob.has_controlling_passenger()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(wanted) = self.wanted {
-                let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.wanted = None;
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(wanted) = self.wanted {
+            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
             mob.get_mob_entity()
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+                .set_progress(NavigatorGoal::new(pos, wanted, self.speed));
+        }
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.wanted = None;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     fn controls(&self) -> Controls {

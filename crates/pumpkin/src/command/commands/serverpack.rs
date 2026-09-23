@@ -23,22 +23,20 @@ struct PushExecutor;
 impl CommandExecutor for PushExecutor {
     /// Implements the packet construction and broadcast in
     /// `ServerPackCommand.push` (`ServerPackCommand.java:47-61`).
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let url = StringArgumentType::get(context, ARG_URL)?;
-            let uuid = context
-                .get_argument::<Uuid>(ARG_UUID)
-                .copied()
-                .unwrap_or_else(|_| java_name_uuid_from_bytes(url.as_bytes()));
-            let hash = StringArgumentType::get(context, ARG_HASH).unwrap_or_default();
-            let packet = CAddResourcePack::new(&uuid, url, hash, false, None);
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let url = StringArgumentType::get(context, ARG_URL)?;
+        let uuid = context
+            .get_argument::<Uuid>(ARG_UUID)
+            .copied()
+            .unwrap_or_else(|_| java_name_uuid_from_bytes(url.as_bytes()));
+        let hash = StringArgumentType::get(context, ARG_HASH).unwrap_or_default();
+        let packet = CAddResourcePack::new(&uuid, url, hash, false, None);
 
-            for player in context.server().get_all_players() {
-                player.send_client_packet(&packet).await;
-            }
+        for player in context.server().get_all_players() {
+            player.send_client_packet(&packet).await;
+        }
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 
@@ -48,17 +46,15 @@ struct PopExecutor;
 impl CommandExecutor for PopExecutor {
     /// Implements the removal packet broadcast in
     /// `ServerPackCommand.pop` (`ServerPackCommand.java:63-68`).
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let uuid = *context.get_argument::<Uuid>(ARG_UUID)?;
-            let packet = CRemoveResourcePack::new(Some(&uuid));
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let uuid = *context.get_argument::<Uuid>(ARG_UUID)?;
+        let packet = CRemoveResourcePack::new(Some(&uuid));
 
-            for player in context.server().get_all_players() {
-                player.send_client_packet(&packet).await;
-            }
+        for player in context.server().get_all_players() {
+            player.send_client_packet(&packet).await;
+        }
 
-            Ok(0)
-        })
+        Ok(0)
     }
 }
 

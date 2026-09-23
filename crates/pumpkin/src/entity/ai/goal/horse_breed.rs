@@ -18,7 +18,7 @@ use crate::entity::{
     r#type::from_type,
 };
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 
 /// Donkey.java#getBreedOffspring / Horse.java#getBreedOffspring: Donkey + Donkey -> Donkey,
 /// Horse + Horse -> Horse, Donkey + Horse (either order) -> Mule.
@@ -53,11 +53,11 @@ impl HorseBreedGoal {
         })
     }
 
-    async fn can_parent(mob: &dyn Mob) -> bool {
+    fn can_parent(mob: &dyn Mob) -> bool {
         let entity = mob.get_entity();
         let living = &mob.get_mob_entity().living_entity;
-        !entity.has_passengers().await
-            && !entity.has_vehicle().await
+        !entity.has_passengers()
+            && !entity.has_vehicle()
             && mob.get_mob_entity().is_tamed()
             && entity.age.load(std::sync::atomic::Ordering::Relaxed) >= 0
             && living.health.load() >= living.get_max_health()
@@ -65,8 +65,8 @@ impl HorseBreedGoal {
             && mob.get_mob_entity().is_in_love()
     }
 
-    async fn find_mate(&self, mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
-        if !Self::can_parent(mob).await {
+    fn find_mate(&self, mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+        if !Self::can_parent(mob) {
             return None;
         }
 
@@ -93,7 +93,7 @@ impl HorseBreedGoal {
             let Some(candidate_mob) = candidate.get_mob() else {
                 continue;
             };
-            if !Self::can_parent(candidate_mob).await || candidate.is_panicking() {
+            if !Self::can_parent(candidate_mob) || candidate.is_panicking() {
                 continue;
             }
 
@@ -108,7 +108,7 @@ impl HorseBreedGoal {
     }
 
     #[allow(clippy::if_not_else, clippy::too_many_lines)]
-    async fn breed(mob: &dyn Mob, mate: &dyn EntityBase) {
+    fn breed(mob: &dyn Mob, mate: &dyn EntityBase) {
         let mob_entity = mob.get_mob_entity();
         if !mob_entity.try_claim_love() {
             return;
@@ -183,7 +183,7 @@ impl HorseBreedGoal {
             }
             Some(baby)
         } else {
-            mob.create_offspring(mate, &world).await
+            mob.create_offspring(mate, &world)
         };
 
         let player = mob_entity
@@ -208,21 +208,17 @@ impl HorseBreedGoal {
                     })
             });
         if let Some(player) = player {
-            player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::AnimalsBred as i32,
-                    1,
-                )
-                .await;
+            player.increment_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                pumpkin_data::statistic::CustomStatistic::AnimalsBred as i32,
+                1,
+            );
 
-            player
-                .trigger_advancement(
-                    crate::entity::player::advancement::trigger::AdvancementTrigger::BredAnimal {
-                        parent_type: format!("minecraft:{}", entity.entity_type.resource_name),
-                    },
-                )
-                .await;
+            player.trigger_advancement(
+                crate::entity::player::advancement::trigger::AdvancementTrigger::BredAnimal {
+                    parent_type: format!("minecraft:{}", entity.entity_type.resource_name),
+                },
+            );
         }
 
         mob.get_entity().set_age(6000);
@@ -238,7 +234,7 @@ impl HorseBreedGoal {
 
         if world.level_info.load().game_rules.mob_drops {
             let xp = rng().random_range(1u32..=7);
-            ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
+            ExperienceOrbEntity::spawn(&world, parent_pos, xp);
         }
 
         let Some(baby) = baby else {
@@ -248,79 +244,69 @@ impl HorseBreedGoal {
             baby_mob.set_persistence_required();
         }
         baby.get_entity().set_age(-24000);
-        world.spawn_entity(baby).await;
+        world.spawn_entity(baby);
     }
 }
 
 impl Goal for HorseBreedGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            if !Self::can_parent(mob).await {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !Self::can_parent(mob) {
+            return false;
+        }
 
-            self.mate = self.find_mate(mob).await;
-            self.mate.is_some()
-        })
+        self.mate = self.find_mate(mob);
+        self.mate.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let Some(mate) = &self.mate else {
-                return false;
-            };
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        let Some(mate) = &self.mate else {
+            return false;
+        };
 
-            if !mate.get_entity().is_alive() || mate.is_panicking() {
-                return false;
-            }
+        if !mate.get_entity().is_alive() || mate.is_panicking() {
+            return false;
+        }
 
-            mate.is_in_love() && self.timer < 60
-        })
+        mate.is_in_love() && self.timer < 60
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.timer = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.timer = 0;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.mate = None;
-            self.timer = 0;
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-            navigator.stop();
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.mate = None;
+        self.timer = 0;
+        let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+        navigator.stop();
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            let Some(mate) = &self.mate else {
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(mate) = &self.mate else {
+            return;
+        };
 
-            let mob_entity = mob.get_mob_entity();
-            let mate_pos = mate.get_entity().pos.load();
+        let mob_entity = mob.get_mob_entity();
+        let mate_pos = mate.get_entity().pos.load();
 
-            {
-                let mut look_control = mob_entity.look_control.lock().unwrap();
-                look_control.look_at_entity(mob, mate);
-            };
+        {
+            let mut look_control = mob_entity.look_control.lock().unwrap();
+            look_control.look_at_entity(mob, mate);
+        };
 
-            let my_pos = mob.get_entity().pos.load();
-            let dist_sq = my_pos.squared_distance_to_vec(&mate_pos);
+        let my_pos = mob.get_entity().pos.load();
+        let dist_sq = my_pos.squared_distance_to_vec(&mate_pos);
 
-            {
-                let mut navigator = mob_entity.navigator.lock().unwrap();
-                navigator.set_progress(NavigatorGoal::new(my_pos, mate_pos, self.speed));
-            };
+        {
+            let mut navigator = mob_entity.navigator.lock().unwrap();
+            navigator.set_progress(NavigatorGoal::new(my_pos, mate_pos, self.speed));
+        };
 
-            self.timer += 1;
+        self.timer += 1;
 
-            if self.timer >= 60 && dist_sq < 9.0 {
-                Self::breed(mob, mate.as_ref()).await;
-            }
-        })
+        if self.timer >= 60 && dist_sq < 9.0 {
+            Self::breed(mob, mate.as_ref());
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

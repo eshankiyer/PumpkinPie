@@ -15,7 +15,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_protocol::java::client::play::MerchantOffer;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ageable::AgeableMob;
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::passive::villager::VillagerEntity;
@@ -69,7 +69,7 @@ impl ShowTradesToPlayerGoal {
     /// interact radius (`SetLookAndInteract.create(EntityTypes.PLAYER, 4)`), and
     /// `checkExtraStartConditions` (`ShowTradesToPlayer.java:31-39`) additionally requires
     /// both parties alive and squared distance at most 17.
-    async fn find_interaction_target(villager: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    fn find_interaction_target(villager: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let entity = villager.get_entity();
         let self_pos = entity.pos.load();
         let world = entity.world.load();
@@ -89,7 +89,7 @@ impl ShowTradesToPlayerGoal {
             let Some(living) = candidate.get_living_entity() else {
                 continue;
             };
-            if !predicate.test(&world, None, living).await {
+            if !predicate.test(&world, None, living) {
                 continue;
             }
             let dist = self_pos.squared_distance_to_vec(&candidate.get_entity().pos.load());
@@ -107,12 +107,11 @@ impl ShowTradesToPlayerGoal {
     /// `updateDisplayItems` (`ShowTradesToPlayer.java:95-101`): every in-stock offer whose
     /// cost A or cost B is the item the player is holding contributes its result stack
     /// (`offer.assemble()`).
-    async fn update_display_items(
-        &self,
-        held_id: u16,
-        villager: &VillagerEntity,
-    ) -> Vec<ItemStack> {
-        let offers = villager.offers.lock().await;
+    fn update_display_items(&self, held_id: u16, villager: &VillagerEntity) -> Vec<ItemStack> {
+        let offers = villager
+            .offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         offers
             .iter()
             .filter(|offer| Self::offer_matches(offer, held_id))
@@ -146,32 +145,32 @@ impl ShowTradesToPlayerGoal {
 
     /// `displayAsHeldItem` (`ShowTradesToPlayer.java:112-115`): put the stack in the main
     /// hand and zero its drop chance so the displayed offer can never be dropped.
-    async fn display_as_held_item(villager: &VillagerEntity, stack: ItemStack) {
+    fn display_as_held_item(villager: &VillagerEntity, stack: ItemStack) {
         let living = &villager.mob_entity.living_entity;
         living
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .equipment
             .insert(EquipmentSlot::MAIN_HAND, stack.clone());
         living
             .equipment_drop_chances
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(EquipmentSlot::MAIN_HAND.clone(), 0.0);
         living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, stack)]);
     }
 
     /// `clearHeldItem` (`ShowTradesToPlayer.java:107-110`): empty main hand and restore the
     /// default villager drop chance.
-    async fn clear_held_item(villager: &VillagerEntity) {
-        Self::display_as_held_item(villager, ItemStack::EMPTY.clone()).await;
+    fn clear_held_item(villager: &VillagerEntity) {
+        Self::display_as_held_item(villager, ItemStack::EMPTY.clone());
         villager
             .mob_entity
             .living_entity
             .equipment_drop_chances
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(
                 EquipmentSlot::MAIN_HAND.clone(),
                 DEFAULT_MAIN_HAND_DROP_CHANCE,
@@ -180,14 +179,10 @@ impl ShowTradesToPlayerGoal {
 
     /// `tick` body (`ShowTradesToPlayer.java:53-64`), minus the look-time bookkeeping the
     /// goal lifecycle owns.
-    async fn tick_inner(&mut self, villager: &VillagerEntity, target: &Arc<dyn EntityBase>) {
+    fn tick_inner(&mut self, villager: &VillagerEntity, target: &Arc<dyn EntityBase>) {
         // `findItemsToDisplay` (`ShowTradesToPlayer.java:73-89`): recompute the display list
         // whenever the player's held item changes.
-        let held = villager
-            .mob_entity
-            .living_entity
-            .held_item(target.as_ref())
-            .await;
+        let held = villager.mob_entity.living_entity.held_item(target.as_ref());
         let held_id = (!held.is_empty()).then_some(held.item.id);
         let changed = self.player_item_id != held_id;
         if changed {
@@ -196,18 +191,18 @@ impl ShowTradesToPlayerGoal {
         }
 
         if changed && let Some(held_id) = held_id {
-            self.display_items = self.update_display_items(held_id, villager).await;
+            self.display_items = self.update_display_items(held_id, villager);
             if !self.display_items.is_empty() {
                 // `findItemsToDisplay` lines 85-86: `this.lookTime = 900; displayFirstItem`.
                 self.look_time = MAX_LOOK_TIME;
                 let first = self.display_items[0].clone();
-                Self::display_as_held_item(villager, first).await;
+                Self::display_as_held_item(villager, first);
             }
         }
 
         if self.display_items.is_empty() {
             // `tick` lines 58-61: nothing to show; cap the remaining look time.
-            Self::clear_held_item(villager).await;
+            Self::clear_held_item(villager);
             self.look_time = self.look_time.min(STARTING_LOOK_TIME);
         } else {
             // `displayCyclingItems` (`ShowTradesToPlayer.java:124-134`): rotate through two
@@ -221,7 +216,7 @@ impl ShowTradesToPlayerGoal {
                         self.display_index = 0;
                     }
                     let next = self.display_items[self.display_index].clone();
-                    Self::display_as_held_item(villager, next).await;
+                    Self::display_as_held_item(villager, next);
                 }
             }
         }
@@ -231,81 +226,71 @@ impl ShowTradesToPlayerGoal {
 }
 
 impl Goal for ShowTradesToPlayerGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() else {
-                return false;
-            };
-            // `!body.isBaby()` (`ShowTradesToPlayer.java:38`); babies have no trades anyway.
-            if villager.is_baby() {
-                return false;
-            }
-            let Some(target) = Self::find_interaction_target(mob).await else {
-                return false;
-            };
-            self.target = Some(target);
-            true
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() else {
+            return false;
+        };
+        // `!body.isBaby()` (`ShowTradesToPlayer.java:38`); babies have no trades anyway.
+        if villager.is_baby() {
+            return false;
+        }
+        let Some(target) = Self::find_interaction_target(mob) else {
+            return false;
+        };
+        self.target = Some(target);
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // `canStillUse` (`ShowTradesToPlayer.java:41-43`): conditions must still hold and
-            // look time must remain. The stored target standing in for `INTERACTION_TARGET`
-            // must still be alive and in range.
-            if self.look_time <= 0 {
-                return false;
-            }
-            let Some(target) = self.target.clone() else {
-                return false;
-            };
-            if !target.get_entity().is_alive() {
-                return false;
-            }
-            let dist_sq = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&target.get_entity().pos.load());
-            dist_sq <= MAX_DISTANCE_SQR
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        // `canStillUse` (`ShowTradesToPlayer.java:41-43`): conditions must still hold and
+        // look time must remain. The stored target standing in for `INTERACTION_TARGET`
+        // must still be alive and in range.
+        if self.look_time <= 0 {
+            return false;
+        }
+        let Some(target) = self.target.clone() else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
+        let dist_sq = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&target.get_entity().pos.load());
+        dist_sq <= MAX_DISTANCE_SQR
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `start` (`ShowTradesToPlayer.java:45-51`).
-            self.cycle_counter = 0;
-            self.display_index = 0;
-            self.look_time = STARTING_LOOK_TIME;
-            if let Some(target) = self.target.clone() {
-                Self::look_at_target(mob, &target);
-            }
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let (Some(villager), Some(target)) = (
-                mob.cast_any().downcast_ref::<VillagerEntity>(),
-                self.target.clone(),
-            ) else {
-                return;
-            };
+    fn start(&mut self, mob: &dyn Mob) {
+        // `start` (`ShowTradesToPlayer.java:45-51`).
+        self.cycle_counter = 0;
+        self.display_index = 0;
+        self.look_time = STARTING_LOOK_TIME;
+        if let Some(target) = self.target.clone() {
             Self::look_at_target(mob, &target);
-            self.tick_inner(villager, &target).await;
-        })
+        }
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `stop` (`ShowTradesToPlayer.java:66-71`). Erasing INTERACTION_TARGET is
-            // implicit: the goal drops its target reference.
-            self.target = None;
-            self.player_item_id = None;
-            if let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() {
-                Self::clear_held_item(villager).await;
-            }
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        let (Some(villager), Some(target)) = (
+            mob.cast_any().downcast_ref::<VillagerEntity>(),
+            self.target.clone(),
+        ) else {
+            return;
+        };
+        Self::look_at_target(mob, &target);
+        self.tick_inner(villager, &target);
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        // `stop` (`ShowTradesToPlayer.java:66-71`). Erasing INTERACTION_TARGET is
+        // implicit: the goal drops its target reference.
+        self.target = None;
+        self.player_item_id = None;
+        if let Some(villager) = mob.cast_any().downcast_ref::<VillagerEntity>() {
+            Self::clear_held_item(villager);
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

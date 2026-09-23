@@ -18,7 +18,7 @@ use rand::RngExt;
 use uuid::Uuid;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, breed::BreedGoal, escape_danger::EscapeDangerGoal,
         follow_parent::FollowParentGoal, llama_follow_caravan::LlamaFollowCaravanGoal,
@@ -248,71 +248,65 @@ pub trait LlamaMob: AbstractChestedHorse {
 
     /// `Llama.handleEating` (`Llama.java:178-234`): llama has its own wheat/hay-block food table
     /// instead of `AbstractHorse`'s default.
-    fn handle_llama_eating<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a ItemStack,
-    ) -> EntityBaseFuture<'a, bool>
+    fn handle_llama_eating<'a>(&'a self, player: &'a Arc<Player>, item_stack: &'a ItemStack) -> bool
     where
         Self: Sized,
     {
-        Box::pin(async move {
-            let id = item_stack.item.id;
-            let (age_up_seconds, temper, heal): (i32, i32, f32) = if id == Item::WHEAT.id {
-                (10, 3, 2.0)
-            } else if id == Item::HAY_BLOCK.id {
-                (90, 6, 10.0)
-            } else {
-                return false;
-            };
+        let id = item_stack.item.id;
+        let (age_up_seconds, temper, heal): (i32, i32, f32) = if id == Item::WHEAT.id {
+            (10, 3, 2.0)
+        } else if id == Item::HAY_BLOCK.id {
+            (90, 6, 10.0)
+        } else {
+            return false;
+        };
 
-            let mob_entity = self.get_mob_entity();
-            let mut item_used = false;
+        let mob_entity = self.get_mob_entity();
+        let mut item_used = false;
 
-            if id == Item::HAY_BLOCK.id
-                && self.is_tamed()
-                && !self.is_baby()
-                && self.can_fall_in_love()
-                && !mob_entity.is_in_love()
-            {
-                item_used = true;
-                mob_entity.set_love_ticks(600, Some(player.gameprofile.id));
-            }
+        if id == Item::HAY_BLOCK.id
+            && self.is_tamed()
+            && !self.is_baby()
+            && self.can_fall_in_love()
+            && !mob_entity.is_in_love()
+        {
+            item_used = true;
+            mob_entity.set_love_ticks(600, Some(player.gameprofile.id));
+        }
 
-            let living = &mob_entity.living_entity;
-            if living.health.load() < living.get_max_health() && heal > 0.0 {
-                living.heal(heal);
-                item_used = true;
-            }
+        let living = &mob_entity.living_entity;
+        if living.health.load() < living.get_max_health() && heal > 0.0 {
+            living.heal(heal);
+            item_used = true;
+        }
 
-            if self.is_baby() && age_up_seconds > 0 {
-                let entity = &living.entity;
-                let world = entity.world.load();
-                let pos = entity.pos.load();
-                world.spawn_particle(
-                    pos + Vector3::new(0.0, f64::from(entity.height()) * 0.5, 0.0),
-                    Vector3::new(0.5, 0.5, 0.5),
-                    1.0,
-                    7,
-                    Particle::HappyVillager,
-                );
-                let new_age = (entity.age.load(Relaxed) + age_up_seconds * 20).min(0);
-                entity.age.store(new_age, Relaxed);
-                item_used = true;
-            }
+        if self.is_baby() && age_up_seconds > 0 {
+            let entity = &living.entity;
+            let world = entity.world.load();
+            let pos = entity.pos.load();
+            world.spawn_particle(
+                pos + Vector3::new(0.0, f64::from(entity.height()) * 0.5, 0.0),
+                Vector3::new(0.5, 0.5, 0.5),
+                1.0,
+                7,
+                Particle::HappyVillager,
+            );
+            let new_age = (entity.age.load(Relaxed) + age_up_seconds * 20).min(0);
+            entity.age.store(new_age, Relaxed);
+            item_used = true;
+        }
 
-            if temper > 0
-                && (item_used || !self.is_tamed())
-                && self.horse_data().temper.load(Relaxed) < self.max_temper()
-            {
-                let new_temper =
-                    (self.horse_data().temper.load(Relaxed) + temper).clamp(0, self.max_temper());
-                self.horse_data().temper.store(new_temper, Relaxed);
-                item_used = true;
-            }
+        if temper > 0
+            && (item_used || !self.is_tamed())
+            && self.horse_data().temper.load(Relaxed) < self.max_temper()
+        {
+            let new_temper =
+                (self.horse_data().temper.load(Relaxed) + temper).clamp(0, self.max_temper());
+            self.horse_data().temper.store(new_temper, Relaxed);
+            item_used = true;
+        }
 
-            item_used
-        })
+        item_used
     }
 
     /// `Llama.getBreedOffspring` (`Llama.java:319-334`): strength rolls `rnd(max(a,b)) + 1`, a 3%
@@ -324,69 +318,67 @@ pub trait LlamaMob: AbstractChestedHorse {
         &'a self,
         mate: &'a dyn EntityBase,
         world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>>
+    ) -> Option<Arc<dyn EntityBase>>
     where
         Self: Sized,
     {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                Uuid::new_v4(),
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            Uuid::new_v4(),
+        );
+
+        let (Some(mate_data), Some(baby_data)) = (
+            llama_data_of(mate),
+            baby.get_mob()
+                .and_then(|m| llama_data_of(m as &dyn EntityBase)),
+        ) else {
+            return Some(baby);
+        };
+
+        let mut random = rand::rng();
+
+        // `AbstractHorse.setOffspringAttributes` (`Llama.java:322`, called before the
+        // strength/variant rolls).
+        if let Some(baby_mob) = baby.get_mob() {
+            let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
+                m.get_mob_entity()
+                    .living_entity
+                    .get_attribute_base(&pumpkin_data::attributes::Attributes::MAX_HEALTH)
+            });
+            crate::entity::passive::equine::apply_offspring_attribute(
+                baby_mob,
+                &pumpkin_data::attributes::Attributes::MAX_HEALTH,
+                self.get_mob_entity()
+                    .living_entity
+                    .get_attribute_base(&pumpkin_data::attributes::Attributes::MAX_HEALTH),
+                mate_max_health,
+                MIN_HEALTH,
+                MAX_HEALTH,
+                &mut random,
             );
+        }
 
-            let (Some(mate_data), Some(baby_data)) = (
-                llama_data_of(mate),
-                baby.get_mob()
-                    .and_then(|m| llama_data_of(m as &dyn EntityBase)),
-            ) else {
-                return Some(baby);
-            };
+        let a = self.llama_data().strength.load(Relaxed);
+        let b = mate_data.strength.load(Relaxed);
+        let mut strength = 1 + random.random_range(0..a.max(b));
+        if random.random::<f32>() < 0.03 {
+            strength += 1;
+        }
+        baby_data
+            .strength
+            .store(strength.min(MAX_STRENGTH), Relaxed);
 
-            let mut random = rand::rng();
+        let picked_variant = if random.random::<bool>() {
+            self.llama_data().variant.load(Relaxed)
+        } else {
+            mate_data.variant.load(Relaxed)
+        };
+        baby_data.variant.store(picked_variant, Relaxed);
 
-            // `AbstractHorse.setOffspringAttributes` (`Llama.java:322`, called before the
-            // strength/variant rolls).
-            if let Some(baby_mob) = baby.get_mob() {
-                let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
-                    m.get_mob_entity()
-                        .living_entity
-                        .get_attribute_base(&pumpkin_data::attributes::Attributes::MAX_HEALTH)
-                });
-                crate::entity::passive::equine::apply_offspring_attribute(
-                    baby_mob,
-                    &pumpkin_data::attributes::Attributes::MAX_HEALTH,
-                    self.get_mob_entity()
-                        .living_entity
-                        .get_attribute_base(&pumpkin_data::attributes::Attributes::MAX_HEALTH),
-                    mate_max_health,
-                    MIN_HEALTH,
-                    MAX_HEALTH,
-                    &mut random,
-                );
-            }
-
-            let a = self.llama_data().strength.load(Relaxed);
-            let b = mate_data.strength.load(Relaxed);
-            let mut strength = 1 + random.random_range(0..a.max(b));
-            if random.random::<f32>() < 0.03 {
-                strength += 1;
-            }
-            baby_data
-                .strength
-                .store(strength.min(MAX_STRENGTH), Relaxed);
-
-            let picked_variant = if random.random::<bool>() {
-                self.llama_data().variant.load(Relaxed)
-            } else {
-                mate_data.variant.load(Relaxed)
-            };
-            baby_data.variant.store(picked_variant, Relaxed);
-
-            Some(baby)
-        })
+        Some(baby)
     }
 }
 
@@ -428,7 +420,7 @@ impl LlamaEntity {
     }
 
     /// `Llama.spit` (`Llama.java:340-365`), also reachable through [`RangedAttackMob`].
-    pub async fn spit(&self, target: &Arc<dyn EntityBase>) {
+    pub fn spit(&self, target: &Arc<dyn EntityBase>) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
@@ -449,7 +441,7 @@ impl LlamaEntity {
         spit.thrown.set_velocity(dx, dy + yo, dz, 1.5, 10.0);
 
         let spit_arc: Arc<dyn EntityBase> = Arc::new(spit);
-        world.spawn_entity(spit_arc).await;
+        world.spawn_entity(spit_arc);
 
         if !entity.silent.load(Relaxed) {
             world.play_sound(Sound::EntityLlamaSpit, SoundCategory::Neutral, &mob_pos);
@@ -460,27 +452,23 @@ impl LlamaEntity {
 }
 
 impl NBTStorage for LlamaEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
-            self.write_llama_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        self.write_horse_nbt(nbt);
+        self.write_chested_horse_nbt(nbt);
+        self.write_llama_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            // Vanilla reads `Strength` before `super.readAdditionalSaveData` on purpose: the
-            // super chain's chest handling sizes the inventory off `getInventoryColumns()`, which
-            // for a llama is strength-dependent (`Llama.java:110-114`).
-            self.read_llama_strength_variant(nbt);
-            self.read_horse_nbt(nbt);
-            self.read_chested_horse_nbt(nbt).await;
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_animal_nbt(nbt);
+        // Vanilla reads `Strength` before `super.readAdditionalSaveData` on purpose: the
+        // super chain's chest handling sizes the inventory off `getInventoryColumns()`, which
+        // for a llama is strength-dependent (`Llama.java:110-114`).
+        self.read_llama_strength_variant(nbt);
+        self.read_horse_nbt(nbt);
+        self.read_chested_horse_nbt(nbt);
     }
 }
 
@@ -524,11 +512,7 @@ impl AbstractHorse for LlamaEntity {
         Some(Sound::EntityLlamaEat)
     }
 
-    fn handle_eating<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn handle_eating(&self, player: &Arc<Player>, item_stack: &ItemStack) -> bool {
         self.handle_llama_eating(player, item_stack)
     }
 }
@@ -571,18 +555,13 @@ impl Mob for LlamaEntity {
 
     /// `ServerPlayer.openHorseInventory` receives the chested horse container
     /// (`ServerPlayer.java:1372-1382`) after the ridden-vehicle inventory command.
-    fn open_custom_inventory_screen<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.is_tamed() {
-                AbstractChestedHorse::open_chest_inventory(self, player).await;
-            }
-        })
+    fn open_custom_inventory_screen(&self, player: &Arc<Player>) {
+        if self.is_tamed() {
+            AbstractChestedHorse::open_chest_inventory(self, player);
+        }
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
         AbstractHorse::tick_horse_ai(self)
     }
 
@@ -590,39 +569,27 @@ impl Mob for LlamaEntity {
         2.0
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.chested_mob_interact(player, item_stack)
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            send_baby_id_if_baby(self.get_entity());
-            self.send_llama_metadata();
-        })
+    fn mob_init_data_tracker(&self) {
+        send_baby_id_if_baby(self.get_entity());
+        self.send_llama_metadata();
     }
 
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn EntityBase>> {
         self.create_llama_offspring(mate, world)
     }
 }
 
 impl RangedAttackMob for LlamaEntity {
-    fn perform_ranged_attack<'a>(
-        &'a self,
-        target: &'a Arc<dyn EntityBase>,
-        _power: f32,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.spit(target).await;
-        })
+    fn perform_ranged_attack(&self, target: &Arc<dyn EntityBase>, _power: f32) {
+        self.spit(target);
     }
 }
 

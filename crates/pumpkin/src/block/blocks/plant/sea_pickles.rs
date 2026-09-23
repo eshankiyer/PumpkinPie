@@ -1,10 +1,10 @@
+use crate::block::BlockIsReplacing;
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, CanPlaceAtArgs, CanUpdateAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
     UseWithItemArgs,
 };
-use crate::block::{BlockFuture, BlockIsReplacing};
 use crate::entity::EntityBase;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BlockProperties;
@@ -42,88 +42,77 @@ fn diamond_z_spans_and_offsets() -> [(i32, i32); 5] {
 }
 
 impl BlockBehaviour for SeaPickleBlock {
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if args.item_stack.item != &Item::BONE_MEAL
-                || !args
-                    .world
-                    .get_block(&args.position.down())
-                    .has_tag(&tag::Block::MINECRAFT_CORAL_BLOCKS)
-                || !SeaPickleProperties::from_state_id(
-                    args.world.get_block_state_id(args.position),
-                    args.block,
-                )
-                .waterlogged
-            {
-                return BlockActionResult::Pass;
-            }
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        if args.item_stack.item != &Item::BONE_MEAL
+            || !args
+                .world
+                .get_block(&args.position.down())
+                .has_tag(&tag::Block::MINECRAFT_CORAL_BLOCKS)
+            || !SeaPickleProperties::from_state_id(
+                args.world.get_block_state_id(args.position),
+                args.block,
+            )
+            .waterlogged
+        {
+            return BlockActionResult::Pass;
+        }
 
-            let base_x = args.position.0.x - 2;
-            for (added_x, (z_span, removed_z)) in diamond_z_spans_and_offsets().iter().enumerate() {
-                for added_z in 0..*z_span {
-                    let temp_y = 2 + args.position.0.y - 1;
-                    for y in (temp_y - 2)..temp_y {
-                        let lv = BlockPos::new(
-                            base_x + added_x as i32,
-                            y,
-                            args.position.0.z - removed_z + added_z,
-                        );
-                        if &lv == args.position
-                            || rand::rng().random_range(0..6) != 0
-                            || !args.world.get_block(&lv).eq(&Block::WATER)
-                            || !args
-                                .world
-                                .get_block(&lv.down())
-                                .has_tag(&tag::Block::MINECRAFT_CORAL_BLOCKS)
-                        {
-                            continue;
-                        }
-                        let mut sea_pickle_prop = SeaPickleProperties::default(args.block);
-
-                        sea_pickle_prop.pickles = rand::rng().random_range(1..=4);
-                        args.world
-                            .set_block_state(
-                                &lv,
-                                sea_pickle_prop.to_state_id(args.block),
-                                BlockFlags::NOTIFY_ALL,
-                            )
-                            .await;
+        let base_x = args.position.0.x - 2;
+        for (added_x, (z_span, removed_z)) in diamond_z_spans_and_offsets().iter().enumerate() {
+            for added_z in 0..*z_span {
+                let temp_y = 2 + args.position.0.y - 1;
+                for y in (temp_y - 2)..temp_y {
+                    let lv = BlockPos::new(
+                        base_x + added_x as i32,
+                        y,
+                        args.position.0.z - removed_z + added_z,
+                    );
+                    if &lv == args.position
+                        || rand::rng().random_range(0..6) != 0
+                        || !args.world.get_block(&lv).eq(&Block::WATER)
+                        || !args
+                            .world
+                            .get_block(&lv.down())
+                            .has_tag(&tag::Block::MINECRAFT_CORAL_BLOCKS)
+                    {
+                        continue;
                     }
+                    let mut sea_pickle_prop = SeaPickleProperties::default(args.block);
+
+                    sea_pickle_prop.pickles = rand::rng().random_range(1..=4);
+                    args.world.set_block_state(
+                        &lv,
+                        sea_pickle_prop.to_state_id(args.block),
+                        BlockFlags::NOTIFY_ALL,
+                    );
                 }
             }
-            let mut sea_pickle_prop = SeaPickleProperties::default(args.block);
-            sea_pickle_prop.pickles = 4;
-            args.world
-                .set_block_state(
-                    args.position,
-                    sea_pickle_prop.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
+        }
+        let mut sea_pickle_prop = SeaPickleProperties::default(args.block);
+        sea_pickle_prop.pickles = 4;
+        args.world.set_block_state(
+            args.position,
+            sea_pickle_prop.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
 
-            BlockActionResult::Consume
-        })
+        BlockActionResult::Consume
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if args.player.get_entity().pose.load() != EntityPose::Crouching
-                && let BlockIsReplacing::Itself(state_id) = args.replacing
-            {
-                let mut sea_pickle_prop = SeaPickleProperties::from_state_id(state_id, args.block);
-                if sea_pickle_prop.pickles < 4 {
-                    sea_pickle_prop.pickles += 1;
-                }
-                return sea_pickle_prop.to_state_id(args.block);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        if args.player.get_entity().pose.load() != EntityPose::Crouching
+            && let BlockIsReplacing::Itself(state_id) = args.replacing
+        {
+            let mut sea_pickle_prop = SeaPickleProperties::from_state_id(state_id, args.block);
+            if sea_pickle_prop.pickles < 4 {
+                sea_pickle_prop.pickles += 1;
             }
+            return sea_pickle_prop.to_state_id(args.block);
+        }
 
-            let mut sea_pickle_prop = SeaPickleProperties::default(args.block);
-            sea_pickle_prop.waterlogged = args.replacing.water_source();
-            sea_pickle_prop.to_state_id(args.block)
-        })
+        let mut sea_pickle_prop = SeaPickleProperties::default(args.block);
+        sea_pickle_prop.waterlogged = args.replacing.water_source();
+        sea_pickle_prop.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -136,19 +125,16 @@ impl BlockBehaviour for SeaPickleBlock {
             && SeaPickleProperties::from_state_id(args.state_id, args.block).pickles < 4
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::{
-    BoxFuture, BoxedRegistry, Registry,
+    BoxedRegistry, Registry,
     error::{DataKeyBuildError, DataKeyGetError},
 };
 use pumpkin_util::identifier::Identifier;
@@ -17,7 +17,7 @@ where
 
     /// Runs `callback` while all registry guards needed to access the value
     /// remain alive.
-    fn with<'a, V, F>(&'a self, callback: F) -> BoxFuture<'a, Result<V, DataKeyGetError>>
+    fn with<'a, V, F>(&'a self, callback: F) -> Result<V, DataKeyGetError>
     where
         V: Send + 'a,
         F: FnOnce(&T) -> V + Send + 'a,
@@ -30,19 +30,17 @@ fn with_from_key<'a, T, V, F>(
     root: &'a dyn Registry,
     keys: &'a [usize],
     callback: F,
-) -> BoxFuture<'a, Result<V, DataKeyGetError>>
+) -> Result<V, DataKeyGetError>
 where
     T: Send + Sync + 'static,
     V: Send + 'a,
     F: FnOnce(&T) -> V + Send + 'a,
 {
-    Box::pin(async move {
-        let Some((&value_id, registry_path)) = keys.split_last() else {
-            return Err(DataKeyGetError::InvalidKey);
-        };
+    let Some((&value_id, registry_path)) = keys.split_last() else {
+        return Err(DataKeyGetError::InvalidKey);
+    };
 
-        with_from_registry(root, registry_path, value_id, callback).await
-    })
+    with_from_registry(root, registry_path, value_id, callback)
 }
 
 fn with_from_registry<'a, T, V, F>(
@@ -50,42 +48,38 @@ fn with_from_registry<'a, T, V, F>(
     registry_path: &'a [usize],
     value_id: usize,
     callback: F,
-) -> BoxFuture<'a, Result<V, DataKeyGetError>>
+) -> Result<V, DataKeyGetError>
 where
     T: Send + Sync + 'static,
     V: Send + 'a,
     F: FnOnce(&T) -> V + Send + 'a,
 {
-    Box::pin(async move {
-        let Some((&registry_id, remaining_path)) = registry_path.split_first() else {
-            let value = current
-                .get_by_id(value_id)
-                .await
-                .ok_or(DataKeyGetError::MissingValue { id: value_id })?;
+    let Some((&registry_id, remaining_path)) = registry_path.split_first() else {
+        let value = current
+            .get_by_id(value_id)
+            .ok_or(DataKeyGetError::MissingValue { id: value_id })?;
 
-            let value = value
-                .downcast_ref::<T>()
-                .ok_or(DataKeyGetError::TypeMismatch {
-                    expected: type_name::<T>(),
-                    actual: current.item_type_name(),
-                })?;
+        let value = value
+            .downcast_ref::<T>()
+            .ok_or(DataKeyGetError::TypeMismatch {
+                expected: type_name::<T>(),
+                actual: current.item_type_name(),
+            })?;
 
-            return Ok(callback(value));
-        };
+        return Ok(callback(value));
+    };
 
-        let registry = current
-            .get_by_id(registry_id)
-            .await
-            .ok_or(DataKeyGetError::MissingRegistry { id: registry_id })?;
+    let registry = current
+        .get_by_id(registry_id)
+        .ok_or(DataKeyGetError::MissingRegistry { id: registry_id })?;
 
-        let registry = registry
-            .downcast_ref::<BoxedRegistry>()
-            .ok_or(DataKeyGetError::MissingRegistry { id: registry_id })?;
+    let registry = registry
+        .downcast_ref::<BoxedRegistry>()
+        .ok_or(DataKeyGetError::MissingRegistry { id: registry_id })?;
 
-        // `registry` borrows from `value`, so `value` and its lock guard
-        // remain alive throughout the recursive call.
-        with_from_registry(registry.as_ref(), remaining_path, value_id, callback).await
-    })
+    // `registry` borrows from `value`, so `value` and its lock guard
+    // remain alive throughout the recursive call.
+    with_from_registry(registry.as_ref(), remaining_path, value_id, callback)
 }
 pub struct ArcDataKey<T: Send + Sync + 'static> {
     keys: Box<[usize]>,
@@ -159,23 +153,23 @@ impl<T: Send + Sync + 'static> DataKeyBuilder<T> {
         self
     }
 
-    async fn build_keys(&self, registry: &dyn Registry) -> Result<Box<[usize]>, DataKeyBuildError> {
+    fn build_keys(&self, registry: &dyn Registry) -> Result<Box<[usize]>, DataKeyBuildError> {
         let Some((value_identifier, registry_path)) = self.keys.split_last() else {
             return Err(DataKeyBuildError::Empty);
         };
 
         let mut numeric_keys = Vec::with_capacity(self.keys.len());
 
-        build_key_path::<T>(registry, registry_path, value_identifier, &mut numeric_keys).await?;
+        build_key_path::<T>(registry, registry_path, value_identifier, &mut numeric_keys)?;
 
         Ok(numeric_keys.into_boxed_slice())
     }
 
-    pub async fn build_arc(
+    pub fn build_arc(
         self,
         registry: &Arc<dyn Registry>,
     ) -> Result<ArcDataKey<T>, DataKeyBuildError> {
-        let keys = self.build_keys(registry.as_ref()).await?;
+        let keys = self.build_keys(registry.as_ref())?;
 
         Ok(ArcDataKey {
             keys,
@@ -184,11 +178,11 @@ impl<T: Send + Sync + 'static> DataKeyBuilder<T> {
         })
     }
 
-    pub async fn build_ref(
+    pub fn build_ref(
         self,
         registry: &dyn Registry,
     ) -> Result<RefDataKey<'_, T>, DataKeyBuildError> {
-        let keys = self.build_keys(registry).await?;
+        let keys = self.build_keys(registry)?;
 
         Ok(RefDataKey {
             keys,
@@ -209,43 +203,37 @@ fn build_key_path<'a, T>(
     registry_path: &'a [Identifier],
     value_identifier: &'a Identifier,
     numeric_keys: &'a mut Vec<usize>,
-) -> BoxFuture<'a, Result<(), DataKeyBuildError>>
+) -> Result<(), DataKeyBuildError>
 where
     T: Send + Sync + 'static,
 {
-    Box::pin(async move {
-        let Some((identifier, remaining_path)) = registry_path.split_first() else {
-            let value_id = current
-                .get_id(value_identifier)
-                .await
-                .ok_or_else(|| DataKeyBuildError::MissingValue(value_identifier.clone()))?;
+    let Some((identifier, remaining_path)) = registry_path.split_first() else {
+        let value_id = current
+            .get_id(value_identifier)
+            .ok_or_else(|| DataKeyBuildError::MissingValue(value_identifier.clone()))?;
 
-            numeric_keys.push(value_id);
-            return Ok(());
-        };
+        numeric_keys.push(value_id);
+        return Ok(());
+    };
 
-        let id = current
-            .get_id(identifier)
-            .await
-            .ok_or_else(|| DataKeyBuildError::MissingRegistry(identifier.clone()))?;
+    let id = current
+        .get_id(identifier)
+        .ok_or_else(|| DataKeyBuildError::MissingRegistry(identifier.clone()))?;
 
-        let registry = current
-            .get_by_id(id)
-            .await
-            .ok_or_else(|| DataKeyBuildError::MissingRegistry(identifier.clone()))?;
+    let registry = current
+        .get_by_id(id)
+        .ok_or_else(|| DataKeyBuildError::MissingRegistry(identifier.clone()))?;
 
-        let registry = registry
-            .downcast_ref::<BoxedRegistry>()
-            .ok_or_else(|| DataKeyBuildError::NotARegistry(identifier.clone()))?;
+    let registry = registry
+        .downcast_ref::<BoxedRegistry>()
+        .ok_or_else(|| DataKeyBuildError::NotARegistry(identifier.clone()))?;
 
-        numeric_keys.push(id);
+    numeric_keys.push(id);
 
-        build_key_path::<T>(
-            registry.as_ref(),
-            remaining_path,
-            value_identifier,
-            numeric_keys,
-        )
-        .await
-    })
+    build_key_path::<T>(
+        registry.as_ref(),
+        remaining_path,
+        value_identifier,
+        numeric_keys,
+    )
 }

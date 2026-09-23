@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::sound::Sound;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage,
+    Entity, NBTStorage,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
 };
 
@@ -33,7 +33,7 @@ impl Mob for StraySkeletonEntity {
         Some(Sound::EntityStrayStep)
     }
 
-    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move { self.entity.reassess_weapon_goal(self).await })
+    fn pre_ai_tick(&self) {
+        self.entity.reassess_weapon_goal(self)
     }
 }

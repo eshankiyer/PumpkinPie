@@ -1,10 +1,7 @@
 use rand::Rng;
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicI32, Ordering},
-    },
+use std::pin::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 use futures::Future;
@@ -22,7 +19,7 @@ use pumpkin_world::generation::structure::structures::{
     },
 };
 
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::block::blocks::jigsaw::JigsawBlock;
 use crate::world::World;
@@ -83,24 +80,39 @@ impl JigsawBlockEntity {
     // Vanilla exposes this state through `getJoint` and the six setters below
     // (`JigsawBlockEntity.java:66-104`). These methods are used by the live
     // jigsaw packet handler and the block-entity serialization path.
-    pub async fn get_joint(&self) -> JigsawJointType {
-        *self.joint.lock().await
+    pub fn get_joint(&self) -> JigsawJointType {
+        *self
+            .joint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    pub async fn set_name(&self, name: String) {
-        *self.name.lock().await = name;
+    pub fn set_name(&self, name: String) {
+        *self
+            .name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = name;
     }
 
-    pub async fn set_pool(&self, pool: String) {
-        *self.pool.lock().await = pool;
+    pub fn set_pool(&self, pool: String) {
+        *self
+            .pool
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = pool;
     }
 
-    pub async fn set_final_state(&self, final_state: String) {
-        *self.final_state.lock().await = final_state;
+    pub fn set_final_state(&self, final_state: String) {
+        *self
+            .final_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = final_state;
     }
 
-    pub async fn set_joint(&self, joint: JigsawJointType) {
-        *self.joint.lock().await = joint;
+    pub fn set_joint(&self, joint: JigsawJointType) {
+        *self
+            .joint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = joint;
     }
 
     pub fn set_placement_priority(&self, placement_priority: i32) {
@@ -113,9 +125,17 @@ impl JigsawBlockEntity {
             .store(selection_priority, Ordering::SeqCst);
     }
 
-    pub async fn generate(&self, world: &Arc<World>, levels: i32, keep_jigsaws: bool) {
-        let pool = self.pool.lock().await.clone();
-        let target = self.target.lock().await.clone();
+    pub fn generate(&self, world: &Arc<World>, levels: i32, keep_jigsaws: bool) {
+        let pool = self
+            .pool
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let target = self
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
         let block_state = world.get_block_state(&self.position);
         let props =
@@ -152,11 +172,11 @@ impl JigsawBlockEntity {
         };
 
         if let Some(structure) = structure {
-            self.place_structure(world, structure, keep_jigsaws).await;
+            self.place_structure(world, structure, keep_jigsaws);
         }
     }
 
-    async fn place_structure(
+    fn place_structure(
         &self,
         world: &Arc<World>,
         structure: StructurePosition,
@@ -180,9 +200,9 @@ impl JigsawBlockEntity {
                 );
             }
         }
-        placer.finalize().await;
-        world.queue_block_updates(&placer.changed_positions).await;
-        world.flush_block_updates().await;
+        placer.finalize();
+        world.queue_block_updates(&placer.changed_positions);
+        world.flush_block_updates();
     }
 }
 
@@ -244,28 +264,47 @@ impl BlockEntity for JigsawBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_string(Self::NAME, self.name.lock().await.clone());
-            nbt.put_string(Self::TARGET, self.target.lock().await.clone());
-            nbt.put_string(Self::POOL, self.pool.lock().await.clone());
-            nbt.put_string(Self::FINAL_STATE, self.final_state.lock().await.clone());
-            // The vanilla save path persists the joint selected by getJoint
-            // (`JigsawBlockEntity.java:107-116`).
-            let joint = self.get_joint().await;
-            nbt.put_string(Self::JOINT, joint.as_str().to_string());
-            nbt.put_int(
-                Self::PLACEMENT_PRIORITY,
-                self.placement_priority.load(Ordering::SeqCst),
-            );
-            nbt.put_int(
-                Self::SELECTION_PRIORITY,
-                self.selection_priority.load(Ordering::SeqCst),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_string(
+            Self::NAME,
+            self.name
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            Self::TARGET,
+            self.target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            Self::POOL,
+            self.pool
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        nbt.put_string(
+            Self::FINAL_STATE,
+            self.final_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        );
+        // The vanilla save path persists the joint selected by getJoint
+        // (`JigsawBlockEntity.java:107-116`).
+        let joint = self.get_joint();
+        nbt.put_string(Self::JOINT, joint.as_str().to_string());
+        nbt.put_int(
+            Self::PLACEMENT_PRIORITY,
+            self.placement_priority.load(Ordering::SeqCst),
+        );
+        nbt.put_int(
+            Self::SELECTION_PRIORITY,
+            self.selection_priority.load(Ordering::SeqCst),
+        );
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -307,27 +346,40 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     #[tokio::test]
-    async fn setters_update_jigsaw_configuration() {
+    fn setters_update_jigsaw_configuration() {
         // These fields correspond to the vanilla JigsawBlockEntity accessors
         // (`JigsawBlockEntity.java:66-104`).
         let entity = JigsawBlockEntity::new(BlockPos::new(0, 64, 0));
 
-        entity.set_name("minecraft:entrance".to_owned()).await;
-        entity
-            .set_pool("minecraft:village/plains/houses".to_owned())
-            .await;
-        entity.set_final_state("minecraft:stone".to_owned()).await;
-        entity.set_joint(JigsawJointType::Aligned).await;
+        entity.set_name("minecraft:entrance".to_owned());
+        entity.set_pool("minecraft:village/plains/houses".to_owned());
+        entity.set_final_state("minecraft:stone".to_owned());
+        entity.set_joint(JigsawJointType::Aligned);
         entity.set_placement_priority(3);
         entity.set_selection_priority(7);
 
-        assert_eq!(&*entity.name.lock().await, "minecraft:entrance");
         assert_eq!(
-            &*entity.pool.lock().await,
+            &*entity
+                .name
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            "minecraft:entrance"
+        );
+        assert_eq!(
+            &*entity
+                .pool
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
             "minecraft:village/plains/houses"
         );
-        assert_eq!(&*entity.final_state.lock().await, "minecraft:stone");
-        assert_eq!(entity.get_joint().await, JigsawJointType::Aligned);
+        assert_eq!(
+            &*entity
+                .final_state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            "minecraft:stone"
+        );
+        assert_eq!(entity.get_joint(), JigsawJointType::Aligned);
         assert_eq!(entity.placement_priority.load(Ordering::SeqCst), 3);
         assert_eq!(entity.selection_priority.load(Ordering::SeqCst), 7);
     }

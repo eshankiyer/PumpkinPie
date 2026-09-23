@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage,
+    Entity, NBTStorage,
     mob::{Mob, MobEntity, equipment::RegionalDifficulty, skeleton::SkeletonEntityBase},
 };
 use crate::world::World;
@@ -25,23 +25,20 @@ impl Mob for SkeletonEntity {
         &self.entity.mob_entity
     }
 
-    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move { self.entity.reassess_weapon_goal(self).await })
+    fn pre_ai_tick(&self) {
+        self.entity.reassess_weapon_goal(self)
     }
 
-    fn populate_default_equipment_slots<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        difficulty: &'a RegionalDifficulty,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn populate_default_equipment_slots(
+        &self,
+        world: &Arc<World>,
+        difficulty: &RegionalDifficulty,
+    ) {
         self.entity
             .populate_default_equipment_slots(world, difficulty)
     }
 
-    fn populate_default_equipment_enchantments<'a>(
-        &'a self,
-        difficulty: &'a RegionalDifficulty,
-    ) -> EntityBaseFuture<'a, ()> {
+    fn populate_default_equipment_enchantments(&self, difficulty: &RegionalDifficulty) {
         self.entity
             .populate_default_equipment_enchantments(difficulty)
     }

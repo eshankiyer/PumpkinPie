@@ -23,7 +23,7 @@ impl ChestMinecart {
         &self.inventory
     }
 
-    pub(super) async fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
+    pub(super) fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
         container::open(
             entity,
             player,
@@ -35,14 +35,13 @@ impl ChestMinecart {
             ),
             false,
         )
-        .await
     }
 
-    pub(super) async fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.inventory.write_nbt(nbt).await;
+    pub(super) fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.inventory.write_nbt(nbt);
     }
 
-    pub(super) async fn read_nbt(&self, nbt: &NbtCompound) {
-        self.inventory.read_nbt(nbt).await;
+    pub(super) fn read_nbt(&self, nbt: &NbtCompound) {
+        self.inventory.read_nbt(nbt);
     }
 }

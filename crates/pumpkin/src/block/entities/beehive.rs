@@ -39,10 +39,9 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
 
 /// `BeehiveBlockEntity.MAX_OCCUPANTS`.
 pub const MAX_OCCUPANTS: usize = 3;
@@ -151,11 +150,16 @@ impl Occupant {
 
 /// `EnvironmentAttributes.BEES_STAY_IN_HIVE`: raised by `WeatherAttributes` while it is raining
 /// and by the `Timelines` keyframes at day-time 12542 (on) and 23460 (off).
-pub async fn bees_stay_in_hive(world: &World) -> bool {
-    if world.weather.lock().await.raining {
+pub fn bees_stay_in_hive(world: &World) -> bool {
+    if world
+        .weather
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .raining
+    {
         return true;
     }
-    let time_of_day = world.get_time_of_day().await.rem_euclid(24_000);
+    let time_of_day = world.get_time_of_day().rem_euclid(24_000);
     (12_542..23_460).contains(&time_of_day)
 }
 
@@ -232,28 +236,26 @@ impl BlockEntity for BeehiveBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_list(
-                "bees",
-                self.bees
-                    .lock()
-                    .await
-                    .iter()
-                    .map(Occupant::to_nbt)
-                    .collect(),
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_list(
+            "bees",
+            self.bees
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .map(Occupant::to_nbt)
+                .collect(),
+        );
+        let flower_pos = *self
+            .flower_pos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = flower_pos {
+            nbt.put(
+                "flower_pos",
+                NbtTag::IntArray(vec![pos.0.x, pos.0.y, pos.0.z]),
             );
-            let flower_pos = *self.flower_pos.lock().await;
-            if let Some(pos) = flower_pos {
-                nbt.put(
-                    "flower_pos",
-                    NbtTag::IntArray(vec![pos.0.x, pos.0.y, pos.0.z]),
-                );
-            }
-        })
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -273,28 +275,36 @@ impl BlockEntity for BeehiveBlockEntity {
 
     /// `BeehiveBlockEntity.serverTick`, plus the fire check `setChanged` runs before every
     /// other mutation.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if self.bees.lock().await.is_empty() {
-                return;
-            }
+    fn tick(&self, world: &Arc<World>) {
+        if self
+            .bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
+            return;
+        }
 
-            if self.is_fire_nearby(world) {
-                self.empty_all_living_from_hive(world, None, BeeReleaseStatus::Emergency)
-                    .await;
-                return;
-            }
+        if self.is_fire_nearby(world) {
+            self.empty_all_living_from_hive(world, None, BeeReleaseStatus::Emergency);
+            return;
+        }
 
-            self.tick_occupants(world).await;
+        self.tick_occupants(world);
 
-            if !self.bees.lock().await.is_empty() && rand::rng().random::<f64>() < 0.005 {
-                world.play_sound(
-                    Sound::BlockBeehiveWork,
-                    SoundCategory::Blocks,
-                    &self.position.to_f64(),
-                );
-            }
-        })
+        if !self
+            .bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+            && rand::rng().random::<f64>() < 0.005
+        {
+            world.play_sound(
+                Sound::BlockBeehiveWork,
+                SoundCategory::Blocks,
+                &self.position.to_f64(),
+            );
+        }
     }
 
     fn is_dirty(&self) -> bool {
@@ -328,28 +338,38 @@ impl BeehiveBlockEntity {
     }
 
     /// `BeehiveBlockEntity.isEmpty`.
-    pub async fn is_empty(&self) -> bool {
-        self.bees.lock().await.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
     /// `BeehiveBlockEntity.isFull`.
-    pub async fn is_full(&self) -> bool {
-        self.bees.lock().await.len() >= MAX_OCCUPANTS
+    pub fn is_full(&self) -> bool {
+        self.bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+            >= MAX_OCCUPANTS
     }
 
     /// `BeehiveBlockEntity.getOccupantCount`.
-    pub async fn occupant_count(&self) -> usize {
-        self.bees.lock().await.len()
+    pub fn occupant_count(&self) -> usize {
+        self.bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     /// Serializes occupants for `DataComponents.BEES`, matching the record fields used by
     /// `collectImplicitComponents` (`BeehiveBlockEntity.java:317-321`, `:366-375`).
-    pub(crate) async fn bees_component(&self) -> pumpkin_data::data_component_impl::BeesImpl {
+    pub(crate) fn bees_component(&self) -> pumpkin_data::data_component_impl::BeesImpl {
         pumpkin_data::data_component_impl::BeesImpl {
             bees: std::borrow::Cow::Owned(
                 self.bees
                     .lock()
-                    .await
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .iter()
                     .filter_map(|occupant| match occupant.to_nbt() {
                         NbtTag::Compound(compound) => Some(compound),
@@ -388,34 +408,39 @@ impl BeehiveBlockEntity {
     }
 
     /// `BeehiveBlockEntity.storeBee`.
-    pub async fn store_bee(&self, occupant: Occupant) {
-        self.bees.lock().await.push(occupant);
+    pub fn store_bee(&self, occupant: Occupant) {
+        self.bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(occupant);
         self.mark_dirty();
     }
 
     /// `BeehiveBlockEntity.addOccupant`: stores the bee's NBT and removes the live entity.
     ///
     /// Returns `false` when the hive is already full, in which case the bee is left alone.
-    pub async fn add_occupant(
+    pub fn add_occupant(
         &self,
         world: &Arc<World>,
         bee: &Arc<dyn EntityBase>,
         bee_flower_pos: Option<BlockPos>,
     ) -> bool {
-        if self.is_full().await {
+        if self.is_full() {
             return false;
         }
 
         let mut entity_data = NbtCompound::new();
         if let Some(living) = bee.get_living_entity() {
-            living.write_nbt(&mut entity_data).await;
+            living.write_nbt(&mut entity_data);
         }
-        bee.write_nbt(&mut entity_data).await;
-        self.store_bee(Occupant::of(entity_data, "minecraft:bee"))
-            .await;
+        bee.write_nbt(&mut entity_data);
+        self.store_bee(Occupant::of(entity_data, "minecraft:bee"));
 
         if let Some(flower_pos) = bee_flower_pos {
-            let mut saved = self.flower_pos.lock().await;
+            let mut saved = self
+                .flower_pos
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if saved.is_none() || rand::rng().random::<bool>() {
                 *saved = Some(flower_pos);
             }
@@ -426,7 +451,7 @@ impl BeehiveBlockEntity {
             SoundCategory::Blocks,
             &self.position.to_f64(),
         );
-        world.remove_entity(bee.as_ref()).await;
+        world.remove_entity(bee.as_ref());
         true
     }
 
@@ -434,19 +459,18 @@ impl BeehiveBlockEntity {
     ///
     /// `player` angers the released bees at the harvesting player, or, when the hive is
     /// sedated by a campfire below it, keeps them out of the hive for 400 ticks instead.
-    pub async fn empty_all_living_from_hive(
+    pub fn empty_all_living_from_hive(
         &self,
         world: &Arc<World>,
         player: Option<&Arc<Player>>,
         release_status: BeeReleaseStatus,
     ) -> Vec<Arc<dyn EntityBase>> {
         self.empty_all_living_from_hive_with_state(world, player, release_status, None)
-            .await
     }
 
     /// `BeehiveBlock.playerDestroy` supplies the pre-break state after removal
     /// (`BeehiveBlock.java:91-108`), because the world now contains air.
-    pub(crate) async fn empty_all_living_from_hive_with_state(
+    pub(crate) fn empty_all_living_from_hive_with_state(
         &self,
         world: &Arc<World>,
         player: Option<&Arc<Player>>,
@@ -455,9 +479,7 @@ impl BeehiveBlockEntity {
         release_state: Option<(pumpkin_data::BlockId, BlockStateId)>,
     ) -> Vec<Arc<dyn EntityBase>> {
         let sedated = self.is_sedated(world);
-        let released = self
-            .release_all_occupants(world, release_status, release_state)
-            .await;
+        let released = self.release_all_occupants(world, release_status, release_state);
 
         if let Some(player) = player {
             let player_pos = player.get_entity().pos.load();
@@ -477,8 +499,7 @@ impl BeehiveBlockEntity {
                 if sedated {
                     bee.set_stay_out_of_hive_countdown(SEDATED_STAY_OUT_TICKS);
                 } else {
-                    bee.set_mob_target(Some(player.clone() as Arc<dyn EntityBase>))
-                        .await;
+                    bee.set_mob_target(Some(player.clone() as Arc<dyn EntityBase>));
                 }
             }
         }
@@ -494,11 +515,14 @@ impl BeehiveBlockEntity {
     /// back-to-front rather than the whole vector being overwritten -- overwriting would
     /// silently drop a bee that entered during the release window, after `add_occupant` had
     /// already removed its live entity.
-    async fn remove_released(&self, indices: &[usize]) {
+    fn remove_released(&self, indices: &[usize]) {
         if indices.is_empty() {
             return;
         }
-        let mut bees = self.bees.lock().await;
+        let mut bees = self
+            .bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for &index in indices.iter().rev() {
             if index < bees.len() {
                 bees.remove(index);
@@ -509,46 +533,56 @@ impl BeehiveBlockEntity {
     }
 
     /// `BeehiveBlockEntity.releaseAllOccupants`.
-    async fn release_all_occupants(
+    fn release_all_occupants(
         &self,
         world: &Arc<World>,
         release_status: BeeReleaseStatus,
         // `playerDestroy` releases against its pre-break state (`BeehiveBlock.java:91-108`).
         release_state: Option<(pumpkin_data::BlockId, BlockStateId)>,
     ) -> Vec<Arc<dyn EntityBase>> {
-        let saved_flower_pos = *self.flower_pos.lock().await;
-        let occupants: Vec<Occupant> = self.bees.lock().await.clone();
+        let saved_flower_pos = *self
+            .flower_pos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let occupants: Vec<Occupant> = self
+            .bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
         let mut spawned = Vec::new();
         let mut released = Vec::new();
         for (index, occupant) in occupants.iter().enumerate() {
-            if let Some(entity) = self
-                .release_occupant(
-                    world,
-                    occupant,
-                    release_status,
-                    saved_flower_pos,
-                    release_state,
-                )
-                .await
-            {
+            if let Some(entity) = self.release_occupant(
+                world,
+                occupant,
+                release_status,
+                saved_flower_pos,
+                release_state,
+            ) {
                 spawned.push(entity);
                 released.push(index);
             }
         }
 
-        self.remove_released(&released).await;
+        self.remove_released(&released);
         spawned
     }
 
     /// `BeehiveBlockEntity.tickOccupants`.
-    async fn tick_occupants(&self, world: &Arc<World>) {
-        let saved_flower_pos = *self.flower_pos.lock().await;
+    fn tick_occupants(&self, world: &Arc<World>) {
+        let saved_flower_pos = *self
+            .flower_pos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // The counters are advanced under the lock so a concurrent `add_occupant` cannot lose
         // a tick; the releases themselves happen after it is dropped.
         let ready: Vec<(usize, Occupant)> = {
-            let mut bees = self.bees.lock().await;
+            let mut bees = self
+                .bees
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut ready = Vec::new();
             for (index, occupant) in bees.iter_mut().enumerate() {
                 if occupant.tick() {
@@ -570,21 +604,20 @@ impl BeehiveBlockEntity {
             };
             if self
                 .release_occupant(world, occupant, release_status, saved_flower_pos, None)
-                .await
                 .is_some()
             {
                 released.push(*index);
             }
         }
 
-        self.remove_released(&released).await;
+        self.remove_released(&released);
     }
 
     /// `BeehiveBlockEntity.releaseOccupant`.
     ///
     /// Returns the spawned entity, or `None` when the release is refused (night/rain outside an
     /// emergency, a blocked hive mouth, or an occupant whose stored type is not a bee).
-    async fn release_occupant(
+    fn release_occupant(
         &self,
         world: &Arc<World>,
         occupant: &Occupant,
@@ -595,7 +628,7 @@ impl BeehiveBlockEntity {
         release_state: Option<(pumpkin_data::BlockId, BlockStateId)>,
     ) -> Option<Arc<dyn EntityBase>> {
         let emergency = release_status == BeeReleaseStatus::Emergency;
-        if !emergency && bees_stay_in_hive(world).await {
+        if !emergency && bees_stay_in_hive(world) {
             return None;
         }
 
@@ -639,9 +672,9 @@ impl BeehiveBlockEntity {
 
         let entity = from_type(entity_type, spawn_pos, world, uuid::Uuid::new_v4());
         if let Some(living) = entity.get_living_entity() {
-            living.read_nbt_non_mut(&occupant.entity_data).await;
+            living.read_nbt_non_mut(&occupant.entity_data);
         }
-        entity.read_nbt_non_mut(&occupant.entity_data).await;
+        entity.read_nbt_non_mut(&occupant.entity_data);
         // `read_nbt_non_mut` restores a saved position; the occupant NBT has none, but the
         // living read still normalises the entity, so the hive-mouth spawn is applied after it.
         entity.get_entity().pos.store(spawn_pos);
@@ -658,7 +691,7 @@ impl BeehiveBlockEntity {
 
             if release_status == BeeReleaseStatus::HoneyDelivered {
                 bee.drop_off_nectar();
-                self.grow_honey(world, block, state_id).await;
+                self.grow_honey(world, block, state_id);
             }
         }
 
@@ -667,13 +700,13 @@ impl BeehiveBlockEntity {
             SoundCategory::Blocks,
             &self.position.to_f64(),
         );
-        world.spawn_entity(entity.clone()).await;
+        world.spawn_entity(entity.clone());
         Some(entity)
     }
 
     /// The honey-level half of `BeehiveBlockEntity.releaseOccupant`: `+1`, or `+2` on a
     /// 1-in-100 roll, clamped to `MAX_HONEY_LEVELS`.
-    async fn grow_honey(&self, world: &Arc<World>, block: &Block, state_id: BlockStateId) {
+    fn grow_honey(&self, world: &Arc<World>, block: &Block, state_id: BlockStateId) {
         let mut props = BeeNestLikeProperties::from_state_id(state_id, block);
         if props.honey_level >= MAX_HONEY_LEVELS {
             return;
@@ -687,13 +720,11 @@ impl BeehiveBlockEntity {
             increase -= 1;
         }
         props.honey_level += increase;
-        world
-            .set_block_state(
-                &self.position,
-                props.to_state_id(block),
-                BlockFlags::NOTIFY_ALL,
-            )
-            .await;
+        world.set_block_state(
+            &self.position,
+            props.to_state_id(block),
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 }
 

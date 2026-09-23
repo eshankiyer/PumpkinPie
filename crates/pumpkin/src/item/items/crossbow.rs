@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -112,133 +111,113 @@ fn charging_sounds(stack: &ItemStack) -> (Option<Sound>, Option<Sound>, Sound) {
 }
 
 impl ItemBehaviour for CrossbowItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let inventory = player.inventory();
-            let stack = inventory.held_item().await;
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        let inventory = player.inventory();
+        let stack = inventory.held_item();
 
-            // Every crossbow carries a ChargedProjectiles component by default, so its mere
-            // presence does not mean the crossbow is loaded. Vanilla checks the list is also
-            // non-empty (CrossbowItem.java:68).
-            if stack
-                .get_data_component::<ChargedProjectilesImpl>()
-                .is_some_and(|charged| !charged.projectiles.is_empty())
-            {
-                Self::fire_projectiles(player).await;
-                return;
-            }
+        // Every crossbow carries a ChargedProjectiles component by default, so its mere
+        // presence does not mean the crossbow is loaded. Vanilla checks the list is also
+        // non-empty (CrossbowItem.java:68).
+        if stack
+            .get_data_component::<ChargedProjectilesImpl>()
+            .is_some_and(|charged| !charged.projectiles.is_empty())
+        {
+            Self::fire_projectiles(player);
+            return;
+        }
 
-            let has_ammo = player.find_crossbow_projectile().await.is_some();
-            if !has_ammo && player.gamemode.load() != GameMode::Creative {
-                return;
-            }
+        let has_ammo = player.find_crossbow_projectile().is_some();
+        if !has_ammo && player.gamemode.load() != GameMode::Creative {
+            return;
+        }
 
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, 72000)
-                .await;
-        })
+        player
+            .living_entity
+            .set_active_hand(pumpkin_util::Hand::Right, stack, 72000);
     }
 
-    fn on_stopped_using<'a>(
-        &'a self,
-        _stack: &'a ItemStack,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let stack = player.inventory().held_item().await;
+    fn on_stopped_using(&self, _stack: &ItemStack, player: &Player) {
+        let stack = player.inventory().held_item();
 
-            // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:222) already loaded the
-            // crossbow once the charge completed while the button was still held, so a
-            // release afterwards must not draw (and consume) ammo a second time. This
-            // mirrors `releaseUsing`'s gate `power >= 1.0F && isCharged(itemStack)`
-            // (CrossbowItem.java:86-89), which only succeeds for an already-charged bow.
-            if stack
-                .get_data_component::<ChargedProjectilesImpl>()
-                .is_some_and(|charged| !charged.projectiles.is_empty())
-            {
-                player.living_entity.clear_active_hand().await;
-                return;
-            }
+        // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:222) already loaded the
+        // crossbow once the charge completed while the button was still held, so a
+        // release afterwards must not draw (and consume) ammo a second time. This
+        // mirrors `releaseUsing`'s gate `power >= 1.0F && isCharged(itemStack)`
+        // (CrossbowItem.java:86-89), which only succeeds for an already-charged bow.
+        if stack
+            .get_data_component::<ChargedProjectilesImpl>()
+            .is_some_and(|charged| !charged.projectiles.is_empty())
+        {
+            player.living_entity.clear_active_hand();
+            return;
+        }
 
-            let use_ticks = player.living_entity.item_use_time.load(Ordering::Relaxed);
-            let use_ticks = 72000 - use_ticks;
+        let use_ticks = player.living_entity.item_use_time.load(Ordering::Relaxed);
+        let use_ticks = 72000 - use_ticks;
 
-            if use_ticks >= charge_duration_ticks(&stack) {
-                let (_, _, end_sound) = charging_sounds(&stack);
-                Self::try_load_projectiles(player, end_sound).await;
-            }
-            player.living_entity.clear_active_hand().await;
-        })
+        if use_ticks >= charge_duration_ticks(&stack) {
+            let (_, _, end_sound) = charging_sounds(&stack);
+            Self::try_load_projectiles(player, end_sound);
+        }
+        player.living_entity.clear_active_hand();
     }
 
-    fn on_use_tick<'a>(
-        &'a self,
-        _stack: &'a ItemStack,
-        player: &'a Player,
-        remaining_use_ticks: i32,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let stack = player.inventory().held_item().await;
+    fn on_use_tick(&self, _stack: &ItemStack, player: &Player, remaining_use_ticks: i32) {
+        let stack = player.inventory().held_item();
 
-            // Already loaded: vanilla's `isCharged` check (CrossbowItem.java:222) stops the
-            // loading branch, and the start/mid sounds only fire once per use anyway.
-            if stack
-                .get_data_component::<ChargedProjectilesImpl>()
-                .is_some_and(|charged| !charged.projectiles.is_empty())
-            {
-                return;
-            }
+        // Already loaded: vanilla's `isCharged` check (CrossbowItem.java:222) stops the
+        // loading branch, and the start/mid sounds only fire once per use anyway.
+        if stack
+            .get_data_component::<ChargedProjectilesImpl>()
+            .is_some_and(|charged| !charged.projectiles.is_empty())
+        {
+            return;
+        }
 
-            let charge_duration = charge_duration_ticks(&stack);
-            if charge_duration == 0 {
-                return;
-            }
+        let charge_duration = charge_duration_ticks(&stack);
+        if charge_duration == 0 {
+            return;
+        }
 
-            let held_ticks = 72000 - remaining_use_ticks;
-            let (start_sound, mid_sound, end_sound) = charging_sounds(&stack);
+        let held_ticks = 72000 - remaining_use_ticks;
+        let (start_sound, mid_sound, end_sound) = charging_sounds(&stack);
 
-            // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:202-238): the charging
-            // progress is `(useDuration - ticksRemaining) / chargeDuration`, with sounds at
-            // START_SOUND_PERCENT 0.2 and MID_SOUND_PERCENT 0.5 played exactly once per use.
-            // Held ticks increase by one each tick, so "first tick at or past a threshold"
-            // equals the smallest tick count reaching it: ceil(threshold * duration).
-            let start_at = (0.2 * charge_duration as f32).ceil() as i32;
-            let mid_at = (0.5 * charge_duration as f32).ceil() as i32;
+        // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:202-238): the charging
+        // progress is `(useDuration - ticksRemaining) / chargeDuration`, with sounds at
+        // START_SOUND_PERCENT 0.2 and MID_SOUND_PERCENT 0.5 played exactly once per use.
+        // Held ticks increase by one each tick, so "first tick at or past a threshold"
+        // equals the smallest tick count reaching it: ceil(threshold * duration).
+        let start_at = (0.2 * charge_duration as f32).ceil() as i32;
+        let mid_at = (0.5 * charge_duration as f32).ceil() as i32;
 
-            if held_ticks == start_at
-                && let Some(sound) = start_sound
-            {
-                player.world().play_sound_fine(
-                    sound,
-                    SoundCategory::Players,
-                    &player.position(),
-                    0.5,
-                    1.0,
-                );
-            }
-            if held_ticks == mid_at
-                && let Some(sound) = mid_sound
-            {
-                player.world().play_sound_fine(
-                    sound,
-                    SoundCategory::Players,
-                    &player.position(),
-                    0.5,
-                    1.0,
-                );
-            }
+        if held_ticks == start_at
+            && let Some(sound) = start_sound
+        {
+            player.world().play_sound_fine(
+                sound,
+                SoundCategory::Players,
+                &player.position(),
+                0.5,
+                1.0,
+            );
+        }
+        if held_ticks == mid_at
+            && let Some(sound) = mid_sound
+        {
+            player.world().play_sound_fine(
+                sound,
+                SoundCategory::Players,
+                &player.position(),
+                0.5,
+                1.0,
+            );
+        }
 
-            if held_ticks >= charge_duration {
-                // Vanilla CrossbowItem.java:222-236: loading at full charge; the
-                // loading-end sound inside is gated on the load succeeding.
-                Self::try_load_projectiles(player, end_sound).await;
-            }
-        })
+        if held_ticks >= charge_duration {
+            // Vanilla CrossbowItem.java:222-236: loading at full charge; the
+            // loading-end sound inside is gated on the load succeeding.
+            Self::try_load_projectiles(player, end_sound);
+        }
     }
 
     /// Vanilla `CrossbowItem.useOnRelease` keeps the active use alive until release
@@ -297,13 +276,13 @@ impl CrossbowItem {
     /// item into the `CHARGED_PROJECTILES` component. Returns whether anything was loaded;
     /// on success it also plays the loading-end sound exactly as `onUseTick` does
     /// (CrossbowItem.java:222-236).
-    async fn try_load_projectiles(player: &Player, end_sound: Sound) -> bool {
-        let arrow_slot = player.find_crossbow_projectile().await;
+    fn try_load_projectiles(player: &Player, end_sound: Sound) -> bool {
+        let arrow_slot = player.find_crossbow_projectile();
         let (arrow_nbt_wrapper, slot) = {
             if let Some(slot) = arrow_slot {
                 let inventory = player.inventory();
 
-                let arrow_stack = inventory.get_stack(slot).await;
+                let arrow_stack = inventory.get_stack(slot);
                 let mut arrow_nbt = pumpkin_nbt::compound::NbtCompound::new();
                 arrow_stack
                     .copy_with_count(1)
@@ -323,7 +302,7 @@ impl CrossbowItem {
             return false;
         };
 
-        let mut stack = player.inventory().held_item().await;
+        let mut stack = player.inventory().held_item();
         stack.patch.push((
             DataComponent::ChargedProjectiles,
             Some(Box::new(ChargedProjectilesImpl {
@@ -331,15 +310,13 @@ impl CrossbowItem {
             })),
         ));
         let updated_stack = stack.clone();
-        player.inventory().set_held_item(stack).await;
+        player.inventory().set_held_item(stack);
 
         if player.gamemode.load() != GameMode::Creative {
-            player.consume_arrow(slot).await;
+            player.consume_arrow(slot);
         }
 
-        player
-            .sync_hand_slot(player.inventory.get_selected_slot() as usize, updated_stack)
-            .await;
+        player.sync_hand_slot(player.inventory.get_selected_slot() as usize, updated_stack);
 
         // Vanilla `CrossbowItem#onUseTick`: volume 1.0, pitch
         // 1.0F / (random.nextFloat() * 0.5F + 1.0F) + 0.2F.
@@ -354,8 +331,8 @@ impl CrossbowItem {
         true
     }
 
-    async fn fire_projectiles(player: &Player) {
-        let mut held = player.inventory().held_item().await;
+    fn fire_projectiles(player: &Player) {
+        let mut held = player.inventory().held_item();
         let projectiles = held.get_data_component::<ChargedProjectilesImpl>().cloned();
         let has_multishot =
             held.get_data_component::<EnchantmentsImpl>()
@@ -416,7 +393,7 @@ impl CrossbowItem {
                             1.0,
                         );
                         let rocket_arc: Arc<dyn EntityBase> = Arc::new(rocket);
-                        world.spawn_entity(rocket_arc).await;
+                        world.spawn_entity(rocket_arc);
                     } else {
                         let arrow_entity = Entity::new(
                             world.clone(),
@@ -444,7 +421,7 @@ impl CrossbowItem {
                             arrow.set_pierce_level(pierce_level);
                         }
                         let arrow_arc: Arc<dyn EntityBase> = Arc::new(arrow);
-                        world.spawn_entity(arrow_arc).await;
+                        world.spawn_entity(arrow_arc);
                     }
 
                     // Vanilla `CrossbowItem#shootProjectile` plays CROSSBOW_SHOOT once per fired
@@ -462,8 +439,8 @@ impl CrossbowItem {
 
             held.patch
                 .retain(|(id, _)| *id != DataComponent::ChargedProjectiles);
-            player.damage_held_item(total_durability_use).await;
-            player.inventory().set_held_item(held).await;
+            player.damage_held_item(total_durability_use);
+            player.inventory().set_held_item(held);
         }
     }
 }

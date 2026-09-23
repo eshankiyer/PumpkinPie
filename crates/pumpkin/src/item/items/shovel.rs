@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use crate::entity::{EntityBase, player::Player};
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
@@ -25,105 +23,94 @@ impl ItemMetadata for ShovelItem {
 }
 
 impl ItemBehaviour for ShovelItem {
-    fn use_on_block<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        _item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Vanilla ShovelItem#useOn: `if (context.getClickedFace() == Direction.DOWN) return
-            // InteractionResult.PASS;` guards the entire method, both flattening and campfire
-            // dowsing -- shoveling the bottom face of a block never does anything.
-            if face == BlockDirection::Down {
-                return;
-            }
+        block: &Block,
+        _server: &Server,
+    ) {
+        // Vanilla ShovelItem#useOn: `if (context.getClickedFace() == Direction.DOWN) return
+        // InteractionResult.PASS;` guards the entire method, both flattening and campfire
+        // dowsing -- shoveling the bottom face of a block never does anything.
+        if face == BlockDirection::Down {
+            return;
+        }
 
-            let world = player.world();
-            // Yes, Minecraft does hardcode these
-            let mut changed = if (block == &Block::GRASS_BLOCK
-                || block == &Block::DIRT
-                || block == &Block::COARSE_DIRT
-                || block == &Block::ROOTED_DIRT
-                || block == &Block::PODZOL
-                || block == &Block::MYCELIUM)
-                && world.get_block_state(&location.up()).is_air()
-            {
-                world
-                    .set_block_state(
-                        &location,
-                        Block::DIRT_PATH.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-                // Vanilla `ShovelItem#useOn` uses `level.playSound(player, pos, ...)`, which plays
-                // the sound at the block centre for every nearby player except the one acting.
-                world.play_block_sound_expect(
-                    player,
-                    Sound::ItemShovelFlatten,
-                    SoundCategory::Blocks,
-                    location,
-                );
-                true
-            } else {
-                false
-            };
-            if block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE {
-                let mut campfire_props = CampfireLikeProperties::from_state_id(
-                    world.get_block_state(&location).id,
-                    block,
-                );
-                if campfire_props.lit {
-                    world.sync_world_event(WorldEvent::SoundExtinguishFire, location, 0);
+        let world = player.world();
+        // Yes, Minecraft does hardcode these
+        let mut changed = if (block == &Block::GRASS_BLOCK
+            || block == &Block::DIRT
+            || block == &Block::COARSE_DIRT
+            || block == &Block::ROOTED_DIRT
+            || block == &Block::PODZOL
+            || block == &Block::MYCELIUM)
+            && world.get_block_state(&location.up()).is_air()
+        {
+            world.set_block_state(
+                &location,
+                Block::DIRT_PATH.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+            // Vanilla `ShovelItem#useOn` uses `level.playSound(player, pos, ...)`, which plays
+            // the sound at the block centre for every nearby player except the one acting.
+            world.play_block_sound_expect(
+                player,
+                Sound::ItemShovelFlatten,
+                SoundCategory::Blocks,
+                location,
+            );
+            true
+        } else {
+            false
+        };
+        if block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE {
+            let mut campfire_props =
+                CampfireLikeProperties::from_state_id(world.get_block_state(&location).id, block);
+            if campfire_props.lit {
+                world.sync_world_event(WorldEvent::SoundExtinguishFire, location, 0);
 
-                    // CampfireBlock.dowse emits BLOCK_CHANGE before ShovelItem emits its
-                    // contextual block-change event (CampfireBlock.java:193-201).
-                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
-                    {
-                        emit_game_event(
-                            &world,
-                            GameEvent::BlockChange,
-                            location.to_centered_f64(),
-                            GameEventContext::of_entity(player_arc),
-                        )
-                        .await;
-                    }
-
-                    campfire_props.lit = false;
-                    world
-                        .set_block_state(
-                            &location,
-                            campfire_props.to_state_id(block),
-                            BlockFlags::NOTIFY_ALL,
-                        )
-                        .await;
-                    changed = true;
-                }
-            }
-
-            if changed {
-                // ShovelItem.useOn: level.gameEvent(BLOCK_CHANGE, pos, Context.of(player,
-                // updatedState)) (ShovelItem.java:60-67).
+                // CampfireBlock.dowse emits BLOCK_CHANGE before ShovelItem emits its
+                // contextual block-change event (CampfireBlock.java:193-201).
                 if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                    let state_id = world.get_block_state_id(&location);
                     emit_game_event(
                         &world,
                         GameEvent::BlockChange,
                         location.to_centered_f64(),
-                        GameEventContext::of_entity_with_block_state(player_arc, state_id),
-                    )
-                    .await;
+                        GameEventContext::of_entity(player_arc),
+                    );
                 }
 
-                if player.gamemode.load() != GameMode::Creative {
-                    player.damage_held_item(1).await;
-                }
+                campfire_props.lit = false;
+                world.set_block_state(
+                    &location,
+                    campfire_props.to_state_id(block),
+                    BlockFlags::NOTIFY_ALL,
+                );
+                changed = true;
             }
-        })
+        }
+
+        if changed {
+            // ShovelItem.useOn: level.gameEvent(BLOCK_CHANGE, pos, Context.of(player,
+            // updatedState)) (ShovelItem.java:60-67).
+            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                let state_id = world.get_block_state_id(&location);
+                emit_game_event(
+                    &world,
+                    GameEvent::BlockChange,
+                    location.to_centered_f64(),
+                    GameEventContext::of_entity_with_block_state(player_arc, state_id),
+                );
+            }
+
+            if player.gamemode.load() != GameMode::Creative {
+                player.damage_held_item(1);
+            }
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -74,7 +74,7 @@ impl TaskScheduler {
             next_tick: current_tick + delay,
             period: None,
         };
-        self.tasks.lock().await.push(task);
+        self.tasks.lock().push(task);
         id
     }
 
@@ -94,17 +94,17 @@ impl TaskScheduler {
             next_tick: current_tick + delay,
             period: Some(period),
         };
-        self.tasks.lock().await.push(task);
+        self.tasks.lock().push(task);
         id
     }
 
     pub async fn cancel_task(&self, id: TaskId) {
-        self.cancelled_tasks.lock().await.insert(id);
+        self.cancelled_tasks.lock().insert(id);
     }
 
-    pub async fn cancel_all_tasks(&self, plugin: &Arc<WasmPlugin>) {
-        let tasks = self.tasks.lock().await;
-        let mut cancelled = self.cancelled_tasks.lock().await;
+    pub fn cancel_all_tasks(&self, plugin: &Arc<WasmPlugin>) {
+        let tasks = self.tasks.lock();
+        let mut cancelled = self.cancelled_tasks.lock();
         for task in tasks.iter() {
             if Arc::ptr_eq(&task.plugin, plugin) {
                 cancelled.insert(task.id);
@@ -112,13 +112,13 @@ impl TaskScheduler {
         }
     }
 
-    pub async fn tick(&self, server: &Arc<Server>) {
+    pub fn tick(&self, server: &Arc<Server>) {
         let current_tick = server.tick_count.load(AtomicOrdering::Relaxed) as u64;
         let mut tasks_to_run = Vec::new();
 
         {
-            let mut tasks = self.tasks.lock().await;
-            let mut cancelled = self.cancelled_tasks.lock().await;
+            let mut tasks = self.tasks.lock();
+            let mut cancelled = self.cancelled_tasks.lock();
 
             while let Some(task) = tasks.peek() {
                 if task.next_tick > current_tick {
@@ -143,7 +143,7 @@ impl TaskScheduler {
             let server_clone = server.clone();
 
             tokio::spawn(async move {
-                let mut store = plugin.store.lock().await;
+                let mut store = plugin.store.lock();
                 match plugin.plugin_instance {
                     crate::plugin::loader::wasm::wasm_host::PluginInstance::V0_1(ref instance) => {
                         if let Ok(server_res) = store.data_mut().add_server(server_clone) {
@@ -165,7 +165,7 @@ impl TaskScheduler {
             // If repeating, schedule next run
             if let Some(period) = task.period {
                 task.next_tick = current_tick + period;
-                self.tasks.lock().await.push(task);
+                self.tasks.lock().push(task);
             }
         }
     }

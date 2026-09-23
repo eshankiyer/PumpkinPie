@@ -16,7 +16,7 @@ use pumpkin_util::random::xoroshiro128::Xoroshiro;
 use pumpkin_util::random::{RandomGenerator, RandomImpl, get_seed};
 
 use crate::entity::{
-    ai::goal::{Controls, Goal, GoalFuture, breeze_util::random_point_behind_target},
+    ai::goal::{Controls, Goal, breeze_util::random_point_behind_target},
     ai::pathfinder::NavigatorGoal,
     mob::{Mob, breeze::BreezeEntity},
 };
@@ -63,7 +63,7 @@ impl BreezeSlideGoal {
         breeze_pos.add(&direction.normalize().multiply(distance, distance, distance))
     }
 
-    async fn has_line_of_sight(mob: &dyn Mob, target: Vector3<f64>) -> bool {
+    fn has_line_of_sight(mob: &dyn Mob, target: Vector3<f64>) -> bool {
         let entity = mob.get_entity();
         entity
             .world
@@ -71,7 +71,6 @@ impl BreezeSlideGoal {
             .raycast(entity.pos.load(), target, async |block_pos, world| {
                 world.get_block_state(block_pos).is_solid()
             })
-            .await
             .is_none()
     }
 
@@ -93,93 +92,94 @@ impl BreezeSlideGoal {
 }
 
 impl Goal for BreezeSlideGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(breeze) = self.breeze.upgrade() else {
-                return false;
-            };
-            if breeze.shoot_window_ticks() > 0 || breeze.jump_cooldown_ticks() > 0 {
-                return false;
-            }
-            let entity = mob.get_entity();
-            if !entity.on_ground.load(Relaxed) || entity.touching_water.load(Relaxed) {
-                return false;
-            }
-            if !mob.get_mob_entity().navigator.lock().unwrap().is_idle() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(breeze) = self.breeze.upgrade() else {
+            return false;
+        };
+        if breeze.shoot_window_ticks() > 0 || breeze.jump_cooldown_ticks() > 0 {
+            return false;
+        }
+        let entity = mob.get_entity();
+        if !entity.on_ground.load(Relaxed) || entity.touching_water.load(Relaxed) {
+            return false;
+        }
+        if !mob.get_mob_entity().navigator.lock().unwrap().is_idle() {
+            return false;
+        }
 
-            let target = breeze.mob_entity.target.lock().await.clone();
-            target.is_some_and(|t| t.get_entity().is_alive())
-        })
+        let target = breeze
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        target.is_some_and(|t| t.get_entity().is_alive())
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            self.elapsed_ticks < MAX_DURATION_TICKS
-                && !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        self.elapsed_ticks < MAX_DURATION_TICKS
+            && !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.elapsed_ticks = 0;
-            let Some(breeze) = self.breeze.upgrade() else {
-                return;
-            };
-            let Some(target) = breeze.mob_entity.target.lock().await.clone() else {
-                return;
-            };
+    fn start(&mut self, mob: &dyn Mob) {
+        self.elapsed_ticks = 0;
+        let Some(breeze) = self.breeze.upgrade() else {
+            return;
+        };
+        let Some(target) = breeze
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
 
-            let breeze_pos = mob.get_entity().pos.load();
-            let target_pos = target.get_entity().pos.load();
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
+        let breeze_pos = mob.get_entity().pos.load();
+        let target_pos = target.get_entity().pos.load();
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
 
-            let mut destination = None;
-            if Self::within_inner_circle_range(breeze_pos, target_pos) {
-                let candidate = Self::pos_away_from(breeze_pos, target_pos, &mut random);
-                if Self::has_line_of_sight(mob, candidate).await
-                    && target_pos.squared_distance_to_vec(&candidate)
-                        > target_pos.squared_distance_to_vec(&breeze_pos)
-                {
-                    destination = Some(candidate);
-                }
+        let mut destination = None;
+        if Self::within_inner_circle_range(breeze_pos, target_pos) {
+            let candidate = Self::pos_away_from(breeze_pos, target_pos, &mut random);
+            if Self::has_line_of_sight(mob, candidate)
+                && target_pos.squared_distance_to_vec(&candidate)
+                    > target_pos.squared_distance_to_vec(&breeze_pos)
+            {
+                destination = Some(candidate);
             }
+        }
 
-            let destination = destination.unwrap_or_else(|| {
-                if random.next_bool() {
-                    random_point_behind_target(
-                        target_pos,
-                        target.get_entity().head_yaw.load(),
-                        &mut random,
-                    )
-                } else {
-                    Self::random_point_in_middle_circle(breeze_pos, target_pos, &mut random)
-                }
+        let destination = destination.unwrap_or_else(|| {
+            if random.next_bool() {
+                random_point_behind_target(
+                    target_pos,
+                    target.get_entity().head_yaw.load(),
+                    &mut random,
+                )
+            } else {
+                Self::random_point_in_middle_circle(breeze_pos, target_pos, &mut random)
+            }
+        });
+
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress(NavigatorGoal {
+                current_progress: breeze_pos,
+                destination,
+                speed: SLIDE_SPEED,
             });
-
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap()
-                .set_progress(NavigatorGoal {
-                    current_progress: breeze_pos,
-                    destination,
-                    speed: SLIDE_SPEED,
-                });
-        })
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
     }
 
-    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.elapsed_ticks += 1;
-        })
+    fn tick(&mut self, _mob: &dyn Mob) {
+        self.elapsed_ticks += 1;
     }
 
     fn should_run_every_tick(&self) -> bool {

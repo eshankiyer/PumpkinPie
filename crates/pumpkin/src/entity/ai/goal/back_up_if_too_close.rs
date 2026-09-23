@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pumpkin_data::item::Item;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{EntityBase, mob::Mob};
 
 /// Goal-system sibling of vanilla `BackUpIfTooClose`.
@@ -28,14 +28,8 @@ impl BackUpIfTooCloseGoal {
         }
     }
 
-    async fn has_crossbow(mob: &dyn Mob) -> bool {
-        mob.get_mob_entity()
-            .living_entity
-            .held_item(mob)
-            .await
-            .item
-            .id
-            == Item::CROSSBOW.id
+    fn has_crossbow(mob: &dyn Mob) -> bool {
+        mob.get_mob_entity().living_entity.held_item(mob).item.id == Item::CROSSBOW.id
     }
 }
 
@@ -43,70 +37,67 @@ impl Goal for BackUpIfTooCloseGoal {
     /// `BehaviorBuilder`'s `ATTACK_TARGET`/`NEAREST_VISIBLE_LIVING_ENTITIES` gate and the
     /// close-distance test (`BackUpIfTooClose.java:13-21`). Piglin's outer `hasCrossbow` gate
     /// (`PiglinAi.java:177`) is represented by the held-crossbow check here.
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !Self::has_crossbow(mob).await {
-                return false;
-            }
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
-                return false;
-            };
-            let entity = mob.get_entity();
-            let target_entity = target.get_entity();
-            if !target_entity.is_alive()
-                || !entity
-                    .pos
-                    .load()
-                    .squared_distance_to_vec(&target_entity.pos.load())
-                    .lt(&(self.too_close_distance * self.too_close_distance))
-                || !mob
-                    .get_mob_entity()
-                    .has_line_of_sight(target.as_ref())
-                    .await
-            {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !Self::has_crossbow(mob) {
+            return false;
+        }
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return false;
+        };
+        let entity = mob.get_entity();
+        let target_entity = target.get_entity();
+        if !target_entity.is_alive()
+            || !entity
+                .pos
+                .load()
+                .squared_distance_to_vec(&target_entity.pos.load())
+                .lt(&(self.too_close_distance * self.too_close_distance))
+            || !mob.get_mob_entity().has_line_of_sight(target.as_ref())
+        {
+            return false;
+        }
 
-            self.target = Some(target);
-            true
-        })
+        self.target = Some(target);
+        true
     }
 
     /// A declarative `OneShot` stops after its trigger tick; this goal applies the one-shot
     /// retreat (`BackUpIfTooClose.java:20-25`) from `start` and therefore does not continue.
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
     /// `lookTarget.set(new EntityTracker(target, true))`, `strafe(-strafeSpeed, 0)`, and
     /// `setYRot(rotateIfNecessary(..., 0))` (`BackUpIfTooClose.java:22-24`). The existing
     /// look controller supplies the equivalent entity tracker and the zero-step body rotation
     /// copies the current head yaw.
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = &self.target else {
-                return;
-            };
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at_entity_with_range(target, 30.0, 30.0);
-            mob.get_mob_entity()
-                .move_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .strafe(-self.strafe_speed, 0.0);
-            let entity = mob.get_entity();
-            entity.yaw.store(entity.head_yaw.load());
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        let Some(target) = &self.target else {
+            return;
+        };
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .look_at_entity_with_range(target, 30.0, 30.0);
+        mob.get_mob_entity()
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .strafe(-self.strafe_speed, 0.0);
+        let entity = mob.get_entity();
+        entity.yaw.store(entity.head_yaw.load());
     }
 
     /// Clears the cached one-shot target after the Goal selector releases the behavior.
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
     }
 
     fn controls(&self) -> Controls {

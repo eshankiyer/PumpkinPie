@@ -1414,7 +1414,7 @@ pub fn generate_chest_loot(
 }
 
 /// Items are scattered randomly across the 27 chest slots.
-pub async fn fill_chest_inventory(
+pub fn fill_chest_inventory(
     inventory: &std::sync::Arc<dyn pumpkin_world::inventory::Inventory>,
     table: &pumpkin_util::chest_loot_table::ChestLootTable,
     seed: i64,
@@ -1444,7 +1444,7 @@ pub async fn fill_chest_inventory(
         let Some(slot) = available_slots.pop() else {
             break;
         };
-        inventory.set_stack(slot, item).await;
+        inventory.set_stack(slot, item);
     }
 }
 
@@ -1806,7 +1806,9 @@ mod tests {
 
         let pot = Arc::new(DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0)));
         futures::executor::block_on(async {
-            *pot.sherds.lock().await = Some(vec![
+            *pot.sherds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(vec![
                 NbtTag::String("minecraft:brick".into()),
                 NbtTag::String("minecraft:brick".into()),
                 NbtTag::String("minecraft:brick".into()),
@@ -1837,7 +1839,9 @@ mod tests {
 
         let pot = Arc::new(DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0)));
         futures::executor::block_on(async {
-            *pot.sherds.lock().await = Some(vec![
+            *pot.sherds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(vec![
                 NbtTag::String("minecraft:brick".into()),
                 NbtTag::String("minecraft:brick".into()),
                 NbtTag::String("minecraft:brick".into()),
@@ -2124,7 +2128,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copy_components_preserves_shulker_contents() {
+    fn copy_components_preserves_shulker_contents() {
         // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) copies the container
         // component into the dropped shulker box instead of scattering its contents.
         let entity: Arc<dyn BlockEntity> = Arc::new(
@@ -2133,9 +2137,7 @@ mod tests {
             ),
         );
         let inventory = entity.clone().get_inventory().expect("shulker inventory");
-        inventory
-            .set_stack(3, ItemStack::new(5, &Item::DIAMOND))
-            .await;
+        inventory.set_stack(3, ItemStack::new(5, &Item::DIAMOND));
 
         let mut stacks = vec![ItemStack::new(1, &Item::SHULKER_BOX)];
         let params = LootContextParameters {

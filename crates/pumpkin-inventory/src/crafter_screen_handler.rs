@@ -10,15 +10,13 @@
 
 use std::{
     any::Any,
-    pin::Pin,
-    sync::{
+    pin::sync::{
         Arc,
         atomic::{AtomicU8, Ordering},
     },
 };
 
 use pumpkin_data::{item_stack::ItemStack, screen::WindowType};
-use pumpkin_world::inventory::InventoryFuture;
 use pumpkin_world::{
     block::entities::PropertyDelegate,
     inventory::{Clearable, Inventory},
@@ -27,11 +25,8 @@ use pumpkin_world::{
 use crate::{
     crafting::{crafting_screen_handler::match_crafting_recipe, recipes::RecipeInputInventory},
     player::player_inventory::PlayerInventory,
-    screen_handler::{
-        InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
-        ScreenHandlerFuture, ScreenProperty,
-    },
-    slot::{BoxFuture, Slot},
+    screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenProperty},
+    slot::Slot,
 };
 
 /// Input slots of a crafter (`CrafterMenu.java:13`).
@@ -87,15 +82,13 @@ impl Slot for CrafterSlot {
         self.id.store(id as u8, Ordering::Relaxed);
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 
     /// `CrafterSlot.java:14-17`: a disabled slot accepts nothing.
-    fn can_insert<'a>(&'a self, _stack: &'a ItemStack) -> BoxFuture<'a, bool> {
-        Box::pin(async move { self.properties.get_property(self.index as i32) != 1 })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        self.properties.get_property(self.index as i32) != 1
     }
 }
 
@@ -133,40 +126,38 @@ impl Slot for NonInteractiveResultSlot {
         self.id.store(id as u8, Ordering::Relaxed);
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 
     /// `NonInteractiveResultSlot.java:47-49`.
-    fn can_insert<'a>(&'a self, _stack: &'a ItemStack) -> BoxFuture<'a, bool> {
-        Box::pin(async move { false })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
     }
 
     /// `NonInteractiveResultSlot.java:18-20` (`mayPickup`).
-    fn can_take_items(&self, _player: &dyn InventoryPlayer) -> BoxFuture<'_, bool> {
-        Box::pin(async move { false })
+    fn can_take_items(&self, _player: &dyn InventoryPlayer) -> bool {
+        false
     }
 
     /// `NonInteractiveResultSlot.java:41-43` (`allowModification`).
-    fn allow_modification<'a>(&'a self, _player: &'a dyn InventoryPlayer) -> BoxFuture<'a, bool> {
-        Box::pin(async move { false })
+    fn allow_modification(&self, _player: &dyn InventoryPlayer) -> bool {
+        false
     }
 
     /// `NonInteractiveResultSlot.java:51-53` (`remove`).
-    fn take_stack(&self, _amount: u8) -> BoxFuture<'_, ItemStack> {
-        Box::pin(async move { ItemStack::EMPTY.clone() })
+    fn take_stack(&self, _amount: u8) -> ItemStack {
+        ItemStack::EMPTY.clone()
     }
 
     /// `NonInteractiveResultSlot.java:22-24` (`tryRemove`).
-    fn try_take_stack_range<'a>(
-        &'a self,
+    fn try_take_stack_range(
+        &self,
         _min: u8,
         _max: u8,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<ItemStack>> {
-        Box::pin(async move { None })
+        _player: &dyn InventoryPlayer,
+    ) -> Option<ItemStack> {
+        None
     }
 
     /// `NonInteractiveResultSlot.isFake` (NonInteractiveResultSlot.java:66-68):
@@ -188,7 +179,7 @@ impl Slot for NonInteractiveResultSlot {
 struct CrafterRecipeInput(Arc<dyn Inventory>);
 
 impl Clearable for CrafterRecipeInput {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    fn clear(&self) {
         self.0.clear()
     }
 }
@@ -197,19 +188,19 @@ impl Inventory for CrafterRecipeInput {
     fn size(&self) -> usize {
         self.0.size()
     }
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
+    fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
+    fn get_stack(&self, slot: usize) -> ItemStack {
         self.0.get_stack(slot)
     }
-    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
+    fn remove_stack(&self, slot: usize) -> ItemStack {
         self.0.remove_stack(slot)
     }
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
         self.0.remove_stack_specific(slot, amount)
     }
-    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
+    fn set_stack(&self, slot: usize, stack: ItemStack) {
         self.0.set_stack(slot, stack)
     }
     fn as_any(&self) -> &dyn Any {
@@ -244,7 +235,7 @@ impl CrafterScreenHandler {
     ///
     /// Slot order is the vanilla one: nine `CrafterSlot`s, the 36 standard
     /// player slots, then the non-interactive result slot at index 45.
-    pub async fn new(
+    pub fn new(
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
         inventory: Arc<dyn Inventory>,
@@ -258,7 +249,7 @@ impl CrafterScreenHandler {
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Crafter3x3)),
         };
 
-        inventory.on_open().await;
+        inventory.on_open();
 
         for index in 0..CRAFTER_SLOT_COUNT {
             handler.add_slot(Arc::new(CrafterSlot::new(
@@ -279,7 +270,7 @@ impl CrafterScreenHandler {
         }
 
         // `CrafterMenu.java:53`: this.refreshRecipeResult().
-        handler.refresh_recipe_result().await;
+        handler.refresh_recipe_result();
 
         handler
     }
@@ -289,13 +280,13 @@ impl CrafterScreenHandler {
     /// non-interactive recipe-preview slot; it does not affect actual crafting, which
     /// `CrafterBlockEntity`'s redstone-triggered tick already resolves independently via the
     /// same [`match_crafting_recipe`].
-    async fn refresh_recipe_result(&self) {
+    fn refresh_recipe_result(&self) {
         let input = CrafterRecipeInput(self.inventory.clone());
-        let result = match_crafting_recipe(&input, None).await.map_or_else(
+        let result = match_crafting_recipe(&input, None).map_or_else(
             || ItemStack::EMPTY.clone(),
             |matched| matched.to_item_stack(),
         );
-        self.result_inventory.set_stack(0, result).await;
+        self.result_inventory.set_stack(0, result);
     }
 
     /// `CrafterMenu.java:62-64`.
@@ -348,81 +339,64 @@ impl ScreenHandler for CrafterScreenHandler {
         &mut self.behaviour
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            self.inventory.on_close().await;
-        })
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        self.inventory.on_close();
     }
 
     /// `CrafterMenu.slotChanged` (`CrafterMenu.java:119-122`), fired here after any click that
     /// could have touched one of the nine input slots.
-    fn on_slot_click<'a>(
-        &'a mut self,
+    fn on_slot_click(
+        &mut self,
         slot_index: i32,
         button: i32,
         action_type: pumpkin_protocol::java::server::play::SlotActionType,
-        player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.internal_on_slot_click(slot_index, button, action_type, player)
-                .await;
-            if (0..CRAFTER_SLOT_COUNT as i32).contains(&slot_index) {
-                self.refresh_recipe_result().await;
-            }
-        })
+        player: &dyn InventoryPlayer,
+    ) {
+        self.internal_on_slot_click(slot_index, button, action_type, player);
+        if (0..CRAFTER_SLOT_COUNT as i32).contains(&slot_index) {
+            self.refresh_recipe_result();
+        }
     }
 
     /// `CrafterMenu.java:70-99`. Input slots push to the whole player area
     /// (reversed); everything else pushes back into the nine input slots. The
     /// result slot sits at index 45 but yields nothing, because
     /// `NonInteractiveResultSlot` refuses to give up its stack.
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            let mut stack_left = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots[slot_index as usize].clone();
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack_left = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots[slot_index as usize].clone();
 
-            if slot.has_stack().await {
-                let mut slot_stack = slot.get_stack().await;
-                stack_left = slot_stack.clone();
+        if slot.has_stack() {
+            let mut slot_stack = slot.get_stack();
+            stack_left = slot_stack.clone();
 
-                if slot_index < CRAFTER_SLOT_COUNT as i32 {
-                    if !self
-                        .insert_item(&mut slot_stack, INV_SLOT_START, USE_ROW_SLOT_END, true)
-                        .await
-                    {
-                        return ItemStack::EMPTY.clone();
-                    }
-                } else if !self
-                    .insert_item(&mut slot_stack, 0, CRAFTER_SLOT_COUNT as i32, false)
-                    .await
-                {
+            if slot_index < CRAFTER_SLOT_COUNT as i32 {
+                if !self.insert_item(&mut slot_stack, INV_SLOT_START, USE_ROW_SLOT_END, true) {
                     return ItemStack::EMPTY.clone();
                 }
-
-                if slot_stack.is_empty() {
-                    slot.set_stack(ItemStack::EMPTY.clone()).await;
-                } else {
-                    slot.set_stack(slot_stack.clone()).await;
-                }
-
-                // Either branch above may have touched an input slot (`slot_index < 9`, or a
-                // successful insert into `[0, 9)` from the player side): refresh the preview.
-                self.refresh_recipe_result().await;
-
-                // `CrafterMenu.java:91-95`.
-                if slot_stack.item_count == stack_left.item_count {
-                    return ItemStack::EMPTY.clone();
-                }
-                slot.on_take_item(player, &slot_stack).await;
+            } else if !self.insert_item(&mut slot_stack, 0, CRAFTER_SLOT_COUNT as i32, false) {
+                return ItemStack::EMPTY.clone();
             }
 
-            stack_left
-        })
+            if slot_stack.is_empty() {
+                slot.set_stack(ItemStack::EMPTY.clone());
+            } else {
+                slot.set_stack(slot_stack.clone());
+            }
+
+            // Either branch above may have touched an input slot (`slot_index < 9`, or a
+            // successful insert into `[0, 9)` from the player side): refresh the preview.
+            self.refresh_recipe_result();
+
+            // `CrafterMenu.java:91-95`.
+            if slot_stack.item_count == stack_left.item_count {
+                return ItemStack::EMPTY.clone();
+            }
+            slot.on_take_item(player, &slot_stack);
+        }
+
+        stack_left
     }
 }
 
@@ -435,7 +409,7 @@ mod tests {
 
     use pumpkin_data::item::Item;
     use pumpkin_world::inventory::SimpleInventory;
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
 
     use crate::{entity_equipment::EntityEquipment, screen_handler::PlayerFuture};
 
@@ -474,15 +448,11 @@ mod tests {
         fn as_any(&self) -> &dyn Any {
             self
         }
-        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) {}
         fn get_inventory(&self) -> Arc<PlayerInventory> {
             self.inventory.clone()
         }
-        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) {}
         fn has_infinite_materials(&self) -> bool {
             false
         }
@@ -492,75 +462,61 @@ mod tests {
         fn experience_level(&self) -> i32 {
             0
         }
-        fn add_experience_levels(&self, _levels: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn add_experience_levels(&self, _levels: i32) {}
         fn enchantment_seed(&self) -> i32 {
             0
         }
-        fn set_enchantment_seed(&self, _seed: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
-        fn enqueue_inventory_packet<'a>(
-            &'a self,
-            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerContent,
+        fn set_enchantment_seed(&self, _seed: i32) {}
+        fn enqueue_inventory_packet(
+            &self,
+            _packet: &pumpkin_protocol::java::client::play::CSetContainerContent,
             _window_type: Option<WindowType>,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        ) {
         }
-        fn enqueue_slot_packet<'a>(
-            &'a self,
-            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerSlot,
+        fn enqueue_slot_packet(
+            &self,
+            _packet: &pumpkin_protocol::java::client::play::CSetContainerSlot,
             _window_type: Option<WindowType>,
             _total_slots: usize,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        ) {
         }
-        fn enqueue_cursor_packet<'a>(
-            &'a self,
-            _packet: &'a pumpkin_protocol::java::client::play::CSetCursorItem,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        fn enqueue_cursor_packet(
+            &self,
+            _packet: &pumpkin_protocol::java::client::play::CSetCursorItem,
+        ) {
         }
-        fn enqueue_property_packet<'a>(
-            &'a self,
-            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerProperty,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        fn enqueue_property_packet(
+            &self,
+            _packet: &pumpkin_protocol::java::client::play::CSetContainerProperty,
+        ) {
         }
-        fn enqueue_slot_set_packet<'a>(
-            &'a self,
-            _packet: &'a pumpkin_protocol::java::client::play::CSetPlayerInventory,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        fn enqueue_slot_set_packet(
+            &self,
+            _packet: &pumpkin_protocol::java::client::play::CSetPlayerInventory,
+        ) {
         }
-        fn enqueue_set_held_item_packet<'a>(
-            &'a self,
-            _packet: &'a pumpkin_protocol::java::client::play::CSetSelectedSlot,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        fn enqueue_set_held_item_packet(
+            &self,
+            _packet: &pumpkin_protocol::java::client::play::CSetSelectedSlot,
+        ) {
         }
-        fn enqueue_equipment_change<'a>(
-            &'a self,
-            _slot: &'a pumpkin_data::data_component_impl::EquipmentSlot,
-            _stack: &'a ItemStack,
-        ) -> PlayerFuture<'a, ()> {
-            Box::pin(async {})
+        fn enqueue_equipment_change(
+            &self,
+            _slot: &pumpkin_data::data_component_impl::EquipmentSlot,
+            _stack: &ItemStack,
+        ) {
         }
-        fn award_experience(&self, _amount: i32) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn award_experience(&self, _amount: i32) {}
         fn increment_stat(
             &self,
             _category: pumpkin_data::statistic::StatisticCategory,
             _stat_id: i32,
             _amount: i32,
-        ) -> PlayerFuture<'_, ()> {
-            Box::pin(async {})
+        ) {
         }
     }
 
-    async fn handler() -> (
+    fn handler() -> (
         CrafterScreenHandler,
         Arc<SimpleInventory>,
         Arc<TestProperties>,
@@ -579,8 +535,7 @@ mod tests {
             inventory.clone(),
             result,
             properties.clone(),
-        )
-        .await;
+        );
         let player = TestPlayer {
             inventory: player_inventory,
         };
@@ -588,8 +543,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn layout_is_nine_inputs_then_player_slots_then_result() {
-        let (handler, ..) = handler().await;
+    fn layout_is_nine_inputs_then_player_slots_then_result() {
+        let (handler, ..) = handler();
         // `CrafterMenu.java:42-51`: 9 + 36 + 1.
         assert_eq!(handler.get_behaviour().slots.len(), 46);
         assert_eq!(handler.window_type(), Some(WindowType::Crafter3x3));
@@ -600,8 +555,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slot_state_round_trips_through_the_container_data() {
-        let (handler, _, properties, _) = handler().await;
+    fn slot_state_round_trips_through_the_container_data() {
+        let (handler, _, properties, _) = handler();
         assert!(!handler.is_slot_disabled(4));
 
         handler.set_slot_state(4, false);
@@ -614,8 +569,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn out_of_range_slot_ids_are_never_disabled() {
-        let (handler, ..) = handler().await;
+    fn out_of_range_slot_ids_are_never_disabled() {
+        let (handler, ..) = handler();
         assert!(!handler.is_slot_disabled(-1));
         // Index 9 is the `powered` flag, not an input slot.
         handler.set_slot_state(POWERED_PROPERTY_INDEX, false);
@@ -623,93 +578,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn powered_reads_property_nine() {
-        let (handler, _, properties, _) = handler().await;
+    fn powered_reads_property_nine() {
+        let (handler, _, properties, _) = handler();
         assert!(!handler.is_powered());
         properties.set_property(POWERED_PROPERTY_INDEX, 1);
         assert!(handler.is_powered());
     }
 
     #[tokio::test]
-    async fn disabled_input_slots_reject_items() {
-        let (handler, _, properties, _) = handler().await;
+    fn disabled_input_slots_reject_items() {
+        let (handler, _, properties, _) = handler();
         let slot = handler.get_behaviour().slots[3].clone();
-        assert!(slot.can_insert(&ItemStack::new(1, &Item::STONE)).await);
+        assert!(slot.can_insert(&ItemStack::new(1, &Item::STONE)));
 
         properties.set_property(3, 1);
-        assert!(!slot.can_insert(&ItemStack::new(1, &Item::STONE)).await);
+        assert!(!slot.can_insert(&ItemStack::new(1, &Item::STONE)));
         // Its neighbours are unaffected.
-        assert!(
-            handler.get_behaviour().slots[4]
-                .can_insert(&ItemStack::new(1, &Item::STONE))
-                .await
-        );
+        assert!(handler.get_behaviour().slots[4].can_insert(&ItemStack::new(1, &Item::STONE)));
     }
 
     #[tokio::test]
-    async fn result_slot_is_display_only() {
-        let (handler, _, _, player) = handler().await;
+    fn result_slot_is_display_only() {
+        let (handler, _, _, player) = handler();
         let result = handler.get_behaviour().slots[45].clone();
-        assert!(!result.can_insert(&ItemStack::new(1, &Item::STONE)).await);
-        assert!(!result.can_take_items(&player).await);
-        assert!(result.take_stack(1).await.is_empty());
-        assert!(result.try_take_stack_range(1, 64, &player).await.is_none());
+        assert!(!result.can_insert(&ItemStack::new(1, &Item::STONE)));
+        assert!(!result.can_take_items(&player));
+        assert!(result.take_stack(1).is_empty());
+        assert!(result.try_take_stack_range(1, 64, &player).is_none());
     }
 
     #[tokio::test]
-    async fn quick_move_from_input_reaches_player_inventory() {
-        let (mut handler, inventory, _, player) = handler().await;
-        inventory
-            .set_stack(0, ItemStack::new(5, &Item::STONE))
-            .await;
+    fn quick_move_from_input_reaches_player_inventory() {
+        let (mut handler, inventory, _, player) = handler();
+        inventory.set_stack(0, ItemStack::new(5, &Item::STONE));
 
-        handler.quick_move(&player, 0).await;
+        handler.quick_move(&player, 0);
 
-        assert!(inventory.get_stack(0).await.is_empty());
+        assert!(inventory.get_stack(0).is_empty());
         // `insert_item(.., true)` fills from the end of the player area, which
         // for a crafter stops at index 44 - the result slot is index 45.
         assert_eq!(
             handler.get_behaviour().slots[(USE_ROW_SLOT_END - 1) as usize]
                 .get_stack()
-                .await
                 .item_count,
             5
         );
-        assert!(
-            handler.get_behaviour().slots[45]
-                .get_stack()
-                .await
-                .is_empty()
-        );
+        assert!(handler.get_behaviour().slots[45].get_stack().is_empty());
     }
 
     #[tokio::test]
-    async fn quick_move_from_player_reaches_the_inputs() {
-        let (mut handler, inventory, _, player) = handler().await;
+    fn quick_move_from_player_reaches_the_inputs() {
+        let (mut handler, inventory, _, player) = handler();
         handler.get_behaviour().slots[INV_SLOT_START as usize]
-            .set_stack(ItemStack::new(2, &Item::STONE))
-            .await;
+            .set_stack(ItemStack::new(2, &Item::STONE));
 
-        handler.quick_move(&player, INV_SLOT_START).await;
+        handler.quick_move(&player, INV_SLOT_START);
 
-        assert_eq!(inventory.get_stack(0).await.item_count, 2);
+        assert_eq!(inventory.get_stack(0).item_count, 2);
     }
 
     #[tokio::test]
-    async fn quick_move_skips_disabled_inputs() {
-        let (mut handler, inventory, properties, player) = handler().await;
+    fn quick_move_skips_disabled_inputs() {
+        let (mut handler, inventory, properties, player) = handler();
         for index in 0..4 {
             properties.set_property(index, 1);
         }
         handler.get_behaviour().slots[INV_SLOT_START as usize]
-            .set_stack(ItemStack::new(2, &Item::STONE))
-            .await;
+            .set_stack(ItemStack::new(2, &Item::STONE));
 
-        handler.quick_move(&player, INV_SLOT_START).await;
+        handler.quick_move(&player, INV_SLOT_START);
 
         for index in 0..4 {
-            assert!(inventory.get_stack(index as usize).await.is_empty());
+            assert!(inventory.get_stack(index as usize).is_empty());
         }
-        assert_eq!(inventory.get_stack(4).await.item_count, 2);
+        assert_eq!(inventory.get_stack(4).item_count, 2);
     }
 }

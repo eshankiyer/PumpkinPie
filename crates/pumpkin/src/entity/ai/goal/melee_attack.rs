@@ -2,7 +2,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal};
 use crate::entity::EntityBase;
-use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::pathfinder::{NavigatorGoal, path::Path};
 use crate::entity::mob::Mob;
 use crate::entity::predicate::EntityPredicate;
@@ -35,8 +34,8 @@ const fn should_start_melee_goal(path_found: bool, in_attack_range: bool) -> boo
 }
 
 /// Vanilla: `MeleeAttackGoal::canPerformAttack` requires sensing line of sight.
-async fn has_melee_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-    mob.get_mob_entity().has_line_of_sight(target).await
+fn has_melee_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+    mob.get_mob_entity().has_line_of_sight(target)
 }
 
 /// Vanilla `MeleeAttackGoal.checkAndPerformAttack` and `canPerformAttack`
@@ -91,249 +90,250 @@ impl MeleeAttackGoal {
 }
 
 impl Goal for MeleeAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let time = {
-                let world = mob.get_entity().world.load();
-                let level_time = world.level_time.lock().await;
-                level_time.world_age
-            };
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let time = {
+            let world = mob.get_entity().world.load();
+            let level_time = world
+                .level_time
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            level_time.world_age
+        };
 
-            if time - self.last_update_time < MAX_ATTACK_TIME {
-                return false;
-            }
-            self.last_update_time = time;
+        if time - self.last_update_time < MAX_ATTACK_TIME {
+            return false;
+        }
+        self.last_update_time = time;
 
-            let (destination, target) = {
-                let target = mob.get_mob_entity().target.lock().await;
-                let Some(target) = target.as_ref() else {
-                    return false;
-                };
-                if !target.get_entity().is_alive() {
-                    return false;
-                }
-                (target.get_entity().pos.load(), target.clone())
-            };
-
-            // Vanilla `MeleeAttackGoal.canUse`:
-            // this.path = this.mob.getNavigation().createPath(target, 0);
-            // return this.path != null ? true : this.mob.isWithinMeleeAttackRange(target);
-            let mob_entity = mob.get_mob_entity();
-            // Pathfinding is async. Probe a scratch navigator so the live navigator remains
-            // installed while the world is being read and another AI tick cannot overwrite it.
-            let mut navigator = mob_entity.navigator.lock().unwrap().path_probe();
-            // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
-            // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
-            let path = navigator
-                .compute_path_with_reach_for_mob(mob, destination, 0)
-                .await;
-
-            // `canUse` and `start` are separate vanilla phases. Do not install a path for a
-            // target that was replaced while the asynchronous probe was running.
-            let target_is_current =
-                mob_entity
-                    .target
-                    .lock()
-                    .await
-                    .as_ref()
-                    .is_some_and(|current| {
-                        current.get_entity().entity_uuid == target.get_entity().entity_uuid
-                    });
-            if !target_is_current {
-                self.path = None;
-                self.path_target = None;
-                return false;
-            }
-
-            let path_found = path.is_some();
-            self.path = path;
-            self.path_target = path_found.then_some(target.get_entity().entity_uuid);
-            let in_attack_range =
-                !path_found && mob_entity.is_in_attack_range(target.as_ref()).await;
-            should_start_melee_goal(path_found, in_attack_range)
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-
-            let Some(target) = target else {
+        let (destination, target) = {
+            let target = mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(target) = target.as_ref() else {
                 return false;
             };
             if !target.get_entity().is_alive() {
                 return false;
             }
+            (target.get_entity().pos.load(), target.clone())
+        };
 
-            let in_range = mob
-                .get_mob_entity()
-                .is_in_position_target_range_pos(&target.get_entity().block_pos.load());
+        // Vanilla `MeleeAttackGoal.canUse`:
+        // this.path = this.mob.getNavigation().createPath(target, 0);
+        // return this.path != null ? true : this.mob.isWithinMeleeAttackRange(target);
+        let mob_entity = mob.get_mob_entity();
+        // Pathfinding is async. Probe a scratch navigator so the live navigator remains
+        // installed while the world is being read and another AI tick cannot overwrite it.
+        let mut navigator = mob_entity.navigator.lock().unwrap().path_probe();
+        // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+        // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
+        let path = navigator.compute_path_with_reach_for_mob(mob, destination, 0);
 
-            let is_valid_target = !target
-                .get_player()
-                .is_some_and(|p| p.is_spectator() || p.is_creative());
-            let navigation_idle = mob
-                .get_mob_entity()
-                .navigator
-                .try_lock()
-                .is_ok_and(|navigator| navigator.is_idle());
-            should_continue_melee_goal(
-                self.pause_when_mob_idle,
-                navigation_idle,
-                in_range,
-                is_valid_target,
-            )
-        })
+        // `canUse` and `start` are separate vanilla phases. Do not install a path for a
+        // target that was replaced while the asynchronous probe was running.
+        let target_is_current = mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|current| {
+                current.get_entity().entity_uuid == target.get_entity().entity_uuid
+            });
+        if !target_is_current {
+            self.path = None;
+            self.path_target = None;
+            return false;
+        }
+
+        let path_found = path.is_some();
+        self.path = path;
+        self.path_target = path_found.then_some(target.get_entity().entity_uuid);
+        let in_attack_range = !path_found && mob_entity.is_in_attack_range(target.as_ref());
+        should_start_melee_goal(path_found, in_attack_range)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // TODO: add missing fields like mob attacking to true and correct Navigation methods
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
 
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            if let Some(target) = target {
-                let pathless_in_attack_range = self.path.is_none()
-                    && mob
-                        .get_mob_entity()
-                        .is_in_attack_range(target.as_ref())
-                        .await;
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                let target_pos = target.get_entity().pos.load();
-                let goal = NavigatorGoal {
-                    current_progress: mob.get_entity().pos.load(),
-                    destination: target_pos,
-                    speed: self.speed,
-                };
-                let path = self
-                    .path_target
-                    .is_some_and(|uuid| uuid == target.get_entity().entity_uuid)
-                    .then(|| self.path.take())
-                    .flatten();
+        let Some(target) = target else {
+            return false;
+        };
+        if !target.get_entity().is_alive() {
+            return false;
+        }
+
+        let in_range = mob
+            .get_mob_entity()
+            .is_in_position_target_range_pos(&target.get_entity().block_pos.load());
+
+        let is_valid_target = !target
+            .get_player()
+            .is_some_and(|p| p.is_spectator() || p.is_creative());
+        let navigation_idle = mob
+            .get_mob_entity()
+            .navigator
+            .try_lock()
+            .is_ok_and(|navigator| navigator.is_idle());
+        should_continue_melee_goal(
+            self.pause_when_mob_idle,
+            navigation_idle,
+            in_range,
+            is_valid_target,
+        )
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        // TODO: add missing fields like mob attacking to true and correct Navigation methods
+
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(target) = target {
+            let pathless_in_attack_range =
+                self.path.is_none() && mob.get_mob_entity().is_in_attack_range(target.as_ref());
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            let target_pos = target.get_entity().pos.load();
+            let goal = NavigatorGoal {
+                current_progress: mob.get_entity().pos.load(),
+                destination: target_pos,
+                speed: self.speed,
+            };
+            let path = self
+                .path_target
+                .is_some_and(|uuid| uuid == target.get_entity().entity_uuid)
+                .then(|| self.path.take())
+                .flatten();
+            if let Some(mut path) = path {
+                trim_cauldron_path(&mut path, &mob.get_entity().world.load());
+                navigator.set_path(goal, path);
+            } else if !pathless_in_attack_range {
+                navigator.set_progress(goal);
+            }
+            self.last_target_position = Some(target_pos);
+        }
+        mob.get_mob_entity().set_attacking(true);
+        self.update_countdown_ticks = 0;
+        self.cooldown = 0;
+    }
+
+    fn stop(&mut self, mob: &dyn Mob) {
+        // Only clear target if they switched to creative/spectator
+        let should_clear = {
+            let target = mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(entity) = target.as_deref() {
+                !EntityPredicate::ExceptCreativeOrSpectator.test(entity.get_entity())
+            } else {
+                false
+            }
+        };
+        if should_clear {
+            mob.set_mob_target(None);
+        }
+
+        // Vanilla: this.mob.getNavigation().stop()
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
+        mob.get_mob_entity().set_attacking(false);
+        self.last_target_position = None;
+        self.path_target = None;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(target) = target else {
+            return;
+        };
+
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .look_at_entity_with_range(&target, 30.0, 30.0);
+
+        self.update_countdown_ticks = (self.update_countdown_ticks - 1).max(0);
+
+        let current_target_pos = target.get_entity().pos.load();
+        let should_update_nav = self.update_countdown_ticks <= 0
+            && (self.pause_when_mob_idle || has_melee_line_of_sight(mob, target.as_ref()))
+            && (self.last_target_position.is_none_or(|last_pos| {
+                current_target_pos.squared_distance_to_vec(&last_pos) >= 1.0
+            }) || mob.get_random().random_range(0..20) == 0);
+
+        if should_update_nav {
+            let mob_pos = mob.get_entity().pos.load();
+            let dist_sq = mob_pos.squared_distance_to_vec(&current_target_pos);
+            let goal = NavigatorGoal {
+                current_progress: mob_pos,
+                destination: current_target_pos,
+                speed: self.speed,
+            };
+            let mut path_probe = mob.get_mob_entity().navigator.lock().unwrap().path_probe();
+            // `Mob.onPathfindingStart/Done` also cover this refresh probe
+            // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
+            let path = path_probe.compute_path_with_reach_for_mob(mob, current_target_pos, 0);
+            let path_found = path.is_some();
+            let target_is_current = mob
+                .get_mob_entity()
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|current| {
+                    current.get_entity().entity_uuid == target.get_entity().entity_uuid
+                });
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            if target_is_current {
                 if let Some(mut path) = path {
                     trim_cauldron_path(&mut path, &mob.get_entity().world.load());
                     navigator.set_path(goal, path);
-                } else if !pathless_in_attack_range {
+                } else {
                     navigator.set_progress(goal);
                 }
-                self.last_target_position = Some(target_pos);
             }
-            mob.get_mob_entity().set_attacking(true);
-            self.update_countdown_ticks = 0;
-            self.cooldown = 0;
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            // Only clear target if they switched to creative/spectator
-            let should_clear = {
-                let target = mob.get_mob_entity().target.lock().await;
-                if let Some(entity) = target.as_deref() {
-                    !EntityPredicate::ExceptCreativeOrSpectator
-                        .test(entity.get_entity())
-                        .await
-                } else {
-                    false
-                }
-            };
-            if should_clear {
-                mob.set_mob_target(None).await;
+            self.last_target_position = Some(current_target_pos);
+            self.update_countdown_ticks = 4 + mob.get_random().random_range(0..7);
+            if dist_sq > 1024.0 {
+                self.update_countdown_ticks += 10;
+            } else if dist_sq > 256.0 {
+                self.update_countdown_ticks += 5;
             }
-
-            // Vanilla: this.mob.getNavigation().stop()
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-            mob.get_mob_entity().set_attacking(false);
-            self.last_target_position = None;
-            self.path_target = None;
-        })
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                return;
-            };
-
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-
-            self.update_countdown_ticks = (self.update_countdown_ticks - 1).max(0);
-
-            let current_target_pos = target.get_entity().pos.load();
-            let should_update_nav = self.update_countdown_ticks <= 0
-                && (self.pause_when_mob_idle
-                    || has_melee_line_of_sight(mob, target.as_ref()).await)
-                && (self.last_target_position.is_none_or(|last_pos| {
-                    current_target_pos.squared_distance_to_vec(&last_pos) >= 1.0
-                }) || mob.get_random().random_range(0..20) == 0);
-
-            if should_update_nav {
-                let mob_pos = mob.get_entity().pos.load();
-                let dist_sq = mob_pos.squared_distance_to_vec(&current_target_pos);
-                let goal = NavigatorGoal {
-                    current_progress: mob_pos,
-                    destination: current_target_pos,
-                    speed: self.speed,
-                };
-                let mut path_probe = mob.get_mob_entity().navigator.lock().unwrap().path_probe();
-                // `Mob.onPathfindingStart/Done` also cover this refresh probe
-                // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
-                let path = path_probe
-                    .compute_path_with_reach_for_mob(mob, current_target_pos, 0)
-                    .await;
-                let path_found = path.is_some();
-                let target_is_current = mob
-                    .get_mob_entity()
-                    .target
-                    .lock()
-                    .await
-                    .as_ref()
-                    .is_some_and(|current| {
-                        current.get_entity().entity_uuid == target.get_entity().entity_uuid
-                    });
-                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
-                if target_is_current {
-                    if let Some(mut path) = path {
-                        trim_cauldron_path(&mut path, &mob.get_entity().world.load());
-                        navigator.set_path(goal, path);
-                    } else {
-                        navigator.set_progress(goal);
-                    }
-                }
-                self.last_target_position = Some(current_target_pos);
-                self.update_countdown_ticks = 4 + mob.get_random().random_range(0..7);
-                if dist_sq > 1024.0 {
-                    self.update_countdown_ticks += 10;
-                } else if dist_sq > 256.0 {
-                    self.update_countdown_ticks += 5;
-                }
-                if !path_found {
-                    // Vanilla adds `FAILED_PATH_FINDING_PENALTY` (15 ticks) when moveTo fails.
-                    self.update_countdown_ticks += 15;
-                }
+            if !path_found {
+                // Vanilla adds `FAILED_PATH_FINDING_PENALTY` (15 ticks) when moveTo fails.
+                self.update_countdown_ticks += 15;
             }
+        }
 
-            self.cooldown = (self.cooldown - 1).max(0);
+        self.cooldown = (self.cooldown - 1).max(0);
 
-            let in_attack_range = mob
-                .get_mob_entity()
-                .is_in_attack_range(target.as_ref())
-                .await;
-            let has_line_of_sight = has_melee_line_of_sight(mob, target.as_ref()).await;
-            if should_perform_melee_attack(self.cooldown, in_attack_range, has_line_of_sight) {
-                self.cooldown = self.get_max_cooldown();
-                mob.get_mob_entity().living_entity.swing_hand().await;
-                mob.try_attack(target.as_ref()).await;
-            }
-        })
+        let in_attack_range = mob.get_mob_entity().is_in_attack_range(target.as_ref());
+        let has_line_of_sight = has_melee_line_of_sight(mob, target.as_ref());
+        if should_perform_melee_attack(self.cooldown, in_attack_range, has_line_of_sight) {
+            self.cooldown = self.get_max_cooldown();
+            mob.get_mob_entity().living_entity.swing_hand();
+            mob.try_attack(target.as_ref());
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

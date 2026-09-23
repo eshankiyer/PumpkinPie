@@ -9,7 +9,7 @@ use pumpkin_util::math::boundingbox::BoundingBox;
 use rand::RngExt;
 
 use super::fox_behavior::is_bright_outside;
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::{EntityBase, mob::Mob};
 
@@ -55,7 +55,7 @@ impl OfferFlowerGoal {
     /// `ServerLevel.getNearestEntity(CANDIDATE_FOR_IRON_GOLEM_GIFT, OFFER_TARGET_CONTEXT, golem,
     /// x, y, z, getGolemBoundingBox())`: the nearest tagged living entity inside the inflated box
     /// that passes the non-combat targeting conditions.
-    async fn find_candidate(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    fn find_candidate(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let mob_entity = mob.get_mob_entity();
         let self_entity = &mob_entity.living_entity.entity;
         let pos = self_entity.pos.load();
@@ -86,9 +86,7 @@ impl OfferFlowerGoal {
 
         for (candidate, _) in candidates {
             if let Some(living) = candidate.get_living_entity()
-                && conditions
-                    .test(&world, Some(&mob_entity.living_entity), living)
-                    .await
+                && conditions.test(&world, Some(&mob_entity.living_entity), living)
             {
                 return Some(candidate);
             }
@@ -114,86 +112,75 @@ impl OfferFlowerGoal {
 }
 
 impl Goal for OfferFlowerGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla: `golem.level().isBrightOutside()` (`Level.java:385-387`).
-            if !is_bright_outside(&mob.get_entity().world.load()) {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // Vanilla: `golem.level().isBrightOutside()` (`Level.java:385-387`).
+        if !is_bright_outside(&mob.get_entity().world.load()) {
+            return false;
+        }
 
-            if mob.get_random().random_range(0..START_CHANCE) != 0 {
-                return false;
-            }
+        if mob.get_random().random_range(0..START_CHANCE) != 0 {
+            return false;
+        }
 
-            self.entity = Self::find_candidate(mob).await;
-            self.entity.is_some()
-        })
+        self.entity = Self::find_candidate(mob);
+        self.entity.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.tick > 0 })
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
+        self.tick > 0
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            // `this.adjustedTickDelay(400)`: the goal does not tick every server tick, so the
-            // countdown is halved and decremented once per goal tick.
-            self.tick = to_goal_ticks(OFFER_TICKS);
-            Self::offer_flower(mob, true);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        // `this.adjustedTickDelay(400)`: the goal does not tick every server tick, so the
+        // countdown is halved and decremented once per goal tick.
+        self.tick = to_goal_ticks(OFFER_TICKS);
+        Self::offer_flower(mob, true);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            Self::offer_flower(mob, false);
+    fn stop(&mut self, mob: &dyn Mob) {
+        Self::offer_flower(mob, false);
 
-            // `OfferFlowerGoal.stop` (:62-72): a gift-accepting mob (the copper golem) still in
-            // reach when the full offer ran out gets the poppy on its empty antenna slot.
-            if self.tick == 0
-                && let Some(entity) = self.entity.as_ref()
-                && let Some(target) = entity.get_mob()
-                && entity
-                    .get_entity()
-                    .entity_type
-                    .has_tag(&tag::EntityType::MINECRAFT_ACCEPTS_IRON_GOLEM_GIFT)
-                && Self::golem_bounding_box(mob)
-                    .intersects(&entity.get_entity().bounding_box.load())
-            {
-                // Read the slot in its own statement so the equipment lock is released before
-                // `set_item_slot_and_drop_when_killed` re-acquires it.
-                let antenna_empty = target
-                    .get_mob_entity()
-                    .living_entity
-                    .entity_equipment
-                    .lock()
-                    .await
-                    .get(&EQUIPMENT_SLOT_ANTENNA)
-                    .is_empty();
-                if antenna_empty {
-                    target
-                        .set_item_slot_and_drop_when_killed(
-                            EQUIPMENT_SLOT_ANTENNA,
-                            ItemStack::new(1, &Item::POPPY),
-                        )
-                        .await;
-                }
+        // `OfferFlowerGoal.stop` (:62-72): a gift-accepting mob (the copper golem) still in
+        // reach when the full offer ran out gets the poppy on its empty antenna slot.
+        if self.tick == 0
+            && let Some(entity) = self.entity.as_ref()
+            && let Some(target) = entity.get_mob()
+            && entity
+                .get_entity()
+                .entity_type
+                .has_tag(&tag::EntityType::MINECRAFT_ACCEPTS_IRON_GOLEM_GIFT)
+            && Self::golem_bounding_box(mob).intersects(&entity.get_entity().bounding_box.load())
+        {
+            // Read the slot in its own statement so the equipment lock is released before
+            // `set_item_slot_and_drop_when_killed` re-acquires it.
+            let antenna_empty = target
+                .get_mob_entity()
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&EQUIPMENT_SLOT_ANTENNA)
+                .is_empty();
+            if antenna_empty {
+                target.set_item_slot_and_drop_when_killed(
+                    EQUIPMENT_SLOT_ANTENNA,
+                    ItemStack::new(1, &Item::POPPY),
+                );
             }
+        }
 
-            self.entity = None;
-        })
+        self.entity = None;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(entity) = self.entity.as_ref() {
-                mob.get_mob_entity()
-                    .look_control
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .look_at_entity_with_range(entity, 30.0, 30.0);
-            }
-            self.tick -= 1;
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        if let Some(entity) = self.entity.as_ref() {
+            mob.get_mob_entity()
+                .look_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .look_at_entity_with_range(entity, 30.0, 30.0);
+        }
+        self.tick -= 1;
     }
 
     fn controls(&self) -> Controls {

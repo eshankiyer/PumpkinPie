@@ -35,10 +35,9 @@ use pumpkin_world::inventory::SimpleInventory;
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
-    InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
-    offer_or_drop_stack,
+    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack,
 };
-use crate::slot::{BoxFuture, Slot};
+use crate::slot::Slot;
 
 /// `AnvilMenu.calculateIncreasedRepairCost` (AnvilMenu.java:276-278).
 #[must_use]
@@ -276,13 +275,12 @@ impl GrindstoneScreenHandler {
         handler
     }
 
-    async fn update_result(&self) {
-        let input = self.repair_inventory.get_stack(0).await;
-        let additional = self.repair_inventory.get_stack(1).await;
+    fn update_result(&self) {
+        let input = self.repair_inventory.get_stack(0);
+        let additional = self.repair_inventory.get_stack(1);
 
         self.result_inventory
-            .set_stack(0, compute_result(&input, &additional))
-            .await;
+            .set_stack(0, compute_result(&input, &additional));
     }
 }
 
@@ -312,96 +310,84 @@ impl ScreenHandler for GrindstoneScreenHandler {
         self
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            for i in 0..2 {
-                let stack = self.repair_inventory.remove_stack(i).await;
-                if !stack.is_empty() {
-                    offer_or_drop_stack(player, stack).await;
-                }
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        for i in 0..2 {
+            let stack = self.repair_inventory.remove_stack(i);
+            if !stack.is_empty() {
+                offer_or_drop_stack(player, stack);
             }
-        })
+        }
     }
 
-    fn on_slot_click<'a>(
-        &'a mut self,
+    fn on_slot_click(
+        &mut self,
         slot_index: i32,
         button: i32,
         action_type: SlotActionType,
-        player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.internal_on_slot_click(slot_index, button, action_type, player)
-                .await;
-            if refreshes_result_for_slot(slot_index) {
-                self.update_result().await;
-            }
-        })
+        player: &dyn InventoryPlayer,
+    ) {
+        self.internal_on_slot_click(slot_index, button, action_type, player);
+        if refreshes_result_for_slot(slot_index) {
+            self.update_result();
+        }
     }
 
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            let mut stack_left = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack_left = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots.get(slot_index as usize).cloned();
 
-            let Some(slot) = slot else {
-                return stack_left;
-            };
-            if !slot.has_stack().await {
-                return stack_left;
+        let Some(slot) = slot else {
+            return stack_left;
+        };
+        if !slot.has_stack() {
+            return stack_left;
+        }
+
+        let mut item = slot.get_cloned_stack();
+        stack_left = item.clone();
+
+        if slot_index == 2 {
+            if !self.insert_item(&mut item, 3, 39, true) {
+                return ItemStack::EMPTY.clone();
             }
+            slot.on_quick_move_crafted(item.clone(), stack_left.clone());
+        } else if slot_index != 0 && slot_index != 1 {
+            let input_empty = self.repair_inventory.get_stack(0).is_empty();
+            let additional_empty = self.repair_inventory.get_stack(1).is_empty();
 
-            let mut item = slot.get_cloned_stack().await;
-            stack_left = item.clone();
-
-            if slot_index == 2 {
-                if !self.insert_item(&mut item, 3, 39, true).await {
-                    return ItemStack::EMPTY.clone();
-                }
-                slot.on_quick_move_crafted(item.clone(), stack_left.clone())
-                    .await;
-            } else if slot_index != 0 && slot_index != 1 {
-                let input_empty = self.repair_inventory.get_stack(0).await.is_empty();
-                let additional_empty = self.repair_inventory.get_stack(1).await.is_empty();
-
-                if !input_empty && !additional_empty {
-                    if (3..30).contains(&slot_index) {
-                        if !self.insert_item(&mut item, 30, 39, false).await {
-                            return ItemStack::EMPTY.clone();
-                        }
-                    } else if (30..39).contains(&slot_index)
-                        && !self.insert_item(&mut item, 3, 30, false).await
-                    {
+            if !input_empty && !additional_empty {
+                if (3..30).contains(&slot_index) {
+                    if !self.insert_item(&mut item, 30, 39, false) {
                         return ItemStack::EMPTY.clone();
                     }
-                } else if !self.insert_item(&mut item, 0, 2, false).await {
+                } else if (30..39).contains(&slot_index)
+                    && !self.insert_item(&mut item, 3, 30, false)
+                {
                     return ItemStack::EMPTY.clone();
                 }
-            } else if !self.insert_item(&mut item, 3, 39, false).await {
+            } else if !self.insert_item(&mut item, 0, 2, false) {
                 return ItemStack::EMPTY.clone();
             }
+        } else if !self.insert_item(&mut item, 3, 39, false) {
+            return ItemStack::EMPTY.clone();
+        }
 
-            if item.is_empty() {
-                slot.set_stack(ItemStack::EMPTY.clone()).await;
-            } else {
-                slot.mark_dirty().await;
-            }
+        if item.is_empty() {
+            slot.set_stack(ItemStack::EMPTY.clone());
+        } else {
+            slot.mark_dirty();
+        }
 
-            if item.item_count == stack_left.item_count {
-                return ItemStack::EMPTY.clone();
-            }
+        if item.item_count == stack_left.item_count {
+            return ItemStack::EMPTY.clone();
+        }
 
-            slot.on_take_item(player, &item).await;
-            if refreshes_result_for_slot(slot_index) {
-                self.update_result().await;
-            }
-            stack_left
-        })
+        slot.on_take_item(player, &item);
+        if refreshes_result_for_slot(slot_index) {
+            self.update_result();
+        }
+        stack_left
     }
 }
 
@@ -436,14 +422,12 @@ impl Slot for GrindstoneRepairSlot {
             .store(id as u8, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn can_insert<'a>(&'a self, stack: &'a ItemStack) -> BoxFuture<'a, bool> {
-        Box::pin(async move { stack.is_damageable() || has_any_enchantments(stack) })
+    fn can_insert(&self, stack: &ItemStack) -> bool {
+        stack.is_damageable() || has_any_enchantments(stack)
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -486,38 +470,26 @@ impl Slot for GrindstoneResultSlot {
             .store(id as u8, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn can_insert(&self, _stack: &ItemStack) -> BoxFuture<'_, bool> {
-        Box::pin(async move { false })
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
     }
 
-    fn on_take_item<'a>(
-        &'a self,
-        player: &'a dyn InventoryPlayer,
-        _stack: &'a ItemStack,
-    ) -> BoxFuture<'a, ()> {
-        Box::pin(async move {
-            let input = self.repair_inventory.get_stack(0).await;
-            let additional = self.repair_inventory.get_stack(1).await;
+    fn on_take_item(&self, player: &dyn InventoryPlayer, _stack: &ItemStack) {
+        let input = self.repair_inventory.get_stack(0);
+        let additional = self.repair_inventory.get_stack(1);
 
-            let amount = experience_amount(&input, &additional);
-            if amount > 0 {
-                player.award_experience(amount).await;
-            }
+        let amount = experience_amount(&input, &additional);
+        if amount > 0 {
+            player.award_experience(amount);
+        }
 
-            self.repair_inventory
-                .set_stack(0, ItemStack::EMPTY.clone())
-                .await;
-            self.repair_inventory
-                .set_stack(1, ItemStack::EMPTY.clone())
-                .await;
-            self.mark_dirty().await;
-        })
+        self.repair_inventory.set_stack(0, ItemStack::EMPTY.clone());
+        self.repair_inventory.set_stack(1, ItemStack::EMPTY.clone());
+        self.mark_dirty();
     }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
     }
 }
 
@@ -526,7 +498,7 @@ mod tests {
     use super::*;
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use pumpkin_data::item::Item;
-    use tokio::sync::Mutex as TokioMutex;
+    use std::sync::Mutex as TokioMutex;
 
     fn handler() -> GrindstoneScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -653,20 +625,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn placing_two_matching_pickaxes_refreshes_the_merged_result() {
+    fn placing_two_matching_pickaxes_refreshes_the_merged_result() {
         let handler = handler();
         handler
             .repair_inventory
-            .set_stack(0, ItemStack::new(1, &Item::IRON_PICKAXE))
-            .await;
+            .set_stack(0, ItemStack::new(1, &Item::IRON_PICKAXE));
         handler
             .repair_inventory
-            .set_stack(1, ItemStack::new(1, &Item::IRON_PICKAXE))
-            .await;
-        handler.update_result().await;
+            .set_stack(1, ItemStack::new(1, &Item::IRON_PICKAXE));
+        handler.update_result();
 
         let result_slot = handler.get_behaviour().slots[2].clone();
-        assert!(result_slot.has_stack().await);
-        assert!(result_slot.get_cloned_stack().await.item == &Item::IRON_PICKAXE);
+        assert!(result_slot.has_stack());
+        assert!(result_slot.get_cloned_stack().item == &Item::IRON_PICKAXE);
     }
 }

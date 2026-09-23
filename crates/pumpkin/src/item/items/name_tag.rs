@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::EntityBase;
@@ -17,29 +16,22 @@ impl ItemMetadata for NameTagItem {
 }
 
 impl ItemBehaviour for NameTagItem {
-    fn use_on_entity<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
-        entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let entity = entity.get_entity();
-            // Vanilla `NameTagItem#interactLivingEntity` requires `target.isAlive()` before
-            // mutating the entity or consuming the tag (`NameTagItem.java:19-27`).
-            if entity.entity_type.saveable
-                && entity.is_alive()
-                && let Some(name) = item.get_data_component::<CustomNameImpl>()
-            {
-                // Vanilla `NameTagItem#interactLivingEntity` only calls `setCustomName`; it never
-                // calls `setCustomNameVisible`, so a named mob shows its name on hover only.
-                entity.set_custom_name(name.name.clone());
-                if let Some(mob) = entity.get_mob() {
-                    mob.set_persistence_required();
-                }
-                item.decrement_unless_creative(player.gamemode.load(), 1);
+    fn use_on_entity(&self, item: &mut ItemStack, player: &Player, entity: Arc<dyn EntityBase>) {
+        let entity = entity.get_entity();
+        // Vanilla `NameTagItem#interactLivingEntity` requires `target.isAlive()` before
+        // mutating the entity or consuming the tag (`NameTagItem.java:19-27`).
+        if entity.entity_type.saveable
+            && entity.is_alive()
+            && let Some(name) = item.get_data_component::<CustomNameImpl>()
+        {
+            // Vanilla `NameTagItem#interactLivingEntity` only calls `setCustomName`; it never
+            // calls `setCustomNameVisible`, so a named mob shows its name on hover only.
+            entity.set_custom_name(name.name.clone());
+            if let Some(mob) = entity.get_mob() {
+                mob.set_persistence_required();
             }
-        })
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+        }
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self

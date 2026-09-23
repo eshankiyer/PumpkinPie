@@ -1,7 +1,7 @@
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata,
-        GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+        BlockBehaviour, BlockIsReplacing, BlockMetadata, GetStateForNeighborUpdateArgs,
+        OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
     },
     entity::falling::FallingEntity,
 };
@@ -37,40 +37,34 @@ impl BlockMetadata for FallingBlock {
 }
 
 impl BlockBehaviour for FallingBlock {
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world.schedule_block_tick(
-                args.block,
-                *args.position,
-                Self::delay_after_place(),
-                TickPriority::Normal,
-            );
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        args.world.schedule_block_tick(
+            args.block,
+            *args.position,
+            Self::delay_after_place(),
+            TickPriority::Normal,
+        );
     }
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            args.world.schedule_block_tick(
-                args.block,
-                *args.position,
-                Self::delay_after_place(),
-                TickPriority::Normal,
-            );
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        args.world.schedule_block_tick(
+            args.block,
+            *args.position,
+            Self::delay_after_place(),
+            TickPriority::Normal,
+        );
+        args.state_id
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let (block, state) = args.world.get_block_and_state(&args.position.down());
-            if !Self::can_fall_through(state, block) || args.position.0.y < args.world.min_y {
-                return;
-            }
-            let state = args.world.get_block_state(args.position);
-            FallingEntity::replace_spawn(args.world, *args.position, state.id).await;
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let (block, state) = args.world.get_block_and_state(&args.position.down());
+        if !Self::can_fall_through(state, block) || args.position.0.y < args.world.min_y {
+            return;
+        }
+        let state = args.world.get_block_state(args.position);
+        FallingEntity::replace_spawn(args.world, *args.position, state.id);
     }
 }
 
@@ -216,52 +210,43 @@ pub fn anvil_damage_tier(block: &'static Block) -> Option<&'static Block> {
 
 impl BlockBehaviour for ConcretePowderBlock {
     /// `ConcretePowderBlock.getStateForPlacement`.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let replaced_is_water = matches!(args.replacing, BlockIsReplacing::Water(_));
-            if should_solidify(args.world, args.position, replaced_is_water)
-                && let Some(concrete) = concrete_for_powder(args.block)
-            {
-                return concrete.default_state.id;
-            }
-            args.block.default_state.id
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let replaced_is_water = matches!(args.replacing, BlockIsReplacing::Water(_));
+        if should_solidify(args.world, args.position, replaced_is_water)
+            && let Some(concrete) = concrete_for_powder(args.block)
+        {
+            return concrete.default_state.id;
+        }
+        args.block.default_state.id
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        args.world
+            .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
     }
 
     /// `ConcretePowderBlock.updateShape`.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if touches_liquid(args.world, args.position)
-                && let Some(concrete) = concrete_for_powder(args.block)
-            {
-                return concrete.default_state.id;
-            }
-            args.world
-                .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if touches_liquid(args.world, args.position)
+            && let Some(concrete) = concrete_for_powder(args.block)
+        {
+            return concrete.default_state.id;
+        }
+        args.world
+            .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
+        args.state_id
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let (block, state) = args.world.get_block_and_state(&args.position.down());
-            if !FallingBlock::can_fall_through(state, block) || args.position.0.y < args.world.min_y
-            {
-                return;
-            }
-            let state = args.world.get_block_state(args.position);
-            FallingEntity::replace_spawn(args.world, *args.position, state.id).await;
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let (block, state) = args.world.get_block_and_state(&args.position.down());
+        if !FallingBlock::can_fall_through(state, block) || args.position.0.y < args.world.min_y {
+            return;
+        }
+        let state = args.world.get_block_state(args.position);
+        FallingEntity::replace_spawn(args.world, *args.position, state.id);
     }
 }
 

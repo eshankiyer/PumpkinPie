@@ -9,7 +9,7 @@ use pumpkin_protocol::IdOr;
 use pumpkin_protocol::java::client::play::CSoundEffect;
 use pumpkin_util::math::vector3::Vector3;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::{
     Entity, EntityBase,
     mob::Mob,
@@ -43,14 +43,14 @@ impl DrownedTridentAttackGoal {
         })
     }
 
-    async fn holding_trident(mob: &dyn Mob) -> bool {
+    fn holding_trident(mob: &dyn Mob) -> bool {
         let entity = mob.get_entity();
-        let held_item = mob.get_mob_entity().living_entity.held_item(entity).await;
+        let held_item = mob.get_mob_entity().living_entity.held_item(entity);
         held_item.item == &Item::TRIDENT
     }
 
-    async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-        mob.get_mob_entity().has_line_of_sight(target).await
+    fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+        mob.get_mob_entity().has_line_of_sight(target)
     }
 
     /// `Drowned#performRangedAttack`: `xd = target.getX() - this.getX()`,
@@ -80,10 +80,10 @@ impl DrownedTridentAttackGoal {
         )
     }
 
-    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
+    fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
-        let held_item = mob.get_mob_entity().living_entity.held_item(shooter).await;
+        let held_item = mob.get_mob_entity().living_entity.held_item(shooter);
         let trident_item = {
             if held_item.item == &Item::TRIDENT {
                 held_item
@@ -109,7 +109,7 @@ impl DrownedTridentAttackGoal {
         let difficulty = world.level_info.load().difficulty as i32;
         let inaccuracy = f64::from(14 - difficulty * 4);
         trident.set_velocity(direction.x, direction.y, direction.z, 1.6, inaccuracy);
-        world.spawn_entity(Arc::new(trident)).await;
+        world.spawn_entity(Arc::new(trident));
 
         let sound = CSoundEffect::new(
             IdOr::Id(Sound::EntityDrownedShoot as u16),
@@ -124,91 +124,87 @@ impl DrownedTridentAttackGoal {
 }
 
 impl Goal for DrownedTridentAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let has_target = mob
-                .get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive());
-            has_target && Self::holding_trident(mob).await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let has_target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|target| target.get_entity().is_alive());
+        has_target && Self::holding_trident(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let has_target = mob
-                .get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive());
-            let holding_trident = Self::holding_trident(mob).await;
-            let navigation_active = !mob.get_mob_entity().navigator.lock().unwrap().is_idle();
-            has_target && (holding_trident || navigation_active)
-        })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let has_target = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|target| target.get_entity().is_alive());
+        let holding_trident = Self::holding_trident(mob);
+        let navigation_active = !mob.get_mob_entity().navigator.lock().unwrap().is_idle();
+        has_target && (holding_trident || navigation_active)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().set_attacking(true);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().set_attacking(true);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity().set_attacking(false);
-            self.attack_time = -1;
+    fn stop(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity().set_attacking(false);
+        self.attack_time = -1;
+        self.see_time = 0;
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let shooter = mob.get_entity();
+        let target_pos = target.get_entity().pos.load();
+        let distance_squared = shooter.pos.load().squared_distance_to_vec(&target_pos);
+        let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref());
+        if has_line_of_sight {
+            self.see_time += 1;
+        } else {
             self.see_time = 0;
-        })
-    }
+        }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
+        mob.get_mob_entity()
+            .look_control
+            .lock()
+            .unwrap()
+            .look_at_entity_with_range(&target, 30.0, 30.0);
+        if distance_squared > self.range * self.range || self.see_time < 5 {
+            mob.get_mob_entity().navigator.lock().unwrap().set_progress(
+                crate::entity::ai::pathfinder::NavigatorGoal {
+                    current_progress: shooter.pos.load(),
+                    destination: target_pos,
+                    speed: self.speed,
+                },
+            );
+        } else {
+            mob.get_mob_entity().navigator.lock().unwrap().stop();
+        }
+
+        self.attack_time -= 1;
+        if self.attack_time == 0 {
+            if !has_line_of_sight {
                 return;
-            };
-            let shooter = mob.get_entity();
-            let target_pos = target.get_entity().pos.load();
-            let distance_squared = shooter.pos.load().squared_distance_to_vec(&target_pos);
-            let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref()).await;
-            if has_line_of_sight {
-                self.see_time += 1;
-            } else {
-                self.see_time = 0;
             }
-
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-            if distance_squared > self.range * self.range || self.see_time < 5 {
-                mob.get_mob_entity().navigator.lock().unwrap().set_progress(
-                    crate::entity::ai::pathfinder::NavigatorGoal {
-                        current_progress: shooter.pos.load(),
-                        destination: target_pos,
-                        speed: self.speed,
-                    },
-                );
-            } else {
-                mob.get_mob_entity().navigator.lock().unwrap().stop();
-            }
-
-            self.attack_time -= 1;
-            if self.attack_time == 0 {
-                if !has_line_of_sight {
-                    return;
-                }
-                self.shoot(mob, target.as_ref()).await;
-                self.attack_time = self.attack_interval;
-            } else if self.attack_time < 0 {
-                self.attack_time = self.attack_interval;
-            }
-        })
+            self.shoot(mob, target.as_ref());
+            self.attack_time = self.attack_interval;
+        } else if self.attack_time < 0 {
+            self.attack_time = self.attack_interval;
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

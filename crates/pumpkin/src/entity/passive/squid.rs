@@ -10,8 +10,8 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
-    ai::goal::{Goal, GoalFuture, squid_flee::SquidFleeGoal},
+    Entity, EntityBase, NBTStorage,
+    ai::goal::{Goal, squid_flee::SquidFleeGoal},
     mob::{Mob, MobEntity},
 };
 
@@ -87,90 +87,79 @@ impl Mob for SquidEntity {
     /// `Squid.travel` (`animal/squid/Squid.java:200-203`) moves using the current velocity and
     /// deliberately skips generic `LivingEntity.travel`. `Squid.aiStep` (`:112-164`) supplies
     /// the water jet propulsion and the gravity/drag fallback outside water.
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let mut velocity = entity.velocity.load();
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
+        let entity = &self.mob_entity.living_entity.entity;
+        let mut velocity = entity.velocity.load();
 
-            if entity
-                .touching_water
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
-                let movement = self.movement_vector();
-                let phase = self.tentacle_movement.load();
-                if phase < std::f64::consts::PI {
-                    if phase / std::f64::consts::PI > 0.75 {
-                        velocity = movement;
-                    }
-                } else {
-                    velocity = velocity * 0.9;
+        if entity
+            .touching_water
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            let movement = self.movement_vector();
+            let phase = self.tentacle_movement.load();
+            if phase < std::f64::consts::PI {
+                if phase / std::f64::consts::PI > 0.75 {
+                    velocity = movement;
                 }
             } else {
-                let levitation = self
-                    .mob_entity
-                    .living_entity
-                    .get_effect(&StatusEffect::LEVITATION)
-                    .await;
-                let y = levitation.map_or_else(
-                    || velocity.y - self.get_mob_gravity(),
-                    |effect| 0.05 * f64::from(effect.amplifier + 1),
-                );
-                velocity = Vector3::new(0.0, y * 0.98, 0.0);
+                velocity = velocity * 0.9;
             }
-
-            entity.set_velocity(velocity);
-            entity.move_entity(caller, velocity).await;
-            true
-        })
-    }
-
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self
+        } else {
+            let levitation = self
                 .mob_entity
                 .living_entity
-                .dead
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
-                return;
+                .get_effect(&StatusEffect::LEVITATION);
+            let y = levitation.map_or_else(
+                || velocity.y - self.get_mob_gravity(),
+                |effect| 0.05 * f64::from(effect.amplifier + 1),
+            );
+            velocity = Vector3::new(0.0, y * 0.98, 0.0);
+        }
+
+        entity.set_velocity(velocity);
+        entity.move_entity(caller, velocity);
+        true
+    }
+
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self
+            .mob_entity
+            .living_entity
+            .dead
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
+        let mut phase = self.tentacle_movement.load() + self.tentacle_speed.load();
+        if phase > std::f64::consts::TAU {
+            phase -= std::f64::consts::TAU;
+            if rand::rng().random_range(0..10) == 0 {
+                self.tentacle_speed
+                    .store(1.0 / (rand::random::<f64>() + 1.0) * 0.2);
             }
-            let mut phase = self.tentacle_movement.load() + self.tentacle_speed.load();
-            if phase > std::f64::consts::TAU {
-                phase -= std::f64::consts::TAU;
-                if rand::rng().random_range(0..10) == 0 {
-                    self.tentacle_speed
-                        .store(1.0 / (rand::random::<f64>() + 1.0) * 0.2);
-                }
-            }
-            self.tentacle_movement.store(phase);
-        })
+        }
+        self.tentacle_movement.store(phase);
     }
 
     /// `Squid.hurtServer`: on a successful hit with a known attacker, spawns an ink cloud and
     /// plays the squirt sound. The exact "behind and below" rotated-cone particle placement
     /// from vanilla's `spawnInk` isn't ported (no body-rotation state is tracked without the
     /// jet-propulsion physics above); particles are emitted at the squid's own position.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if source.is_none() {
-                return;
-            }
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            let pos = entity.pos.load();
-            world.spawn_particle(
-                pos,
-                Vector3::new(0.3, 0.3, 0.3),
-                0.1,
-                30,
-                self.ink_particle(),
-            );
-            world.play_sound(self.squirt_sound(), SoundCategory::Neutral, &pos);
-        })
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        if source.is_none() {
+            return;
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let pos = entity.pos.load();
+        world.spawn_particle(
+            pos,
+            Vector3::new(0.3, 0.3, 0.3),
+            0.1,
+            30,
+            self.ink_particle(),
+        );
+        world.play_sound(self.squirt_sound(), SoundCategory::Neutral, &pos);
     }
 }
 
@@ -181,24 +170,22 @@ impl Mob for SquidEntity {
 pub struct SquidRandomMovementGoal;
 
 impl Goal for SquidRandomMovementGoal {
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { true })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        true
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(movement) = mob.get_movement_vector() else {
-                return;
-            };
-            if mob.get_random().random_range(0..50) == 0 || movement.length_squared() <= 1.0e-5 {
-                let angle = mob.get_random().random_range(0.0..std::f64::consts::TAU);
-                mob.set_movement_vector(Vector3::new(
-                    angle.cos() * 0.2,
-                    -0.1 + mob.get_random().random_range(0.0..0.2),
-                    angle.sin() * 0.2,
-                ));
-            }
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(movement) = mob.get_movement_vector() else {
+            return;
+        };
+        if mob.get_random().random_range(0..50) == 0 || movement.length_squared() <= 1.0e-5 {
+            let angle = mob.get_random().random_range(0.0..std::f64::consts::TAU);
+            mob.set_movement_vector(Vector3::new(
+                angle.cos() * 0.2,
+                -0.1 + mob.get_random().random_range(0.0..0.2),
+                angle.sin() * 0.2,
+            ));
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

@@ -52,20 +52,13 @@ impl ArgumentConsumer for BossbarColorArgumentConsumer {
         Box::pin(async move { result })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        _input: &'a str,
-    ) -> SuggestResult<'a> {
-        Box::pin(async move {
-            let colors = ["blue", "green", "pink", "purple", "red", "white", "yellow"];
-            let suggestions: Vec<CommandSuggestion> = colors
-                .iter()
-                .map(|color| CommandSuggestion::new((*color).to_string(), None))
-                .collect();
-            Ok(Some(suggestions))
-        })
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {
+        let colors = ["blue", "green", "pink", "purple", "red", "white", "yellow"];
+        let suggestions: Vec<CommandSuggestion> = colors
+            .iter()
+            .map(|color| CommandSuggestion::new((*color).to_string(), None))
+            .collect();
+        Ok(Some(suggestions))
     }
 }
 

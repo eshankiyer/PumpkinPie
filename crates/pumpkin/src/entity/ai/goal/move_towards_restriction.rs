@@ -3,7 +3,7 @@
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 
@@ -68,32 +68,28 @@ impl MoveTowardsRestrictionGoal {
 }
 
 impl Goal for MoveTowardsRestrictionGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if mob.get_mob_entity().is_in_position_target_range() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if mob.get_mob_entity().is_in_position_target_range() {
+            return false;
+        }
 
-            self.target = Some(Self::find_target(mob));
-            true
-        })
+        self.target = Some(Self::find_target(mob));
+        true
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { !mob.get_mob_entity().navigator.lock().unwrap().is_idle() })
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(target) = self.target {
-                let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                mob.get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap()
-                    .set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(target) = self.target {
+            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap()
+                .set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
     fn controls(&self) -> Controls {

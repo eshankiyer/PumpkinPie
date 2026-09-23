@@ -6,9 +6,8 @@ use crate::command::CommandSender;
 use crate::entity::EntityBase;
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, NormalUseArgs,
-        OnNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
-        registry::BlockActionResult,
+        BlockBehaviour, BlockMetadata, CanPlaceAtArgs, NormalUseArgs, OnNeighborUpdateArgs,
+        OnPlaceArgs, OnScheduledTickArgs, PlacedArgs, registry::BlockActionResult,
     },
     server::Server,
     world::World,
@@ -103,7 +102,7 @@ impl CommandBlock {
         }
     }
 
-    async fn execute(
+    fn execute(
         server: &Arc<Server>,
         world: Arc<World>,
         block_entity: Arc<dyn BlockEntity>,
@@ -122,24 +121,17 @@ impl CommandBlock {
         if command.is_empty() {
             command_entity.success_count.store(0, Ordering::Release);
         } else {
-            let source = CommandSender::CommandBlock(command_entity, world.clone())
-                .into_source(server)
-                .await;
+            let source =
+                CommandSender::CommandBlock(command_entity, world.clone()).into_source(server);
 
             server
                 .command_dispatcher
                 .load()
-                .handle_command(&source, command)
-                .await;
+                .handle_command(&source, command);
         }
     }
 
-    async fn chain_execute(
-        server: &Arc<Server>,
-        world: Arc<World>,
-        start: BlockPos,
-        direction: Facing,
-    ) {
+    fn chain_execute(server: &Arc<Server>, world: Arc<World>, start: BlockPos, direction: Facing) {
         let mut i = u16::MAX;
         let mut pos = start;
 
@@ -171,12 +163,15 @@ impl CommandBlock {
             if powered || auto {
                 let conditions_met = Self::conditions_met(&world, &pos, direction);
                 if conditions_met {
-                    let command = command_entity.command.lock().await;
+                    let command = command_entity
+                        .command
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let Some(entity) = world.get_block_entity(&pos) else {
                         warn!("Command block entity disappeared during execution");
                         break;
                     };
-                    Self::execute(server, world.clone(), entity, &command).await;
+                    Self::execute(server, world.clone(), entity, &command);
                 } else if props.conditional {
                     command_entity.success_count.store(0, Ordering::Release);
                 }
@@ -207,126 +202,116 @@ impl BlockMetadata for CommandBlock {
 }
 
 impl BlockBehaviour for CommandBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = CommandBlockLikeProperties::default(args.block);
-            props.facing = args.player.get_entity().get_facing().opposite();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = CommandBlockLikeProperties::default(args.block);
+        props.facing = args.player.get_entity().get_facing().opposite();
+        props.to_state_id(args.block)
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            // `CommandBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
-            // (`CommandBlock.java:131-133`; `Player.java:1863-1865`).
-            if !args.player.can_use_game_master_blocks() {
-                return BlockActionResult::Pass;
-            }
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::Pass;
-            };
-            let Some(command_entity) = block_entity.as_any().downcast_ref::<CommandBlockEntity>()
-            else {
-                return BlockActionResult::Pass;
-            };
-            // `ServerPlayer.openCommandBlock` sends the custom tag only to the interacting
-            // player (`ServerPlayer.java:1408-1411`); a world update would leak it to trackers.
-            args.player.open_command_block(command_entity).await;
-            BlockActionResult::SuccessServer
-        })
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        // `CommandBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
+        // (`CommandBlock.java:131-133`; `Player.java:1863-1865`).
+        if !args.player.can_use_game_master_blocks() {
+            return BlockActionResult::Pass;
+        }
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return BlockActionResult::Pass;
+        };
+        let Some(command_entity) = block_entity.as_any().downcast_ref::<CommandBlockEntity>()
+        else {
+            return BlockActionResult::Pass;
+        };
+        // `ServerPlayer.openCommandBlock` sends the custom tag only to the interacting
+        // player (`ServerPlayer.java:1408-1411`); a world update would leak it to trackers.
+        args.player.open_command_block(command_entity);
+        BlockActionResult::SuccessServer
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let command_blocks_work =
-                { args.world.level_info.load().game_rules.command_blocks_work };
-            if !command_blocks_work {
-                return;
-            }
-            if let Some(block_entity) = args.world.get_block_entity(args.position) {
-                if block_entity.resource_location() != CommandBlockEntity::ID {
-                    return;
-                }
-                let Some(command_entity) =
-                    block_entity.as_any().downcast_ref::<CommandBlockEntity>()
-                else {
-                    warn!("Block entity at {} is not a command block", args.position);
-                    return;
-                };
-
-                Self::update(
-                    args.world,
-                    args.block,
-                    command_entity,
-                    args.position,
-                    block_receives_redstone_power(args.world, args.position).await,
-                );
-            }
-        })
-    }
-
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let command_blocks_work =
-                { args.world.level_info.load().game_rules.command_blocks_work };
-            if !command_blocks_work {
-                return;
-            }
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return;
-            };
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let command_blocks_work = { args.world.level_info.load().game_rules.command_blocks_work };
+        if !command_blocks_work {
+            return;
+        }
+        if let Some(block_entity) = args.world.get_block_entity(args.position) {
             if block_entity.resource_location() != CommandBlockEntity::ID {
                 return;
             }
-
             let Some(command_entity) = block_entity.as_any().downcast_ref::<CommandBlockEntity>()
             else {
                 warn!("Block entity at {} is not a command block", args.position);
                 return;
             };
-            let Some(server) = args.world.server.upgrade() else {
-                return;
-            };
-            let props = CommandBlockLikeProperties::from_state_id(
-                args.world.get_block_state_id(args.position),
+
+            Self::update(
+                args.world,
                 args.block,
+                command_entity,
+                args.position,
+                block_receives_redstone_power(args.world, args.position),
             );
+        }
+    }
 
-            let previous_condition_met = command_entity.condition_met.load(Ordering::Acquire);
-            let is_auto = args.block.id == Block::REPEATING_COMMAND_BLOCK.id;
-            if is_auto {
-                command_entity.mark_condition_met(args.world);
-            }
-            let should_execute = previous_condition_met;
-            if should_execute {
-                Self::execute(
-                    &server,
-                    args.world.clone(),
-                    block_entity.clone(),
-                    &command_entity.command.lock().await,
-                )
-                .await;
-            } else if props.conditional {
-                command_entity.success_count.store(0, Ordering::Release);
-            }
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let command_blocks_work = { args.world.level_info.load().game_rules.command_blocks_work };
+        if !command_blocks_work {
+            return;
+        }
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return;
+        };
+        if block_entity.resource_location() != CommandBlockEntity::ID {
+            return;
+        }
 
-            Self::chain_execute(
+        let Some(command_entity) = block_entity.as_any().downcast_ref::<CommandBlockEntity>()
+        else {
+            warn!("Block entity at {} is not a command block", args.position);
+            return;
+        };
+        let Some(server) = args.world.server.upgrade() else {
+            return;
+        };
+        let props = CommandBlockLikeProperties::from_state_id(
+            args.world.get_block_state_id(args.position),
+            args.block,
+        );
+
+        let previous_condition_met = command_entity.condition_met.load(Ordering::Acquire);
+        let is_auto = args.block.id == Block::REPEATING_COMMAND_BLOCK.id;
+        if is_auto {
+            command_entity.mark_condition_met(args.world);
+        }
+        let should_execute = previous_condition_met;
+        if should_execute {
+            Self::execute(
                 &server,
                 args.world.clone(),
-                args.position
-                    .offset(props.facing.to_block_direction().to_offset()),
-                props.facing,
-            )
-            .await;
+                block_entity.clone(),
+                &command_entity
+                    .command
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+        } else if props.conditional {
+            command_entity.success_count.store(0, Ordering::Release);
+        }
 
-            let block = args.world.get_block(args.position);
-            let is_auto = command_entity.auto.load(Ordering::Relaxed);
-            let can_run = command_entity.powered.load(Ordering::Relaxed) || is_auto;
-            if block == &Block::REPEATING_COMMAND_BLOCK && can_run {
-                args.world
-                    .schedule_block_tick(block, *args.position, 1, TickPriority::Normal);
-            }
-        })
+        Self::chain_execute(
+            &server,
+            args.world.clone(),
+            args.position
+                .offset(props.facing.to_block_direction().to_offset()),
+            props.facing,
+        );
+
+        let block = args.world.get_block(args.position);
+        let is_auto = command_entity.auto.load(Ordering::Relaxed);
+        let can_run = command_entity.powered.load(Ordering::Relaxed) || is_auto;
+        if block == &Block::REPEATING_COMMAND_BLOCK && can_run {
+            args.world
+                .schedule_block_tick(block, *args.position, 1, TickPriority::Normal);
+        }
     }
 
     /// Vanilla `GameMasterBlockItem.getPlacementState` (GameMasterBlockItem.java:15-18): only
@@ -343,40 +328,33 @@ impl BlockBehaviour for CommandBlock {
         player.can_use_game_master_blocks()
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let send_command_feedback = {
-                let game_rules = &args.world.level_info.load().game_rules;
-                game_rules.send_command_feedback
-            };
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let send_command_feedback = {
+            let game_rules = &args.world.level_info.load().game_rules;
+            game_rules.send_command_feedback
+        };
 
-            let entity = CommandBlockEntity::new(
-                *args.position,
-                send_command_feedback,
-                args.block.id == Block::CHAIN_COMMAND_BLOCK.id,
-            );
-            args.world.add_block_entity(Arc::new(entity));
-        })
+        let entity = CommandBlockEntity::new(
+            *args.position,
+            send_command_feedback,
+            args.block.id == Block::CHAIN_COMMAND_BLOCK.id,
+        );
+        args.world.add_block_entity(Arc::new(entity));
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: crate::block::GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async {
-            let entity = args.world.get_block_entity(args.position);
+    fn get_comparator_output(&self, args: crate::block::GetComparatorOutputArgs<'_>) -> Option<u8> {
+        let entity = args.world.get_block_entity(args.position);
 
-            entity.map_or_else(
-                || {
-                    warn!("Command block is missing its corresponding block entity");
-                    None
-                },
-                |entity| {
-                    let command_block_entity: Option<&CommandBlockEntity> =
-                        entity.as_any().downcast_ref();
-                    command_block_entity.map(|e| e.success_count.load(Ordering::Acquire) as u8)
-                },
-            )
-        })
+        entity.map_or_else(
+            || {
+                warn!("Command block is missing its corresponding block entity");
+                None
+            },
+            |entity| {
+                let command_block_entity: Option<&CommandBlockEntity> =
+                    entity.as_any().downcast_ref();
+                command_block_entity.map(|e| e.success_count.load(Ordering::Acquire) as u8)
+            },
+        )
     }
 }

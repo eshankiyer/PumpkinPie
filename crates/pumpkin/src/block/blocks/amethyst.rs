@@ -1,5 +1,4 @@
 use crate::block::BlockBehaviour;
-use crate::block::BlockFuture;
 use crate::block::BlockMetadata;
 use crate::block::CanPlaceAtArgs;
 use crate::block::GetStateForNeighborUpdateArgs;
@@ -34,16 +33,12 @@ impl BlockMetadata for AmethystBlock {
 }
 
 impl BlockBehaviour for AmethystBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = AmethystClusterLikeProperties::from_state_id(
-                args.block.default_state.id,
-                args.block,
-            );
-            props.facing = args.direction.to_facing();
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props =
+            AmethystClusterLikeProperties::from_state_id(args.block.default_state.id, args.block);
+        props.facing = args.direction.to_facing();
+        props.waterlogged = args.replacing.water_source();
+        props.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -55,15 +50,15 @@ impl BlockBehaviour for AmethystBlock {
         WallMountedBlock::can_place_at(self, args.block_accessor, args.position, direction)
     }
 
-    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { play_chime(&args) })
+    fn on_projectile_hit(&self, args: OnProjectileHitArgs<'_>) {
+        play_chime(&args)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move { WallMountedBlock::get_state_for_neighbor_update(self, args).await })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        WallMountedBlock::get_state_for_neighbor_update(self, args)
     }
 }
 
@@ -102,8 +97,8 @@ impl BlockMetadata for SolidAmethystBlock {
 }
 
 impl BlockBehaviour for SolidAmethystBlock {
-    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { play_chime(&args) })
+    fn on_projectile_hit(&self, args: OnProjectileHitArgs<'_>) {
+        play_chime(&args)
     }
 }
 
@@ -171,36 +166,32 @@ fn next_growth_stage(
 }
 
 impl BlockBehaviour for BuddingAmethystBlock {
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // GROWTH_CHANCE = 5 -> `random.nextInt(5) == 0`
-            if rand::rng().random_range(0..5) != 0 {
-                return;
-            }
-            let directions = BlockDirection::all();
-            let grow_direction = directions[rand::rng().random_range(0..directions.len())];
-            let grow_pos = args.position.offset(grow_direction.to_offset());
-            let (relative_block, relative_state_id) = args.world.get_block_and_state_id(&grow_pos);
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        // GROWTH_CHANCE = 5 -> `random.nextInt(5) == 0`
+        if rand::rng().random_range(0..5) != 0 {
+            return;
+        }
+        let directions = BlockDirection::all();
+        let grow_direction = directions[rand::rng().random_range(0..directions.len())];
+        let grow_pos = args.position.offset(grow_direction.to_offset());
+        let (relative_block, relative_state_id) = args.world.get_block_and_state_id(&grow_pos);
 
-            if let Some(next_stage) =
-                next_growth_stage(relative_block, relative_state_id, grow_direction)
-            {
-                let mut props = AmethystClusterLikeProperties::default(next_stage);
-                props.facing = grow_direction.to_facing();
-                props.waterlogged = relative_state_is_water(relative_block, relative_state_id);
-                args.world
-                    .set_block_state(
-                        &grow_pos,
-                        props.to_state_id(next_stage),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+        if let Some(next_stage) =
+            next_growth_stage(relative_block, relative_state_id, grow_direction)
+        {
+            let mut props = AmethystClusterLikeProperties::default(next_stage);
+            props.facing = grow_direction.to_facing();
+            props.waterlogged = relative_state_is_water(relative_block, relative_state_id);
+            args.world.set_block_state(
+                &grow_pos,
+                props.to_state_id(next_stage),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
-    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move { play_chime(&args) })
+    fn on_projectile_hit(&self, args: OnProjectileHitArgs<'_>) {
+        play_chime(&args)
     }
 }
 

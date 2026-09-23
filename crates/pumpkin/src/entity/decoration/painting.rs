@@ -1,9 +1,7 @@
 use core::f32;
 use std::sync::atomic::Ordering;
 
-use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
-};
+use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity};
 use arc_swap::ArcSwap;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::BlockDirection;
@@ -510,35 +508,31 @@ impl PaintingEntity {
 }
 
 impl NBTStorage for PaintingEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.write_nbt(nbt).await;
-            nbt.put_byte("facing", self.entity.data.load(Ordering::Relaxed) as i8);
-            nbt.put_string("variant", self.get_variant());
-            // `BlockAttachedEntity.addAdditionalSaveData` (`BlockAttachedEntity.java:119-121`).
-            let anchor = self.anchor.load();
-            nbt.put(
-                "block_pos",
-                NbtTag::IntArray(vec![anchor.0.x, anchor.0.y, anchor.0.z]),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.entity.write_nbt(nbt);
+        nbt.put_byte("facing", self.entity.data.load(Ordering::Relaxed) as i8);
+        nbt.put_string("variant", self.get_variant());
+        // `BlockAttachedEntity.addAdditionalSaveData` (`BlockAttachedEntity.java:119-121`).
+        let anchor = self.anchor.load();
+        nbt.put(
+            "block_pos",
+            NbtTag::IntArray(vec![anchor.0.x, anchor.0.y, anchor.0.z]),
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.read_nbt_non_mut(nbt).await;
-            let facing = nbt.get_byte("facing").unwrap_or(3);
-            self.entity.data.store(facing as i32, Ordering::Relaxed);
-            if let Some(variant) = nbt.get_string("variant") {
-                self.set_variant_with_dimensions(variant);
-            }
-            // `BlockAttachedEntity.readAdditionalSaveData` (`BlockAttachedEntity.java:124-127`).
-            if let Some(&[x, y, z]) = nbt.get_int_array("block_pos") {
-                self.anchor.store(BlockPos(Vector3::new(x, y, z)));
-            } else {
-                self.anchor.store(self.entity.block_pos.load());
-            }
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.entity.read_nbt_non_mut(nbt);
+        let facing = nbt.get_byte("facing").unwrap_or(3);
+        self.entity.data.store(facing as i32, Ordering::Relaxed);
+        if let Some(variant) = nbt.get_string("variant") {
+            self.set_variant_with_dimensions(variant);
+        }
+        // `BlockAttachedEntity.readAdditionalSaveData` (`BlockAttachedEntity.java:124-127`).
+        if let Some(&[x, y, z]) = nbt.get_int_array("block_pos") {
+            self.anchor.store(BlockPos(Vector3::new(x, y, z)));
+        } else {
+            self.anchor.store(self.entity.block_pos.load());
+        }
     }
 }
 
@@ -555,33 +549,29 @@ impl EntityBase for PaintingEntity {
         true
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {
-            let entity = self.get_entity();
-            entity.send_meta_data(
-                &[Metadata::new(
-                    tracked_data::painting::PAINTING_VARIANT_ID,
-                    self.get_variant(),
-                )],
-                None,
-            );
-        })
+    fn init_data_tracker(&self) {
+        let entity = self.get_entity();
+        entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::painting::PAINTING_VARIANT_ID,
+                self.get_variant(),
+            )],
+            None,
+        );
     }
 
-    fn damage_with_context<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         _amount: f32,
         _damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        _source: Option<&'a dyn EntityBase>,
-        _cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async {
-            // TODO
-            self.entity.remove().await;
-            true
-        })
+        _source: Option<&dyn EntityBase>,
+        _cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        // TODO
+        self.entity.remove();
+        true
     }
 
     /// `Painting.getAddEntityPacket` (`Painting.java:196-199`): the painting sends the

@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::EntityBase;
@@ -25,22 +24,20 @@ impl ItemMetadata for LeadItem {
 }
 
 impl ItemBehaviour for LeadItem {
-    fn use_on_block<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        _item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         _face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_FENCES) {
-                return;
-            }
-            let _ = bind_player_mobs(player, location).await;
-        })
+        block: &Block,
+        _server: &Server,
+    ) {
+        if !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_FENCES) {
+            return;
+        }
+        let _ = bind_player_mobs(player, location);
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -51,7 +48,7 @@ impl ItemBehaviour for LeadItem {
 /// Vanilla `LeadItem.bindPlayerMobs` (`LeadItem.java:37-65`) is also called by
 /// `FenceBlock.useWithoutItem` (`FenceBlock.java:70-75`), so both interaction paths
 /// share the same leash transfer and block-attach event.
-pub(crate) async fn bind_player_mobs(player: &Player, location: BlockPos) -> bool {
+pub(crate) fn bind_player_mobs(player: &Player, location: BlockPos) -> bool {
     let world = player.world();
     let center = Vector3::new(
         f64::from(location.0.x) + 0.5,
@@ -86,10 +83,10 @@ pub(crate) async fn bind_player_mobs(player: &Player, location: BlockPos) -> boo
 
         if is_leashed_to_player {
             if knot.is_none() {
-                knot = Some(LeashKnotEntity::get_or_create(&world, location).await);
+                knot = Some(LeashKnotEntity::get_or_create(&world, location));
             }
             if let Some(k) = &knot {
-                ent.leash_to(k.clone() as Arc<dyn EntityBase>).await;
+                ent.leash_to(k.clone() as Arc<dyn EntityBase>);
                 any_leashed = true;
             }
         }
@@ -103,8 +100,7 @@ pub(crate) async fn bind_player_mobs(player: &Player, location: BlockPos) -> boo
                 pumpkin_data::game_event::GameEvent::BlockAttach,
                 center,
                 crate::world::game_event::GameEventContext::of_entity(player_arc),
-            )
-            .await;
+            );
         }
     }
     any_leashed

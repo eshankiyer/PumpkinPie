@@ -8,12 +8,11 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_inventory::screen_handler::BoxFuture;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         ambient_stand::AmbientStandGoal, follow_parent::FollowParentGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -116,7 +115,7 @@ impl NBTStorage for ZombieHorseEntity {
         nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
     ) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.mob_entity.living_entity.write_nbt(nbt);
             self.write_horse_nbt(nbt);
         })
     }
@@ -126,7 +125,7 @@ impl NBTStorage for ZombieHorseEntity {
         nbt: &'a pumpkin_nbt::compound::NbtCompound,
     ) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt);
             self.read_horse_nbt(nbt);
         })
     }
@@ -185,13 +184,15 @@ impl AbstractHorse for ZombieHorseEntity {
     /// `ZombieHorse.isMobControlled`: `getFirstPassenger() instanceof Mob` -- a non-player
     /// mob riding (e.g. a zombie jockey) counts as being "in control", which keeps
     /// `RunAroundLikeCrazyGoal` from bucking it.
-    fn is_mob_controlled(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async {
-            let passengers = self.get_entity().passengers.lock().await;
-            passengers
-                .first()
-                .is_some_and(|passenger| passenger.get_mob().is_some())
-        })
+    fn is_mob_controlled(&self) -> bool {
+        let passengers = self
+            .get_entity()
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        passengers
+            .first()
+            .is_some_and(|passenger| passenger.get_mob().is_some())
     }
 
     /// `ZombieHorse.randomizeAttributes`: only jump-strength and speed, using
@@ -225,7 +226,7 @@ impl Mob for ZombieHorseEntity {
     }
 
     // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
-    fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
+    fn can_jump(&self) -> bool {
         AbstractHorse::can_jump_now(self)
     }
 
@@ -249,11 +250,11 @@ impl Mob for ZombieHorseEntity {
         AbstractHorse::on_elastic_leash_pull(self);
     }
 
-    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+    fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {
         AbstractHorse::custom_travel(self, caller)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
         AbstractHorse::tick_horse_ai(self)
     }
 
@@ -262,15 +263,11 @@ impl Mob for ZombieHorseEntity {
         Some(Sound::EntityZombieHorseAmbient)
     }
 
-    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+    fn has_controlling_passenger(&self) -> bool {
         AbstractHorse::has_saddled_player_passenger(self)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.abstract_horse_mob_interact(player, item_stack)
     }
 }

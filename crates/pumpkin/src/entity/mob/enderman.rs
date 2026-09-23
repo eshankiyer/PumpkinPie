@@ -29,10 +29,10 @@ use rand::RngExt;
 
 use crate::entity::mob::equipment::enchant_item_from_single_enchantment;
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ai::{
         goal::{
-            GoalFuture, active_target::ActiveTargetGoal, chase_player::ChasePlayerGoal,
+            active_target::ActiveTargetGoal, chase_player::ChasePlayerGoal,
             look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
             melee_attack::MeleeAttackGoal, pick_up_block::PickUpBlockGoal,
             place_block::PlaceBlockGoal, revenge::RevengeGoal, swim::SwimGoal,
@@ -330,8 +330,12 @@ impl EndermanEntity {
         true
     }
 
-    pub async fn set_target(&self, target: Option<Arc<dyn EntityBase>>) {
-        let mut mob_target = self.mob_entity.target.lock().await;
+    pub fn set_target(&self, target: Option<Arc<dyn EntityBase>>) {
+        let mut mob_target = self
+            .mob_entity
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (*mob_target).clone_from(&target);
         drop(mob_target);
 
@@ -364,8 +368,7 @@ impl EndermanEntity {
                 crate::entity::attributes::send_attribute_updates_for_living(
                     living,
                     vec![Attributes::MOVEMENT_SPEED],
-                )
-                .await;
+                );
             }
         } else {
             self.set_angry(false);
@@ -380,8 +383,7 @@ impl EndermanEntity {
                 crate::entity::attributes::send_attribute_updates_for_living(
                     living,
                     vec![Attributes::MOVEMENT_SPEED],
-                )
-                .await;
+                );
             }
         }
     }
@@ -428,7 +430,7 @@ impl EndermanEntity {
         self.carried_block.load()
     }
 
-    pub async fn is_player_staring(&self, player: &Player) -> bool {
+    pub fn is_player_staring(&self, player: &Player) -> bool {
         let equipment = player.living_entity.entity_equipment.try_lock();
         if let Ok(equipment) = equipment
             && let Some(head_stack) = equipment.equipment.get(&EquipmentSlot::HEAD)
@@ -483,45 +485,40 @@ impl EndermanEntity {
                 let state = w.get_block_state(block_pos);
                 state.is_solid()
             })
-            .await
             .is_none()
     }
 }
 
 impl NBTStorage for EndermanEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if let Some(block_state) = self.carried_block.load() {
-                let block = Block::from_state_id(block_state);
-                let mut block_state_compound = NbtCompound::new();
-                block_state_compound.put_string("Name", format!("minecraft:{}", block.name));
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        if let Some(block_state) = self.carried_block.load() {
+            let block = Block::from_state_id(block_state);
+            let mut block_state_compound = NbtCompound::new();
+            block_state_compound.put_string("Name", format!("minecraft:{}", block.name));
 
-                if let Some(properties) = block.properties(block_state) {
-                    let props = properties.to_props();
-                    if !props.is_empty() {
-                        let mut properties_compound = NbtCompound::new();
-                        for (key, value) in props {
-                            properties_compound.put_string(key, value.to_string());
-                        }
-                        block_state_compound.put_compound("Properties", properties_compound);
+            if let Some(properties) = block.properties(block_state) {
+                let props = properties.to_props();
+                if !props.is_empty() {
+                    let mut properties_compound = NbtCompound::new();
+                    for (key, value) in props {
+                        properties_compound.put_string(key, value.to_string());
                     }
+                    block_state_compound.put_compound("Properties", properties_compound);
                 }
-
-                nbt.put_compound("carriedBlockState", block_state_compound);
             }
-        })
+
+            nbt.put_compound("carriedBlockState", block_state_compound);
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            let carried_block = nbt
-                .get_compound("carriedBlockState")
-                .and_then(decode_carried_block_state)
-                .filter(|block_state| !BlockState::from_id(*block_state).is_air());
-            self.set_carried_block(carried_block);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        let carried_block = nbt
+            .get_compound("carriedBlockState")
+            .and_then(decode_carried_block_state)
+            .filter(|block_state| !BlockState::from_id(*block_state).is_air());
+        self.set_carried_block(carried_block);
     }
 }
 
@@ -534,65 +531,59 @@ impl Mob for EndermanEntity {
         self.get_carried_block().is_some()
     }
 
-    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> GoalFuture<'_, ()> {
-        Box::pin(async move {
-            self.set_target(target).await;
-        })
+    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) {
+        self.set_target(target);
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            if !entity.is_alive() {
-                return;
-            }
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if !entity.is_alive() {
+            return;
+        }
 
-            let world = entity.world.load();
-            let raining_at_feet = world.is_raining_at(&entity.block_pos.load()).await;
-            let raining_at_head = world
-                .is_raining_at(&entity.bounding_box.load().max_block_pos())
-                .await;
-            let in_rain = raining_at_feet || raining_at_head;
-            if entity.touching_water.load(Ordering::SeqCst) || in_rain {
-                self.mob_entity
-                    .living_entity
-                    .damage_with_context(self, 1.0, DamageType::DROWN, None, None, None)
-                    .await;
-                // Mirrors vanilla EnderMan#hurtServer: non-projectile, non-living-sourced
-                // damage (which includes this rain "drown" tick) has a 1-in-10 chance to
-                // NOT trigger a random teleport.
-                if in_rain && self.get_random().random_range(0..10) != 0 {
-                    self.teleport_randomly();
-                }
-            }
-
-            let day_time = world.get_time_of_day().await.rem_euclid(24000);
-            let bright_outside = !(NIGHT_START..DAY_START).contains(&day_time);
-            let eye_pos = entity.get_eye_pos().to_block_pos();
-            let brightness = world.get_sky_light_level(&eye_pos) as f32 / 15.0;
-            let age = entity.age.load(Ordering::Relaxed);
-            if bright_outside
-                && age >= self.target_change_time.load(Ordering::Relaxed) + DEAGGRESSION_DELAY
-                && brightness > 0.5
-                && world.can_see_sky(&entity.block_pos.load())
-                && self.get_random().random::<f32>() * 30.0 < (brightness - 0.4) * 2.0
-            {
-                self.set_target(None).await;
+        let world = entity.world.load();
+        let raining_at_feet = world.is_raining_at(&entity.block_pos.load());
+        let raining_at_head = world.is_raining_at(&entity.bounding_box.load().max_block_pos());
+        let in_rain = raining_at_feet || raining_at_head;
+        if entity.touching_water.load(Ordering::SeqCst) || in_rain {
+            self.mob_entity.living_entity.damage_with_context(
+                self,
+                1.0,
+                DamageType::DROWN,
+                None,
+                None,
+                None,
+            );
+            // Mirrors vanilla EnderMan#hurtServer: non-projectile, non-living-sourced
+            // damage (which includes this rain "drown" tick) has a 1-in-10 chance to
+            // NOT trigger a random teleport.
+            if in_rain && self.get_random().random_range(0..10) != 0 {
                 self.teleport_randomly();
             }
+        }
 
-            // NOTE: Enderman ambient portal particles are intentionally NOT sent server-side.
-            // The vanilla Minecraft client generates these particles locally in the entity
-            // renderer. Sending them from the server would cause duplicate particles and
-            // massive network overhead (2 packets/tick/enderman = 40 packets/sec/enderman).
-        })
+        let day_time = world.get_time_of_day().rem_euclid(24000);
+        let bright_outside = !(NIGHT_START..DAY_START).contains(&day_time);
+        let eye_pos = entity.get_eye_pos().to_block_pos();
+        let brightness = world.get_sky_light_level(&eye_pos) as f32 / 15.0;
+        let age = entity.age.load(Ordering::Relaxed);
+        if bright_outside
+            && age >= self.target_change_time.load(Ordering::Relaxed) + DEAGGRESSION_DELAY
+            && brightness > 0.5
+            && world.can_see_sky(&entity.block_pos.load())
+            && self.get_random().random::<f32>() * 30.0 < (brightness - 0.4) * 2.0
+        {
+            self.set_target(None);
+            self.teleport_randomly();
+        }
+
+        // NOTE: Enderman ambient portal particles are intentionally NOT sent server-side.
+        // The vanilla Minecraft client generates these particles locally in the entity
+        // renderer. Sending them from the server would cause duplicate particles and
+        // massive network overhead (2 packets/tick/enderman = 40 packets/sec/enderman).
     }
 
-    fn pre_damage<'a>(
-        &'a self,
-        damage_type: DamageType,
-        _source: Option<&'a dyn EntityBase>,
-    ) -> GoalFuture<'a, bool> {
+    fn pre_damage(&self, damage_type: DamageType, _source: Option<&dyn EntityBase>) -> bool {
         let is_projectile = is_projectile_damage(damage_type);
         Box::pin(async move {
             if is_projectile {
@@ -606,59 +597,52 @@ impl Mob for EndermanEntity {
         })
     }
 
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            if living.health.load() <= 0.0
-                && living.dead.load(Ordering::Relaxed)
-                && let Some(block_state) = self.carried_block.swap(None)
-            {
-                self.set_carried_block(None);
-                let world = living.entity.world.load();
-                let block_pos = living.entity.block_pos.load();
-                let position = living.entity.pos.load();
-                // `EnderMan.dropCustomDeathLoot` (`EnderMan.java:320-339`): loot is gathered
-                // with a fake diamond axe enchanted through the `enderman_loot_drop`
-                // provider (`VanillaEnchantmentProviders.java:20,30`) — a
-                // `SingleEnchantment(SilkTouch, ConstantInt.of(1))` — so silk-touch-sensitive
-                // blocks (stone, grass_block, glass, ...) drop their silk-touch variant.
-                let mut fake_tool = ItemStack::new(1, &Item::DIAMOND_AXE);
-                enchant_item_from_single_enchantment(
-                    &mut fake_tool,
-                    &pumpkin_data::Enchantment::SILK_TOUCH,
-                    1,
-                );
-                let params = LootContextParameters {
-                    block_state: Some(BlockState::from_id(block_state)),
-                    position: Some(position),
-                    world_time: world.level_info.load().day_time as u64,
-                    is_raining: Some(world.is_raining().await),
-                    is_thundering: Some(world.is_thundering().await),
-                    tool: Some(fake_tool),
-                    ..Default::default()
-                };
-                crate::block::drop_loot(
-                    &world,
-                    Block::from_state_id(block_state),
-                    &block_pos,
-                    false,
-                    params,
-                )
-                .await;
-            }
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        let living = &self.mob_entity.living_entity;
+        if living.health.load() <= 0.0
+            && living.dead.load(Ordering::Relaxed)
+            && let Some(block_state) = self.carried_block.swap(None)
+        {
+            self.set_carried_block(None);
+            let world = living.entity.world.load();
+            let block_pos = living.entity.block_pos.load();
+            let position = living.entity.pos.load();
+            // `EnderMan.dropCustomDeathLoot` (`EnderMan.java:320-339`): loot is gathered
+            // with a fake diamond axe enchanted through the `enderman_loot_drop`
+            // provider (`VanillaEnchantmentProviders.java:20,30`) — a
+            // `SingleEnchantment(SilkTouch, ConstantInt.of(1))` — so silk-touch-sensitive
+            // blocks (stone, grass_block, glass, ...) drop their silk-touch variant.
+            let mut fake_tool = ItemStack::new(1, &Item::DIAMOND_AXE);
+            enchant_item_from_single_enchantment(
+                &mut fake_tool,
+                &pumpkin_data::Enchantment::SILK_TOUCH,
+                1,
+            );
+            let params = LootContextParameters {
+                block_state: Some(BlockState::from_id(block_state)),
+                position: Some(position),
+                world_time: world.level_info.load().day_time as u64,
+                is_raining: Some(world.is_raining()),
+                is_thundering: Some(world.is_thundering()),
+                tool: Some(fake_tool),
+                ..Default::default()
+            };
+            crate::block::drop_loot(
+                &world,
+                Block::from_state_id(block_state),
+                &block_pos,
+                false,
+                params,
+            );
+        }
 
-            if source.is_some_and(|s| s.get_living_entity().is_some()) {
-                return;
-            }
-            let should_teleport = self.get_random().random_range(0..10) != 0;
-            if should_teleport {
-                self.teleport_randomly();
-            }
-        })
+        if source.is_some_and(|s| s.get_living_entity().is_some()) {
+            return;
+        }
+        let should_teleport = self.get_random().random_range(0..10) != 0;
+        if should_teleport {
+            self.teleport_randomly();
+        }
     }
 }
 

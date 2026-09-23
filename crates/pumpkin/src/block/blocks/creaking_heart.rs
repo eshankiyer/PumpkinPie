@@ -14,7 +14,7 @@ use rand::RngExt;
 
 use crate::block::entities::creaking_heart::CreakingHeartBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
+    BlockBehaviour, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
     GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs,
     PlayerWillDestroyArgs,
 };
@@ -36,8 +36,13 @@ impl BlockMetadata for CreakingHeartBlock {
 /// check: `data/minecraft/timeline/day.json` drives the
 /// `minecraft:gameplay/creaking_active` track with keyframes true at tick 12600 and
 /// false at tick 23401 (the same track that gates `eyeblossom_open`).
-pub async fn creaking_active(world: &World) -> bool {
-    let time_of_day = world.level_time.lock().await.time_of_day.rem_euclid(24000);
+pub fn creaking_active(world: &World) -> bool {
+    let time_of_day = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .time_of_day
+        .rem_euclid(24000);
     (12600..23401).contains(&time_of_day)
 }
 
@@ -70,17 +75,13 @@ const fn axis_directions(axis: Axis) -> [BlockDirection; 2] {
 /// `CreakingHeartBlock.updateState`: an UPROOTED heart that has gained its logs wakes to
 /// AWAKE or DORMANT depending on `creaking_active`. Any other state is left alone -- only
 /// the block entity's ticker moves a live heart between AWAKE and DORMANT.
-async fn update_state(
-    world: &World,
-    pos: &BlockPos,
-    props: &mut CreakingHeartLikeProperties,
-) -> bool {
+fn update_state(world: &World, pos: &BlockPos, props: &mut CreakingHeartLikeProperties) -> bool {
     if props.creaking_heart_state != CreakingHeartState::Uprooted
         || !has_required_logs(world, pos, props.axis)
     {
         return false;
     }
-    props.creaking_heart_state = if creaking_active(world).await {
+    props.creaking_heart_state = if creaking_active(world) {
         CreakingHeartState::Awake
     } else {
         CreakingHeartState::Dormant
@@ -91,136 +92,108 @@ async fn update_state(
 impl BlockBehaviour for CreakingHeartBlock {
     /// `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:174-181`) runs before
     /// the block is removed, removes a player-damaged protector, and awards natural-heart XP.
-    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(heart) = block_entity
-                    .as_any()
-                    .downcast_ref::<CreakingHeartBlockEntity>()
-            {
-                heart
-                    .remove_protector(args.world, Some(DamageType::PLAYER_ATTACK))
-                    .await;
-            }
+    fn player_will_destroy(&self, args: PlayerWillDestroyArgs<'_>) {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(heart) = block_entity
+                .as_any()
+                .downcast_ref::<CreakingHeartBlockEntity>()
+        {
+            heart.remove_protector(args.world, Some(DamageType::PLAYER_ATTACK));
+        }
 
-            let properties = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(heart) = block_entity
-                    .as_any()
-                    .downcast_ref::<CreakingHeartBlockEntity>()
-            {
-                heart.remove_protector_after_player_attack(args.world);
-            }
-            if properties.r#natural
-                && !matches!(
-                    args.player.gamemode.load(),
-                    GameMode::Creative | GameMode::Spectator
-                )
-            {
-                let amount = rand::rng().random_range(20..=24);
-                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount)
-                    .await;
-            }
-        })
+        let properties = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(heart) = block_entity
+                .as_any()
+                .downcast_ref::<CreakingHeartBlockEntity>()
+        {
+            heart.remove_protector_after_player_attack(args.world);
+        }
+        if properties.r#natural
+            && !matches!(
+                args.player.gamemode.load(),
+                GameMode::Creative | GameMode::Spectator
+            )
+        {
+            let amount = rand::rng().random_range(20..=24);
+            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount);
+        }
     }
 
     // Vanilla `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:174-181`) performs
     // the heart's player-break side effects before removal; no side effect remains for `broken`.
-    fn broken<'a>(&'a self, _args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn broken(&self, _args: BrokenArgs<'_>) {}
 
     /// `CreakingHeartBlock.onExplosionHit` (`CreakingHeartBlock.java:159-172`): an explosion
     /// removes the protector before block removal.
-    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(heart) = block_entity
-                    .as_any()
-                    .downcast_ref::<CreakingHeartBlockEntity>()
-            {
-                heart
-                    .remove_protector(args.world, Some(DamageType::EXPLOSION))
-                    .await;
-            }
-        })
+    fn explode(&self, args: ExplodeArgs<'_>) {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(heart) = block_entity
+                .as_any()
+                .downcast_ref::<CreakingHeartBlockEntity>()
+        {
+            heart.remove_protector(args.world, Some(DamageType::EXPLOSION));
+        }
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `CreakingHeartBlock.affectNeighborsAfterRemoval` (`CreakingHeartBlock.java:154-156`)
-            // refreshes comparator inputs after the heart is removed.
-            args.world
-                .update_comparators(args.position, args.block)
-                .await;
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        // `CreakingHeartBlock.affectNeighborsAfterRemoval` (`CreakingHeartBlock.java:154-156`)
+        // refreshes comparator inputs after the heart is removed.
+        args.world.update_comparators(args.position, args.block);
     }
 
     /// `getStateForPlacement`: AXIS from the clicked face, then `updateState`.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = CreakingHeartLikeProperties::default(args.block);
-            props.axis = match args.direction {
-                BlockDirection::East | BlockDirection::West => Axis::X,
-                BlockDirection::Up | BlockDirection::Down => Axis::Y,
-                BlockDirection::North | BlockDirection::South => Axis::Z,
-            };
-            // NATURAL stays false: vanilla only sets it from the pale oak tree decorator.
-            update_state(args.world, args.position, &mut props).await;
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = CreakingHeartLikeProperties::default(args.block);
+        props.axis = match args.direction {
+            BlockDirection::East | BlockDirection::West => Axis::X,
+            BlockDirection::Up | BlockDirection::Down => Axis::Y,
+            BlockDirection::North | BlockDirection::South => Axis::Z,
+        };
+        // NATURAL stays false: vanilla only sets it from the pale oak tree decorator.
+        update_state(args.world, args.position, &mut props);
+        props.to_state_id(args.block)
     }
 
     /// `updateShape`: any neighbour change schedules a tick one tick out.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            args.world
-                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        args.world
+            .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+        args.state_id
     }
 
     /// `CreakingHeartBlock.tick`: re-runs `updateState` and writes it back if it changed.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut props = CreakingHeartLikeProperties::from_state_id(state.id, args.block);
-            if update_state(args.world, args.position, &mut props).await {
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let mut props = CreakingHeartLikeProperties::from_state_id(state.id, args.block);
+        if update_state(args.world, args.position, &mut props) {
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
     /// `getAnalogOutputSignal`: 0 while UPROOTED, else the block entity's cached signal.
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            let props = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
-            if props.creaking_heart_state == CreakingHeartState::Uprooted {
-                return Some(0);
-            }
-            Some(
-                args.world
-                    .get_block_entity(args.position)
-                    .and_then(|entity| {
-                        entity
-                            .as_any()
-                            .downcast_ref::<CreakingHeartBlockEntity>()
-                            .map(CreakingHeartBlockEntity::get_analog_output_signal)
-                    })
-                    .unwrap_or(0),
-            )
-        })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        let props = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
+        if props.creaking_heart_state == CreakingHeartState::Uprooted {
+            return Some(0);
+        }
+        Some(
+            args.world
+                .get_block_entity(args.position)
+                .and_then(|entity| {
+                    entity
+                        .as_any()
+                        .downcast_ref::<CreakingHeartBlockEntity>()
+                        .map(CreakingHeartBlockEntity::get_analog_output_signal)
+                })
+                .unwrap_or(0),
+        )
     }
 }

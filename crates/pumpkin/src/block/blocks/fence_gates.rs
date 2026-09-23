@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, ExplodeArgs, GetStateForNeighborUpdateArgs, NormalUseArgs,
+    BlockBehaviour, ExplodeArgs, GetStateForNeighborUpdateArgs, NormalUseArgs,
     OnNeighborUpdateArgs, OnPlaceArgs,
 };
 use crate::entity::EntityBase;
@@ -40,7 +40,7 @@ fn get_sound(block: &Block, open: bool) -> Sound {
     }
 }
 
-pub async fn toggle_fence_gate(
+pub fn toggle_fence_gate(
     world: &Arc<World>,
     block_pos: &BlockPos,
     player: &Arc<Player>,
@@ -81,16 +81,13 @@ pub async fn toggle_fence_gate(
         },
         block_pos.to_centered_f64(),
         GameEventContext::of_entity(player.clone()),
-    )
-    .await;
+    );
 
-    world
-        .set_block_state(
-            block_pos,
-            fence_gate_props.to_state_id(block),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
+    world.set_block_state(
+        block_pos,
+        fence_gate_props.to_state_id(block),
+        BlockFlags::NOTIFY_LISTENERS,
+    );
     fence_gate_props.to_state_id(block)
 }
 
@@ -102,144 +99,127 @@ impl BlockBehaviour for FenceGateBlock {
     /// explosions toggle an unpowered gate and emit the corresponding block event. The live
     /// explosion dispatcher invokes this hook after a destroying explosion has replaced the
     /// state with air, so only trigger-block explosions reach the toggle below.
-    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !args.can_trigger_blocks {
-                return;
-            }
+    fn explode(&self, args: ExplodeArgs<'_>) {
+        if !args.can_trigger_blocks {
+            return;
+        }
 
-            let state = args.world.get_block_state(args.position);
-            if state.is_air() {
-                return;
-            }
+        let state = args.world.get_block_state(args.position);
+        if state.is_air() {
+            return;
+        }
 
-            let mut properties = FenceGateProperties::from_state_id(state.id, args.block);
-            let Some(open) = explosion_open_value(properties.open, properties.powered, true) else {
-                return;
-            };
+        let mut properties = FenceGateProperties::from_state_id(state.id, args.block);
+        let Some(open) = explosion_open_value(properties.open, properties.powered, true) else {
+            return;
+        };
 
-            properties.open = open;
-            args.world
-                .set_block_state(
-                    args.position,
-                    properties.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
+        properties.open = open;
+        args.world.set_block_state(
+            args.position,
+            properties.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
+        args.world.play_block_sound(
+            get_sound(args.block, open),
+            SoundCategory::Blocks,
+            *args.position,
+        );
+        emit_game_event(
+            args.world,
+            if open {
+                GameEvent::BlockOpen
+            } else {
+                GameEvent::BlockClose
+            },
+            args.position.to_centered_f64(),
+            GameEventContext {
+                source_entity: None,
+                affected_block_state: Some(state.id),
+            },
+        );
+    }
+
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut fence_gate_props = FenceGateProperties::default(args.block);
+        fence_gate_props.facing = args.player.get_entity().get_horizontal_facing();
+
+        let powered = block_receives_redstone_power(args.world, args.position);
+        fence_gate_props.powered = powered;
+        fence_gate_props.open = powered;
+
+        // FenceGateBlock.java:133-134 (getStateForPlacement): check adjacent
+        // blocks on the perpendicular axis for walls to set in_wall.
+        let cw = args
+            .position
+            .offset(fence_gate_props.facing.rotate_clockwise().to_offset());
+        let ccw = args.position.offset(
+            fence_gate_props
+                .facing
+                .rotate_counter_clockwise()
+                .to_offset(),
+        );
+        let cw_block = args.world.get_block(&cw);
+        let ccw_block = args.world.get_block(&ccw);
+        fence_gate_props.in_wall = cw_block.has_tag(&tag::Block::MINECRAFT_WALLS)
+            || ccw_block.has_tag(&tag::Block::MINECRAFT_WALLS);
+
+        fence_gate_props.to_state_id(args.block)
+    }
+
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let fence_props = is_in_wall(&args);
+        fence_props.to_state_id(args.block)
+    }
+
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        toggle_fence_gate(args.world, args.position, args.player);
+
+        BlockActionResult::Success
+    }
+
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let block_state = args.world.get_block_state(args.position);
+        let mut fence_gate_props = FenceGateProperties::from_state_id(block_state.id, args.block);
+        let powered = block_receives_redstone_power(args.world, args.position);
+
+        if powered == fence_gate_props.powered {
+            return;
+        }
+
+        fence_gate_props.powered = powered;
+
+        if powered != fence_gate_props.open {
+            fence_gate_props.open = powered;
+
             args.world.play_block_sound(
-                get_sound(args.block, open),
+                get_sound(args.block, powered),
                 SoundCategory::Blocks,
                 *args.position,
             );
+
+            // FenceGateBlock.java:198 (`neighborChanged`): fires BLOCK_OPEN/BLOCK_CLOSE
+            // with no source entity when a redstone signal flips the gate.
             emit_game_event(
                 args.world,
-                if open {
+                if powered {
                     GameEvent::BlockOpen
                 } else {
                     GameEvent::BlockClose
                 },
                 args.position.to_centered_f64(),
-                GameEventContext {
-                    source_entity: None,
-                    affected_block_state: Some(state.id),
-                },
-            )
-            .await;
-        })
-    }
-
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut fence_gate_props = FenceGateProperties::default(args.block);
-            fence_gate_props.facing = args.player.get_entity().get_horizontal_facing();
-
-            let powered = block_receives_redstone_power(args.world, args.position).await;
-            fence_gate_props.powered = powered;
-            fence_gate_props.open = powered;
-
-            // FenceGateBlock.java:133-134 (getStateForPlacement): check adjacent
-            // blocks on the perpendicular axis for walls to set in_wall.
-            let cw = args
-                .position
-                .offset(fence_gate_props.facing.rotate_clockwise().to_offset());
-            let ccw = args.position.offset(
-                fence_gate_props
-                    .facing
-                    .rotate_counter_clockwise()
-                    .to_offset(),
+                GameEventContext::none(),
             );
-            let cw_block = args.world.get_block(&cw);
-            let ccw_block = args.world.get_block(&ccw);
-            fence_gate_props.in_wall = cw_block.has_tag(&tag::Block::MINECRAFT_WALLS)
-                || ccw_block.has_tag(&tag::Block::MINECRAFT_WALLS);
+        }
 
-            fence_gate_props.to_state_id(args.block)
-        })
-    }
-
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let fence_props = is_in_wall(&args);
-            fence_props.to_state_id(args.block)
-        })
-    }
-
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            toggle_fence_gate(args.world, args.position, args.player).await;
-
-            BlockActionResult::Success
-        })
-    }
-
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let block_state = args.world.get_block_state(args.position);
-            let mut fence_gate_props =
-                FenceGateProperties::from_state_id(block_state.id, args.block);
-            let powered = block_receives_redstone_power(args.world, args.position).await;
-
-            if powered == fence_gate_props.powered {
-                return;
-            }
-
-            fence_gate_props.powered = powered;
-
-            if powered != fence_gate_props.open {
-                fence_gate_props.open = powered;
-
-                args.world.play_block_sound(
-                    get_sound(args.block, powered),
-                    SoundCategory::Blocks,
-                    *args.position,
-                );
-
-                // FenceGateBlock.java:198 (`neighborChanged`): fires BLOCK_OPEN/BLOCK_CLOSE
-                // with no source entity when a redstone signal flips the gate.
-                emit_game_event(
-                    args.world,
-                    if powered {
-                        GameEvent::BlockOpen
-                    } else {
-                        GameEvent::BlockClose
-                    },
-                    args.position.to_centered_f64(),
-                    GameEventContext::none(),
-                )
-                .await;
-            }
-
-            args.world
-                .set_block_state(
-                    args.position,
-                    fence_gate_props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-        })
+        args.world.set_block_state(
+            args.position,
+            fence_gate_props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 }
 

@@ -14,7 +14,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::AgeableMob,
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, look_at_entity::LookAtEntityGoal,
@@ -160,25 +160,21 @@ impl AgeableMob for TurtleEntity {
 }
 
 impl NBTStorage for TurtleEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            nbt.put_bool("has_egg", self.has_egg());
-            if let Some(home_pos) = self.home_pos.load() {
-                nbt.put("home_pos", block_pos_to_nbt(home_pos));
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        nbt.put_bool("has_egg", self.has_egg());
+        if let Some(home_pos) = self.home_pos.load() {
+            nbt.put("home_pos", block_pos_to_nbt(home_pos));
+        }
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.has_egg
-                .store(nbt.get_bool("has_egg").unwrap_or(false), Relaxed);
-            self.home_pos.store(block_pos_from_nbt(nbt, "home_pos"));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.has_egg
+            .store(nbt.get_bool("has_egg").unwrap_or(false), Relaxed);
+        self.home_pos.store(block_pos_from_nbt(nbt, "home_pos"));
     }
 }
 
@@ -231,12 +227,12 @@ impl Mob for TurtleEntity {
     }
 
     /// `TurtleBreedGoal` lays an egg rather than creating a live baby.
-    fn create_offspring<'a>(
-        &'a self,
-        _mate: &'a dyn EntityBase,
-        _world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async { None })
+    fn create_offspring(
+        &self,
+        _mate: &dyn EntityBase,
+        _world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        None
     }
 
     /// `TurtleBreedGoal` does not broadcast Animal's generic event 18.
@@ -244,23 +240,21 @@ impl Mob for TurtleEntity {
         false
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            if self.is_baby() {
-                entity.send_meta_data(&[Metadata::new(tracked_data::turtle::BABY_ID, true)], None);
-            }
-            entity.send_meta_data(
-                &[Metadata::new(tracked_data::turtle::HAS_EGG, self.has_egg())],
-                None,
-            );
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        if self.is_baby() {
+            entity.send_meta_data(&[Metadata::new(tracked_data::turtle::BABY_ID, true)], None);
+        }
+        entity.send_meta_data(
+            &[Metadata::new(tracked_data::turtle::HAS_EGG, self.has_egg())],
+            None,
+        );
 
-            // `Turtle.finalizeSpawn`: sets homePos to the spawn position. Reused here as the
-            // "not yet set" case, since NBT restore (which runs before this on load) already
-            // populated home_pos for existing turtles.
-            if self.home_pos.load().is_none() {
-                self.home_pos.store(Some(entity.block_pos.load()));
-            }
-        })
+        // `Turtle.finalizeSpawn`: sets homePos to the spawn position. Reused here as the
+        // "not yet set" case, since NBT restore (which runs before this on load) already
+        // populated home_pos for existing turtles.
+        if self.home_pos.load().is_none() {
+            self.home_pos.store(Some(entity.block_pos.load()));
+        }
     }
 }

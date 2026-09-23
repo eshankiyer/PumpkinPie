@@ -50,26 +50,19 @@ impl ArgumentConsumer for BossbarStyleArgumentConsumer {
         Box::pin(async move { result })
     }
 
-    fn suggest<'a>(
-        &'a self,
-        _sender: &CommandSender,
-        _server: &'a Server,
-        _input: &'a str,
-    ) -> SuggestResult<'a> {
-        Box::pin(async move {
-            let styles = [
-                "notched_10",
-                "notched_12",
-                "notched_20",
-                "notched_6",
-                "progress",
-            ];
-            let suggestions: Vec<CommandSuggestion> = styles
-                .iter()
-                .map(|style| CommandSuggestion::new((*style).to_string(), None))
-                .collect();
-            Ok(Some(suggestions))
-        })
+    fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {
+        let styles = [
+            "notched_10",
+            "notched_12",
+            "notched_20",
+            "notched_6",
+            "progress",
+        ];
+        let suggestions: Vec<CommandSuggestion> = styles
+            .iter()
+            .map(|style| CommandSuggestion::new((*style).to_string(), None))
+            .collect();
+        Ok(Some(suggestions))
     }
 }
 

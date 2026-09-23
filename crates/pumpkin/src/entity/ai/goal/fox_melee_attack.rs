@@ -1,5 +1,5 @@
 use super::melee_attack::MeleeAttackGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
 
@@ -29,30 +29,28 @@ impl FoxMeleeAttackGoal {
 }
 
 impl Goal for FoxMeleeAttackGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { Self::gated(mob) && self.inner.can_start(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        Self::gated(mob) && self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         // Vanilla `FoxMeleeAttackGoal` only overrides `canUse`, not `canContinueToUse` -- once
         // started, a bite in progress isn't cancelled by e.g. going sleepy mid-attack.
         self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.set_is_interested(false);
-            }
-            self.inner.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.set_is_interested(false);
+        }
+        self.inner.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

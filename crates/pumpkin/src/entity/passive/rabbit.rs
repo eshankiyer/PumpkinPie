@@ -18,7 +18,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         active_target::ActiveTargetGoal, breed::BreedGoal,
@@ -327,34 +327,30 @@ impl Animal for RabbitEntity {
 }
 
 impl NBTStorage for RabbitEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_int("RabbitType", self.variant.load(Ordering::Relaxed) as i32);
-            // Vanilla `addAdditionalSaveData` line 275.
-            nbt.put_int(
-                "MoreCarrotTicks",
-                self.more_carrot_ticks.load(Ordering::Relaxed),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_ageable_nbt(nbt);
+        self.write_animal_nbt(nbt);
+        nbt.put_int("RabbitType", self.variant.load(Ordering::Relaxed) as i32);
+        // Vanilla `addAdditionalSaveData` line 275.
+        nbt.put_int(
+            "MoreCarrotTicks",
+            self.more_carrot_ticks.load(Ordering::Relaxed),
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            if let Some(variant) = nbt.get_int("RabbitType") {
-                self.variant.store(variant as u8, Ordering::Relaxed);
-            }
-            // Vanilla `readAdditionalSaveData` line 282.
-            self.more_carrot_ticks.store(
-                nbt.get_int("MoreCarrotTicks").unwrap_or(0),
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_ageable_nbt(nbt);
+        self.read_animal_nbt(nbt);
+        if let Some(variant) = nbt.get_int("RabbitType") {
+            self.variant.store(variant as u8, Ordering::Relaxed);
+        }
+        // Vanilla `readAdditionalSaveData` line 282.
+        self.more_carrot_ticks.store(
+            nbt.get_int("MoreCarrotTicks").unwrap_or(0),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -398,133 +394,128 @@ impl Mob for RabbitEntity {
     /// vanilla runs `customServerAiStep` *after* `goalSelector.tick()` and `navigation.tick()`
     /// within `Mob.serverAiStep`, whereas `mob_tick` runs before both. The hop therefore reacts
     /// to the previous tick's navigation state - a one-tick lag, not a behavioural break.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            let entity = &living.entity;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let living = &self.mob_entity.living_entity;
+        let entity = &living.entity;
 
-            if self.jump_delay_ticks.load(Ordering::Relaxed) > 0 {
-                self.jump_delay_ticks.fetch_sub(1, Ordering::Relaxed);
+        if self.jump_delay_ticks.load(Ordering::Relaxed) > 0 {
+            self.jump_delay_ticks.fetch_sub(1, Ordering::Relaxed);
+        }
+
+        // Vanilla lines 182-187: decay by `random.nextInt(3)` every tick, floored at 0.
+        let carrots = self.more_carrot_ticks.load(Ordering::Relaxed);
+        if carrots > 0 {
+            self.more_carrot_ticks.store(
+                decay_more_carrot_ticks(carrots, rand::random_range(0..3)),
+                Ordering::Relaxed,
+            );
+        }
+
+        let on_ground = entity.on_ground.load(Ordering::SeqCst);
+        if on_ground {
+            if !self.was_on_ground.load(Ordering::Relaxed) {
+                // Vanilla `checkLandingDelay` (line 250).
+                self.set_jumping(false);
+                self.set_landing_delay();
             }
 
-            // Vanilla lines 182-187: decay by `random.nextInt(3)` every tick, floored at 0.
-            let carrots = self.more_carrot_ticks.load(Ordering::Relaxed);
-            if carrots > 0 {
-                self.more_carrot_ticks.store(
-                    decay_more_carrot_ticks(carrots, rand::random_range(0..3)),
-                    Ordering::Relaxed,
-                );
-            }
+            let mut evil_lunged = false;
 
-            let on_ground = entity.on_ground.load(Ordering::SeqCst);
-            if on_ground {
-                if !self.was_on_ground.load(Ordering::Relaxed) {
-                    // Vanilla `checkLandingDelay` (line 250).
-                    self.set_jumping(false);
-                    self.set_landing_delay();
-                }
-
-                let mut evil_lunged = false;
-
-                // Vanilla lines 195-203: the killer bunny lunges at a nearby target the moment
-                // its landing delay expires, bypassing the usual "needs a navigation
-                // destination" gate below.
-                if self.get_variant() == RabbitVariant::Evil
-                    && self.jump_delay_ticks.load(Ordering::Relaxed) == 0
-                {
-                    let target = self.mob_entity.target.lock().await.clone();
-                    if let Some(target) = target {
-                        let dist_sq = target
-                            .get_entity()
-                            .pos
-                            .load()
-                            .squared_distance_to_vec(&entity.pos.load());
-                        if dist_sq < 16.0 {
-                            self.start_jumping();
-                            evil_lunged = true;
-                        }
+            // Vanilla lines 195-203: the killer bunny lunges at a nearby target the moment
+            // its landing delay expires, bypassing the usual "needs a navigation
+            // destination" gate below.
+            if self.get_variant() == RabbitVariant::Evil
+                && self.jump_delay_ticks.load(Ordering::Relaxed) == 0
+            {
+                let target = self
+                    .mob_entity
+                    .target
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                if let Some(target) = target {
+                    let dist_sq = target
+                        .get_entity()
+                        .pos
+                        .load()
+                        .squared_distance_to_vec(&entity.pos.load());
+                    if dist_sq < 16.0 {
+                        self.start_jumping();
+                        evil_lunged = true;
                     }
                 }
-
-                // Vanilla lines 206-216. `moveControl.hasWanted()` is "the move control has a
-                // destination it is still travelling to"; the closest equivalent here is a
-                // non-idle navigator.
-                if !evil_lunged
-                    && !living.jumping.load(Ordering::SeqCst)
-                    && self.jump_delay_ticks.load(Ordering::Relaxed) == 0
-                    && !self.mob_entity.navigator.lock().unwrap().is_idle()
-                {
-                    self.start_jumping();
-                }
             }
 
-            // Vanilla line 222.
-            self.was_on_ground.store(on_ground, Ordering::Relaxed);
-        })
+            // Vanilla lines 206-216. `moveControl.hasWanted()` is "the move control has a
+            // destination it is still travelling to"; the closest equivalent here is a
+            // non-idle navigator.
+            if !evil_lunged
+                && !living.jumping.load(Ordering::SeqCst)
+                && self.jump_delay_ticks.load(Ordering::Relaxed) == 0
+                && !self.mob_entity.navigator.lock().unwrap().is_idle()
+            {
+                self.start_jumping();
+            }
+        }
+
+        // Vanilla line 222.
+        self.was_on_ground.store(on_ground, Ordering::Relaxed);
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
+    fn mob_init_data_tracker(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
 
-            if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
-                let world = entity.world.load();
-                let pos = entity.block_pos.load();
-                let variant = get_random_rabbit_variant(world.get_biome(&pos));
-                self.set_variant(variant);
-            } else {
-                self.set_variant(self.get_variant());
-            }
+        if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
+            let world = entity.world.load();
+            let pos = entity.block_pos.load();
+            let variant = get_random_rabbit_variant(world.get_biome(&pos));
+            self.set_variant(variant);
+        } else {
+            self.set_variant(self.get_variant());
+        }
 
-            // This override replaces (rather than chains to) `Mob::mob_init_data_tracker`'s
-            // default body, which sends `BABY_ID` for age < 0 -- replicate that here so bred
-            // kits (spawned at age -24000) still render baby-sized.
-            if entity.age.load(Ordering::Relaxed) < 0 {
-                entity.send_meta_data(&[Metadata::new(tracked_data::rabbit::BABY_ID, true)], None);
-            }
-        })
+        // This override replaces (rather than chains to) `Mob::mob_init_data_tracker`'s
+        // default body, which sends `BABY_ID` for age < 0 -- replicate that here so bred
+        // kits (spawned at age -24000) still render baby-sized.
+        if entity.age.load(Ordering::Relaxed) < 0 {
+            entity.send_meta_data(&[Metadata::new(tracked_data::rabbit::BABY_ID, true)], None);
+        }
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.animal_interact(player, item_stack, Sound::EntityRabbitAmbient)
     }
 
     /// Vanilla `Rabbit.getBreedOffspring`: 95% chance (`random.nextInt(20) != 0`) to inherit a
     /// parent's variant (50/50 which parent), else roll a fresh biome-based variant.
-    fn create_offspring<'a>(
-        &'a self,
-        mate: &'a dyn EntityBase,
-        world: &'a Arc<crate::world::World>,
-    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let baby = crate::entity::r#type::from_type(
-                entity.entity_type,
-                entity.pos.load(),
-                world,
-                uuid::Uuid::new_v4(),
-            );
+    fn create_offspring(
+        &self,
+        mate: &dyn EntityBase,
+        world: &Arc<crate::world::World>,
+    ) -> Option<Arc<dyn EntityBase>> {
+        let entity = self.get_entity();
+        let baby = crate::entity::r#type::from_type(
+            entity.entity_type,
+            entity.pos.load(),
+            world,
+            uuid::Uuid::new_v4(),
+        );
 
-            if let Some(kit) = baby.cast_any().downcast_ref::<Self>() {
-                let variant = if rand::random_range(0..20) != 0 {
-                    let mate_rabbit = mate.cast_any().downcast_ref::<Self>();
-                    if rand::random_bool(0.5) {
-                        self.get_variant()
-                    } else {
-                        mate_rabbit.map_or_else(|| self.get_variant(), Self::get_variant)
-                    }
+        if let Some(kit) = baby.cast_any().downcast_ref::<Self>() {
+            let variant = if rand::random_range(0..20) != 0 {
+                let mate_rabbit = mate.cast_any().downcast_ref::<Self>();
+                if rand::random_bool(0.5) {
+                    self.get_variant()
                 } else {
-                    get_random_rabbit_variant(world.get_biome(&entity.block_pos.load()))
-                };
-                kit.set_variant(variant);
-            }
+                    mate_rabbit.map_or_else(|| self.get_variant(), Self::get_variant)
+                }
+            } else {
+                get_random_rabbit_variant(world.get_biome(&entity.block_pos.load()))
+            };
+            kit.set_variant(variant);
+        }
 
-            Some(baby)
-        })
+        Some(baby)
     }
 }
 

@@ -22,13 +22,13 @@ use pumpkin_protocol::java::client::play::SuggestionProviders;
 use rustc_hash::FxHashSet;
 
 #[expect(clippy::too_many_lines)]
-pub async fn send_c_commands_packet(
+pub fn send_c_commands_packet(
     player: &Arc<Player>,
     server: &Server,
     dispatcher: &CommandDispatcher,
 ) {
     let cmd_src = super::CommandSender::Player(player.clone());
-    let permitted_nodes = permitted_nodes_for_player(player, dispatcher).await;
+    let permitted_nodes = permitted_nodes_for_player(player, dispatcher);
 
     let mut first_level = Vec::new();
 
@@ -52,7 +52,7 @@ pub async fn send_c_commands_packet(
             continue;
         };
 
-        if !cmd_src.has_permission(server, permission.as_str()).await {
+        if !cmd_src.has_permission(server, permission.as_str()) {
             continue;
         }
 
@@ -316,18 +316,18 @@ fn nodes_to_proto_node_builders<'a>(
 }
 
 // Commands.java:413-439 copies only nodes whose canUse check accepts the player.
-async fn permitted_nodes_for_player(
+fn permitted_nodes_for_player(
     player: &Arc<Player>,
     dispatcher: &CommandDispatcher,
 ) -> FxHashSet<NodeId> {
     let Some(server) = player.world().server.upgrade() else {
         return FxHashSet::default();
     };
-    let source = player.get_command_source(&server).await;
-    permitted_nodes_for_source(dispatcher, &source).await
+    let source = player.get_command_source(&server);
+    permitted_nodes_for_source(dispatcher, &source)
 }
 
-async fn permitted_nodes_for_source(
+fn permitted_nodes_for_source(
     dispatcher: &CommandDispatcher,
     source: &crate::command::context::command_source::CommandSource,
 ) -> FxHashSet<NodeId> {
@@ -335,7 +335,7 @@ async fn permitted_nodes_for_source(
     let mut pending = dispatcher.tree.get_children(ROOT_NODE_ID);
 
     while let Some(node) = pending.pop() {
-        if dispatcher.tree.can_use(node, source).await {
+        if dispatcher.tree.can_use(node, source) {
             permitted.insert(node);
             pending.extend(dispatcher.tree.get_children(node));
         }
@@ -350,13 +350,13 @@ struct BuilderContext<'a> {
 }
 
 #[expect(clippy::too_many_lines)]
-pub async fn send_bedrock_commands_packet(
+pub fn send_bedrock_commands_packet(
     player: &Arc<Player>,
     server: &Server,
     dispatcher: &CommandDispatcher,
 ) {
     let cmd_src = super::CommandSender::Player(player.clone());
-    let permitted_nodes = permitted_nodes_for_player(player, dispatcher).await;
+    let permitted_nodes = permitted_nodes_for_player(player, dispatcher);
 
     let mut enum_values: Vec<String> = Vec::new();
     let mut enums: Vec<EnumData> = Vec::new();
@@ -380,7 +380,7 @@ pub async fn send_bedrock_commands_packet(
             continue;
         };
 
-        if !cmd_src.has_permission(server, permission.as_str()).await {
+        if !cmd_src.has_permission(server, permission.as_str()) {
             continue;
         }
 
@@ -800,17 +800,17 @@ mod tests {
     use crate::command::node::attached::NodeId;
     use crate::command::node::dispatcher::CommandDispatcher;
 
-    fn denied(_: &CommandSource) -> RequirementResult<'_> {
-        Box::pin(async { false })
+    fn denied(_: &CommandSource) -> RequirementResult {
+        false
     }
 
     #[tokio::test]
-    async fn command_packets_omit_nodes_the_source_cannot_use() {
+    fn command_packets_omit_nodes_the_source_cannot_use() {
         let mut dispatcher = CommandDispatcher::new();
         let allowed = dispatcher.register(command("allowed", "").build());
         let blocked = dispatcher.register(command("blocked", "").requires(denied).build());
 
-        let permitted = permitted_nodes_for_source(&dispatcher, &CommandSource::dummy()).await;
+        let permitted = permitted_nodes_for_source(&dispatcher, &CommandSource::dummy());
 
         assert!(permitted.contains(&NodeId::from(allowed)));
         assert!(!permitted.contains(&NodeId::from(blocked)));
