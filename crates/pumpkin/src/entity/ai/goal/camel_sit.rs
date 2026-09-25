@@ -4,7 +4,9 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
-use pumpkin_data::sound::{Sound, SoundCategory};
+use crate::entity::passive::camel::CamelEntity;
+use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::SoundCategory;
 use rand::RngExt;
 
 /// Vanilla: `CamelAi.RandomSitting.minimalPoseTicks` (`minimalPoseTimeSec = 20`). The camel must
@@ -105,8 +107,9 @@ impl Goal for CamelSitGoal {
 
             let entity = mob.get_entity();
             let world = entity.world.load();
+            // `CamelHusk.getSitDownSound` (`CamelHusk.java:119-122`).
             world.play_sound(
-                Sound::EntityCamelSit,
+                CamelEntity::sit_down_sound(entity.entity_type.id == EntityType::CAMEL_HUSK.id),
                 SoundCategory::Neutral,
                 &entity.pos.load(),
             );
@@ -119,8 +122,9 @@ impl Goal for CamelSitGoal {
 
             let entity = mob.get_entity();
             let world = entity.world.load();
+            // `CamelHusk.getStandUpSound` (`CamelHusk.java:114-117`).
             world.play_sound(
-                Sound::EntityCamelStand,
+                CamelEntity::stand_up_sound(entity.entity_type.id == EntityType::CAMEL_HUSK.id),
                 SoundCategory::Neutral,
                 &entity.pos.load(),
             );

@@ -214,7 +214,11 @@ pub fn from_type(
         id if id == EntityType::ARMADILLO.id => ArmadilloEntity::new(entity),
         id if id == EntityType::AXOLOTL.id => AxolotlEntity::new(entity),
         id if id == EntityType::BEE.id => BeeEntity::new(entity),
-        id if id == EntityType::CAMEL.id => CamelEntity::new(entity),
+        id if id == EntityType::CAMEL.id || id == EntityType::CAMEL_HUSK.id => {
+            // `CamelHusk` extends `Camel` (`CamelHusk.java:24-27`); the shared Rust camel
+            // implementation dispatches its overrides from the registered entity type.
+            CamelEntity::new(entity)
+        }
         id if id == EntityType::COPPER_GOLEM.id => CopperGolemEntity::new(entity),
         id if id == EntityType::FROG.id => FrogEntity::new(entity),
         id if id == EntityType::GOAT.id => GoatEntity::new(entity),

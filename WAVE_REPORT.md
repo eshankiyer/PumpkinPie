@@ -1,0 +1,4 @@
+| Class | NOT_A_GAP (existing file) OR methods IMPLEMENTED | vanilla file:lines read | new call sites wired |
+|---|---|---|---|
+| PistonMovingBlockEntity | NOT_A_GAP (`crates/pumpkin/src/block/entities/piston.rs::PistonBlockEntity`) | `net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java:32-404` | Existing piston block-entity tick, persistence, collision, and block registration |
+| CamelHusk | `removeWhenFarAway`, `isMobControlled`/`canBeLeashed`, `interact`, `isFood`, ambient/death/hurt/step/dash/dash-ready/eating/sit/stand/saddle sounds, `canMate`, `getBreedOffspring`, `canFallInLove`, `canBeABaby`, `chargeSpeedModifier` | `net/minecraft/world/entity/animal/camel/CamelHusk.java:24-133` | `entity/type.rs::from_type`; camel interaction/tick; mob sound/despawn/leash/breeding hooks; `LivingEntity::on_death`; `CamelSitGoal`; equine saddle equip |
