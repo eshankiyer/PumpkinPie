@@ -13,6 +13,7 @@ use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
 use crate::world::scoreboard::entity_scoreboard_name;
 use pumpkin_data::translation;
 use pumpkin_protocol::java::client::play::ArgumentType as JavaArgumentType;
+use pumpkin_protocol::java::client::play::SuggestionProviders;
 use pumpkin_util::text::TextComponent;
 use std::future::Future;
 use std::pin::Pin;
@@ -28,7 +29,7 @@ const NO_RESULTS_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
 /// (`ScoreHolderArgument.java:92-161`).
 pub enum ScoreHolderArgument {
     Name(String),
-    Selector(EntitySelector),
+    Selector(Box<EntitySelector>),
     Wildcard,
 }
 
@@ -50,6 +51,7 @@ impl ScoreHolderArgumentType {
         Self { multiple: true }
     }
 
+    /// `ScoreHolderArgument.parse` (`ScoreHolderArgument.java:92-123`)
     fn parse_with_allow_selectors(
         self,
         reader: &mut StringReader,
@@ -59,13 +61,12 @@ impl ScoreHolderArgumentType {
             let selector =
                 EntitySelectorParser::new(reader, allow_selectors).parse_and_consume()?;
             if !self.multiple && selector.max_selected > 1 {
-                reader.set_cursor(0);
                 return Err(
                     crate::command::argument_types::entity::NOT_SINGLE_ENTITY_ERROR_TYPE
                         .create(reader),
                 );
             }
-            Ok(ScoreHolderArgument::Selector(selector))
+            Ok(ScoreHolderArgument::Selector(Box::new(selector)))
         } else {
             let start = reader.cursor();
             reader.read_until_space();
@@ -83,6 +84,7 @@ impl ScoreHolderArgumentType {
         }
     }
 
+    /// `ScoreHolderArgument.parse` result lambdas (`ScoreHolderArgument.java:109-159`)
     async fn resolve(
         argument: &ScoreHolderArgument,
         source: &CommandSource,
@@ -90,20 +92,29 @@ impl ScoreHolderArgumentType {
     ) -> Result<Vec<String>, CommandSyntaxError> {
         match argument {
             ScoreHolderArgument::Name(name) => {
+                if name.starts_with('#') {
+                    return Ok(vec![name.clone()]);
+                }
                 if let Ok(uuid) = name.parse::<Uuid>() {
                     // Vanilla preserves every matching entity when a UUID occurs in multiple
                     // server levels (`ScoreHolderArgument.java:125-153`).
                     let mut matches = Vec::new();
                     for world in source.server().worlds.load().iter() {
-                        if let Some(entity) = world.get_entity_by_uuid(uuid) {
+                        if let Some(player) = world.get_player_by_uuid(uuid) {
+                            matches.push(player.gameprofile.name.clone());
+                        } else if let Some(entity) = world.get_entity_by_uuid(uuid) {
                             matches.push(entity_scoreboard_name(entity.as_ref()));
                         }
                     }
                     if !matches.is_empty() {
                         return Ok(matches);
                     }
+                    return Ok(vec![name.clone()]);
                 }
-                Ok(vec![name.clone()])
+                Ok(vec![source.server().get_player_by_name(name).map_or_else(
+                    || name.clone(),
+                    |player| player.gameprofile.name.clone(),
+                )])
             }
             ScoreHolderArgument::Selector(selector) => {
                 let entities = selector.find_entities(source).await?;
@@ -141,17 +152,22 @@ impl ScoreHolderArgumentType {
         context: &CommandContext<'_>,
         name: &str,
     ) -> Result<Vec<String>, CommandSyntaxError> {
-        let wildcard = context
-            .world()
-            .scoreboard
-            .lock()
-            .await
-            .get_tracked_players()
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
         let argument = context.get_argument::<ScoreHolderArgument>(name)?;
-        Self::resolve(argument, &context.source, Some(wildcard)).await
+        let wildcard = match argument {
+            ScoreHolderArgument::Wildcard => Some(
+                context
+                    .world()
+                    .scoreboard
+                    .lock()
+                    .await
+                    .get_tracked_players()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            _ => None,
+        };
+        Self::resolve(argument, &context.source, wildcard).await
     }
 
     /// Returns one resolved holder from a single-holder argument.
@@ -205,6 +221,11 @@ impl ArgumentType for ScoreHolderArgumentType {
         EntitySelectorParserSuggestions::list_suggestions(context, builder)
     }
 
+    /// `ScoreHolderArgument.SUGGEST_SCORE_HOLDERS` (`ScoreboardCommand.java:170-171`)
+    fn override_suggestion_providers(&self) -> Option<SuggestionProviders> {
+        Some(SuggestionProviders::AskServer)
+    }
+
     fn examples(&self) -> Vec<String> {
         vec![
             "Player".to_string(),
@@ -239,11 +260,10 @@ mod tests {
     fn single_holder_rejects_unbounded_selector() {
         // Vanilla rejects a selector with more than one possible result for `scoreHolder()`
         // (`ScoreHolderArgument.java:92-99`).
-        let mut reader = StringReader::new("@e");
-        assert!(
-            ScoreHolderArgumentType::score_holder()
-                .parse(&mut reader)
-                .is_err()
-        );
+        let mut reader = StringReader::new("@e obj");
+        let Err(error) = ScoreHolderArgumentType::score_holder().parse(&mut reader) else {
+            panic!("unbounded selector should be rejected");
+        };
+        assert_eq!(error.context.map(|context| context.cursor), Some(2));
     }
 }
