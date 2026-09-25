@@ -238,6 +238,9 @@ pub mod range;
 pub mod resource;
 pub mod resource_key;
 pub mod resource_or_tag;
+// Vanilla score-holder parsing is used by scoreboard target/source arguments
+// (`ScoreHolderArgument.java:32-162`).
+pub mod score_holder;
 pub mod slot;
 pub mod structure;
 pub mod team;
