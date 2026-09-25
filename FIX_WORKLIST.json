@@ -1,0 +1,30 @@
+[
+  {
+    "file": "crates/pumpkin/src/block/blocks/redstone/redstone_ore.rs",
+    "lost_prod_fns": [
+      "attack"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/entity/ai/goal/ranged_crossbow_attack.rs",
+    "lost_prod_fns": [
+      "has_crossbow"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/block/blocks/flower_pots.rs",
+    "lost_prod_fns": [
+      "get_clone_item_stack"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/item/mod.rs",
+    "lost_prod_fns": [
+      "inventory_tick"
+    ],
+    "lost_test_fns": []
+  }
+]

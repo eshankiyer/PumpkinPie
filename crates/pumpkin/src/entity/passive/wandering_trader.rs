@@ -70,6 +70,29 @@ use crate::world::World;
 
 const DEFAULT_DESPAWN_DELAY: i32 = 0;
 
+/// The seven `AvoidEntityGoal`s of `WanderingTrader.registerGoals`
+/// (`WanderingTrader.java:80-86`), each at priority 1 with speeds `0.5, 0.5`.
+///
+/// Vanilla matches `Zombie.class` by class hierarchy, so it also covers every subclass:
+/// `Drowned.java:67`, `Husk.java:31`, `ZombieVillager.java:61` and `ZombifiedPiglin.java:48`
+/// all `extends Zombie`. `AvoidEntityGoal`'s `FleeSelector::Type` matches one exact entity
+/// type, so those four are listed explicitly at the same 8.0 radius. The other six vanilla
+/// classes here have no subclasses (verified by grepping `extends <Class>` over the decompile).
+#[cfg(test)]
+const AVOIDED: &[(&EntityType, f64)] = &[
+    (&EntityType::ZOMBIE, 8.0),
+    (&EntityType::DROWNED, 8.0),
+    (&EntityType::HUSK, 8.0),
+    (&EntityType::ZOMBIE_VILLAGER, 8.0),
+    (&EntityType::ZOMBIFIED_PIGLIN, 8.0),
+    (&EntityType::EVOKER, 12.0),
+    (&EntityType::VINDICATOR, 8.0),
+    (&EntityType::VEX, 8.0),
+    (&EntityType::PILLAGER, 15.0),
+    (&EntityType::ILLUSIONER, 12.0),
+    (&EntityType::ZOGLIN, 10.0),
+];
+
 fn create_invisibility_potion() -> ItemStack {
     let mut stack = ItemStack::new(1, &Item::POTION);
     apply_potion(&mut stack, "invisibility");
@@ -1284,6 +1307,7 @@ impl Goal for WanderingTraderUseItemGoal {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use pumpkin_data::entity::EntityType;
 
     #[test]
     fn default_wandering_trader_despawn_delay_is_zero() {
@@ -1299,6 +1323,37 @@ mod tests {
         add_offers_from_trade_set(&mut offers, TRADES_WANDERING_TRADER_COMMON, 5, &mut rng);
 
         assert_eq!(offers.len(), 9);
+    }
+
+    /// `WanderingTrader.registerGoals` (`WanderingTrader.java:80-86`) registers exactly seven
+    /// `AvoidEntityGoal`s, and the flee radii are not uniform -- pillagers are feared from
+    /// 15 blocks, evokers and illusioners from 12, zoglins from 10, the rest from 8.
+    #[test]
+    fn avoided_table_matches_vanilla() {
+        // Six single classes plus `Zombie` and its four subclasses.
+        assert_eq!(AVOIDED.len(), 11);
+        let radius = |ty: &EntityType| {
+            AVOIDED
+                .iter()
+                .find(|(t, _)| t.id == ty.id)
+                .map(|(_, d)| *d)
+                .expect("entity type missing from AVOIDED")
+        };
+        for zombie in [
+            &EntityType::ZOMBIE,
+            &EntityType::DROWNED,
+            &EntityType::HUSK,
+            &EntityType::ZOMBIE_VILLAGER,
+            &EntityType::ZOMBIFIED_PIGLIN,
+        ] {
+            assert!((radius(zombie) - 8.0).abs() < f64::EPSILON);
+        }
+        assert!((radius(&EntityType::EVOKER) - 12.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::VINDICATOR) - 8.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::VEX) - 8.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::PILLAGER) - 15.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::ILLUSIONER) - 12.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::ZOGLIN) - 10.0).abs() < f64::EPSILON);
     }
 
     #[test]
