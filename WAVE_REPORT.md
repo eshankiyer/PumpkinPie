@@ -1,0 +1,5 @@
+| Class | NOT_A_GAP (existing file) OR methods IMPLEMENTED | vanilla file:lines read | new call sites wired |
+| --- | --- | --- | --- |
+| ScoreHolderArgument | `ScoreHolderArgumentType`: single/multiple parsing, names, fake holders, UUID resolution, selectors, wildcard expansion, suggestions, and client argument flags | `net/minecraft/commands/arguments/ScoreHolderArgument.java:32-235`; `net/minecraft/server/commands/ScoreboardCommand.java:164-367` | `crates/pumpkin/src/command/commands/scoreboard.rs`: every `/scoreboard players` target/source branch |
+| ItemPredicateArgument | NOT_A_GAP (`crates/pumpkin/src/command/args/resource/item.rs::ItemPredicateArgumentConsumer`) | `net/minecraft/commands/arguments/item/ItemPredicateArgument.java:40-234` | Existing `/clear` item predicate path at `crates/pumpkin/src/command/commands/clear.rs:320-377` |
+| TagValueInput | NOT_A_GAP (`crates/pumpkin-nbt/src/compound.rs::NbtCompound`) | `net/minecraft/world/level/storage/TagValueInput.java:40-235,237-458` | N/A; existing entity and block-entity NBT load paths use the equivalent typed accessors |
