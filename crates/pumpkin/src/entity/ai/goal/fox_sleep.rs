@@ -23,13 +23,9 @@ fn is_bright_outside(world: &World) -> bool {
 
 fn is_untamed_tamable(other: &dyn EntityBase) -> bool {
     let entity_type = other.get_entity().entity_type;
-    let tamable_type = [
-        &EntityType::CAT,
-        &EntityType::WOLF,
-        &EntityType::PARROT,
-    ]
-    .into_iter()
-    .any(|tamable| entity_type == tamable);
+    let tamable_type = [&EntityType::CAT, &EntityType::WOLF, &EntityType::PARROT]
+        .into_iter()
+        .any(|tamable| entity_type == tamable);
     tamable_type
         && other
             .get_mob()
