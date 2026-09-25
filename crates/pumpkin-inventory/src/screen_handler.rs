@@ -220,6 +220,12 @@ pub trait InventoryPlayer: Send + Sync {
         let _ = access;
         true
     }
+
+    /// `Player.mayBuild` (`Player.java:1612-1614`).
+    fn may_build(&self) -> PlayerFuture<'_, bool> {
+        Box::pin(async { true })
+    }
+
     /// Drops an item into the world.
     ///
     /// # Arguments

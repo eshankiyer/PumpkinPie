@@ -1546,6 +1546,22 @@ impl Player {
             .await;
     }
 
+    /// `ItemCooldowns.tick` with `ServerItemCooldowns.onCooldownEnded` (`ItemCooldowns.java:33-46`; `ServerItemCooldowns.java:20-24`).
+    async fn tick_item_cooldowns(&self) {
+        let current_tick = self.tick_counter.load(Ordering::Relaxed);
+        let ended: Vec<String> = self
+            .item_cooldowns
+            .lock()
+            .await
+            .extract_if(|_, cooldown| current_tick - cooldown.start_tick >= cooldown.duration)
+            .map(|(group, _)| group)
+            .collect();
+        for group in ended {
+            self.send_client_packet(&CItemCooldown::new(group, VarInt(0)))
+                .await;
+        }
+    }
+
     pub async fn get_cooldown(&self, group: &str) -> f32 {
         let cooldowns = self.item_cooldowns.lock().await;
         if let Some(cooldown) = cooldowns.get(group) {
@@ -1687,6 +1703,10 @@ impl Player {
             .is::<PlayerScreenHandler>()
         {
             self.on_handled_screen_closed().await;
+        }
+
+        if self.is_sleeping() {
+            self.stop_sleep_in_bed().await;
         }
 
         let vehicle = self.living_entity.entity.vehicle.lock().await.clone();
@@ -2906,6 +2926,12 @@ impl Player {
             }
         }
 
+        self.set_stat(
+            statistics::StatisticCategory::Custom,
+            statistics::CustomStatistic::TimeSinceRest as i32,
+            0,
+        )
+        .await;
         self.get_entity().set_pose(EntityPose::Sleeping);
         self.living_entity
             .entity
@@ -3014,6 +3040,11 @@ impl Player {
         self.sleeping_pos.load().is_some()
     }
 
+    /// `Player.wantsToStopRiding` (`Player.java:296-298`).
+    fn wants_to_stop_riding(&self) -> bool {
+        self.living_entity.entity.is_sneaking()
+    }
+
     /// Vanilla `Player.isSleepingLongEnough` (`Player.java:1355-1357`) gates night skipping
     /// after the player's sleep timer reaches 100 ticks.
     pub fn is_sleeping_long_enough(&self) -> bool {
@@ -3087,80 +3118,55 @@ impl Player {
         }
     }
 
-    pub async fn wake_up(&self) {
-        let world = self.world();
-        let respawn_point = self.respawn_point.lock().await;
-        let Some(respawn_point) = respawn_point.as_ref() else {
-            warn!("Player waking up should have it's respawn point set on the bed");
+    /// `Player.stopSleepInBed` (`Player.java:1341-1348`; `ServerPlayer.java:1266-1276`; `LivingEntity.java:3795-3816`).
+    pub async fn stop_sleep_in_bed(&self) {
+        let Some(bed_pos) = self.sleeping_pos.swap(None) else {
+            self.sleeping_since.store(None);
             return;
         };
 
+        let world = self.world();
+        let player_arc = world.get_player_by_uuid(self.gameprofile.id);
         if let Some(server) = world.server.upgrade()
-            && let Some(player_arc) = world.get_player_by_uuid(self.gameprofile.id)
+            && let Some(player_arc) = &player_arc
         {
             let mut event =
                 crate::plugin::api::events::player::player_bed::PlayerBedLeaveEvent::new(
-                    player_arc,
-                    respawn_point.position,
+                    player_arc.clone(),
+                    bed_pos,
                 );
             server.plugin_manager.fire(&server, &mut event).await;
         }
 
-        let (bed, bed_state) = world.get_block_and_state_id(&respawn_point.position);
-        let bed_properties =
-            pumpkin_data::block_properties::WhiteBedLikeProperties::from_state_id(bed_state, bed);
-        let stand_up_position = BedBlock::find_stand_up_position(
-            &world,
-            &respawn_point.position,
-            bed_properties.facing.to_block_direction(),
-            self.get_entity().yaw.load(),
-            &EntityType::PLAYER,
-        )
-        .unwrap_or_else(|| respawn_point.position.to_f64().add_raw(0.5, 1.1, 0.5));
-        BedBlock::set_occupied(false, &world, bed, &respawn_point.position, bed_state).await;
-
-        self.living_entity.entity.set_pose(EntityPose::Standing);
-        self.living_entity.entity.set_pos(stand_up_position);
-        self.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                pumpkin_data::tracked_data::player::SLEEPING_POS_ID,
-                None::<BlockPos>,
-            )],
-            None,
-        );
-
-        self.set_stat(
-            statistics::StatisticCategory::Custom,
-            statistics::CustomStatistic::TimeSinceRest as i32,
-            0,
-        )
-        .await;
-
-        let chunk_pos = self.living_entity.entity.chunk_pos.load();
+        let entity = &self.living_entity.entity;
         world.broadcast_to_chunk(
-            chunk_pos,
+            entity.chunk_pos.load(),
             &CEntityAnimation::new(self.entity_id().into(), Animation::LeaveBed),
         );
 
-        self.sleeping_since.store(None);
-        self.sleeping_pos.store(None);
-    }
-
-    /// Vanilla `LivingEntity.stopSleeping`, used when accepted damage interrupts rest. This must
-    /// rely on the occupied bed, not the respawn point: damage can arrive before later respawn
-    /// handling, and the transition must still clear the bed and synchronized sleep state.
-    pub async fn stop_sleeping_after_damage(&self) {
-        let Some(bed_pos) = self.sleeping_pos.swap(None) else {
-            return;
-        };
-
-        let world = self.world();
         let (bed, bed_state) = world.get_block_and_state_id(&bed_pos);
-        BedBlock::set_occupied(false, &world, bed, &bed_pos, bed_state).await;
+        if bed.has_tag(&tag::Block::MINECRAFT_BEDS) {
+            let facing = pumpkin_data::block_properties::WhiteBedLikeProperties::from_state_id(
+                bed_state, bed,
+            )
+            .facing
+            .to_block_direction();
+            BedBlock::set_occupied(false, &world, bed, &bed_pos, bed_state).await;
+            let stand_up_position = BedBlock::find_stand_up_position(
+                &world,
+                &bed_pos,
+                facing,
+                entity.yaw.load(),
+                &EntityType::PLAYER,
+            )
+            .unwrap_or_else(|| bed_pos.up().to_f64().add_raw(0.5, 0.1, 0.5));
+            entity.set_pos(stand_up_position);
+            entity.set_rotation(bed_wake_yaw(bed_pos, stand_up_position), 0.0);
+        }
 
-        self.living_entity.entity.set_pose(EntityPose::Standing);
-        self.living_entity.entity.set_pos(self.position());
-        self.living_entity.entity.send_meta_data(
+        entity.set_pose(EntityPose::Standing);
+        entity.set_pos(entity.pos.load());
+        entity.send_meta_data(
             &[Metadata::new(
                 pumpkin_data::tracked_data::player::SLEEPING_POS_ID,
                 None::<BlockPos>,
@@ -3169,11 +3175,11 @@ impl Player {
         );
         self.sleeping_since.store(None);
 
-        let chunk_pos = self.living_entity.entity.chunk_pos.load();
-        world.broadcast_to_chunk(
-            chunk_pos,
-            &CEntityAnimation::new(self.entity_id().into(), Animation::LeaveBed),
-        );
+        if let Some(player_arc) = player_arc {
+            player_arc
+                .request_teleport(entity.pos.load(), entity.yaw.load(), entity.pitch.load())
+                .await;
+        }
     }
 
     pub async fn show_title(&self, text: &TextComponent, mode: &TitleMode) {
@@ -3317,6 +3323,15 @@ impl Player {
 
     #[expect(clippy::too_many_lines)]
     pub async fn tick(self: &Arc<Self>, server: &Server) {
+        if self.wants_to_stop_riding() {
+            let vehicle = self.living_entity.entity.vehicle.lock().await.clone();
+            if let Some(vehicle) = vehicle {
+                vehicle
+                    .get_entity()
+                    .remove_passenger(self.entity_id())
+                    .await;
+            }
+        }
         if let Some(camera_id) = self.camera_target_id.load() {
             if camera_id == self.entity_id() {
                 self.camera_target_id.store(None);
@@ -3332,6 +3347,11 @@ impl Player {
                     if player_pos != target_pos {
                         self.living_entity.entity.set_pos(target_pos);
                         crate::world::chunker::update_position(self).await;
+                    }
+                    if self.wants_to_stop_riding() {
+                        self.camera_target_id.store(None);
+                        self.send_client_packet(&CSetCamera::new(self.entity_id().into()))
+                            .await;
                     }
                 } else {
                     // Target no longer exists, reset camera back to player
@@ -3368,7 +3388,9 @@ impl Player {
             stats.increment_custom(statistics::CustomStatistic::PlayTime, 1);
             stats.increment_custom(statistics::CustomStatistic::TotalWorldTime, 1);
             stats.increment_custom(statistics::CustomStatistic::TimeSinceDeath, 1);
-            stats.increment_custom(statistics::CustomStatistic::TimeSinceRest, 1);
+            if !self.is_sleeping() {
+                stats.increment_custom(statistics::CustomStatistic::TimeSinceRest, 1);
+            }
             if self.living_entity.entity.sneaking.load(Ordering::Relaxed) {
                 stats.increment_custom(statistics::CustomStatistic::SneakTime, 1);
             }
@@ -3434,6 +3456,10 @@ impl Player {
         {
             self.sleeping_since.store(Some(sleeping_since + 1));
         }
+        if self.is_sleeping() && !crate::block::blocks::bed::bed_rule_can_sleep(&self.world()).await
+        {
+            self.stop_sleep_in_bed().await;
+        }
 
         if self.delayed_mining.load(Ordering::Relaxed) {
             self.continue_delayed_mining(server).await;
@@ -3465,7 +3491,7 @@ impl Player {
             .swap(main_hand_item, Ordering::Relaxed)
             != main_hand_item
         {
-            self.last_attacked_ticks.store(0, Ordering::Relaxed);
+            self.reset_attack_strength_ticker();
         }
 
         // Player.aiStep resets fall distance while flying before the normal
@@ -3477,6 +3503,7 @@ impl Player {
 
         let caller: Arc<dyn EntityBase> = self.clone();
         self.living_entity.tick(&caller, server).await;
+        self.tick_item_cooldowns().await;
         // Vanilla updates pose in PlayerEntity#tick after super.tick().
         self.update_player_pose().await;
         self.hunger_manager.tick(self).await;
@@ -3767,6 +3794,11 @@ impl Player {
         self.drop_spam_tick_count
             .fetch_add(INCREMENT_STEP, Ordering::Relaxed);
         true
+    }
+
+    /// `Player.resetAttackStrengthTicker` (`Player.java:1834-1837`).
+    pub fn reset_attack_strength_ticker(&self) {
+        self.last_attacked_ticks.store(0, Ordering::Relaxed);
     }
 
     pub fn get_attack_cooldown_progress(&self, tps: f64, base_time: f64, attack_speed: f64) -> f64 {
@@ -8045,6 +8077,25 @@ fn sleeping_long_enough(sleeping_since: Option<u8>) -> bool {
     sleeping_since.is_some_and(|since| since >= 100)
 }
 
+/// `LivingEntity.stopSleeping` wake-up yaw toward the bed (`LivingEntity.java:3805-3806`).
+fn bed_wake_yaw(bed_pos: BlockPos, stand_up_position: Vector3<f64>) -> f32 {
+    let mut dx = f64::from(bed_pos.0.x) + 0.5 - stand_up_position.x;
+    let dy = f64::from(bed_pos.0.y) - stand_up_position.y;
+    let mut dz = f64::from(bed_pos.0.z) + 0.5 - stand_up_position.z;
+    if dx.mul_add(dx, dy.mul_add(dy, dz * dz)).sqrt() < f64::from(1.0E-5f32) {
+        dx = 0.0;
+        dz = 0.0;
+    }
+    let mut yaw = (dz.atan2(dx) * 180.0 / f64::from(std::f32::consts::PI) - 90.0) % 360.0;
+    if yaw >= 180.0 {
+        yaw -= 360.0;
+    }
+    if yaw < -180.0 {
+        yaw += 360.0;
+    }
+    yaw as f32
+}
+
 const fn may_use_item_at_allowed(may_build: bool, can_place_on_block: bool) -> bool {
     may_build || can_place_on_block
 }
@@ -8220,6 +8271,9 @@ impl EntityBase for Player {
         world: Arc<World>,
     ) -> TeleportFuture {
         Box::pin(async move {
+            if self.is_sleeping() {
+                self.stop_sleep_in_bed().await;
+            }
             if Arc::ptr_eq(&world, &self.world()) {
                 // Same world
                 let yaw = yaw.unwrap_or(self.living_entity.entity.yaw.load());
@@ -8811,6 +8865,10 @@ impl InventoryPlayer for Player {
             && self.can_interact_with_block_at(&pos, 4.0)
     }
 
+    fn may_build(&self) -> PlayerFuture<'_, bool> {
+        Box::pin(async move { self.abilities.lock().await.allow_modify_world })
+    }
+
     fn drop_item(&self, item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
             self.drop_item(item).await;
@@ -9375,7 +9433,7 @@ pub(crate) const fn restore_creative_interaction_count(stack: &mut ItemStack, or
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, attack_charge_ready, attack_range_is_in_range,
-        attack_speed_for_item, bedrock_inventory_slot, can_harm_player_teams,
+        attack_speed_for_item, bed_wake_yaw, bedrock_inventory_slot, can_harm_player_teams,
         can_start_fall_flying, can_use_game_master_blocks_state, damage_dealt_stat_points,
         experience_level_after_delta, extract_parrot_variant, first_fifth_level_crossed,
         is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
@@ -9589,6 +9647,17 @@ mod tests {
         assert!(!sleeping_long_enough(Some(99)));
         assert!(sleeping_long_enough(Some(100)));
         assert!(sleeping_long_enough(Some(101)));
+    }
+
+    /// `LivingEntity.stopSleeping` turns the woken sleeper to face the bed (`LivingEntity.java:3805-3809`).
+    #[test]
+    fn bed_wake_yaw_faces_the_bed() {
+        let bed = BlockPos::new(0, 64, 0);
+        assert!((bed_wake_yaw(bed, Vector3::new(0.5, 64.5625, 1.5)) + 180.0).abs() < 1.0E-4);
+        assert!((bed_wake_yaw(bed, Vector3::new(1.5, 64.5625, 0.5)) - 90.0).abs() < 1.0E-4);
+        assert!((bed_wake_yaw(bed, Vector3::new(-0.5, 64.0, 0.5)) + 90.0).abs() < 1.0E-4);
+        assert!(bed_wake_yaw(bed, Vector3::new(0.5, 64.0, -0.5)).abs() < 1.0E-4);
+        assert!((bed_wake_yaw(bed, Vector3::new(0.5, 64.0, 0.5)) + 90.0).abs() < 1.0E-4);
     }
 
     /// `Player.freeAt` accepts non-suffocating leaves while rejecting a full wooden block

@@ -57,6 +57,7 @@ impl JavaClient {
             event;
             'after: {
                 player.swing_hand(hand, false).await;
+                player.reset_attack_strength_ticker();
             }
         }}
     }

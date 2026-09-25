@@ -1939,7 +1939,7 @@ impl World {
 
             for player in self.players.load().iter() {
                 if player.sleeping_since.load().is_some() {
-                    player.wake_up().await;
+                    player.stop_sleep_in_bed().await;
                 }
             }
 

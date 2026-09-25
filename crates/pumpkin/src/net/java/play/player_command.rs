@@ -41,7 +41,7 @@ impl JavaClient {
                     }}
                 }
             }
-            Action::LeaveBed => player.wake_up().await,
+            Action::LeaveBed => player.stop_sleep_in_bed().await,
 
             Action::StartHorseJump => {
                 // `ServerGamePacketListenerImpl.handlePlayerCommand` checks `canJump`, then

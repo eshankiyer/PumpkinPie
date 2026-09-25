@@ -642,14 +642,21 @@ impl BedBlock {
     }
 }
 
-async fn can_sleep(world: &Arc<World>) -> bool {
-    let time = world.level_time.lock().await;
-    let weather = world.weather.lock().await;
-    let day_time = time.time_of_day.rem_euclid(24_000);
+/// `BedRule.canSleep` for the dimension's `gameplay/bed_rule` (`BedRule.java:27-29`, `Player.java:247-251`).
+pub(crate) async fn bed_rule_can_sleep(world: &Arc<World>) -> bool {
+    world.dimension == Dimension::OVERWORLD && can_sleep(world).await
+}
 
-    if weather.thundering {
+async fn can_sleep(world: &Arc<World>) -> bool {
+    let day_time = world.level_time.lock().await.time_of_day.rem_euclid(24_000);
+    let (thundering, raining) = {
+        let weather = world.weather.lock().await;
+        (weather.thundering, weather.raining)
+    };
+
+    if thundering {
         true
-    } else if weather.raining {
+    } else if raining {
         day_time > 12010 && day_time < 23991
     } else {
         day_time > 12542 && day_time < 23459

@@ -5902,7 +5902,7 @@ impl EntityBase for LivingEntity {
             // passed, but before blocking or hurt-cooldown rejection. Use the occupied bed,
             // rather than the respawn point, to clear the actual sleep state.
             if let Some(player) = caller.get_player() {
-                player.stop_sleeping_after_damage().await;
+                player.stop_sleep_in_bed().await;
             }
 
             // Check for shield blocking. Vanilla resolves blocking in `applyItemBlocking`

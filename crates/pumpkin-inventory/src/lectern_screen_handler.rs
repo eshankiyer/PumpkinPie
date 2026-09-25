@@ -118,6 +118,7 @@ impl ScreenHandler for LecternScreenHandler {
         &mut self.behaviour
     }
 
+    /// `LecternMenu.clickMenuButton` (`LecternMenu.java:38-72`).
     fn on_button_click<'a>(
         &'a mut self,
         player: &'a dyn InventoryPlayer,
@@ -145,6 +146,9 @@ impl ScreenHandler for LecternScreenHandler {
                     true
                 }
                 Self::TAKE_BOOK_BUTTON_ID => {
+                    if !player.may_build().await {
+                        return false;
+                    }
                     let stack = self.inventory.remove_stack(0).await;
                     if stack.is_empty() {
                         return false;
@@ -174,5 +178,174 @@ impl ScreenHandler for LecternScreenHandler {
     ) -> ItemStackFuture<'a> {
         // The lectern screen has no player slots, so nothing can be shift-clicked.
         Box::pin(async move { ItemStack::EMPTY.clone() })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use pumpkin_data::statistic::StatisticCategory;
+    use pumpkin_data::{data_component_impl::EquipmentSlot, item::Item, sound::Sound};
+    use pumpkin_protocol::java::client::play::{
+        CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
+        CSetPlayerInventory, CSetSelectedSlot,
+    };
+    use pumpkin_world::inventory::SimpleInventory;
+    use tokio::sync::Mutex;
+
+    use crate::entity_equipment::EntityEquipment;
+    use crate::player::player_inventory::PlayerInventory;
+    use crate::screen_handler::PlayerFuture;
+
+    use super::*;
+
+    struct TestPlayer {
+        inventory: Arc<PlayerInventory>,
+        may_build: bool,
+    }
+
+    impl InventoryPlayer for TestPlayer {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn may_build(&self) -> PlayerFuture<'_, bool> {
+            let may_build = self.may_build;
+            Box::pin(async move { may_build })
+        }
+        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn get_inventory(&self) -> Arc<PlayerInventory> {
+            self.inventory.clone()
+        }
+        fn play_sound(&self, _sound: Sound) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn has_infinite_materials(&self) -> bool {
+            false
+        }
+        fn is_creative(&self) -> bool {
+            false
+        }
+        fn experience_level(&self) -> i32 {
+            0
+        }
+        fn add_experience_levels(&self, _levels: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn enchantment_seed(&self) -> i32 {
+            0
+        }
+        fn set_enchantment_seed(&self, _seed: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_inventory_packet<'a>(
+            &'a self,
+            _packet: &'a CSetContainerContent,
+            _window_type: Option<WindowType>,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_slot_packet<'a>(
+            &'a self,
+            _packet: &'a CSetContainerSlot,
+            _window_type: Option<WindowType>,
+            _total_slots: usize,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_cursor_packet<'a>(
+            &'a self,
+            _packet: &'a CSetCursorItem,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_property_packet<'a>(
+            &'a self,
+            _packet: &'a CSetContainerProperty,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_slot_set_packet<'a>(
+            &'a self,
+            _packet: &'a CSetPlayerInventory,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_set_held_item_packet<'a>(
+            &'a self,
+            _packet: &'a CSetSelectedSlot,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_equipment_change<'a>(
+            &'a self,
+            _slot: &'a EquipmentSlot,
+            _stack: &'a ItemStack,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn award_experience(&self, _amount: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn increment_stat(
+            &self,
+            _category: StatisticCategory,
+            _stat_id: i32,
+            _amount: i32,
+        ) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    struct TestController;
+
+    impl LecternController for TestController {
+        fn current_page(&self) -> i32 {
+            0
+        }
+        fn has_book(&self) -> bool {
+            true
+        }
+        fn set_page(&self, _page: i32) -> ScreenHandlerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn on_book_taken(&self) -> ScreenHandlerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    async fn take_book(may_build: bool) -> (bool, ItemStack, Arc<PlayerInventory>) {
+        let lectern = Arc::new(SimpleInventory::new(1));
+        lectern
+            .set_stack(0, ItemStack::new(1, &Item::WRITTEN_BOOK))
+            .await;
+        let player = TestPlayer {
+            inventory: Arc::new(PlayerInventory::new(
+                Arc::new(Mutex::new(EntityEquipment::new())),
+                Arc::new(HashMap::new()),
+            )),
+            may_build,
+        };
+        let mut handler = LecternScreenHandler::new(0, lectern.clone(), Arc::new(TestController));
+        let taken = handler
+            .on_button_click(&player, LecternScreenHandler::TAKE_BOOK_BUTTON_ID)
+            .await;
+        (taken, lectern.get_stack(0).await, player.inventory)
+    }
+
+    /// `LecternMenu.clickMenuButton` keeps the book unless `Player.mayBuild` (`LecternMenu.java:57-60`).
+    #[tokio::test]
+    async fn take_book_requires_may_build() {
+        let (taken, left_on_lectern, inventory) = take_book(false).await;
+        assert!(!taken);
+        assert_eq!(left_on_lectern.item.id, Item::WRITTEN_BOOK.id);
+        assert!(!inventory.contains_item(&Item::WRITTEN_BOOK));
+
+        let (taken, left_on_lectern, inventory) = take_book(true).await;
+        assert!(taken);
+        assert!(left_on_lectern.is_empty());
+        assert!(inventory.contains_item(&Item::WRITTEN_BOOK));
     }
 }
