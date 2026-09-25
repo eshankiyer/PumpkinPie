@@ -606,6 +606,35 @@ macro_rules! impl_block_entity_for_cooking {
                 })
             }
 
+            fn on_block_replaced<'a>(
+                self: Arc<Self>,
+                world: Arc<$crate::world::World>,
+                position: pumpkin_util::math::position::BlockPos,
+            ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+            where
+                Self: 'a,
+            {
+                Box::pin(async move {
+                    // The furnace calls its superclass side effects first, then awards pending
+                    // recipe XP before the entity is removed
+                    // (`AbstractFurnaceBlockEntity.java:375-380`); `World::set_block_state_internal`
+                    // reaches this hook before removal.
+                    if let Some(inventory) = self.get_inventory() {
+                        world.scatter_inventory(&position, &inventory).await;
+                    }
+
+                    let experience = self.extract_experience_from_recipes();
+                    if experience > 0 {
+                        $crate::entity::experience_orb::ExperienceOrbEntity::spawn(
+                            &world,
+                            position.to_f64(),
+                            experience as u32,
+                        )
+                        .await;
+                    }
+                })
+            }
+
             fn resource_location(&self) -> &'static str {
                 Self::ID
             }

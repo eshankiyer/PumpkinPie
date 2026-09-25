@@ -1413,9 +1413,10 @@ pub fn generate_chest_loot(
     items_to_place
 }
 
-/// Items are scattered randomly across the 27 chest slots.
+/// Items are scattered randomly across the 27 chest slots, matching the deferred container-loot
+/// fill used by `ContainerEntity.unpackChestVehicleLootTable` (`ContainerEntity.java:93-107`).
 pub async fn fill_chest_inventory(
-    inventory: &std::sync::Arc<dyn pumpkin_world::inventory::Inventory>,
+    inventory: &dyn pumpkin_world::inventory::Inventory,
     table: &pumpkin_util::chest_loot_table::ChestLootTable,
     seed: i64,
 ) {

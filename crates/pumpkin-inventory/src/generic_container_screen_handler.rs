@@ -129,6 +129,9 @@ pub struct GenericContainerScreenHandler {
     pub columns: u8,
     /// Core screen handler behavior (slots, sync ID, listeners).
     behaviour: ScreenHandlerBehaviour,
+    // Entity-backed containers retain the access family required by
+    // `ContainerEntity.isChestVehicleStillValid` (`ContainerEntity.java:168-170`).
+    container_access: crate::screen_handler::ContainerAccess,
 }
 
 impl GenericContainerScreenHandler {
@@ -154,6 +157,7 @@ impl GenericContainerScreenHandler {
             rows,
             columns,
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(screen_type)),
+            container_access: crate::screen_handler::ContainerAccess::RangeOnly,
         };
 
         // TODO: Add player entity as a parameter
@@ -164,6 +168,12 @@ impl GenericContainerScreenHandler {
         handler.add_player_slots(&player_inventory);
 
         handler
+    }
+
+    pub const fn set_container_access(&mut self, access: crate::screen_handler::ContainerAccess) {
+        // The chest-vehicle factory wires the entity validity check before opening the menu
+        // (`ContainerEntity.java:168-170`).
+        self.container_access = access;
     }
 
     /// Adds slots for the container's inventory grid.
@@ -194,7 +204,7 @@ impl ScreenHandler for GenericContainerScreenHandler {
     /// only the range half is enforced; a destroyed block entity is handled by
     /// `World::close_container_screens_at`.
     fn container_access(&self) -> crate::screen_handler::ContainerAccess {
-        crate::screen_handler::ContainerAccess::RangeOnly
+        self.container_access
     }
 
     fn as_any(&self) -> &dyn Any {
