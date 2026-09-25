@@ -134,8 +134,8 @@ pub fn oxidation_level_of(block: &Block) -> Option<u8> {
 ///   representing the full oxidation family
 /// * `state_converter` - Function to convert the target block and preserve properties
 ///
-/// Returns true if the block was oxidized, false otherwise
-pub async fn try_oxidize_copper(
+/// Applies the transition when both probability checks pass.
+pub fn try_oxidize_copper(
     world: &Arc<World>,
     position: &BlockPos,
     current_block: &Block,
@@ -174,11 +174,9 @@ pub async fn try_oxidize_copper(
         return;
     }
 
-    // Apply oxidation with converted state
+    // ChangeOverTimeBlock.java:19 uses setBlockAndUpdate; preserve properties and notify neighbors.
     let new_state_id = state_converter(next_block);
-    world
-        .set_block_state(position, new_state_id, BlockFlags::NOTIFY_LISTENERS)
-        .await;
+    world.set_block_state(position, new_state_id, BlockFlags::NOTIFY_ALL);
 }
 
 /// Get the oxidation level for a block if it's in the given family.

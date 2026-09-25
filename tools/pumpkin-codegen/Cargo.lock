@@ -731,7 +731,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-codecs"
+name = "pumpkinpie-codecs"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "serde_json",
@@ -739,15 +739,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-codegen"
+name = "pumpkinpie-codegen"
 version = "0.1.0-dev+26.1"
 dependencies = [
  "heck",
  "indexmap",
  "md5",
  "proc-macro2",
- "pumpkin-nbt",
- "pumpkin-util",
+ "pumpkinpie-nbt",
+ "pumpkinpie-util",
  "quote",
  "rayon",
  "semver",
@@ -759,20 +759,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-nbt"
+name = "pumpkinpie-nbt"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "bytes",
  "cesu8",
  "flate2",
- "pumpkin-codecs",
+ "pumpkinpie-codecs",
  "thiserror",
  "tracing",
  "uuid",
 ]
 
 [[package]]
-name = "pumpkin-util"
+name = "pumpkinpie-util"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "base64",
@@ -786,8 +786,8 @@ dependencies = [
  "num-traits",
  "p384",
  "proc-macro2",
- "pumpkin-codecs",
- "pumpkin-nbt",
+ "pumpkinpie-codecs",
+ "pumpkinpie-nbt",
  "quote",
  "rsa",
  "serde",

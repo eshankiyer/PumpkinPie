@@ -1,5 +1,5 @@
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, RandomTickArgs, UseWithItemArgs};
+use crate::block::{BlockBehaviour, GetCloneItemStackArgs, RandomTickArgs, UseWithItemArgs};
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::flower_pot_transformations::get_potted_item;
 use pumpkin_data::item::Item;
@@ -93,6 +93,13 @@ impl BlockBehaviour for FlowerPotBlock {
                 .emit_game_event("block_change", args.position.to_centered_f64());
             BlockActionResult::Success
         }
+    }
+
+    /// Vanilla `FlowerPotBlock#getCloneItemStack` (`FlowerPotBlock.java:104-106`):
+    /// middle-clicking a filled pot yields its contents instead of the pot itself.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let potted = get_potted(args.block)?;
+        Some(ItemStack::new(1, Item::from_id(potted.item_id)?))
     }
 
     fn random_tick(&self, args: RandomTickArgs<'_>) {

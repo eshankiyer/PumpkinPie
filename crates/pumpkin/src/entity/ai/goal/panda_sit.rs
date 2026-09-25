@@ -59,7 +59,7 @@ impl Goal for PandaSitGoal {
             {
                 return false;
             }
-            if !panda.can_perform_action().await {
+            if !panda.can_perform_action() {
                 return false;
             }
 

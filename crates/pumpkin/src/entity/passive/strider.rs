@@ -87,8 +87,6 @@ impl AgeableMob for StriderEntity {
     }
 }
 
-}
-
 impl Animal for StriderEntity {
     /// `strider_food` tag: warped fungus only (the tempt-item tag is wider, adding
     /// warped-fungus-on-a-stick, but that item isn't food for breeding purposes).

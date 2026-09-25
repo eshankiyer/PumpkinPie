@@ -11,7 +11,7 @@ use pumpkin_protocol::java::client::play::{CGameEvent, GameEvent};
 use pumpkin_util::GameMode;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -175,7 +175,6 @@ impl ElderGuardianEntity {
     }
 }
 
-impl NBTStorage for ElderGuardianEntity {}
 
 impl Mob for ElderGuardianEntity {
     fn get_mob_entity(&self) -> &MobEntity {

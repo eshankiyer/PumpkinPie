@@ -8,7 +8,7 @@ use pumpkin_data::tracked_data;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         camel_sit::CamelSitGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
@@ -135,7 +135,6 @@ impl CamelEntity {
     }
 }
 
-impl NBTStorage for CamelEntity {}
 
 impl Mob for CamelEntity {
     fn get_mob_entity(&self) -> &MobEntity {

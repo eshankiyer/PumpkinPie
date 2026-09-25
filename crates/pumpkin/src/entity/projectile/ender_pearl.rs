@@ -154,16 +154,17 @@ impl EntityBase for EnderPearlEntity {
                 &teleport_pos,
             );
 
-            // Deal 5 damage to owner
-            owner.damage(
-                owner.as_ref(),
-                5.0,
-                pumpkin_data::damage::DamageType::ENDER_PEARL,
-            );
-        }
-
             if let Some(living) = owner.get_living_entity() {
                 living.fall_distance.store(0.0);
+            }
+            // ThrownEnderpearl.onHit resets fall distance before damaging player owners.
+            // Non-player owners teleport without taking pearl damage.
+            if owner.get_player().is_some() {
+                owner.damage(
+                    owner.as_ref(),
+                    5.0,
+                    pumpkin_data::damage::DamageType::ENDER_PEARL,
+                );
             }
         }
         world.send_entity_status(entity, EntityStatus::Death, Some(ActorEventID::Death));

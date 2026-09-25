@@ -14,8 +14,14 @@ impl JavaClient {
             return;
         }
 
-        let current_handler = player.current_screen_handler.lock().await.clone();
-        let handler = current_handler.lock().await;
+        let current_handler = player
+            .current_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let handler = current_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(slot) = handler
             .get_behaviour()
             .slots
@@ -24,13 +30,13 @@ impl JavaClient {
         else {
             return;
         };
-        let mut stack = slot.get_stack().await;
+        let mut stack = slot.get_stack();
         if let Some(contents) =
             stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
         {
             contents.toggle_selected_item(selected_item_index);
-            slot.set_stack(stack).await;
-            slot.mark_dirty().await;
+            slot.set_stack(stack);
+            slot.mark_dirty();
         }
     }
 }

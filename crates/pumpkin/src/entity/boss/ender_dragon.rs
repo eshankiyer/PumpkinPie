@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage,
+    Entity, EntityBase,
     living::LivingEntity,
     mob::{Mob, MobEntity},
     player::Player,
@@ -239,9 +239,6 @@ impl EntityBase for EnderDragonPart {
         None
     }
 
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
 
     fn can_hit(&self) -> bool {
         true
@@ -1039,10 +1036,8 @@ impl EnderDragonEntity {
     }
 }
 
-impl NBTStorage for EnderDragonEntity {
-    fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.mob_entity.living_entity.entity.write_nbt(nbt);
-        self.mob_entity.living_entity.write_living_nbt(nbt);
+impl Mob for EnderDragonEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_int(
             "DragonPhase",
             *self
@@ -1066,9 +1061,7 @@ impl NBTStorage for EnderDragonEntity {
         );
     }
 
-    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
-        self.mob_entity.living_entity.entity.read_nbt_non_mut(nbt);
-        self.mob_entity.living_entity.read_living_nbt_non_mut(nbt);
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
         if let Some(phase_id) = nbt.get_int("DragonPhase") {
             self.set_phase(EnderDragonPhase::from_ordinal(phase_id));
         }
@@ -1083,9 +1076,7 @@ impl NBTStorage for EnderDragonEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             nbt.get_float("sitting_damage_received").unwrap_or(0.0);
     }
-}
 
-impl Mob for EnderDragonEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

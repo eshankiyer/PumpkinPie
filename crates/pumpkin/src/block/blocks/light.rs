@@ -8,7 +8,7 @@ use pumpkin_util::{GameMode, PermissionLvl};
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, GetCloneItemStackArgs, NormalUseArgs};
+use crate::block::{BlockBehaviour, GetCloneItemStackArgs, NormalUseArgs};
 
 /// `LightBlock.MAX_LEVEL` (`net/minecraft/world/level/block/LightBlock.java:33`).
 const MAX_LEVEL: u8 = 15;
@@ -37,28 +37,24 @@ impl BlockBehaviour for LightBlock {
     /// the game-master permission; this codebase spells that as creative plus permission level
     /// two, the same pairing `jigsaw.rs` uses. A player who fails the gate gets `CONSUME`, not
     /// `PASS`, so the click is swallowed rather than falling through to a block placement.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if args.player.permission_lvl.load() < PermissionLvl::Two
-                || args.player.gamemode.load() != GameMode::Creative
-            {
-                return BlockActionResult::Consume;
-            }
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        if args.player.permission_lvl.load() < PermissionLvl::Two
+            || args.player.gamemode.load() != GameMode::Creative
+        {
+            return BlockActionResult::Consume;
+        }
 
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = LightLikeProperties::from_state_id(state_id, args.block);
-            props.level = cycle_level(props.level);
+        let state_id = args.world.get_block_state_id(args.position);
+        let mut props = LightLikeProperties::from_state_id(state_id, args.block);
+        props.level = cycle_level(props.level);
 
-            // Vanilla passes flag 2 (`NOTIFY_LISTENERS` only): no neighbour updates.
-            args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-            BlockActionResult::SuccessServer
-        })
+        // Vanilla passes flag 2 (`NOTIFY_LISTENERS` only): no neighbour updates.
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
+        BlockActionResult::SuccessServer
     }
 
     /// `LightBlock.getCloneItemStack`/`setLightOnStack` (LightBlock.java:108-115): creative

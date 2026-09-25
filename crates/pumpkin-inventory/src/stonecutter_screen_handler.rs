@@ -176,3 +176,91 @@ impl Slot for StonecutterOutputSlot {
     fn set_stack_prev(&self, _stack: ItemStack, _previous_stack: ItemStack) {}
     fn mark_dirty(&self) { self.inventory.mark_dirty(); }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
+    use std::sync::Mutex;
+
+    fn handler() -> StonecutterScreenHandler {
+        let player_inventory = Arc::new(PlayerInventory::new(
+            Arc::new(Mutex::new(EntityEquipment::new())),
+            Arc::new(build_equipment_slots()),
+        ));
+        StonecutterScreenHandler::new(0, &player_inventory)
+    }
+
+    #[test]
+    fn selecting_a_valid_recipe_refreshes_the_output() {
+        let handler = handler();
+        let input = ItemStack::new(1, &Item::STONE);
+        let recipes = StonecutterScreenHandler::get_available_recipes(&input);
+        assert!(!recipes.is_empty());
+        handler.input_inventory.set_stack(0, input);
+
+        assert!(handler.select_recipe(0));
+        assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), 0);
+
+        let output = handler.output_inventory.get_stack(0);
+        let expected = Item::from_registry_key(recipes[0].result.id)
+            .expect("stonecutter recipe result must be a registered item");
+        assert_eq!(output.item.id, expected.id);
+        assert_eq!(output.item_count, recipes[0].result.count);
+    }
+
+    #[test]
+    fn invalid_recipe_selection_preserves_the_current_output() {
+        let handler = handler();
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::new(1, &Item::STONE));
+        assert!(handler.select_recipe(0));
+
+        let output_before = handler.output_inventory.remove_stack(0);
+        handler
+            .output_inventory
+            .set_stack(0, output_before.clone());
+
+        assert!(!handler.select_recipe(i32::MAX));
+        assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), 0);
+        let output_after = handler.output_inventory.remove_stack(0);
+        assert_eq!(output_after.item.id, output_before.item.id);
+        assert_eq!(output_after.item_count, output_before.item_count);
+    }
+
+    #[test]
+    fn output_refresh_clears_selection_when_input_is_depleted() {
+        let handler = handler();
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::new(1, &Item::STONE));
+        assert!(handler.select_recipe(0));
+
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::EMPTY.clone());
+        handler.update_output();
+
+        assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), u8::MAX);
+        let output = handler.output_inventory.get_stack(0);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn changing_input_item_clears_the_selected_recipe() {
+        let handler = handler();
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::new(1, &Item::STONE));
+        assert!(handler.select_recipe(0));
+
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::new(1, &Item::COBBLESTONE));
+        handler.update_output();
+
+        assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), u8::MAX);
+        assert!(handler.output_inventory.get_stack(0).is_empty());
+    }
+}

@@ -160,12 +160,10 @@ impl FireBlock {
         let odds = Self::get_burn_odds(block);
         if rand::rng().random_range(0..chance) < odds {
             let old_block = block;
-            // Bound the `Rng` temporary to a statement so it is not held across the
-            // `is_near_rain` await point.
             let can_persist = rand::rng().random_range(0..(age + 10) as i32) < 5;
             // Vanilla `FireBlock#checkBurnOut` tests this position only; the
             // five position `isNearRain` form is used for spreading.
-            if can_persist && !world.is_raining_at(pos).await {
+            if can_persist && !world.is_raining_at(pos) {
                 let new_age = (age + (rand::rng().random_range(0..5) / 4)).min(15) as u8;
                 let state_id = self.get_state_for_position(world.as_ref(), &Block::FIRE, pos);
                 let mut fire_props = FireProperties::from_state_id(state_id, &Block::FIRE);

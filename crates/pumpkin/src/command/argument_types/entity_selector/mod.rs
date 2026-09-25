@@ -291,12 +291,12 @@ impl EntitySelector {
 /// `ComponentUtils.formatList`, whose `DEFAULT_SEPARATOR` is a plain `", "`
 /// (`ComponentUtils.java:19`) used between every pair of names, including the last -
 /// there is no "and" before the final entry.
-pub async fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
+pub fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
     if entities.is_empty() {
         return TextComponent::empty();
     }
     if entities.len() == 1 {
-        return entities[0].get_display_name().await;
+        return entities[0].get_display_name();
     }
 
     let mut result = TextComponent::empty();
@@ -304,7 +304,7 @@ pub async fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
         if i > 0 {
             result = result.add_child(TextComponent::text(", "));
         }
-        result = result.add_child(entity.get_display_name().await);
+        result = result.add_child(entity.get_display_name());
     }
     result
 }

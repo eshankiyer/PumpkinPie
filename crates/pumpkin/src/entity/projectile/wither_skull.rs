@@ -60,6 +60,18 @@ const OWNER_DAMAGE: f32 = 8.0;
 const NO_OWNER_DAMAGE: f32 = 5.0;
 const OWNER_HEAL_ON_KILL: f32 = 5.0;
 
+/// `WitherSkull#onHitEntity` (WitherSkull.java): the Wither effect's duration is picked from
+/// the world's `Difficulty`, not from the skull's `dangerous` flag. `dangerous` only changes
+/// flight inertia and which blocks the resulting explosion can destroy (see `getInertia` /
+/// `getBlockExplosionResistance`), neither of which affects this duration.
+const fn wither_duration_ticks(difficulty: Difficulty) -> i32 {
+    match difficulty {
+        Difficulty::Hard => 800,   // 40 seconds
+        Difficulty::Normal => 200, // 10 seconds
+        Difficulty::Easy | Difficulty::Peaceful => 0,
+    }
+}
+
 pub struct WitherSkullEntity {
     pub thrown: ThrownItemEntity,
     pub dangerous: AtomicBool,
@@ -197,11 +209,7 @@ impl EntityBase for WitherSkullEntity {
 
             if was_hurt && let Some(living) = entity.get_living_entity() {
                 let difficulty = world.level_info.load().difficulty;
-                let duration = match difficulty {
-                    Difficulty::Hard => 800,   // 40 seconds
-                    Difficulty::Normal => 200, // 10 seconds
-                    Difficulty::Easy | Difficulty::Peaceful => 0,
-                };
+                let duration = wither_duration_ticks(difficulty);
 
                 if duration > 0 {
                     let effect = Effect {
@@ -230,5 +238,18 @@ impl EntityBase for WitherSkullEntity {
                 dangerous: self.is_dangerous(),
             })),
         );
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn wither_duration_scales_with_difficulty_not_dangerous() {
+        assert_eq!(wither_duration_ticks(Difficulty::Peaceful), 0);
+        assert_eq!(wither_duration_ticks(Difficulty::Easy), 0);
+        assert_eq!(wither_duration_ticks(Difficulty::Normal), 200);
+        assert_eq!(wither_duration_ticks(Difficulty::Hard), 800);
     }
 }

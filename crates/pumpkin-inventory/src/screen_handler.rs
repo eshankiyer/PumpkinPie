@@ -36,6 +36,7 @@ use pumpkin_data::{
     Block, Enchantment,
     data_component_impl::{EquipmentSlot, EquipmentType, EquippableImpl},
     screen::WindowType,
+    sound::Sound,
     statistic::StatisticCategory,
 };
 use pumpkin_protocol::{
@@ -53,7 +54,6 @@ use pumpkin_world::{
     block::entities::PropertyDelegate,
     inventory::{ComparableInventory, Inventory},
 };
-use std::cmp::max;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{any::Any, collections::HashMap, sync::Arc};
@@ -155,6 +155,9 @@ pub trait InventoryPlayer: Send + Sync {
 
     /// Gets the player's inventory.
     fn get_inventory(&self) -> Arc<PlayerInventory>;
+
+    /// Plays a sound at the player's own position, broadcast to nearby players.
+    fn play_sound(&self, sound: Sound);
 
     /// Checks if the player has infinite materials (creative mode).
     fn has_infinite_materials(&self) -> bool;
@@ -1120,6 +1123,7 @@ pub trait ScreenHandler: Send + Sync {
                             && let Some(extracted) = bundle.try_extract() {
                                 *cursor_stack = extracted;
                                 slot.set_stack(inner_slot_stack);
+                                player.play_sound(Sound::ItemBundleRemoveOne);
                                 intercepted = true;
                             }
                     }
@@ -1128,6 +1132,7 @@ pub trait ScreenHandler: Send + Sync {
                         && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
                         && let Some(extracted) = bundle.try_extract() {
                             slot.set_stack(extracted);
+                            player.play_sound(Sound::ItemBundleRemoveOne);
                             intercepted = true;
                         }
 
@@ -1382,6 +1387,7 @@ impl ScreenHandlerBehaviour {
 mod container_access_tests {
     use super::ContainerAccess;
     use pumpkin_data::Block;
+    use pumpkin_data::tag::Taggable;
     #[test]
     fn access_families_match_vanilla() {
         assert!(!ContainerAccess::None.requires_position());
@@ -1392,6 +1398,42 @@ mod container_access_tests {
         assert!(anvil.accepts_block(&Block::CHIPPED_ANVIL));
         assert!(anvil.accepts_block(&Block::DAMAGED_ANVIL));
         assert!(!anvil.accepts_block(&Block::STONE));
+    }
+
+    #[test]
+    fn null_access_has_no_position() {
+        assert!(!ContainerAccess::None.requires_position());
+        assert!(ContainerAccess::None.accepts_block(&Block::STONE));
+    }
+
+    #[test]
+    fn block_entity_family_checks_range_but_not_identity() {
+        let access = ContainerAccess::RangeOnly;
+        assert!(access.requires_position());
+        // `Container.stillValidBlockEntity` (`Container.java:94-101`) compares block
+        // entities, never block ids, so any block passes the block half here.
+        assert!(access.accepts_block(&Block::STONE));
+    }
+
+    #[test]
+    fn block_family_rejects_a_replaced_block() {
+        let access = ContainerAccess::Block(|block| block.id == Block::CRAFTING_TABLE.id);
+        assert!(access.requires_position());
+        assert!(access.accepts_block(&Block::CRAFTING_TABLE));
+        assert!(!access.accepts_block(&Block::STONE));
+    }
+
+    /// `AnvilMenu.isValidBlock` tests `BlockTags.ANVIL` (`AnvilMenu.java:65-67`), so a
+    /// chipped or damaged anvil must keep the menu open while any other block closes it.
+    #[test]
+    fn anvil_family_accepts_every_damage_stage() {
+        let access = ContainerAccess::Block(|block| {
+            block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_ANVIL)
+        });
+        assert!(access.accepts_block(&Block::ANVIL));
+        assert!(access.accepts_block(&Block::CHIPPED_ANVIL));
+        assert!(access.accepts_block(&Block::DAMAGED_ANVIL));
+        assert!(!access.accepts_block(&Block::STONE));
     }
     // `ContainerLevelAccess.java:10-15`, `Container.java:94-101`,
     // `AbstractContainerMenu.java:93-95`, `Player.java:2014-2016`,

@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-macros"
+name = "pumpkinpie-macros"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

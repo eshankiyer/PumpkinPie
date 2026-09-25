@@ -125,7 +125,7 @@ pub struct Server {
     /// The server's custom bossbars
     pub bossbars: std::sync::Mutex<CustomBossbars>,
     /// The server's named stopwatches (`Stopwatches.java`), driven by the /stopwatch command
-    pub stopwatches: Mutex<Stopwatches>,
+    pub stopwatches: std::sync::Mutex<Stopwatches>,
     /// Manages all maps on the server
     pub map_manager: MapManager,
     /// The default gamemode when a player joins the server (reset every restart)
@@ -315,7 +315,7 @@ impl Server {
             listing,
             branding: CachedBranding::new(),
             bossbars: std::sync::Mutex::new(CustomBossbars::new()),
-            stopwatches: Mutex::new(Stopwatches::default()),
+            stopwatches: std::sync::Mutex::new(Stopwatches::default()),
             map_manager: MapManager::new(),
             defaultgamemode,
             player_data_storage,

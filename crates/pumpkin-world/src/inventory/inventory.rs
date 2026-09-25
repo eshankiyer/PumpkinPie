@@ -115,11 +115,7 @@ pub trait Inventory: Send + Sync + Clearable {
     /// Vanilla `Container.canPlaceItem` admission check. Most inventories only need the
     /// synchronous slot restriction above; inventories whose rule depends on their other
     /// slots can override this synchronous hook.
-    fn can_place_item(
-        &self,
-        slot: usize,
-        stack: &ItemStack,
-    ) -> bool {
+    fn can_place_item(&self, slot: usize, stack: &ItemStack) -> bool {
         self.is_valid_slot_for(slot, stack)
     }
 

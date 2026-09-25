@@ -171,11 +171,10 @@ impl BedrockClient {
                         || !click_offset_within_block
                         || player
                             .is_under_spawn_protection(&server, &world, &data.block_position)
-                            .await
                         || !world
                             .worldborder
                             .lock()
-                            .await
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .contains_block(data.block_position.0.x, data.block_position.0.z)
                     {
                         return;
@@ -197,8 +196,7 @@ impl BedrockClient {
                                 },
                                 &server,
                                 &world,
-                            )
-                            .await;
+                            );
                         return;
                     }
 

@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use pumpkin_data::translation;
 use pumpkin_util::math::vector3::Axis;
 
@@ -87,12 +85,12 @@ impl ArgumentType for SwizzleArgumentType {
         JavaClientArgumentType::Swizzle
     }
 
-    fn list_suggestions<'a>(
-        &'a self,
-        _context: &'a CommandContext,
+    fn list_suggestions(
+        &self,
+        _context: &CommandContext,
         builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send + 'a>> {
-        Box::pin(async move { builder.build() })
+    ) -> Suggestions {
+        builder.build()
     }
 
     fn examples(&self) -> Vec<String> {

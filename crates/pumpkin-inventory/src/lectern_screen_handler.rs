@@ -6,7 +6,6 @@ use pumpkin_data::screen::WindowType;
 use pumpkin_world::block::entities::PropertyDelegate;
 use pumpkin_world::inventory::Inventory;
 
-use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenProperty, offer_or_drop_stack};
 use crate::slot::NormalSlot;
 

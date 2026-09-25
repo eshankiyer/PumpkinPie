@@ -1,9 +1,7 @@
 use core::f32;
 use std::sync::atomic::Ordering;
 
-use crate::entity::{
-    Entity, EntityBase, NBTStorage, living::LivingEntity,
-};
+use crate::entity::{Entity, EntityBase, living::LivingEntity};
 use arc_swap::ArcSwap;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::BlockDirection;
@@ -509,9 +507,8 @@ impl PaintingEntity {
     }
 }
 
-impl NBTStorage for PaintingEntity {
-    fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.entity.write_nbt(nbt);
+impl EntityBase for PaintingEntity {
+    fn write_custom_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_byte("facing", self.entity.data.load(Ordering::Relaxed) as i8);
         nbt.put_string("variant", self.get_variant());
         // `BlockAttachedEntity.addAdditionalSaveData` (`BlockAttachedEntity.java:119-121`).
@@ -522,8 +519,7 @@ impl NBTStorage for PaintingEntity {
         );
     }
 
-    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
-        self.entity.read_nbt_non_mut(nbt);
+    fn read_custom_nbt(&self, nbt: &NbtCompound) {
         let facing = nbt.get_byte("facing").unwrap_or(3);
         self.entity.data.store(facing as i32, Ordering::Relaxed);
         if let Some(variant) = nbt.get_string("variant") {
@@ -535,17 +531,6 @@ impl NBTStorage for PaintingEntity {
         } else {
             self.anchor.store(self.entity.block_pos.load());
         }
-    }
-}
-
-impl EntityBase for PaintingEntity {
-    fn write_custom_nbt(&self, nbt: &mut NbtCompound) {
-        nbt.put_byte("facing", self.entity.data.load(Ordering::Relaxed) as i8);
-    }
-
-    fn read_custom_nbt(&self, nbt: &NbtCompound) {
-        let facing = nbt.get_byte("facing").unwrap_or(3);
-        self.entity.data.store(facing as i32, Ordering::Relaxed);
     }
 
     fn get_entity(&self) -> &Entity {
@@ -608,10 +593,6 @@ impl EntityBase for PaintingEntity {
         if let Ok(data) = client.serialize_packet(&packet) {
             client.try_enqueue_packet(data);
         }
-    }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {

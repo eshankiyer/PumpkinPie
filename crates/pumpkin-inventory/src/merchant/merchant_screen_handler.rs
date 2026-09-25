@@ -567,6 +567,8 @@ mod tests {
 
         fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) {}
 
+        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) {}
+
         fn get_inventory(&self) -> Arc<PlayerInventory> {
             self.inventory.clone()
         }

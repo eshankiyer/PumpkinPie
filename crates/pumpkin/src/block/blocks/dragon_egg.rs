@@ -1,6 +1,6 @@
 use crate::block::blocks::falling::FallingBlock;
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BrokenArgs, NormalUseArgs, PlacedArgs};
+use crate::block::{AttackArgs, BlockBehaviour, NormalUseArgs, PlacedArgs};
 use crate::world::World;
 use pumpkin_data::BlockStateId;
 use pumpkin_macros::pumpkin_block;
@@ -58,6 +58,11 @@ impl DragonEggBlock {
 }
 
 impl BlockBehaviour for DragonEggBlock {
+    /// `DragonEggBlock.attack` (`DragonEggBlock.java:47-49`) teleports the egg when punched.
+    fn attack(&self, args: AttackArgs<'_>) {
+        Self::teleport(args.world, args.position, args.state.id);
+    }
+
     fn placed(&self, args: PlacedArgs<'_>) {
         args.world
             .schedule_block_tick(args.block, *args.position, 5, TickPriority::Normal);
@@ -67,12 +72,6 @@ impl BlockBehaviour for DragonEggBlock {
         let state_id = args.world.get_block_state(args.position).id;
         Self::teleport(args.world, args.position, state_id);
         BlockActionResult::Success
-    }
-
-    // Dragon egg is typically teleported when attacked
-    fn broken(&self, args: BrokenArgs<'_>) {
-        let state_id = args.world.get_block_state(args.position).id;
-        Self::teleport(args.world, args.position, state_id);
     }
 
     fn on_scheduled_tick(&self, args: crate::block::OnScheduledTickArgs<'_>) {

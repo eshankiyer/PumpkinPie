@@ -8,7 +8,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
@@ -110,21 +110,15 @@ impl ZoglinEntity {
     }
 }
 
-impl NBTStorage for ZoglinEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            nbt.put_bool("IsBaby", self.is_baby());
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.set_baby(nbt.get_bool("IsBaby").unwrap_or(false));
-        })
-    }
-}
-
 impl Mob for ZoglinEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("IsBaby", self.is_baby());
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.set_baby(nbt.get_bool("IsBaby").unwrap_or(false));
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

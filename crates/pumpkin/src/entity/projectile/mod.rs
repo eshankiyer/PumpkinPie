@@ -188,11 +188,10 @@ pub async fn projectile_may_interact(
     if let Some(player) = owner.get_player() {
         return !player
             .is_under_spawn_protection(server, world, position)
-            .await
             && world
                 .worldborder
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains_block(position.0.x, position.0.z);
     }
     world.level_info.load().game_rules.mob_griefing

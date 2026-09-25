@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-config"
+name = "pumpkinpie-config"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

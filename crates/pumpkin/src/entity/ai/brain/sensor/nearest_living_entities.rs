@@ -58,7 +58,7 @@ impl NearestLivingEntitySensor {
         // Range check with the invisibility modifier
         // (`TargetingConditions.java:81-89`, modifier from
         // `LivingEntity.getVisibilityPercent`, LivingEntity.java:919-946).
-        let modifier = Self::visibility_percent(observer_type, candidate).await;
+        let modifier = Self::visibility_percent(observer_type, candidate);
         let visibility_distance = (follow_range * modifier).max(2.0);
         if distance_sq > visibility_distance * visibility_distance {
             return false;
@@ -71,10 +71,7 @@ impl NearestLivingEntitySensor {
 
     /// `LivingEntity.getVisibilityPercent` (`LivingEntity.java:919-946`), evaluated on the
     /// observed entity with the observer's type driving the worn-head disguise branch.
-    ///
-    /// DEVIATION: vanilla reads the head slot synchronously; here the equipment map is a
-    /// tokio mutex, so the read is awaited inside this helper before any brain lock is taken.
-    async fn visibility_percent(observer_type: &EntityType, target: &Arc<dyn EntityBase>) -> f64 {
+    fn visibility_percent(observer_type: &EntityType, target: &Arc<dyn EntityBase>) -> f64 {
         let mut percent = 1.0;
 
         let entity = target.get_entity();
@@ -88,7 +85,10 @@ impl NearestLivingEntitySensor {
             };
             // `getArmorCoverPercentage` (`LivingEntity.java:2289-2308`): fraction of the four
             // humanoid armor slots that hold an item, floored at 0.1 by the caller above.
-            let equipment = living.entity_equipment.lock().await;
+            let equipment = living
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let armor_slots = [
                 EquipmentSlot::FEET,
                 EquipmentSlot::LEGS,
@@ -106,11 +106,11 @@ impl NearestLivingEntitySensor {
         // Worn-head disguise (`LivingEntity.java:934-943`): half visibility against the mob
         // type whose head is being worn.
         if let Some(living) = target.get_living_entity() {
-            let head_item = living
+            let equipment = living
                 .entity_equipment
                 .lock()
-                .await
-                .get(&EquipmentSlot::HEAD);
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let head_item = equipment.get(&EquipmentSlot::HEAD);
             let disguised = (observer_type == &EntityType::SKELETON
                 && head_item.item == &Item::SKELETON_SKULL)
                 || (observer_type == &EntityType::ZOMBIE && head_item.item == &Item::ZOMBIE_HEAD)

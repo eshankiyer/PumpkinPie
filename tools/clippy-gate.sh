@@ -4,7 +4,7 @@
 #
 # Usage:
 #   tools/clippy-gate.sh                  # whole workspace, all features (what CI runs)
-#   tools/clippy-gate.sh -p pumpkin       # one crate, for a faster inner loop
+#   tools/clippy-gate.sh -p pumpkinpie       # one crate, for a faster inner loop
 #
 # Exits non-zero if any clippy error is found.
 set -uo pipefail

@@ -10,7 +10,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{Goal, GoalFuture, squid_flee::SquidFleeGoal},
     mob::{Mob, MobEntity},
 };
@@ -69,7 +69,6 @@ impl SquidEntity {
     }
 }
 
-impl NBTStorage for SquidEntity {}
 
 impl Mob for SquidEntity {
     fn get_mob_entity(&self) -> &MobEntity {

@@ -135,11 +135,9 @@ fn give_player_bucket_item(
     mut item_stack: ItemStack,
     limit_creative_stack_size: bool,
 ) {
-    let item = item_stack.item;
     let is_creative = player.gamemode.load() == GameMode::Creative;
     if limit_creative_stack_size && is_creative {
-        let inventory = player.inventory.main_inventory.read().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if inventory.iter().any(|stack| stack.item.id == item.id) {
+        if player.inventory.get_slot_with_stack(&item_stack) >= 0 {
             return;
         }
         player.inventory.insert_stack_anywhere(&mut item_stack);
@@ -149,7 +147,7 @@ fn give_player_bucket_item(
         // only the new item is granted.
         player.inventory.offer_or_drop_stack(item_stack, player);
     } else {
-        let item_stack = ItemStack::new(1, item);
+        // ItemUtils.createFilledResult returns the supplied stack, including mob data.
         let mut held_stack = player.inventory.held_item();
 
         if held_stack.item_count == 1 {
@@ -163,6 +161,7 @@ fn give_player_bucket_item(
                 player
                     .world()
                     .drop_stack(&player.position().to_block_pos(), stack_to_give);
+            }
         }
     }
 }
@@ -821,7 +820,6 @@ impl ItemBehaviour for FilledBucketItem {
                 let item_stack = ItemStack::new(1, &Item::BUCKET);
                 player.inventory.set_slot(player.inventory.get_selected_slot() as usize, item_stack);
             }
-        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

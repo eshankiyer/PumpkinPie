@@ -4,8 +4,8 @@ use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::bell::BellBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockHitResult, BrokenArgs, CanPlaceAtArgs, ExplodeArgs,
-    NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
+    BlockBehaviour, BlockHitResult, BrokenArgs, CanPlaceAtArgs, ExplodeArgs, NormalUseArgs,
+    OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
 };
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};

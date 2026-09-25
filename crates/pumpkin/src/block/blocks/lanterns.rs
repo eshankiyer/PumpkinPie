@@ -1,7 +1,7 @@
 use crate::block::blocks::copper_weathering;
 use crate::block::{
-    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
-    RandomTickArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    OnScheduledTickArgs, RandomTickArgs,
 };
 use crate::world::World;
 use pumpkin_data::block_properties::BlockProperties;
@@ -22,11 +22,11 @@ impl BlockBehaviour for LanternBlock {
         props.r#waterlogged = args.replacing.water_source();
 
         props.r#hanging = hanging_for_placement(
-                args.direction,
-                args.use_item_on.cursor_pos.y,
-                floor_supports(args.world, args.position),
-                ceiling_supports(args.world, args.position),
-            );
+            args.direction,
+            args.use_item_on.cursor_pos.y,
+            floor_supports(args.world, args.position),
+            ceiling_supports(args.world, args.position),
+        );
 
         props.to_state_id(args.block)
     }
@@ -55,42 +55,36 @@ impl BlockBehaviour for LanternBlock {
     }
 
     fn random_tick(&self, args: RandomTickArgs<'_>) {
-            // No tag gate needed: the oxidation_stages table below only contains the
-            // copper lantern family, so this is a no-op for every other lantern type.
+        // No tag gate needed: the oxidation_stages table below only contains the
+        // copper lantern family, so this is a no-op for every other lantern type.
 
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let lantern_props =
-                pumpkin_data::block_properties::LanternLikeProperties::from_state_id(
-                    current_state_id,
-                    args.block,
-                );
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let lantern_props = pumpkin_data::block_properties::LanternLikeProperties::from_state_id(
+            current_state_id,
+            args.block,
+        );
 
-            let world = args.world.clone();
-            let position = *args.position;
-            let block = pumpkin_data::Block::from_id(args.block.id);
-            let hanging = lantern_props.r#hanging;
-            let waterlogged = lantern_props.r#waterlogged;
-            tokio::spawn(async move {
-                let oxidation_stages = [
-                    &Block::COPPER_LANTERN,
-                    &Block::EXPOSED_COPPER_LANTERN,
-                    &Block::WEATHERED_COPPER_LANTERN,
-                    &Block::OXIDIZED_COPPER_LANTERN,
-                ];
-                copper_weathering::try_oxidize_copper(
-                    &world,
-                    &position,
-                    &block,
-                    &oxidation_stages,
-                    |next_block| {
-                        let mut new_props = pumpkin_data::block_properties::LanternLikeProperties::default(next_block);
-                        new_props.r#hanging = hanging;
-                        new_props.r#waterlogged = waterlogged;
-                        new_props.to_state_id(next_block)
-                    },
-                )
-                .await;
-            });
+        let hanging = lantern_props.r#hanging;
+        let waterlogged = lantern_props.r#waterlogged;
+        let oxidation_stages = [
+            &Block::COPPER_LANTERN,
+            &Block::EXPOSED_COPPER_LANTERN,
+            &Block::WEATHERED_COPPER_LANTERN,
+            &Block::OXIDIZED_COPPER_LANTERN,
+        ];
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props =
+                    pumpkin_data::block_properties::LanternLikeProperties::default(next_block);
+                new_props.r#hanging = hanging;
+                new_props.r#waterlogged = waterlogged;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 }
 

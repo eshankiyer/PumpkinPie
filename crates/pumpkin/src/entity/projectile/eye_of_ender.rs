@@ -19,7 +19,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
-use super::{Entity, EntityBase, NBTStorage};
+use super::{Entity, EntityBase};
 
 /// Maximum horizontal distance the eye will travel before signalling at an elevated height.
 const TOO_FAR_DISTANCE: f64 = 12.0;
@@ -121,7 +121,6 @@ fn lerp(t: f64, start: f64, end: f64) -> f64 {
     start + t * (end - start)
 }
 
-impl NBTStorage for EyeOfEnder {}
 
 impl EntityBase for EyeOfEnder {
     fn tick(&self, caller: &dyn EntityBase, server: &Server) {

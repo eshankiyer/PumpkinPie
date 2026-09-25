@@ -17,13 +17,19 @@ use crate::block::entities::creaking_heart::CreakingHeartBlockEntity;
 use crate::block::{
     BlockBehaviour, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
     GetStateForNeighborUpdateArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
-    PlacedArgs,
+    PlacedArgs, BlockMetadata,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 
 /// `net.minecraft.world.level.block.CreakingHeartBlock`.
 pub struct CreakingHeartBlock;
+
+impl BlockMetadata for CreakingHeartBlock {
+    fn ids() -> Box<[BlockId]> {
+        [BlockId::CREAKING_HEART].into()
+    }
+}
 
 impl CreakingHeartBlock {
     const fn is_pale_oak_log(id: BlockId) -> bool {

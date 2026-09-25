@@ -13,9 +13,10 @@ use pumpkin_util::math::position::BlockPos;
 
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
+use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ai::control::vex_move_control::VexMoveControl,
     ai::goal::{
         active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal, revenge::RevengeGoal,
@@ -160,10 +161,17 @@ impl VexEntity {
     /// Vanilla: `Vex#setIsCharging`.
     pub fn set_is_charging(&self, value: bool) {
         self.is_charging.store(value, Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::vex::DATA_FLAGS_ID,
+                i8::from(value),
+            )],
+            None,
+        );
     }
 }
 
-impl NBTStorage for VexEntity {
+impl Mob for VexEntity {
     /// Vanilla `Vex.addAdditionalSaveData` (Vex.java:124-133).
     ///
     /// Scope reduction: vanilla also stores `owner` as an `EntityReference` (a UUID that is
@@ -171,41 +179,33 @@ impl NBTStorage for VexEntity {
     /// across a save/load, and `MobEntity` has no UUID-reference machinery to hang it on, so the
     /// owner is deliberately not persisted. A reloaded vex therefore stops copying its evoker's
     /// target, but keeps its bound origin and its limited life.
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if let Some(origin) = self.bound_origin.load() {
-                nbt.put(
-                    "bound_pos",
-                    NbtTag::IntArray(vec![origin.0.x, origin.0.y, origin.0.z]),
-                );
-            }
-            if self.has_limited_life.load(Relaxed) {
-                nbt.put_int("life_ticks", self.limited_life_ticks.load(Relaxed));
-            }
-        })
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(origin) = self.bound_origin.load() {
+            nbt.put(
+                "bound_pos",
+                NbtTag::IntArray(vec![origin.0.x, origin.0.y, origin.0.z]),
+            );
+        }
+        if self.has_limited_life.load(Relaxed) {
+            nbt.put_int("life_ticks", self.limited_life_ticks.load(Relaxed));
+        }
     }
 
     /// Vanilla `Vex.readAdditionalSaveData` (Vex.java:108-114): a missing `life_ticks` clears
     /// `hasLimitedLife` rather than leaving it set.
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.bound_origin
-                .store(if let Some(&[x, y, z]) = nbt.get_int_array("bound_pos") {
-                    Some(BlockPos::new(x, y, z))
-                } else {
-                    None
-                });
-            match nbt.get_int("life_ticks") {
-                Some(life_ticks) => self.set_limited_life(life_ticks),
-                None => self.has_limited_life.store(false, Relaxed),
-            }
-        })
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.bound_origin
+            .store(if let Some(&[x, y, z]) = nbt.get_int_array("bound_pos") {
+                Some(BlockPos::new(x, y, z))
+            } else {
+                None
+            });
+        match nbt.get_int("life_ticks") {
+            Some(life_ticks) => self.set_limited_life(life_ticks),
+            None => self.has_limited_life.store(false, Relaxed),
+        }
     }
-}
 
-impl Mob for VexEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

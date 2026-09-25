@@ -104,7 +104,6 @@ pub mod frosted_ice;
 pub mod grass_block;
 pub mod ice;
 pub mod infested;
-pub mod leaves;
 pub mod moss;
 pub mod mycelium;
 pub mod netherrack;

@@ -5,4 +5,6 @@
 
 ## Testing
 
-Please follow our [Coding Guidelines](https://github.com/Pumpkin-MC/Pumpkin/blob/master/CONTRIBUTING.md#coding-guidelines)
+Please follow the [PumpkinPie Coding Guidelines](https://github.com/eshankiyer/PumpkinPie/blob/master/CONTRIBUTING.md#coding-guidelines).
+
+Contributions to this fork belong in `eshankiyer/PumpkinPie`, not the upstream Pumpkin repository.

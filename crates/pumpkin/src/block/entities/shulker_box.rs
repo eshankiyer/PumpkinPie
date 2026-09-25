@@ -200,13 +200,13 @@ impl Inventory for ShulkerBoxBlockEntity {
         self.viewers.close_container();
     }
 
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         _slot: usize,
-        stack: &'a ItemStack,
+        stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move { !is_shulker_box(stack) })
+    ) -> bool {
+        !is_shulker_box(stack)
     }
 
     fn mark_dirty(&self) {

@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::entity::EntityType;
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         follow_flock_leader::FollowFlockLeaderGoal, look_around::RandomLookAroundGoal,
@@ -57,7 +57,6 @@ impl CodEntity {
     }
 }
 
-impl NBTStorage for CodEntity {}
 
 impl Mob for CodEntity {
     fn get_mob_entity(&self) -> &MobEntity {

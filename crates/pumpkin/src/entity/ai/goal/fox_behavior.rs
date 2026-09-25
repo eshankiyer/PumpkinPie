@@ -44,11 +44,16 @@ pub fn animal_walk_target_value(world: &World, pos: &BlockPos) -> f32 {
 }
 
 /// `Fox.FoxStrollThroughVillageGoal.canFoxMove` (`Fox.java:1298-1300`).
-pub async fn can_fox_move(mob: &dyn Mob, fox: &FoxEntity) -> bool {
+pub fn can_fox_move(mob: &dyn Mob, fox: &FoxEntity) -> bool {
     !fox.is_sleeping()
         && !fox.is_sitting()
         && !fox.is_defending()
-        && mob.get_mob_entity().target.lock().await.is_none()
+        && mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_none()
 }
 
 fn is_untamed_tamable(other: &dyn EntityBase) -> bool {

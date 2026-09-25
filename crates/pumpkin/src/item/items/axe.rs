@@ -44,7 +44,7 @@ impl ItemBehaviour for AxeItem {
         // First we try to strip the block. by getting his equivalent and applying it the axis.
 
         // If there is a strip equivalent.
-        let changed = replacement_block.is_some_and(|replacement| {
+        let changed = if let Some((replacement, action)) = replacement_block {
             let new_block = replacement.to_block();
             // Bamboo blocks are pillars too, but they are not part of the logs tag.
             let new_state_id = if block.has_tag(&tag::Block::MINECRAFT_LOGS)
@@ -56,10 +56,6 @@ impl ItemBehaviour for AxeItem {
                 let mut new_log_properties = PaleOakWoodLikeProperties::default(new_block);
                 new_log_properties.axis = log_props.axis;
 
-                // create new properties for the new log.
-
-                    // Set old axis to the new log.
-                    new_log_properties.axis = log_props.axis;
                     new_log_properties.to_state_id(new_block)
                 }
                 // Let's check if It's a door

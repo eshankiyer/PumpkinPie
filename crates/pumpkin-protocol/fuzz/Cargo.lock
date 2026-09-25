@@ -1076,7 +1076,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-codecs"
+name = "pumpkinpie-codecs"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "serde_json",
@@ -1084,10 +1084,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-config"
+name = "pumpkinpie-config"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
- "pumpkin-util",
+ "pumpkinpie-util",
  "serde",
  "toml",
  "tracing",
@@ -1095,44 +1095,44 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-data"
+name = "pumpkinpie-data"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "crc-fast",
  "phf",
- "pumpkin-nbt",
- "pumpkin-util",
+ "pumpkinpie-nbt",
+ "pumpkinpie-util",
  "rand",
  "serde",
 ]
 
 [[package]]
-name = "pumpkin-macros"
+name = "pumpkinpie-macros"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "heck",
  "proc-macro-error2",
  "proc-macro2",
- "pumpkin-data",
+ "pumpkinpie-data",
  "quote",
  "syn 3.0.3",
 ]
 
 [[package]]
-name = "pumpkin-nbt"
+name = "pumpkinpie-nbt"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "bytes",
  "cesu8",
  "flate2",
- "pumpkin-codecs",
+ "pumpkinpie-codecs",
  "thiserror",
  "tracing",
  "uuid",
 ]
 
 [[package]]
-name = "pumpkin-protocol"
+name = "pumpkinpie-protocol"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "aes",
@@ -1142,11 +1142,11 @@ dependencies = [
  "cfb8",
  "flate2",
  "hybrid-array",
- "pumpkin-data",
- "pumpkin-macros",
- "pumpkin-nbt",
- "pumpkin-util",
- "pumpkin-world",
+ "pumpkinpie-data",
+ "pumpkinpie-macros",
+ "pumpkinpie-nbt",
+ "pumpkinpie-util",
+ "pumpkinpie-world",
  "serde",
  "serde_json",
  "thiserror",
@@ -1156,17 +1156,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-protocol-fuzz"
+name = "pumpkinpie-protocol-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "pumpkin-protocol",
- "pumpkin-util",
+ "pumpkinpie-protocol",
+ "pumpkinpie-util",
  "tokio",
 ]
 
 [[package]]
-name = "pumpkin-util"
+name = "pumpkinpie-util"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "base64",
@@ -1179,8 +1179,8 @@ dependencies = [
  "num-derive",
  "num-traits",
  "p384",
- "pumpkin-codecs",
- "pumpkin-nbt",
+ "pumpkinpie-codecs",
+ "pumpkinpie-nbt",
  "rsa",
  "serde",
  "serde_json",
@@ -1191,7 +1191,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pumpkin-world"
+name = "pumpkinpie-world"
 version = "0.1.0-dev+26.2-26.40"
 dependencies = [
  "arc-swap",
@@ -1203,10 +1203,10 @@ dependencies = [
  "futures",
  "itertools",
  "lz4-java-wrc",
- "pumpkin-config",
- "pumpkin-data",
- "pumpkin-nbt",
- "pumpkin-util",
+ "pumpkinpie-config",
+ "pumpkinpie-data",
+ "pumpkinpie-nbt",
+ "pumpkinpie-util",
  "rand",
  "rayon",
  "rustc-hash",

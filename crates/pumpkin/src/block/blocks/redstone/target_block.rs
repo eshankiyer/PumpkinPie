@@ -87,7 +87,6 @@ impl BlockBehaviour for TargetBlock {
             };
             props.power = 0;
             props.to_state_id(args.block)
-        })
     }
 
     fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
@@ -124,7 +123,6 @@ impl BlockBehaviour for TargetBlock {
                     )
                     ;
             }
-        })
     }
 
     fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {

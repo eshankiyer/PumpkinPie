@@ -27,9 +27,8 @@ use std::{collections::HashMap, sync::atomic::AtomicI32};
 use tracing::warn;
 
 use super::experience_orb::ExperienceOrbEntity;
-use super::{Entity, EntityBase, NBTStorage, NBTStorageInit};
+use super::{Entity, EntityBase, NBTStorageInit};
 use crate::block::OnLandedUponArgs;
-use crate::entity::NBTStorage;
 use crate::entity::attributes::AttributeInstance;
 use crate::entity::attributes::Modifier;
 use crate::entity::attributes::ModifierOperation;
@@ -4464,9 +4463,8 @@ fn apply_packed_attributes(attributes: &mut HashMap<u8, AttributeInstance>, pack
     }
 }
 
-impl NBTStorage for LivingEntity {
-    fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.entity.write_nbt(nbt);
+impl LivingEntity {
+    pub fn write_living_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put("Health", NbtTag::Float(self.health.load()));
         if self.entity.entity_type != &EntityType::PLAYER {
             nbt.put_short("Air", self.air_supply.load(Relaxed) as i16);
@@ -4567,10 +4565,8 @@ impl NBTStorage for LivingEntity {
         nbt.put("ArmorItems", NbtTag::List(armor_items));
         // todo more...
     }
-}
 
-fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
-    self.entity.read_nbt_non_mut(nbt);
+pub fn read_living_nbt_non_mut(&self, nbt: &NbtCompound) {
     load_attributes_from_nbt(&self.attributes, nbt);
     self.health.store(nbt.get_float("Health").unwrap_or(0.0));
     if self.entity.entity_type != &EntityType::PLAYER
@@ -4607,16 +4603,6 @@ fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
     self.entity
         .fall_flying
         .store(nbt.get_bool("FallFlying").unwrap_or(false), Relaxed);
-    {
-        if let Some(hurt_time) = nbt.get_short("HurtTime") {
-            self.hurt_cooldown.store(i32::from(hurt_time), Relaxed);
-        }
-        if let Some(death_time) = nbt.get_short("DeathTime") {
-            self.death_time.store(death_time as u8, Relaxed);
-        }
-        self.entity
-            .fall_flying
-            .store(nbt.get_bool("FallFlying").unwrap_or(false), Relaxed);
         let mut loaded_effects: Vec<Effect> = Vec::new();
         {
             let mut active_effects = self
@@ -6038,9 +6024,6 @@ impl EntityBase for LivingEntity {
         self
     }
 
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
 }
 
 impl LivingEntity {

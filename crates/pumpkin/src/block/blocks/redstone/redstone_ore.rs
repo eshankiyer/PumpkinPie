@@ -1,5 +1,5 @@
 use crate::block::{
-    BlockBehaviour, BlockMetadata, BrokenArgs, NormalUseArgs, OnEntityCollisionArgs,
+    AttackArgs, BlockBehaviour, BlockMetadata, BrokenArgs, NormalUseArgs,
     OnEntityStepArgs, RandomTickArgs, UseWithItemArgs, registry::BlockActionResult,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
@@ -60,15 +60,15 @@ impl RedstoneOreBlock {
 }
 
 impl BlockBehaviour for RedstoneOreBlock {
+    // RedStoneOreBlock.attack lights the ore as soon as mining begins.
+    fn attack(&self, args: AttackArgs<'_>) {
+        Self::interact(args.world, args.position, args.block, args.state);
+    }
+
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
         let state = args.world.get_block_state(args.position);
         Self::interact(args.world, args.position, args.block, state);
         BlockActionResult::Success
-    }
-
-    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
-        let state = args.world.get_block_state(args.position);
-        Self::interact(args.world, args.position, args.block, state);
     }
 
     fn on_entity_step(&self, args: OnEntityStepArgs<'_>) {

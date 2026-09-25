@@ -1,0 +1,2 @@
+crates/pumpkin-inventory/src/beacon_screen_handler.rs::on_property_update — RESTORED (adapted the beacon listener from async to the current synchronous ScreenHandlerListener API and re-registered it in the constructor)
+crates/pumpkin/src/block/blocks/redstone/copper_bulb.rs::get_comparator_output — RESTORED (adapted the async comparator hook to the current synchronous `Option<u8>` BlockBehaviour API)

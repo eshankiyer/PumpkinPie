@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     entity::{
-        Entity, EntityBase, NBTStorage,
+        Entity, EntityBase,
         living::LivingEntity,
         projectile::{ProjectileHit, ThrownItemEntity},
         projectile_deflection::ProjectileDeflectionType,
@@ -152,12 +152,8 @@ impl WindChargeEntity {
     }
 }
 
-impl NBTStorage for WindChargeEntity {}
 
 impl EntityBase for WindChargeEntity {
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
 
     fn is_pickable(&self) -> bool {
         true

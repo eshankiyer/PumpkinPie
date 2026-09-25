@@ -483,8 +483,7 @@ impl PandaEntity {
 
     /// `Panda.isScared`: a worried panda cowers during a thunderstorm.
     ///
-    /// Takes the weather state as an argument because `World::is_thundering` is async and every
-    /// caller already has it to hand.
+    /// Accepts an already sampled weather state for callers sharing one tick snapshot.
     #[must_use]
     pub fn is_scared_with(&self, thundering: bool) -> bool {
         self.is_worried() && thundering
@@ -502,15 +501,14 @@ impl PandaEntity {
     }
 
     /// `Panda.canPerformAction`, resolving the weather itself. Goals call this one.
-    pub async fn can_perform_action(&self) -> bool {
+    pub fn can_perform_action(&self) -> bool {
         let thundering = self
             .mob_entity
             .living_entity
             .entity
             .world
             .load()
-            .is_thundering()
-            .await;
+            .is_thundering();
         self.can_perform_action_with(thundering)
     }
 

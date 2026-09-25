@@ -14,7 +14,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBaseFuture,
     item::ItemEntity,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
     player::Player,
@@ -104,28 +104,15 @@ impl BoggedSkeletonEntity {
     }
 }
 
-impl NBTStorage for BoggedSkeletonEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_bool("sheared", self.is_sheared());
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.entity
-                .mob_entity
-                .living_entity
-                .read_nbt_non_mut(nbt)
-                .await;
-            self.sheared
-                .store(nbt.get_bool("sheared").unwrap_or(false), Relaxed);
-        })
-    }
-}
-
 impl Mob for BoggedSkeletonEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("sheared", self.is_sheared());
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.set_sheared(nbt.get_bool("sheared").unwrap_or(false));
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
     }

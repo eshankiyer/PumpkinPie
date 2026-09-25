@@ -73,37 +73,34 @@ impl BlockBehaviour for StairBlock {
         }
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // No tag gate needed: the oxidation_stages table below only contains the
-            // cut copper stair family, so this is a no-op for every other stair type.
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        // No tag gate needed: the oxidation_stages table below only contains the
+        // cut copper stair family, so this is a no-op for every other stair type.
 
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let stair_props = StairsProperties::from_state_id(current_state_id, args.block);
+        let current_state_id = args.world.get_block_state_id(args.position);
+        let stair_props = StairsProperties::from_state_id(current_state_id, args.block);
 
-            let oxidation_stages = [
-                &Block::CUT_COPPER_STAIRS,
-                &Block::EXPOSED_CUT_COPPER_STAIRS,
-                &Block::WEATHERED_CUT_COPPER_STAIRS,
-                &Block::OXIDIZED_CUT_COPPER_STAIRS,
-            ];
+        let oxidation_stages = [
+            &Block::CUT_COPPER_STAIRS,
+            &Block::EXPOSED_CUT_COPPER_STAIRS,
+            &Block::WEATHERED_CUT_COPPER_STAIRS,
+            &Block::OXIDIZED_CUT_COPPER_STAIRS,
+        ];
 
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = StairsProperties::default(next_block);
-                    new_props.facing = stair_props.facing;
-                    new_props.half = stair_props.half;
-                    new_props.shape = stair_props.shape;
-                    new_props.waterlogged = stair_props.waterlogged;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = StairsProperties::default(next_block);
+                new_props.facing = stair_props.facing;
+                new_props.half = stair_props.half;
+                new_props.shape = stair_props.shape;
+                new_props.waterlogged = stair_props.waterlogged;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 
     fn rotate(

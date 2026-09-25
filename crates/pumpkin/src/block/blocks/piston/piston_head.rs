@@ -5,12 +5,12 @@ use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 
+use crate::block::blocks::piston::piston::try_move;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, OnNeighborUpdateArgs,
-    OnStateReplacedArgs, PlayerWillDestroyArgs,
+    BlockBehaviour, BrokenArgs, GetCloneItemStackArgs, OnNeighborUpdateArgs, OnStateReplacedArgs,
+    PlayerWillDestroyArgs,
 };
 use crate::world::World;
-use crate::block::blocks::piston::piston::try_move;
 
 use super::piston::PistonProps;
 
@@ -59,26 +59,22 @@ impl BlockBehaviour for PistonHeadBlock {
 
     /// `PistonHeadBlock.playerWillDestroy` (`PistonHeadBlock.java:70-78`): creative removal
     /// destroys a fitting base without drops before the head itself is destroyed.
-    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.player.gamemode.load() != GameMode::Creative {
-                return;
-            }
+    fn player_will_destroy(&self, args: PlayerWillDestroyArgs<'_>) {
+        if args.player.gamemode.load() != GameMode::Creative {
+            return;
+        }
 
-            let head = PistonHeadProperties::from_state_id(args.state.id, &Block::PISTON_HEAD);
-            if Self::fitting_base(args.world, args.position, head) {
-                let base_pos = args
-                    .position
-                    .offset(head.facing.opposite().to_block_direction().to_offset());
-                args.world
-                    .break_block(
-                        &base_pos,
-                        None,
-                        BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_NEIGHBORS,
-                    )
-                    .await;
-            }
-        })
+        let head = PistonHeadProperties::from_state_id(args.state.id, &Block::PISTON_HEAD);
+        if Self::fitting_base(args.world, args.position, head) {
+            let base_pos = args
+                .position
+                .offset(head.facing.opposite().to_block_direction().to_offset());
+            args.world.break_block(
+                &base_pos,
+                None,
+                BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_NEIGHBORS,
+            );
+        }
     }
 
     fn broken(&self, args: BrokenArgs<'_>) {
@@ -110,17 +106,19 @@ impl BlockBehaviour for PistonHeadBlock {
                 .to_offset(),
         );
         let piston_block = args.world.get_block(&piston_pos);
-        let base_survives = if piston_block == &Block::PISTON || piston_block == &Block::STICKY_PISTON {
-            let base_state_id = args.world.get_block_state_id(&piston_pos);
-            let base_props = PistonProps::from_state_id(base_state_id, piston_block);
-            base_props.extended && base_props.facing == head_props.facing
-        } else if piston_block == &Block::MOVING_PISTON {
-            let base_state_id = args.world.get_block_state_id(&piston_pos);
-            let base_props = PistonHeadProperties::from_state_id(base_state_id, &Block::MOVING_PISTON);
-            base_props.facing == head_props.facing
-        } else {
-            false
-        };
+        let base_survives =
+            if piston_block == &Block::PISTON || piston_block == &Block::STICKY_PISTON {
+                let base_state_id = args.world.get_block_state_id(&piston_pos);
+                let base_props = PistonProps::from_state_id(base_state_id, piston_block);
+                base_props.extended && base_props.facing == head_props.facing
+            } else if piston_block == &Block::MOVING_PISTON {
+                let base_state_id = args.world.get_block_state_id(&piston_pos);
+                let base_props =
+                    PistonHeadProperties::from_state_id(base_state_id, &Block::MOVING_PISTON);
+                base_props.facing == head_props.facing
+            } else {
+                false
+            };
         if base_survives {
             args.world.update_neighbor(&piston_pos, args.source_block);
         }

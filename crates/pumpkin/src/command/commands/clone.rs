@@ -5,7 +5,7 @@ use crate::command::context::command_context::CommandContext;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
-use pumpkin_data::{BlockStateId, translation};
+use pumpkin_data::{Block, BlockStateId, translation};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::math::position::BlockPos;

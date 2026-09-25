@@ -82,8 +82,7 @@ impl BlockEntity for SculkCatalystBlockEntity {
                 RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::random::<u64>()));
             let target = WorldSpreadTarget { world: &world };
             let events = spreader
-                .update_cursors(&target, entity.position, &mut random, true)
-                .await;
+                .update_cursors(&target, entity.position, &mut random, true);
             drop(spreader);
 
             for event in events {

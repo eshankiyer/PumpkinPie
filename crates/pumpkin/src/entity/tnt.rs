@@ -1,4 +1,4 @@
-use super::{Entity, EntityBase, NBTStorage, living::LivingEntity};
+use super::{Entity, EntityBase, living::LivingEntity};
 use crate::server::Server;
 use core::f32;
 use pumpkin_data::Block;
@@ -27,8 +27,6 @@ impl TNTEntity {
         }
     }
 }
-
-impl NBTStorage for TNTEntity {}
 
 impl EntityBase for TNTEntity {
     fn is_pickable(&self) -> bool {
@@ -109,10 +107,6 @@ impl EntityBase for TNTEntity {
 
     fn get_gravity(&self) -> f64 {
         0.04
-    }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {

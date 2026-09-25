@@ -6,7 +6,7 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 
-use crate::block::{BlockBehaviour, BlockFuture, OnEntityCollisionArgs, OnLandedUponArgs};
+use crate::block::{BlockBehaviour, OnEntityCollisionArgs, OnLandedUponArgs};
 use crate::entity::{Entity, EntityBase};
 
 /// `HoneyBlock.SLIDE_STARTS_WHEN_VERTICAL_SPEED_IS_AT_LEAST` (`HoneyBlock.java:27`).
@@ -90,43 +90,37 @@ fn do_slide_movement(entity: &dyn EntityBase) {
 impl BlockBehaviour for HoneyBlock {
     /// `HoneyBlock.fallOn` (`HoneyBlock.java:51-61`): the slide sound always plays, and fall
     /// damage is scaled by 0.2 rather than the vanilla default of 1.0.
-    fn on_landed_upon<'a>(&'a self, args: OnLandedUponArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = args.entity.get_entity();
-            entity.play_sound(Sound::BlockHoneyBlockSlide);
-            args.world
-                .send_entity_status(entity, EntityStatus::HoneyJump, None);
+    fn on_landed_upon(&self, args: OnLandedUponArgs<'_>) {
+        let entity = args.entity.get_entity();
+        entity.play_sound(Sound::BlockHoneyBlockSlide);
+        args.world
+            .send_entity_status(entity, EntityStatus::HoneyJump, None);
 
-            if let Some(living) = args.entity.get_living_entity() {
-                living
-                    .handle_fall_damage(args.entity, args.fall_distance, 0.2)
-                    .await;
-            }
-        })
+        if let Some(living) = args.entity.get_living_entity() {
+            living.handle_fall_damage(args.entity, args.fall_distance, 0.2);
+        }
     }
 
     /// `HoneyBlock.entityInside` (`HoneyBlock.java:63-74`).
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = args.entity.get_entity();
-            if !is_sliding_down(args.position, entity) {
-                return;
-            }
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        let entity = args.entity.get_entity();
+        if !is_sliding_down(args.position, entity) {
+            return;
+        }
 
-            // `maybeDoSlideAchievement` (`HoneyBlock.java:103-107`) is an advancement trigger and
-            // has no analogue here.
-            do_slide_movement(args.entity);
+        // `maybeDoSlideAchievement` (`HoneyBlock.java:103-107`) is an advancement trigger and
+        // has no analogue here.
+        do_slide_movement(args.entity);
 
-            // `maybeDoSlideEffects` (`HoneyBlock.java:121-132`).
-            if does_entity_do_slide_effects(args.entity) {
-                if rng().random_range(0..5) == 0 {
-                    entity.play_sound(Sound::BlockHoneyBlockSlide);
-                }
-                if rng().random_range(0..5) == 0 {
-                    args.world
-                        .send_entity_status(entity, EntityStatus::HoneySlide, None);
-                }
+        // `maybeDoSlideEffects` (`HoneyBlock.java:121-132`).
+        if does_entity_do_slide_effects(args.entity) {
+            if rng().random_range(0..5) == 0 {
+                entity.play_sound(Sound::BlockHoneyBlockSlide);
             }
-        })
+            if rng().random_range(0..5) == 0 {
+                args.world
+                    .send_entity_status(entity, EntityStatus::HoneySlide, None);
+            }
+        }
     }
 }

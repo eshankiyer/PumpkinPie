@@ -27,7 +27,7 @@ impl JavaClient {
         if !world
             .worldborder
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_block(target_pos.x.floor() as i32, target_pos.z.floor() as i32)
             || target
                 .get_entity()

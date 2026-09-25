@@ -275,12 +275,8 @@ impl ShulkerBulletEntity {
     }
 }
 
-impl NBTStorage for ShulkerBulletEntity {}
 
 impl EntityBase for ShulkerBulletEntity {
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
 
     fn is_pickable(&self) -> bool {
         true

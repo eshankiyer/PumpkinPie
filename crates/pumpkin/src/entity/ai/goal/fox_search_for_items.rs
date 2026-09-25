@@ -9,7 +9,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use super::fox_behavior::can_fox_move;
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
@@ -63,63 +63,63 @@ impl FoxSearchForItemsGoal {
 }
 
 impl Goal for FoxSearchForItemsGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return false;
-            };
-            if !fox.can_hold_item() {
-                return false;
-            }
-            if mob.get_mob_entity().target.lock().await.is_some() {
-                return false;
-            }
-            if mob
-                .get_mob_entity()
-                .living_entity
-                .last_attacker_id
-                .load(std::sync::atomic::Ordering::Relaxed)
-                != 0
-            {
-                return false;
-            }
-            // `Fox.canMove` (`Fox.java:661-663`); `can_fox_move` adds the target check the
-            // stroll goal needs, which is already `None` here.
-            if !can_fox_move(mob, fox).await || fox.is_faceplanted() {
-                return false;
-            }
-            let roll = {
-                mob.get_random()
-                    .random_range(0..to_goal_ticks(TRY_INTERVAL).max(1))
-            };
-            if roll != 0 {
-                return false;
-            }
-            Self::nearest_allowed_item(mob).is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return false;
+        };
+        if !fox.can_hold_item() {
+            return false;
+        }
+        if mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
+            return false;
+        }
+        if mob
+            .get_mob_entity()
+            .living_entity
+            .last_attacker_id
+            .load(std::sync::atomic::Ordering::Relaxed)
+            != 0
+        {
+            return false;
+        }
+        // `Fox.canMove` (`Fox.java:661-663`); `can_fox_move` adds the target check the
+        // stroll goal needs, which is already `None` here.
+        if !can_fox_move(mob, fox) || fox.is_faceplanted() {
+            return false;
+        }
+        let roll = {
+            mob.get_random()
+                .random_range(0..to_goal_ticks(TRY_INTERVAL).max(1))
+        };
+        if roll != 0 {
+            return false;
+        }
+        Self::nearest_allowed_item(mob).is_some()
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(target) = Self::nearest_allowed_item(mob) {
-                Self::move_to_item(mob, target);
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(target) = Self::nearest_allowed_item(mob) {
+            Self::move_to_item(mob, target);
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let holding = mob
-                .cast_any()
-                .downcast_ref::<FoxEntity>()
-                .is_some_and(|fox| !fox.can_hold_item());
-            if holding {
-                return;
-            }
-            if let Some(target) = Self::nearest_allowed_item(mob) {
-                Self::move_to_item(mob, target);
-            }
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        let holding = mob
+            .cast_any()
+            .downcast_ref::<FoxEntity>()
+            .is_some_and(|fox| !fox.can_hold_item());
+        if holding {
+            return;
+        }
+        if let Some(target) = Self::nearest_allowed_item(mob) {
+            Self::move_to_item(mob, target);
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

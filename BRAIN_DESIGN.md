@@ -307,8 +307,7 @@ that mob's memory that originates from a damage/game-event call arriving
 during that window lands on the `Brain::default()` placeholder sitting in
 the mutex and is silently lost. This is a correctness bug, not a
 performance one, and it would be intermittent and hard to reproduce —
-exactly the shape of failure CLAUDE.md's standing quality rules exist to
-catch.
+a failure that requires explicit concurrency regression coverage.
 
 **Recommendation: split the Brain into two independently-locked halves.**
 
@@ -434,8 +433,8 @@ invalidated.
   it across ticks is an acceptable stage-1 substitute — flag the deviation
   in the code comment.
 - **POI/village/gossip/raid systems**: villager and piglin-adjacent brains
-  depend on these; none exist in Pumpkin (INFERRED from CLAUDE.md's own
-  parity notes referencing PARITY.md's "village 7" bucket as unaddressed).
+  depend on these. Historical parity notes marked this area as unaddressed;
+  inspect the current implementation before treating that as a missing feature.
   Villager is explicitly not the first migration target (§6).
 - **Warden's 7-activity ladder**: `warden.rs`'s own comment already
   demonstrates why this is not a good first slice — DIGGING ends in entity
@@ -670,8 +669,8 @@ been read (§4.5).
 Total rough sizing through a working, live-verified Allay (Stages 0-2):
 medium — comparable to one substantial multi-file PR, not a rewrite.
 Stages 3-4 are open-ended and should each get their own sizing pass once
-the prior stage's actual friction is known, per CLAUDE.md's general
-preference for re-deriving rather than projecting.
+the prior stage's actual friction is known, using fresh measurements rather
+than projecting from the original plan.
 
 ## 9. Regression budget
 

@@ -19,7 +19,6 @@ use crate::block::blocks::carved_pumpkin::CarvedPumpkinBlock;
 use crate::block::blocks::cauldron::CauldronBlock;
 use crate::block::blocks::chests::{ChestBlock, CopperChestBlock, TrappedChestBlock};
 use crate::block::blocks::chiseled_bookshelf::ChiseledBookshelfBlock;
-use crate::block::blocks::cocoa::CocoaBlock;
 use crate::block::blocks::command::CommandBlock;
 use crate::block::blocks::composter::ComposterBlock;
 use crate::block::blocks::conduit::ConduitBlock;
@@ -416,7 +415,6 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(BuddingAmethystBlock);
     manager.register(SolidAmethystBlock);
     manager.register(GrassBlock);
-    manager.register(CocoaBlock);
     manager.register(HangingRootsBlock);
     manager.register(PaleHangingMossBlock);
     manager.register(LightBlock);

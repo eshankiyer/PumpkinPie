@@ -105,12 +105,19 @@ impl LookAtEntityGoal {
         }
         target_predicate
     }
-}
+    /// `PandaLookAtPlayerGoal.canUse` rolls normally but keeps a previously assigned
+    /// look target, including one supplied by the breeding goal (`Panda.java:930-958`).
+    pub(crate) fn can_start_preserving_target(&mut self, mob: &dyn Mob) -> bool {
+        self.try_start(mob, true)
+    }
 
-impl Goal for LookAtEntityGoal {
-    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+    fn try_start(&mut self, mob: &dyn Mob, preserve_target: bool) -> bool {
         if mob.get_random().random::<f32>() >= self.chance {
             return false;
+        }
+
+        if preserve_target && self.target.is_some() {
+            return true;
         }
 
         let mob_entity = mob.get_mob_entity();
@@ -119,14 +126,34 @@ impl Goal for LookAtEntityGoal {
         mob_pos.y += mob_entity.living_entity.entity.get_eye_height();
 
         let mut candidates: Vec<Arc<dyn EntityBase>> = match self.target_type {
-                Some(target_type) if *target_type == EntityType::PLAYER => world
-                    .players
-                    .load()
-                    .iter()
-                    .cloned()
-                    .map(|p: Arc<Player>| p as Arc<dyn EntityBase>)
-                    .collect(),
-                Some(target_type) => world
+            Some(target_type) if *target_type == EntityType::PLAYER => world
+                .players
+                .load()
+                .iter()
+                .cloned()
+                .map(|p: Arc<Player>| p as Arc<dyn EntityBase>)
+                .collect(),
+            Some(target_type) => world
+                .get_entities_at_box(&mob_entity.living_entity.entity.bounding_box.load().expand(
+                    self.range.into(),
+                    3.0,
+                    self.range.into(),
+                ))
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.get_entity().entity_type == target_type
+                        && candidate.get_entity().entity_id
+                            != mob_entity.living_entity.entity.entity_id
+                })
+                .collect(),
+            // Vanilla `Mob.class`: any mob, players excluded (Player is not a Mob subclass).
+            // The self-exclusion must happen here, inside the search: `get_closest_entity_where`
+            // returns a single nearest match, and this mob itself (at ~0 distance) would
+            // otherwise always win over any other candidate, leaving `target_predicate.test`'s
+            // later `ptr::eq` self-check to reject the only candidate found every time.
+            None => {
+                let own_id = mob_entity.living_entity.entity.entity_id;
+                world
                     .get_entities_at_box(
                         &mob_entity.living_entity.entity.bounding_box.load().expand(
                             self.range.into(),
@@ -136,34 +163,11 @@ impl Goal for LookAtEntityGoal {
                     )
                     .into_iter()
                     .filter(|candidate| {
-                        candidate.get_entity().entity_type == target_type
-                            && candidate.get_entity().entity_id
-                                != mob_entity.living_entity.entity.entity_id
+                        candidate.get_entity().entity_id != own_id && candidate.get_mob().is_some()
                     })
-                    .collect(),
-                // Vanilla `Mob.class`: any mob, players excluded (Player is not a Mob subclass).
-                // The self-exclusion must happen here, inside the search: `get_closest_entity_where`
-                // returns a single nearest match, and this mob itself (at ~0 distance) would
-                // otherwise always win over any other candidate, leaving `target_predicate.test`'s
-                // later `ptr::eq` self-check to reject the only candidate found every time.
-                None => {
-                    let own_id = mob_entity.living_entity.entity.entity_id;
-                    world
-                        .get_entities_at_box(
-                            &mob_entity.living_entity.entity.bounding_box.load().expand(
-                                self.range.into(),
-                                3.0,
-                                self.range.into(),
-                            ),
-                        )
-                        .into_iter()
-                        .filter(|candidate| {
-                            candidate.get_entity().entity_id != own_id
-                                && candidate.get_mob().is_some()
-                        })
-                        .collect()
-                }
-            };
+                    .collect()
+            }
+        };
 
         candidates.sort_by(|a, b| {
             let a_distance = a.get_entity().pos.load().squared_distance_to_vec(&mob_pos);
@@ -186,6 +190,12 @@ impl Goal for LookAtEntityGoal {
         }
 
         self.target.is_some()
+    }
+}
+
+impl Goal for LookAtEntityGoal {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.try_start(mob, false)
     }
 
     fn should_continue(&self, mob: &dyn Mob) -> bool {

@@ -69,7 +69,7 @@ impl RangedCrossbowAttackGoal {
     }
 
     fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-        mob.get_mob_entity().has_line_of_sight(target)
+        futures::executor::block_on(mob.get_mob_entity().has_line_of_sight(target))
     }
 
     fn shoot(mob: &dyn Mob, target: &Arc<dyn EntityBase>) {

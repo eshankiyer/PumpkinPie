@@ -408,10 +408,7 @@ impl BeehiveBlockEntity {
         }
 
         let mut entity_data = NbtCompound::new();
-        if let Some(living) = bee.get_living_entity() {
-            living.write_nbt(&mut entity_data).await;
-        }
-        bee.write_nbt(&mut entity_data).await;
+        EntityBase::write_nbt(bee.as_ref(), &mut entity_data);
         self.store_bee(Occupant::of(entity_data, "minecraft:bee"))
             .await;
 
@@ -609,10 +606,7 @@ impl BeehiveBlockEntity {
         );
 
         let entity = from_type(entity_type, spawn_pos, world, uuid::Uuid::new_v4());
-        if let Some(living) = entity.get_living_entity() {
-            living.read_nbt_non_mut(&occupant.entity_data).await;
-        }
-        entity.read_nbt_non_mut(&occupant.entity_data).await;
+        EntityBase::read_nbt_non_mut(entity.as_ref(), &occupant.entity_data);
         // `read_nbt_non_mut` restores a saved position; the occupant NBT has none, but the
         // living read still normalises the entity, so the hive-mouth spawn is applied after it.
         entity.get_entity().pos.store(spawn_pos);

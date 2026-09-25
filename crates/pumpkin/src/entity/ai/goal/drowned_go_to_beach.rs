@@ -5,7 +5,7 @@ use pumpkin_util::math::position::BlockPos;
 
 use super::drowned_util::is_bright_outside;
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle};
+use super::{Controls, Goal, ParentHandle};
 use crate::entity::mob::Mob;
 use crate::world::World;
 
@@ -32,37 +32,35 @@ impl DrownedGoToBeachGoal {
 }
 
 impl Goal for DrownedGoToBeachGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if !self.move_to_target_pos_goal.can_start(mob).await {
-                return false;
-            }
-            let entity = mob.get_entity();
-            let world = entity.world.load();
-            if is_bright_outside(&world) {
-                return false;
-            }
-            if !entity.touching_water.load(Relaxed) {
-                return false;
-            }
-            entity.pos.load().y >= f64::from(world.sea_level - 3)
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !self.move_to_target_pos_goal.can_start(mob) {
+            return false;
+        }
+        let entity = mob.get_entity();
+        let world = entity.world.load();
+        if is_bright_outside(&world) {
+            return false;
+        }
+        if !entity.touching_water.load(Relaxed) {
+            return false;
+        }
+        entity.pos.load().y >= f64::from(world.sea_level - 3)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.move_to_target_pos_goal.should_continue(mob).await })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        self.move_to_target_pos_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.start(mob).await })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.stop(mob).await })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob);
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move { self.move_to_target_pos_goal.tick(mob).await })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.tick(mob);
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -78,18 +76,12 @@ impl MoveToTargetPos for DrownedGoToBeachGoal {
     /// `isValidTarget`: both blocks above must be empty and the candidate itself must be
     /// something the drowned can stand on. `entityCanStandOn` is approximated with
     /// `is_solid`, since there is no generic per-entity "can stand on" hook here.
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move {
-            let above = block_pos.up();
-            let above2 = above.up();
-            if !world.get_block_state(&above).is_air() || !world.get_block_state(&above2).is_air() {
-                return false;
-            }
-            world.get_block_state(&block_pos).is_solid()
-        })
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        let above = block_pos.up();
+        let above2 = above.up();
+        if !world.get_block_state(&above).is_air() || !world.get_block_state(&above2).is_air() {
+            return false;
+        }
+        world.get_block_state(&block_pos).is_solid()
     }
 }

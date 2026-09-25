@@ -34,7 +34,7 @@ use pumpkin_data::{Block, entity::EntityType, tag::Taggable};
 use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::vector3::Vector3;
@@ -97,14 +97,18 @@ pub(crate) async fn equip_saddle_item(
         });
     let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
     {
-        let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
+        let mut equipment = mob_entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         equipment.put(&EquipmentSlot::SADDLE, new_stack.clone());
     };
     mob_entity
         .living_entity
         .equipment_drop_chances
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(EquipmentSlot::SADDLE, 1.0);
     mob_entity
         .living_entity
@@ -126,14 +130,18 @@ pub(crate) async fn equip_body_armor_item(
             equippable.equip_sound.clone()
         });
     let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
-    let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
+    let mut equipment = mob_entity
+        .living_entity
+        .entity_equipment
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     equipment.put(&EquipmentSlot::BODY, new_stack.clone());
     drop(equipment);
     mob_entity
         .living_entity
         .equipment_drop_chances
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(EquipmentSlot::BODY, 1.0);
     mob_entity
         .living_entity
@@ -145,7 +153,7 @@ pub(crate) async fn equip_body_armor_item(
 }
 
 pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
-    if !player.get_entity().can_start_riding().await {
+    if !player.get_entity().can_start_riding() {
         return;
     }
 
@@ -157,9 +165,7 @@ pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
     let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
         return;
     };
-    entity
-        .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-        .await;
+    entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
 }
 
 use crate::entity::{
@@ -327,16 +333,14 @@ pub fn create_offspring_attribute(
 struct HorseChestScreenFactory(Arc<dyn Inventory>);
 
 impl ScreenHandlerFactory for HorseChestScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone()).await;
-            Some(Arc::new(TokioMutex::new(handler)) as SharedScreenHandler)
-        })
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone());
+        Some(Arc::new(std::sync::Mutex::new(handler)) as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {
@@ -371,7 +375,7 @@ pub trait AbstractHorse: Animal {
 
     /// `AbstractHorse.isMobControlled`, default `false`. `ZombieHorseEntity` is the only
     /// current override (a non-player mob riding counts as "in control").
-    fn is_mob_controlled(&self) -> BoxFuture<'_, bool> {
+    fn is_mob_controlled(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async { false })
     }
 
@@ -395,7 +399,11 @@ pub trait AbstractHorse: Animal {
             }
 
             let entity = self.get_entity();
-            let is_vehicle = !entity.passengers.lock().await.is_empty();
+            let is_vehicle = !entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty();
             if self.can_eat_grass()
                 && !data.get_flag(FLAG_EATING)
                 && !is_vehicle
@@ -495,14 +503,14 @@ pub trait AbstractHorse: Animal {
         self.get_entity().is_alive() && !self.is_baby() && self.is_tamed()
     }
 
-    fn is_saddled(&self) -> BoxFuture<'_, bool> {
+    fn is_saddled(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move {
             let equipment = self
                 .get_mob_entity()
                 .living_entity
                 .entity_equipment
                 .lock()
-                .await;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let stack = equipment.get(&EquipmentSlot::SADDLE);
             self.can_use_saddle_slot()
                 && is_valid_saddle_item(&stack, self.get_entity().entity_type)
@@ -516,7 +524,13 @@ pub trait AbstractHorse: Animal {
             if !AbstractHorse::is_saddled(self).await {
                 return Mob::has_controlling_passenger(self).await;
             }
-            let passenger = self.get_entity().passengers.lock().await.first().cloned();
+            let passenger = self
+                .get_entity()
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .first()
+                .cloned();
             if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
                 return true;
             }
@@ -569,7 +583,7 @@ pub trait AbstractHorse: Animal {
             self.horse_data().set_flag(FLAG_EATING, false);
             self.clear_standing();
 
-            if !player.get_entity().can_start_riding().await {
+            if !player.get_entity().can_start_riding() {
                 return;
             }
 
@@ -581,9 +595,7 @@ pub trait AbstractHorse: Animal {
             let Some(vehicle) = world.get_entity_by_id(entity.entity_id) else {
                 return;
             };
-            entity
-                .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                .await;
+            entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
         })
     }
 
@@ -720,7 +732,11 @@ pub trait AbstractHorse: Animal {
         Box::pin(async move {
             let mob_entity = self.get_mob_entity();
             let entity = &mob_entity.living_entity.entity;
-            let is_vehicle = !entity.passengers.lock().await.is_empty();
+            let is_vehicle = !entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty();
 
             if is_vehicle || self.is_baby() {
                 return mob_entity
@@ -744,7 +760,11 @@ pub trait AbstractHorse: Animal {
                 }
 
                 let body_armor = {
-                    let equipment = mob_entity.living_entity.entity_equipment.lock().await;
+                    let equipment = mob_entity
+                        .living_entity
+                        .entity_equipment
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     equipment.get(&EquipmentSlot::BODY)
                 };
                 if is_valid_body_armor_item(item_stack, entity.entity_type) && body_armor.is_empty()
@@ -902,9 +922,9 @@ pub trait AbstractChestedHorse: AbstractHorse {
             let new_inventory = Arc::new(SimpleInventory::new(new_size));
             let max = old.size().min(new_inventory.size());
             for i in 0..max {
-                let stack = old.get_stack(i).await;
+                let stack = old.get_stack(i);
                 if !stack.is_empty() {
-                    new_inventory.set_stack(i, stack).await;
+                    new_inventory.set_stack(i, stack);
                 }
             }
             *slot = new_inventory;
@@ -914,12 +934,10 @@ pub trait AbstractChestedHorse: AbstractHorse {
     fn open_chest_inventory<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let inventory = self.chested_data().inventory.lock().await.clone();
-            player
-                .open_handled_screen(
-                    &HorseChestScreenFactory(inventory as Arc<dyn Inventory>),
-                    None,
-                )
-                .await;
+            player.open_handled_screen(
+                &HorseChestScreenFactory(inventory as Arc<dyn Inventory>),
+                None,
+            );
         })
     }
 
@@ -935,7 +953,11 @@ pub trait AbstractChestedHorse: AbstractHorse {
         Box::pin(async move {
             let mob_entity = self.get_mob_entity();
             let entity = &mob_entity.living_entity.entity;
-            let is_vehicle = !entity.passengers.lock().await.is_empty();
+            let is_vehicle = !entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty();
             let should_open_inventory =
                 !self.is_baby() && self.is_tamed() && player.get_entity().is_sneaking();
             let baby_with_dandelion =

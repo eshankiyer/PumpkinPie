@@ -14,7 +14,7 @@ use pumpkin_data::{
 use pumpkin_util::Difficulty;
 
 use crate::entity::{
-    Entity, NBTStorage, NbtFuture,
+    Entity,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, flee_sun::FleeSunGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -23,7 +23,6 @@ use crate::entity::{
     },
     mob::{Mob, MobEntity, equipment::RegionalDifficulty},
 };
-use pumpkin_nbt::compound::NbtCompound;
 use crate::world::World;
 
 pub mod bogged;
@@ -257,16 +256,6 @@ impl SkeletonEntityBase {
         } else {
             goals.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
         }
-    }
-}
-
-impl NBTStorage for SkeletonEntityBase {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        self.mob_entity.living_entity.write_nbt(nbt)
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        self.mob_entity.living_entity.read_nbt_non_mut(nbt)
     }
 }
 

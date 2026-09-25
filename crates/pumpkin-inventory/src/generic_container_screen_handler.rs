@@ -179,6 +179,16 @@ impl GenericContainerScreenHandler {
 }
 
 impl ScreenHandler for GenericContainerScreenHandler {
+    /// Port of `ChestMenu.java:70-72`, which delegates to
+    /// `Container.stillValidBlockEntity` (`Container.java:94-101`): same block entity at
+    /// the opening position, and the player within `blockInteractionRange() + 4.0`
+    /// (`Player.java:2014-2016`). Pumpkin cannot compare block-entity identity here, so
+    /// only the range half is enforced; a destroyed block entity is handled by
+    /// `World::close_container_screens_at`.
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::RangeOnly
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -234,5 +244,285 @@ impl ScreenHandler for GenericContainerScreenHandler {
         }
 
         stack_left
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use pumpkin_data::statistic::StatisticCategory;
+    use pumpkin_data::{data_component_impl::EquipmentSlot, item::Item, sound::Sound};
+    use pumpkin_protocol::java::client::play::{
+        CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
+        CSetPlayerInventory, CSetSelectedSlot,
+    };
+    use pumpkin_world::inventory::SimpleInventory;
+    use std::sync::Mutex;
+
+    use crate::{
+        entity_equipment::EntityEquipment,
+        screen_handler::ContainerAccess,
+    };
+
+    use super::*;
+
+    struct TestPlayer {
+        inventory: Arc<PlayerInventory>,
+        block_at: Option<&'static pumpkin_data::Block>,
+        in_range: bool,
+    }
+
+    impl InventoryPlayer for TestPlayer {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn evaluate_container_access(&self, access: ContainerAccess) -> bool {
+            if !access.requires_position() {
+                return true;
+            }
+            let Some(block) = self.block_at else {
+                return true;
+            };
+            access.accepts_block(block) && self.in_range
+        }
+
+        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) {}
+
+        fn get_inventory(&self) -> Arc<PlayerInventory> {
+            self.inventory.clone()
+        }
+
+        fn play_sound(&self, _sound: Sound) {}
+
+        fn has_infinite_materials(&self) -> bool {
+            false
+        }
+
+        fn is_creative(&self) -> bool {
+            false
+        }
+
+        fn experience_level(&self) -> i32 {
+            0
+        }
+
+        fn add_experience_levels(&self, _levels: i32) {}
+
+        fn enchantment_seed(&self) -> i32 {
+            0
+        }
+
+        fn set_enchantment_seed(&self, _seed: i32) {}
+
+        fn enqueue_inventory_packet(
+            &self,
+            _packet: &CSetContainerContent,
+            _window_type: Option<WindowType>,
+        ) {
+        }
+
+        fn enqueue_slot_packet(
+            &self,
+            _packet: &CSetContainerSlot,
+            _window_type: Option<WindowType>,
+            _total_slots: usize,
+        ) {
+        }
+
+        fn enqueue_cursor_packet(&self, _packet: &CSetCursorItem) {}
+
+        fn enqueue_property_packet(&self, _packet: &CSetContainerProperty) {}
+
+        fn enqueue_slot_set_packet(&self, _packet: &CSetPlayerInventory) {}
+
+        fn enqueue_set_held_item_packet(&self, _packet: &CSetSelectedSlot) {}
+
+        fn enqueue_equipment_change(&self, _slot: &EquipmentSlot, _stack: &ItemStack) {}
+
+        fn award_experience(&self, _amount: i32) {}
+
+        fn increment_stat(
+            &self,
+            _category: StatisticCategory,
+            _stat_id: i32,
+            _amount: i32,
+        ) {
+        }
+    }
+
+    fn player_inventory() -> Arc<PlayerInventory> {
+        Arc::new(PlayerInventory::new(
+            Arc::new(Mutex::new(EntityEquipment::new())),
+            Arc::new(HashMap::new()),
+        ))
+    }
+
+    #[test]
+    fn container_boundary_matches_container_size() {
+        for (rows, columns, expected) in [
+            (3u8, 9u8, 27i32),
+            (6, 9, 54),
+            (3, 3, 9),
+            (1, 5, 5),
+            (1, 9, 9),
+        ] {
+            let handler = GenericContainerScreenHandler::new(
+                WindowType::Generic9x3,
+                0,
+                &player_inventory(),
+                Arc::new(SimpleInventory::new(
+                    usize::from(rows) * usize::from(columns),
+                )),
+                rows,
+                columns,
+            );
+            assert_eq!(handler.container_slot_count(), expected);
+            assert_eq!(
+                handler.get_behaviour().slots.len() as i32,
+                expected + 36,
+                "container should have its slots plus 36 player slots"
+            );
+        }
+    }
+
+    fn handler_for(
+        window: WindowType,
+        rows: u8,
+        columns: u8,
+    ) -> (
+        GenericContainerScreenHandler,
+        Arc<SimpleInventory>,
+        TestPlayer,
+    ) {
+        let inventory = Arc::new(SimpleInventory::new(
+            usize::from(rows) * usize::from(columns),
+        ));
+        let player_inventory = player_inventory();
+        let handler = GenericContainerScreenHandler::new(
+            window,
+            0,
+            &player_inventory,
+            inventory.clone(),
+            rows,
+            columns,
+        );
+        let player = TestPlayer {
+            inventory: player_inventory,
+            block_at: Some(&pumpkin_data::Block::CHEST),
+            in_range: true,
+        };
+        (handler, inventory, player)
+    }
+
+    #[test]
+    fn hopper_quick_move_from_player_reaches_container() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5);
+        let player_slot = 5;
+        handler.get_behaviour().slots[player_slot as usize]
+            .set_stack(ItemStack::new(4, &Item::STONE));
+
+        handler.quick_move(&player, player_slot);
+
+        assert_eq!(inventory.get_stack(0).item_count, 4);
+        assert!(
+            handler.get_behaviour().slots[player_slot as usize]
+                .get_stack()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn hopper_quick_move_from_container_reaches_player() {
+        let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5);
+        inventory.set_stack(0, ItemStack::new(4, &Item::STONE));
+
+        handler.quick_move(&player, 0);
+
+        assert!(inventory.get_stack(0).is_empty());
+        let last = handler.get_behaviour().slots.len() - 1;
+        assert_eq!(
+            handler.get_behaviour().slots[last].get_stack().item_count,
+            4
+        );
+    }
+
+    #[test]
+    fn dispenser_quick_move_from_player_reaches_container() {
+        let (mut handler, inventory, player) =
+            handler_for(WindowType::Generic3x3, 3, 3);
+        let player_slot = 9;
+        handler.get_behaviour().slots[player_slot as usize]
+            .set_stack(ItemStack::new(7, &Item::STONE));
+
+        handler.quick_move(&player, player_slot);
+
+        assert_eq!(inventory.get_stack(0).item_count, 7);
+    }
+
+    #[test]
+    fn dispenser_quick_move_from_container_reaches_player() {
+        let (mut handler, inventory, player) =
+            handler_for(WindowType::Generic3x3, 3, 3);
+        inventory.set_stack(8, ItemStack::new(7, &Item::STONE));
+
+        handler.quick_move(&player, 8);
+
+        assert!(inventory.get_stack(8).is_empty());
+        let last = handler.get_behaviour().slots.len() - 1;
+        assert_eq!(
+            handler.get_behaviour().slots[last].get_stack().item_count,
+            7
+        );
+    }
+
+    #[test]
+    fn chest_quick_move_unchanged() {
+        let (mut handler, inventory, player) =
+            handler_for(WindowType::Generic9x3, 3, 9);
+        let player_slot = 27;
+        handler.get_behaviour().slots[player_slot as usize]
+            .set_stack(ItemStack::new(5, &Item::STONE));
+
+        handler.quick_move(&player, player_slot);
+
+        assert_eq!(inventory.get_stack(0).item_count, 5);
+    }
+
+    #[test]
+    fn chest_menu_is_invalid_once_the_player_walks_away() {
+        let (handler, _inventory, mut player) =
+            handler_for(WindowType::Generic9x3, 3, 9);
+
+        assert!(handler.can_use(&player));
+
+        player.in_range = false;
+        assert!(!handler.can_use(&player));
+    }
+
+    #[test]
+    fn chest_menu_access_is_range_only() {
+        let (handler, _inventory, mut player) =
+            handler_for(WindowType::Generic9x3, 3, 9);
+
+        player.block_at = Some(&pumpkin_data::Block::STONE);
+        assert!(handler.can_use(&player));
+        assert!(handler.container_access().requires_position());
+        assert!(
+            handler
+                .container_access()
+                .accepts_block(&pumpkin_data::Block::STONE)
+        );
+    }
+
+    #[test]
+    fn menu_without_a_backing_position_stays_valid() {
+        let (handler, _inventory, mut player) =
+            handler_for(WindowType::Generic9x3, 3, 9);
+
+        player.block_at = None;
+        player.in_range = false;
+        assert!(handler.can_use(&player));
     }
 }

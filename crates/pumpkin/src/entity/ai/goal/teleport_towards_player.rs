@@ -113,30 +113,6 @@ impl Goal for TeleportTowardsPlayerGoal {
                 10.0,
             );
             true
-        })
-    }
-
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
-        if let Some(target) = &self.target_player
-            && let Some(player) = target.get_player()
-        {
-            if !self.enderman.is_player_staring(player) && !self.enderman.is_angry() {
-                return false;
-            }
-            let player_pos = player.get_entity().pos.load();
-            let mut look_control = mob
-                .get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            look_control.look_at_with_range(
-                player_pos.x,
-                player_pos.y + PLAYER_EYE_HEIGHT,
-                player_pos.z,
-                10.0,
-                10.0,
-            );
-            true
         } else if self.target_player.is_some() {
             false
         } else if let Some(target) = &self.committed_target {

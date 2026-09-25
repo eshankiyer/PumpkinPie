@@ -355,7 +355,11 @@ pub async fn try_warn(world: &Arc<World>, pos: &BlockPos, trigger: &Arc<Player>)
         players.push(trigger.clone());
     }
 
-    let now = world.level_time.lock().await.world_age;
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
     let mut registry = REGISTRY.lock().await;
     registry.ensure_loaded(world);
 
@@ -392,7 +396,11 @@ pub async fn try_warn(world: &Arc<World>, pos: &BlockPos, trigger: &Arc<Player>)
 /// Current warning level for one player, brought up to date. Exposed for tests and for a
 /// future `/warden_spawn_tracker` command (`WardenSpawnTrackerCommand.java`).
 pub async fn warning_level_of(world: &Arc<World>, uuid: Uuid) -> i32 {
-    let now = world.level_time.lock().await.world_age;
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
     let mut registry = REGISTRY.lock().await;
     registry.ensure_loaded(world);
     registry.advanced(uuid, now).warning_level()
@@ -401,7 +409,11 @@ pub async fn warning_level_of(world: &Arc<World>, uuid: Uuid) -> i32 {
 /// Implements the state mutation performed by
 /// `WardenSpawnTrackerCommand.setWarningLevel` (`WardenSpawnTrackerCommand.java:34-43`).
 pub async fn set_warning_level_of(world: &Arc<World>, uuid: Uuid, warning_level: i32) {
-    let now = world.level_time.lock().await.world_age;
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
     let mut registry = REGISTRY.lock().await;
     registry.ensure_loaded(world);
     let mut tracker = registry.advanced(uuid, now);
@@ -413,7 +425,11 @@ pub async fn set_warning_level_of(world: &Arc<World>, uuid: Uuid, warning_level:
 /// Implements the tracker reset performed by
 /// `WardenSpawnTrackerCommand.resetTracker` (`WardenSpawnTrackerCommand.java:47-58`).
 pub async fn reset_tracker_of(world: &Arc<World>, uuid: Uuid) {
-    let now = world.level_time.lock().await.world_age;
+    let now = world
+        .level_time
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .world_age;
     let mut registry = REGISTRY.lock().await;
     registry.ensure_loaded(world);
     let mut tracker = registry.advanced(uuid, now);

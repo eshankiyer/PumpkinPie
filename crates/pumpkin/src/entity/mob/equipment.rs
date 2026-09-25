@@ -485,7 +485,7 @@ pub static EQUIPMENT_REGISTRY: LazyLock<HashMap<&'static str, MobEquipmentDef>> 
                 // `populateDefaultEquipmentEnchantments` unconditionally
                 // (`Pillager.java:161`), so the crossbow takes the generic
                 // `MOB_SPAWN_EQUIPMENT` roll; the mob-specific 1-in-300 Piercing roll
-                // chains on top via `Mob::enchant_spawned_weapon`.
+                // chains on top via `Mob::apply_spawned_weapon_enchantment_bonus`.
                 enchanted: true,
                 can_pick_up_loot: false,
             },
@@ -1107,7 +1107,7 @@ pub fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::World>
         .find(|(slot, _, _)| *slot == EquipmentSlot::MAIN_HAND)
         && let Some(mob) = mob.get_mob()
     {
-        mob.enchant_spawned_weapon(stack);
+        mob.apply_spawned_weapon_enchantment_bonus(stack);
     }
 
     let mut equipment_changes: Vec<(EquipmentSlot, ItemStack)> = Vec::new();

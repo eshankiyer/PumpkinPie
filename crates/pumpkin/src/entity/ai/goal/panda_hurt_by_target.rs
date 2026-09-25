@@ -1,19 +1,16 @@
 use super::revenge::RevengeGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
 
-/// `Panda.PandaHurtByTargetGoal` (`Panda.java:923-945`).
+/// `Panda.PandaHurtByTargetGoal` (`Panda.java:849-873`).
 ///
 /// Retaliation with an escape hatch: once the panda has either been fed bamboo mid-fight
 /// (`gotBamboo`) or landed a bite of its own (`didBite`), it drops the target and stops
 /// chasing.
 ///
-/// Vanilla also overrides `alertOther` so only AGGRESSIVE-gened pandas join in. `RevengeGoal`'s
-/// alert loop has no per-candidate hook to intercept here, so this goal does not call
-/// `setAlertOthers` at all -- one panda's grudge stays its own. That is narrower than vanilla
-/// rather than wider: a non-aggressive panda would never have been alerted anyway, and the
-/// aggressive-panda pile-on is the documented gap.
+/// Vanilla enables alerts (`Panda.java:281`) but overrides `alertOther` so only pandas
+/// expressing the aggressive gene join in (`Panda.java:867-872`).
 pub struct PandaHurtByTargetGoal {
     inner: RevengeGoal,
 }
@@ -22,37 +19,40 @@ impl PandaHurtByTargetGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
-            inner: RevengeGoal::new(true),
+            inner: RevengeGoal::new(true).with_alert_filter(|other| {
+                other
+                    .cast_any()
+                    .downcast_ref::<PandaEntity>()
+                    .is_some_and(PandaEntity::is_aggressive_gene)
+            }),
         })
     }
 }
 
 impl Goal for PandaHurtByTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
         self.inner.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>()
-                && (panda.got_bamboo() || panda.did_bite())
-            {
-                panda.get_mob_entity().set_target(None).await;
-                return false;
-            }
-            self.inner.should_continue(mob).await
-        })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        if let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>()
+            && (panda.got_bamboo() || panda.did_bite())
+        {
+            panda.get_mob_entity().set_target(None);
+            return false;
+        }
+        self.inner.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start(&mut self, mob: &dyn Mob) {
         self.inner.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop(&mut self, mob: &dyn Mob) {
         self.inner.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.inner.tick(mob)
     }
 

@@ -13,7 +13,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -300,34 +300,26 @@ impl HoglinEntity {
     }
 }
 
-impl NBTStorage for HoglinEntity {
+impl Mob for HoglinEntity {
     /// `Hoglin.addAdditionalSaveData` (`Hoglin.java:273-277`). `CannotBeHunted`
     /// (`Hoglin.java:275`) is not persisted: nothing in this codebase sets it, because the
     /// piglin hunting behaviour it gates is not ported (see `PiglinAi.StartHuntingHoglin`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.zombification.write_nbt(nbt);
-        })
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        self.zombification.write_nbt(nbt);
     }
 
     /// `Hoglin.readAdditionalSaveData` (`Hoglin.java:280-285`).
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.zombification.read_nbt(nbt);
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::hoglin::DATA_IMMUNE_TO_ZOMBIFICATION,
-                    self.zombification.is_immune(),
-                )],
-                None,
-            );
-        })
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.zombification.read_nbt(nbt);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::hoglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+                self.zombification.is_immune(),
+            )],
+            None,
+        );
     }
-}
 
-impl Mob for HoglinEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

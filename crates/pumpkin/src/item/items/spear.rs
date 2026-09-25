@@ -278,28 +278,21 @@ impl ItemBehaviour for SpearItem {
     /// and plays its use sound. There is no throw and no charged release - a spear is a braced
     /// lance, and all of its effect is produced per-tick while held (`ItemStack.onUseTick`,
     /// `ItemStack.java:1100-1103`).
-    fn normal_use<'a>(
-        &'a self,
-        item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let Some(params) = params_for(item.id) else {
-                return;
-            };
+    fn normal_use(&self, item: &Item, player: &Player) {
+        let Some(params) = params_for(item.id) else {
+            return;
+        };
 
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, USE_DURATION)
-                .await;
+        let stack = player.inventory().held_item();
+        player
+            .living_entity
+            .set_active_hand(pumpkin_util::Hand::Right, stack, USE_DURATION);
 
-            // `KineticWeapon.makeSound` (`KineticWeapon.java:86-91`) plays at the user, for
-            // everyone, at volume and pitch 1.0.
-            player
-                .world()
-                .play_sound(params.use_sound, SoundCategory::Players, &player.position());
-        })
+        // `KineticWeapon.makeSound` (`KineticWeapon.java:86-91`) plays at the user, for
+        // everyone, at volume and pitch 1.0.
+        player
+            .world()
+            .play_sound(params.use_sound, SoundCategory::Players, &player.position());
     }
 
     /// `ItemStack.onUseTick` -> `KineticWeapon.damageEntities`
@@ -366,12 +359,9 @@ impl ItemBehaviour for SpearItem {
 
             // `ProjectileUtil.java:96-102`: the sweep is clipped at the first solid block, and
             // is abandoned entirely when that block is nearer than the sweep's own start.
-            if let Some((hit_pos, _)) = world
-                .raycast(eye, to, async |pos, world_inner| {
-                    !world_inner.get_block_state(pos).is_air()
-                })
-                .await
-            {
+            if let Some((hit_pos, _)) = world.raycast(eye, to, |pos, world_inner| {
+                !world_inner.get_block_state(pos).is_air()
+            }) {
                 let hit = Vector3::new(
                     f64::from(hit_pos.0.x) + 0.5,
                     f64::from(hit_pos.0.y) + 0.5,
@@ -412,7 +402,12 @@ impl ItemBehaviour for SpearItem {
                 candidate.get_entity().entity_id != attacker_id && candidate.get_entity().is_alive()
             });
 
-            let game_time = world.level_time.lock().await.world_age.unsigned_abs();
+            let game_time = world
+                .level_time
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .world_age
+                .unsigned_abs();
             let mut affected = false;
 
             for target in candidates {
@@ -474,28 +469,29 @@ impl ItemBehaviour for SpearItem {
                 // passenger-removal path just as `target.stopRiding()` does in vanilla
                 // (`LivingEntity.java:2912-2915`).
                 if deals_dismount {
-                    let vehicle = target_entity.vehicle.lock().await.clone();
+                    let vehicle = target_entity
+                        .vehicle
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
                     if let Some(vehicle) = vehicle {
                         vehicle
                             .get_entity()
-                            .remove_passenger(target_entity.entity_id)
-                            .await;
+                            .remove_passenger(target_entity.entity_id);
                         affected = true;
                     }
                 }
 
                 if deals_damage {
                     let attacker = world.get_entity_by_id(attacker_id);
-                    let dealt = target
-                        .damage_with_context(
-                            target.as_ref(),
-                            damage_dealt as f32,
-                            DamageType::SPEAR,
-                            Some(entity.pos.load()),
-                            attacker.as_deref(),
-                            attacker.as_deref(),
-                        )
-                        .await;
+                    let dealt = target.damage_with_context(
+                        target.as_ref(),
+                        damage_dealt as f32,
+                        DamageType::SPEAR,
+                        Some(entity.pos.load()),
+                        attacker.as_deref(),
+                        attacker.as_deref(),
+                    );
                     affected |= dealt;
                 }
 
@@ -526,7 +522,7 @@ impl ItemBehaviour for SpearItem {
                 if target.get_living_entity().is_some()
                     && player.gamemode.load() != GameMode::Creative
                 {
-                    player.damage_held_item(1).await;
+                    player.damage_held_item(1);
                 }
             }
 

@@ -1,4 +1,4 @@
-use crate::block::{BlockFuture, BonemealArgs, BrokenArgs, PlacedArgs};
+use crate::block::{BonemealArgs, BrokenArgs, PlacedArgs};
 use pumpkin_data::Block;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockId;
@@ -50,15 +50,12 @@ impl BlockBehaviour for TallPlantBlock {
 
     /// `TallFlowerBlock.performBonemeal` (`TallFlowerBlock.java:35-38`) drops one
     /// item stack of the flower at the block position.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(item) = Item::from_id(args.block.item_id) else {
-                return;
-            };
-            args.world
-                .drop_stack(args.position, ItemStack::new(1, item))
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let Some(item) = Item::from_id(args.block.item_id) else {
+            return;
+        };
+        args.world
+            .drop_stack(args.position, ItemStack::new(1, item));
     }
 
     /// Mirrors `DoublePlantBlock.getStateForPlacement` (`DoublePlantBlock.java:64-68`):
@@ -98,7 +95,7 @@ impl BlockBehaviour for TallPlantBlock {
         }
 
         let (other_block, other_state_id) = args.world.get_block_and_state_id(&other_block_pos);
-        if Self::ids().contains(&other_block.id) {
+        if other_block.id == args.block.id {
             let other_props =
                 TallSeagrassLikeProperties::from_state_id(other_state_id, other_block);
             let opposite_half = match tall_plant_props.half {
@@ -134,7 +131,7 @@ impl BlockBehaviour for TallPlantBlock {
                 DoubleBlockHalf::Lower => args.position.up(),
             };
             let (other_block, other_state_id) = args.world.get_block_and_state_id(&other_block_pos);
-            if Self::ids().contains(&other_block.id) {
+            if other_block.id == args.block.id {
                 let other_props =
                     TallSeagrassLikeProperties::from_state_id(other_state_id, other_block);
                 let opposite_half = match tall_plant_props.half {

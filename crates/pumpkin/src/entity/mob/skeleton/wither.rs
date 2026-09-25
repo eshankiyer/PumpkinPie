@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::entity::EntityType;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage,
+    Entity, EntityBaseFuture,
     ai::goal::active_target::ActiveTargetGoal,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
 };
@@ -34,7 +34,6 @@ impl WitherSkeletonEntity {
     }
 }
 
-impl NBTStorage for WitherSkeletonEntity {}
 
 impl Mob for WitherSkeletonEntity {
     fn get_mob_entity(&self) -> &MobEntity {

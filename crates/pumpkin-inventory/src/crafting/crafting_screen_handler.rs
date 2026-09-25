@@ -988,7 +988,7 @@ fn match_special_recipe(items: &[(usize, ItemStack)]) -> Option<RecipeResult> {
         .or_else(|| match_book_cloning(items))
 }
 
-+/// Looks up the crafting recipe a grid currently satisfies.
+/// Looks up the crafting recipe a grid currently satisfies.
 ///
 /// This is vanilla's `RecipeManager::getRecipeFor(RecipeTypes.CRAFTING, input, level)`,
 /// reached from `AbstractCraftingMenu.slotsChanged` for menus and from

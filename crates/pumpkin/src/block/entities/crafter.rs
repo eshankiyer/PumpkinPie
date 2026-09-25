@@ -7,7 +7,7 @@ use pumpkin_inventory::crafting::recipes::RecipeInputInventory;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
+use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 use pumpkin_world::world::BlockFlags;
 use std::any::Any;
 use std::array::from_fn;
@@ -26,24 +26,27 @@ pub struct CrafterBlockEntity {
 
 impl BlockEntity for CrafterBlockEntity {
     fn write_nbt(&self, nbt: &mut NbtCompound) {
-            let items = self.items.read().unwrap_or_else(std::sync::PoisonError::into_inner);
-            sync_write_items_to_nbt(items.as_slice(), nbt);
-            nbt.put_int(
-                "crafting_ticks_remaining",
-                self.crafting_ticks_remaining.load(Ordering::Relaxed),
-            );
-            nbt.put_bool("triggered", self.triggered.load(Ordering::Relaxed));
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        sync_write_items_to_nbt(items.as_slice(), nbt);
+        nbt.put_int(
+            "crafting_ticks_remaining",
+            self.crafting_ticks_remaining.load(Ordering::Relaxed),
+        );
+        nbt.put_bool("triggered", self.triggered.load(Ordering::Relaxed));
 
-            let disabled_indices: Vec<i32> = self
-                .disabled_slots
-                .iter()
-                .enumerate()
-                .filter(|(_, disabled)| disabled.load(Ordering::Relaxed))
-                .map(|(slot, _)| slot as i32)
-                .collect();
-            if !disabled_indices.is_empty() {
-                nbt.put("disabled_slots", NbtTag::IntArray(disabled_indices));
-            }
+        let disabled_indices: Vec<i32> = self
+            .disabled_slots
+            .iter()
+            .enumerate()
+            .filter(|(_, disabled)| disabled.load(Ordering::Relaxed))
+            .map(|(slot, _)| slot as i32)
+            .collect();
+        if !disabled_indices.is_empty() {
+            nbt.put("disabled_slots", NbtTag::IntArray(disabled_indices));
+        }
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -99,23 +102,27 @@ impl BlockEntity for CrafterBlockEntity {
     /// Vanilla `CrafterBlockEntity.serverTick` (`CrafterBlockEntity.java:236-245`):
     /// counts the crafting animation down and clears `CRAFTING` when it reaches zero.
     fn tick(&self, world: &Arc<World>) {
-            let remaining = self.crafting_ticks_remaining.load(Ordering::Relaxed) - 1;
-            if remaining < 0 {
-                return;
-            }
-            self.crafting_ticks_remaining
-                .store(remaining, Ordering::Relaxed);
-            if remaining != 0 {
-                return;
-            }
-            let block = world.get_block(&self.position);
-            let state = world.get_block_state(&self.position);
-            let mut props = CrafterLikeProperties::from_state_id(state.id, block);
-            if !props.crafting {
-                return;
-            }
-            props.crafting = false;
-            world.set_block_state(&self.position, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
+        let remaining = self.crafting_ticks_remaining.load(Ordering::Relaxed) - 1;
+        if remaining < 0 {
+            return;
+        }
+        self.crafting_ticks_remaining
+            .store(remaining, Ordering::Relaxed);
+        if remaining != 0 {
+            return;
+        }
+        let block = world.get_block(&self.position);
+        let state = world.get_block_state(&self.position);
+        let mut props = CrafterLikeProperties::from_state_id(state.id, block);
+        if !props.crafting {
+            return;
+        }
+        props.crafting = false;
+        world.set_block_state(
+            &self.position,
+            props.to_state_id(block),
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 
     fn resource_location(&self) -> &'static str {
@@ -300,16 +307,16 @@ impl Inventory for CrafterBlockEntity {
     }
 
     fn set_stack(&self, slot: usize, stack: ItemStack) {
-            // Vanilla `setItem`: placing an item into a disabled slot re-enables it.
-            if self.is_slot_disabled(slot) {
-                self.set_slot_state(slot, true);
-            }
-            let mut items = self
-                .items
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            items[slot] = stack;
-            self.mark_dirty();
+        // Vanilla `setItem`: placing an item into a disabled slot re-enables it.
+        if self.is_slot_disabled(slot) {
+            self.set_slot_state(slot, true);
+        }
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot] = stack;
+        self.mark_dirty();
     }
 
     fn mark_dirty(&self) {
@@ -320,51 +327,45 @@ impl Inventory for CrafterBlockEntity {
         self
     }
 
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         slot: usize,
-        _stack: &'a ItemStack,
+        _stack: &ItemStack,
         _direction: BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move { !self.is_slot_disabled(slot) })
+    ) -> bool {
+        !self.is_slot_disabled(slot)
     }
 
     /// Vanilla `CrafterBlockEntity.canPlaceItem` (`CrafterBlockEntity.java:88-100`):
     /// inputs are distributed across enabled slots by count, preserving the first later
     /// empty or smaller matching stack as the insertion target.
-    fn can_place_item<'a>(
-        &'a self,
-        slot: usize,
-        _stack: &'a ItemStack,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            if slot >= Self::INVENTORY_SIZE || self.is_slot_disabled(slot) {
+    fn can_place_item(&self, slot: usize, _stack: &ItemStack) -> bool {
+        if slot >= Self::INVENTORY_SIZE || self.is_slot_disabled(slot) {
+            return false;
+        }
+
+        let current = self.get_stack(slot);
+        if current.item_count >= current.get_max_stack_size() {
+            return false;
+        }
+        if current.is_empty() {
+            return true;
+        }
+
+        for later_slot in slot + 1..Self::INVENTORY_SIZE {
+            if self.is_slot_disabled(later_slot) {
+                continue;
+            }
+            let later = self.get_stack(later_slot);
+            if later.is_empty()
+                || (later.item_count < current.item_count
+                    && later.are_items_and_components_equal(&current))
+            {
                 return false;
             }
+        }
 
-            let current = self.get_stack(slot);
-            if current.item_count >= current.get_max_stack_size() {
-                return false;
-            }
-            if current.is_empty() {
-                return true;
-            }
-
-            for later_slot in slot + 1..Self::INVENTORY_SIZE {
-                if self.is_slot_disabled(later_slot) {
-                    continue;
-                }
-                let later = self.get_stack(later_slot);
-                if later.is_empty()
-                    || (later.item_count < current.item_count
-                        && later.are_items_and_components_equal(&current))
-                {
-                    return false;
-                }
-            }
-
-            true
-        })
+        true
     }
 }
 
@@ -408,39 +409,34 @@ mod tests {
 
     /// The crafter is a `CraftingContainer`, so `CrafterBlock.dispenseFrom` can look a
     /// recipe up straight out of its nine slots (`CrafterBlock.java:152-153`).
-    #[tokio::test]
-    async fn crafter_contents_are_a_recipe_input() {
+    #[test]
+    fn crafter_contents_are_a_recipe_input() {
         let crafter = crafter();
         for slot in [0, 1, 3, 4] {
-            crafter
-                .set_stack(slot, ItemStack::new(1, &Item::OAK_PLANKS))
-                ;
+            crafter.set_stack(slot, ItemStack::new(1, &Item::OAK_PLANKS));
         }
-        let result = match_crafting_recipe(&crafter, None)
-            .await
-            .expect("four planks are a crafting table");
+        let result =
+            match_crafting_recipe(&crafter, None).expect("four planks are a crafting table");
         assert_eq!(result.item_id, "minecraft:crafting_table");
     }
 
     /// A disabled slot is an empty one, so it just shrinks the trimmed input.
-    #[tokio::test]
-    async fn a_disabled_slot_does_not_block_a_match() {
+    #[test]
+    fn a_disabled_slot_does_not_block_a_match() {
         let crafter = crafter();
         crafter.set_slot_state(8, false);
         for slot in [0, 1, 3, 4] {
-            crafter
-                .set_stack(slot, ItemStack::new(1, &Item::OAK_PLANKS))
-                ;
+            crafter.set_stack(slot, ItemStack::new(1, &Item::OAK_PLANKS));
         }
         assert!(crafter.is_slot_disabled(8));
-        assert!(match_crafting_recipe(&crafter, None).await.is_some());
+        assert!(match_crafting_recipe(&crafter, None).is_some());
     }
 
-    #[tokio::test]
-    async fn an_unmatched_grid_yields_no_recipe() {
+    #[test]
+    fn an_unmatched_grid_yields_no_recipe() {
         let crafter = crafter();
         crafter.set_stack(0, ItemStack::new(1, &Item::DIRT));
         crafter.set_stack(4, ItemStack::new(1, &Item::DIRT));
-        assert!(match_crafting_recipe(&crafter, None).await.is_none());
+        assert!(match_crafting_recipe(&crafter, None).is_none());
     }
 }

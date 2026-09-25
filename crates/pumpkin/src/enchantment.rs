@@ -854,8 +854,7 @@ pub async fn apply_frost_walker(
                     continue;
                 }
                 let replaced = world
-                    .set_block_state(&pos, frosted_ice, BlockFlags::NOTIFY_ALL)
-                    .await;
+                    .set_block_state(&pos, frosted_ice, BlockFlags::NOTIFY_ALL);
                 if replaced == frosted_ice {
                     continue;
                 }

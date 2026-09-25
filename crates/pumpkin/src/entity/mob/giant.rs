@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity,
     mob::{Mob, MobEntity},
 };
 
@@ -18,7 +18,6 @@ impl GiantEntity {
     }
 }
 
-impl NBTStorage for GiantEntity {}
 
 impl Mob for GiantEntity {
     fn get_mob_entity(&self) -> &MobEntity {

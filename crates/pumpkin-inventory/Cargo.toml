@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-inventory"
+name = "pumpkinpie-inventory"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

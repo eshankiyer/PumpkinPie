@@ -32,21 +32,25 @@ impl CreeperIgniteGoal {
 
     /// Vanilla `SwellGoal.canUse`: an already lit fuse keeps the goal alive regardless of
     /// distance, otherwise swelling only begins for a live target inside 3 blocks.
-    async fn can_swell(&self, mob: &dyn Mob) -> bool {
+    fn can_swell(&self, mob: &dyn Mob) -> bool {
         if self.creeper.fuse_speed.load(Ordering::Relaxed) > 0 {
             return true;
         }
 
-        let target_lock = mob.get_mob_entity().target.lock().await;
+        let target_lock = mob
+            .get_mob_entity()
+            .target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(target) = target_lock.as_ref() {
             if !target.get_entity().is_alive() {
                 return false;
             }
-        let dist_sq = mob
-            .get_entity()
-            .pos
-            .load()
-            .squared_distance_to_vec(&target.get_entity().pos.load());
+            let dist_sq = mob
+                .get_entity()
+                .pos
+                .load()
+                .squared_distance_to_vec(&target.get_entity().pos.load());
             return dist_sq < 9.0;
         }
 
@@ -56,12 +60,12 @@ impl CreeperIgniteGoal {
 
 impl Goal for CreeperIgniteGoal {
     fn can_start(&mut self, mob: &dyn Mob) -> bool {
-        futures::executor::block_on(self.can_swell(mob))
+        self.can_swell(mob)
     }
 
     /// Vanilla `SwellGoal` inherits `canContinueToUse` from `Goal`, which returns `canUse()`.
     fn should_continue(&self, mob: &dyn Mob) -> bool {
-        futures::executor::block_on(self.can_swell(mob))
+        self.can_swell(mob)
     }
 
     fn start(&mut self, mob: &dyn Mob) {
@@ -89,15 +93,13 @@ impl Goal for CreeperIgniteGoal {
             return;
         }
 
-            let dist_sq = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&target.get_entity().pos.load());
-        let has_line_of_sight = futures::executor::block_on(Self::has_line_of_sight(
-            mob,
-            target.as_ref(),
-        ));
+        let dist_sq = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&target.get_entity().pos.load());
+        let has_line_of_sight =
+            futures::executor::block_on(Self::has_line_of_sight(mob, target.as_ref()));
         if Self::should_swell(dist_sq, has_line_of_sight) {
             self.creeper.set_fuse_speed(1);
         } else {

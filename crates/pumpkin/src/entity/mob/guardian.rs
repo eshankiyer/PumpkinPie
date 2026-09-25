@@ -5,7 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -145,7 +145,6 @@ impl GuardianEntity {
     }
 }
 
-impl NBTStorage for GuardianEntity {}
 
 impl Mob for GuardianEntity {
     fn get_mob_entity(&self) -> &MobEntity {

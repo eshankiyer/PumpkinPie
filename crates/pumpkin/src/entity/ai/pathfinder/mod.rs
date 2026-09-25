@@ -1126,6 +1126,8 @@ impl Navigator {
             Vector3::new(f64::from(x), f64::from(y), f64::from(z)),
             goal.speed,
         ))
+    }
+
     #[must_use]
     pub const fn get_path(&self) -> Option<&Path> {
         self.current_path.as_ref()

@@ -1,17 +1,19 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
 use pumpkin_data::entity::{EntityPose, EntityType, MobCategory};
 use rand::RngExt;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
 use crate::world::World;
 
-const WAIT_TIME_BEFORE_SLEEP: i32 = 140;
+// `Fox.SleepGoal.WAIT_TIME_BEFORE_SLEEP` (`Fox.java:1398`).
+const WAIT_TIME_BEFORE_SLEEP: i32 = to_goal_ticks(140);
 const BRIGHT_OUTSIDE_THRESHOLD: u8 = 4;
 const ALERT_RADIUS: f64 = 12.0;
 const ALERT_VERTICAL_RADIUS: f64 = 6.0;
@@ -93,20 +95,25 @@ fn alertable(mob: &dyn Mob) -> bool {
 /// `hasShelter` still drops vanilla's `getWalkTargetValue(pos) >= 0.0F` half because the world
 /// API has no equivalent primitive, and keeps the `!canSeeSky` half.
 pub struct FoxSleepGoal {
-    countdown: i32,
+    countdown: AtomicI32,
 }
 
 impl FoxSleepGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
-            countdown: rand::rng().random_range(0..WAIT_TIME_BEFORE_SLEEP),
+            countdown: AtomicI32::new(rand::rng().random_range(0..WAIT_TIME_BEFORE_SLEEP)),
         })
     }
 
-    fn can_sleep(&mut self, mob: &dyn Mob) -> bool {
-        if self.countdown > 0 {
-            self.countdown -= 1;
+    fn can_sleep(&self, mob: &dyn Mob) -> bool {
+        if self
+            .countdown
+            .fetch_update(Relaxed, Relaxed, |countdown| {
+                (countdown > 0).then(|| countdown - 1)
+            })
+            .is_ok()
+        {
             return false;
         }
 
@@ -122,52 +129,49 @@ impl FoxSleepGoal {
 }
 
 impl Goal for FoxSleepGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
-                return false;
-            };
-            let navigator_idle = mob.get_mob_entity().navigator.lock().unwrap().is_idle();
-            if !navigator_idle && !fox.is_sleeping() {
-                return false;
-            }
-            self.can_sleep(mob) || fox.is_sleeping()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() else {
+            return false;
+        };
+        let navigator_idle = mob.get_mob_entity().navigator.lock().unwrap().is_idle();
+        if !navigator_idle && !fox.is_sleeping() {
+            return false;
+        }
+        self.can_sleep(mob) || fox.is_sleeping()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.can_sleep(mob) })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        self.can_sleep(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.set_sitting(false);
-                fox.set_is_crouching(false);
-                fox.set_is_interested(false);
-                fox.set_sleeping(true);
-            }
-            mob.get_mob_entity()
-                .living_entity
-                .jumping
-                .store(false, SeqCst);
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-            let pos = mob.get_entity().pos.load();
-            mob.get_mob_entity()
-                .move_control
-                .lock()
-                .unwrap()
-                .set_wanted_position(pos.x, pos.y, pos.z, 0.0);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.set_sitting(false);
+            fox.set_is_crouching(false);
+            fox.set_is_interested(false);
+            fox.set_sleeping(true);
+        }
+        mob.get_mob_entity()
+            .living_entity
+            .jumping
+            .store(false, SeqCst);
+        mob.get_mob_entity().navigator.lock().unwrap().stop();
+        let pos = mob.get_entity().pos.load();
+        mob.get_mob_entity()
+            .move_control
+            .lock()
+            .unwrap()
+            .set_wanted_position(pos.x, pos.y, pos.z, 0.0);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.countdown = mob.get_random().random_range(0..WAIT_TIME_BEFORE_SLEEP);
-            if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
-                fox.clear_states();
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.countdown.store(
+            mob.get_random().random_range(0..WAIT_TIME_BEFORE_SLEEP),
+            Relaxed,
+        );
+        if let Some(fox) = mob.cast_any().downcast_ref::<FoxEntity>() {
+            fox.clear_states();
+        }
     }
 
     fn controls(&self) -> Controls {

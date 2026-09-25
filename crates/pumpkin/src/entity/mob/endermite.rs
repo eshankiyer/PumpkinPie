@@ -5,7 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal, climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -79,40 +79,30 @@ impl EndermiteEntity {
     }
 }
 
-impl NBTStorage for EndermiteEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("Lifetime", self.life.load(Ordering::Relaxed));
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.life
-                .store(nbt.get_int("Lifetime").unwrap_or(0), Ordering::Relaxed);
-        })
-    }
-}
-
 impl Mob for EndermiteEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int("Lifetime", self.life.load(Ordering::Relaxed));
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.life
+            .store(nbt.get_int("Lifetime").unwrap_or(0), Ordering::Relaxed);
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
 
     /// Vanilla `Endermite::aiStep`'s server-side branch: while not persistence-required,
     /// increments `life` each tick and discards the endermite once it reaches `MAX_LIFE`.
-    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            if entity.custom_name.load().is_none() {
-                self.life.fetch_add(1, Ordering::Relaxed);
-            }
+    fn mob_tick(&self, caller: &dyn EntityBase) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if entity.custom_name.load().is_none() {
+            self.life.fetch_add(1, Ordering::Relaxed);
+        }
 
-            if self.life.load(Ordering::Relaxed) >= MAX_LIFE {
-                entity.world.load().remove_entity(caller.as_ref()).await;
-            }
-        })
+        if self.life.load(Ordering::Relaxed) >= MAX_LIFE {
+            entity.world.load().remove_entity(caller);
+        }
     }
 }

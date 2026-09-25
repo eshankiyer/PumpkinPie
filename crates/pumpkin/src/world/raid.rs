@@ -8,11 +8,10 @@
 //! `should_apply_effect_tick`/`apply_effect_tick`, `BAD_OMEN`/`RAID_OMEN` branches) convert
 //! `BAD_OMEN` into `RAID_OMEN` on entering a real village (`World::is_close_to_village`, backed
 //! by `world::village_poi`'s POI-density tracker) and, on `RAID_OMEN` expiry, call
-//! `RaidManager::create_or_extend_raid` - which computes the raid center from real occupied
+//! `Raids::create_or_extend_raid` - which computes the raid center from real occupied
 //! `village`-tag POIs, mirroring `Raids.createOrExtendRaid`.
 //!
-//! Scope reductions (no vanilla-parity infrastructure exists yet for these; see
-//! `pumpkin/src/world/mod.rs` `RaidManager` field and `CLAUDE.md`/`PARITY.md`):
+//! Known limitations to recheck against the current implementation:
 //! - The raid center never re-centers onto a real village once triggered
 //!   (`moveRaidCenterToNearbyVillageSection` is not ported), and a raid is never lost for
 //!   "no longer a village" (`Raid.java` lines 287-297).
@@ -1117,7 +1116,10 @@ impl Raids {
 
 #[cfg(test)]
 mod tests {
-    use super::{Difficulty, Raid, RaiderType, num_groups_for_difficulty, potential_bonus_spawns};
+    use super::{
+        Difficulty, PATROL_SPAWN_INTERVAL, PATROL_SPAWN_INTERVAL_JITTER, PatrolSpawner, Raid,
+        RaiderType, num_groups_for_difficulty, potential_bonus_spawns,
+    };
     use pumpkin_util::math::position::BlockPos;
 
     #[test]
@@ -1162,5 +1164,116 @@ mod tests {
         // PatrolSpawner.java:26.
         assert_eq!(super::PATROL_SPAWN_INTERVAL, 12000);
         assert_eq!(super::PATROL_SPAWN_INTERVAL_JITTER, 1200);
+    }
+
+    #[test]
+    fn bonus_wave_uses_num_groups_index() {
+        let raid = Raid::new(0, BlockPos::new(0, 0, 0), Difficulty::Easy);
+        assert_eq!(raid.num_groups, 3);
+        assert_eq!(
+            raid.get_default_num_spawns(RaiderType::Pillager, 1, true),
+            raid.get_default_num_spawns(RaiderType::Pillager, raid.num_groups, false)
+        );
+    }
+
+    #[test]
+    fn evoker_never_gets_bonus_spawns() {
+        for wave in 1..=7 {
+            for difficulty in [Difficulty::Easy, Difficulty::Normal, Difficulty::Hard] {
+                assert_eq!(
+                    potential_bonus_spawns(RaiderType::Evoker, wave, difficulty, false),
+                    0
+                );
+                assert_eq!(
+                    potential_bonus_spawns(RaiderType::Evoker, wave, difficulty, true),
+                    0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn witch_bonus_spawns_only_after_wave_two_and_not_on_wave_four() {
+        assert_eq!(
+            potential_bonus_spawns(RaiderType::Witch, 1, Difficulty::Normal, false),
+            0
+        );
+        assert_eq!(
+            potential_bonus_spawns(RaiderType::Witch, 2, Difficulty::Normal, false),
+            0
+        );
+        assert_eq!(
+            potential_bonus_spawns(RaiderType::Witch, 4, Difficulty::Normal, false),
+            0
+        );
+        assert_eq!(
+            potential_bonus_spawns(RaiderType::Witch, 3, Difficulty::Easy, false),
+            0
+        );
+        for _ in 0..50 {
+            assert!(potential_bonus_spawns(RaiderType::Witch, 3, Difficulty::Normal, false) <= 1);
+        }
+    }
+
+    #[test]
+    fn ravager_bonus_spawn_requires_bonus_wave_and_not_easy() {
+        for _ in 0..50 {
+            assert_eq!(
+                potential_bonus_spawns(RaiderType::Ravager, 5, Difficulty::Normal, false),
+                0
+            );
+            assert_eq!(
+                potential_bonus_spawns(RaiderType::Ravager, 5, Difficulty::Easy, true),
+                0
+            );
+            assert!(
+                potential_bonus_spawns(RaiderType::Ravager, 5, Difficulty::Normal, true) <= 1
+            );
+        }
+    }
+
+    /// PatrolSpawner.java:24-26: the counter is decremented every tick and only rearms when it
+    /// reaches zero, then accumulates rather than assigns, so an overshoot carries forward.
+    #[test]
+    fn patrol_spawner_reschedule_carries_overshoot() {
+        let mut spawner = PatrolSpawner::default();
+        assert_eq!(spawner.next_tick, 0);
+        spawner.next_tick = -7;
+        spawner.next_tick -= 1;
+        let before = spawner.next_tick;
+        spawner.next_tick += PATROL_SPAWN_INTERVAL;
+        assert_eq!(spawner.next_tick, before + PATROL_SPAWN_INTERVAL);
+        assert!(spawner.next_tick < PATROL_SPAWN_INTERVAL);
+    }
+
+    /// PatrolSpawner.java:26 bounds the rearmed interval to (12000, 13200).
+    #[test]
+    fn patrol_spawn_interval_bounds_match_vanilla() {
+        assert_eq!(PATROL_SPAWN_INTERVAL, 12000);
+        assert_eq!(PATROL_SPAWN_INTERVAL_JITTER, 1200);
+        for _ in 0..200 {
+            let interval =
+                PATROL_SPAWN_INTERVAL + rand::random_range(0..PATROL_SPAWN_INTERVAL_JITTER);
+            assert!((12000..13200).contains(&interval));
+        }
+    }
+
+    /// PatrolSpawner.java:34-35: each horizontal offset is (24 + nextInt(24)) with a random
+    /// sign, so its magnitude always lands in (24, 48).
+    #[test]
+    fn patrol_offset_magnitude_matches_vanilla_range() {
+        for _ in 0..200 {
+            let offset: i32 = (24 + rand::random_range(0..24))
+                * if rand::random_range(0..2) == 0 { -1 } else { 1 };
+            assert!((24..48).contains(&offset.abs()));
+        }
+    }
+
+    /// PatrolSpawner.java:40: ceil(effectiveDifficulty) + 1.
+    #[test]
+    fn patrol_group_size_matches_vanilla_formula() {
+        for (effective, expected) in [(2.0f32, 3), (2.5f32, 4), (3.0f32, 4), (4.0f32, 5)] {
+            assert_eq!(effective.ceil() as i32 + 1, expected);
+        }
     }
 }

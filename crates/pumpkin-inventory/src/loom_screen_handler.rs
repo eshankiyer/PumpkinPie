@@ -21,8 +21,10 @@ use pumpkin_world::inventory::Inventory;
 use pumpkin_world::inventory::SimpleInventory;
 
 use crate::player::player_inventory::PlayerInventory;
-use crate::screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack};
-use crate::slot::{BoxFuture, Slot};
+use crate::screen_handler::{
+    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack,
+};
+use crate::slot::Slot;
 
 fn is_banner(stack: &ItemStack) -> bool {
     stack.item.has_tag(&ItemTag::MINECRAFT_BANNERS)
@@ -35,7 +37,9 @@ fn is_dye_item(stack: &ItemStack) -> bool {
 
 fn is_pattern_item(stack: &ItemStack) -> bool {
     stack.item.has_tag(&ItemTag::MINECRAFT_LOOM_PATTERNS)
-        && stack.get_data_component::<ProvidesBannerPatternsImpl>().is_some()
+        && stack
+            .get_data_component::<ProvidesBannerPatternsImpl>()
+            .is_some()
 }
 
 pub struct LoomScreenHandler {
@@ -52,16 +56,23 @@ impl LoomScreenHandler {
             output_inventory: Arc::new(SimpleInventory::new(1)),
         };
         handler.add_slot(Arc::new(LoomInputSlot::new(
-            handler.input_inventory.clone() as Arc<dyn Inventory>, 0, is_banner,
+            handler.input_inventory.clone() as Arc<dyn Inventory>,
+            0,
+            is_banner,
         )));
         handler.add_slot(Arc::new(LoomInputSlot::new(
-            handler.input_inventory.clone() as Arc<dyn Inventory>, 1, is_dye_item,
+            handler.input_inventory.clone() as Arc<dyn Inventory>,
+            1,
+            is_dye_item,
         )));
         handler.add_slot(Arc::new(LoomInputSlot::new(
-            handler.input_inventory.clone() as Arc<dyn Inventory>, 2, is_pattern_item,
+            handler.input_inventory.clone() as Arc<dyn Inventory>,
+            2,
+            is_pattern_item,
         )));
         handler.add_slot(Arc::new(LoomResultSlot::new(
-            handler.output_inventory.clone() as Arc<dyn Inventory>, 0,
+            handler.output_inventory.clone() as Arc<dyn Inventory>,
+            0,
         )));
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
         handler.add_player_slots(&player_inventory);
@@ -78,13 +89,24 @@ impl ScreenHandler for LoomScreenHandler {
         })
     }
 
-    fn get_behaviour(&self) -> &ScreenHandlerBehaviour { &self.behaviour }
-    fn get_behaviour_mut(&mut self) -> &mut ScreenHandlerBehaviour { &mut self.behaviour }
-    fn as_any(&self) -> &dyn Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
+        &self.behaviour
+    }
+    fn get_behaviour_mut(&mut self) -> &mut ScreenHandlerBehaviour {
+        &mut self.behaviour
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 
     fn on_slot_click(
-        &mut self, slot_index: i32, button: i32, action_type: SlotActionType,
+        &mut self,
+        slot_index: i32,
+        button: i32,
+        action_type: SlotActionType,
         player: &dyn InventoryPlayer,
     ) {
         self.internal_on_slot_click(slot_index, button, action_type, player);
@@ -95,7 +117,9 @@ impl ScreenHandler for LoomScreenHandler {
         self.default_on_closed(player);
         for i in 0..3 {
             let stack = self.input_inventory.remove_stack(i);
-            if !stack.is_empty() { offer_or_drop_stack(player, stack); }
+            if !stack.is_empty() {
+                offer_or_drop_stack(player, stack);
+            }
         }
     }
 
@@ -104,12 +128,16 @@ impl ScreenHandler for LoomScreenHandler {
         let Some(slot) = self.get_behaviour().slots.get(slot_index as usize).cloned() else {
             return stack_left;
         };
-        if !slot.has_stack() { return stack_left; }
+        if !slot.has_stack() {
+            return stack_left;
+        }
         let mut item = slot.get_cloned_stack();
         stack_left = item.clone();
 
         if slot_index == 3 {
-            if !self.insert_item(&mut item, 4, 40, true) { return ItemStack::EMPTY.clone(); }
+            if !self.insert_item(&mut item, 4, 40, true) {
+                return ItemStack::EMPTY.clone();
+            }
             slot.on_quick_move_crafted(item.clone(), stack_left.clone());
         } else if slot_index != 0 && slot_index != 1 && slot_index != 2 {
             let moved = if is_banner(&item) {
@@ -122,14 +150,24 @@ impl ScreenHandler for LoomScreenHandler {
                 self.insert_item(&mut item, 31, 40, false)
             } else if (31..40).contains(&slot_index) {
                 self.insert_item(&mut item, 4, 31, false)
-            } else { false };
-            if !moved { return ItemStack::EMPTY.clone(); }
+            } else {
+                false
+            };
+            if !moved {
+                return ItemStack::EMPTY.clone();
+            }
         } else if !self.insert_item(&mut item, 4, 40, false) {
             return ItemStack::EMPTY.clone();
         }
 
-        if item.is_empty() { slot.set_stack(ItemStack::EMPTY.clone()); } else { slot.mark_dirty(); }
-        if item.item_count == stack_left.item_count { return ItemStack::EMPTY.clone(); }
+        if item.is_empty() {
+            slot.set_stack(ItemStack::EMPTY.clone());
+        } else {
+            slot.mark_dirty();
+        }
+        if item.item_count == stack_left.item_count {
+            return ItemStack::EMPTY.clone();
+        }
         slot.on_take_item(player, &item);
         stack_left
     }
@@ -137,39 +175,76 @@ impl ScreenHandler for LoomScreenHandler {
 
 /// `mayPlace` for the banner/dye/pattern input slots (LoomMenu.java:64-81).
 struct LoomInputSlot {
-    inventory: Arc<dyn Inventory>, index: usize, id: AtomicU8,
+    inventory: Arc<dyn Inventory>,
+    index: usize,
+    id: AtomicU8,
     predicate: fn(&ItemStack) -> bool,
 }
 
 impl LoomInputSlot {
     fn new(inventory: Arc<dyn Inventory>, index: usize, predicate: fn(&ItemStack) -> bool) -> Self {
-        Self { inventory, index, id: AtomicU8::new(0), predicate }
+        Self {
+            inventory,
+            index,
+            id: AtomicU8::new(0),
+            predicate,
+        }
     }
 }
 
 impl Slot for LoomInputSlot {
-    fn get_inventory(&self) -> Arc<dyn Inventory> { self.inventory.clone() }
-    fn get_index(&self) -> usize { self.index }
-    fn set_id(&self, id: usize) { self.id.store(id as u8, std::sync::atomic::Ordering::Relaxed); }
-    fn can_insert(&self, stack: &ItemStack) -> bool { (self.predicate)(stack) }
-    fn mark_dirty(&self) { self.inventory.mark_dirty(); }
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.inventory.clone()
+    }
+    fn get_index(&self) -> usize {
+        self.index
+    }
+    fn set_id(&self, id: usize) {
+        self.id
+            .store(id as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn can_insert(&self, stack: &ItemStack) -> bool {
+        (self.predicate)(stack)
+    }
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
+    }
 }
 
 /// Result slot (LoomMenu.java:82-105). Never accepts items.
-struct LoomResultSlot { inventory: Arc<dyn Inventory>, index: usize, id: AtomicU8 }
+struct LoomResultSlot {
+    inventory: Arc<dyn Inventory>,
+    index: usize,
+    id: AtomicU8,
+}
 
 impl LoomResultSlot {
     fn new(inventory: Arc<dyn Inventory>, index: usize) -> Self {
-        Self { inventory, index, id: AtomicU8::new(0) }
+        Self {
+            inventory,
+            index,
+            id: AtomicU8::new(0),
+        }
     }
 }
 
 impl Slot for LoomResultSlot {
-    fn get_inventory(&self) -> Arc<dyn Inventory> { self.inventory.clone() }
-    fn get_index(&self) -> usize { self.index }
-    fn set_id(&self, id: usize) { self.id.store(id as u8, std::sync::atomic::Ordering::Relaxed); }
-    fn can_insert(&self, _stack: &ItemStack) -> bool { false }
-    fn mark_dirty(&self) { self.inventory.mark_dirty(); }
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.inventory.clone()
+    }
+    fn get_index(&self) -> usize {
+        self.index
+    }
+    fn set_id(&self, id: usize) {
+        self.id
+            .store(id as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn can_insert(&self, _stack: &ItemStack) -> bool {
+        false
+    }
+    fn mark_dirty(&self) {
+        self.inventory.mark_dirty();
+    }
 }
 
 #[cfg(test)]
@@ -177,7 +252,7 @@ mod tests {
     use super::*;
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use pumpkin_data::item::Item;
-    use tokio::sync::Mutex as TokioMutex;
+    use std::sync::Mutex as TokioMutex;
 
     fn handler() -> LoomScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -201,7 +276,10 @@ mod tests {
 
     #[test]
     fn pattern_predicate_matches_only_loom_pattern_items() {
-        assert!(is_pattern_item(&ItemStack::new(1, &Item::FLOWER_BANNER_PATTERN)));
+        assert!(is_pattern_item(&ItemStack::new(
+            1,
+            &Item::FLOWER_BANNER_PATTERN
+        )));
         assert!(!is_pattern_item(&ItemStack::new(1, &Item::WHITE_DYE)));
     }
 

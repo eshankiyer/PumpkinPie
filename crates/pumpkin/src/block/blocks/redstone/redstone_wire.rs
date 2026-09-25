@@ -421,3 +421,159 @@ impl CardinalWireConnectionExt for NorthRedstone { fn to_wire_connection(&self) 
 impl CardinalWireConnectionExt for SouthRedstone { fn to_wire_connection(&self) -> WireConnection { match self { Self::Side => WireConnection::Side, Self::Up => WireConnection::Up, Self::None => WireConnection::None } } }
 impl CardinalWireConnectionExt for EastRedstone { fn to_wire_connection(&self) -> WireConnection { match self { Self::Side => WireConnection::Side, Self::Up => WireConnection::Up, Self::None => WireConnection::None } } }
 impl CardinalWireConnectionExt for WestRedstone { fn to_wire_connection(&self) -> WireConnection { match self { Self::Side => WireConnection::Side, Self::Up => WireConnection::Up, Self::None => WireConnection::None } } }
+
+#[cfg(test)]
+mod rotate_mirror_tests {
+    use super::*;
+
+    const fn wire(
+        north: NorthRedstone,
+        south: SouthRedstone,
+        east: EastRedstone,
+        west: WestRedstone,
+    ) -> RedstoneWireProperties {
+        RedstoneWireProperties {
+            north,
+            south,
+            east,
+            west,
+            power: 0,
+        }
+    }
+
+    #[test]
+    fn rotate_none_is_identity() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::None,
+            EastRedstone::Up,
+            WestRedstone::None,
+        );
+        assert_eq!(rotate_wire(w, Rotation::None), w);
+    }
+
+    #[test]
+    fn rotate_clockwise_90_permutes_sides() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::None,
+            EastRedstone::Up,
+            WestRedstone::None,
+        );
+        let rotated = rotate_wire(w, Rotation::Clockwise90);
+        assert_eq!(
+            rotated.north,
+            WestRedstone::None.to_wire_connection().to_north()
+        );
+        assert_eq!(
+            rotated.east,
+            NorthRedstone::Side.to_wire_connection().to_east()
+        );
+        assert_eq!(
+            rotated.south,
+            EastRedstone::Up.to_wire_connection().to_south()
+        );
+        assert_eq!(
+            rotated.west,
+            SouthRedstone::None.to_wire_connection().to_west()
+        );
+    }
+
+    #[test]
+    fn rotate_counter_clockwise_90_is_inverse_of_clockwise_90() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::Up,
+            EastRedstone::None,
+            WestRedstone::Side,
+        );
+        let round_tripped = rotate_wire(
+            rotate_wire(w, Rotation::Clockwise90),
+            Rotation::CounterClockwise90,
+        );
+        assert_eq!(round_tripped, w);
+    }
+
+    #[test]
+    fn rotate_180_twice_is_identity() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::Up,
+            EastRedstone::None,
+            WestRedstone::Side,
+        );
+        let twice = rotate_wire(rotate_wire(w, Rotation::Rotate180), Rotation::Rotate180);
+        assert_eq!(twice, w);
+    }
+
+    #[test]
+    fn mirror_none_is_identity() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::None,
+            EastRedstone::Up,
+            WestRedstone::None,
+        );
+        assert_eq!(mirror_wire(w, Mirror::None), w);
+    }
+
+    #[test]
+    fn mirror_left_right_swaps_north_south_only() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::None,
+            EastRedstone::Up,
+            WestRedstone::None,
+        );
+        let mirrored = mirror_wire(w, Mirror::LeftRight);
+        assert_eq!(
+            mirrored.north,
+            SouthRedstone::None.to_wire_connection().to_north()
+        );
+        assert_eq!(
+            mirrored.south,
+            NorthRedstone::Side.to_wire_connection().to_south()
+        );
+        assert_eq!(mirrored.east, w.east);
+        assert_eq!(mirrored.west, w.west);
+    }
+
+    #[test]
+    fn mirror_front_back_swaps_east_west_only() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::None,
+            EastRedstone::Up,
+            WestRedstone::None,
+        );
+        let mirrored = mirror_wire(w, Mirror::FrontBack);
+        assert_eq!(
+            mirrored.east,
+            WestRedstone::None.to_wire_connection().to_east()
+        );
+        assert_eq!(
+            mirrored.west,
+            EastRedstone::Up.to_wire_connection().to_west()
+        );
+        assert_eq!(mirrored.north, w.north);
+        assert_eq!(mirrored.south, w.south);
+    }
+
+    #[test]
+    fn mirror_applied_twice_is_identity() {
+        let w = wire(
+            NorthRedstone::Side,
+            SouthRedstone::Up,
+            EastRedstone::None,
+            WestRedstone::Side,
+        );
+        assert_eq!(
+            mirror_wire(mirror_wire(w, Mirror::LeftRight), Mirror::LeftRight),
+            w
+        );
+        assert_eq!(
+            mirror_wire(mirror_wire(w, Mirror::FrontBack), Mirror::FrontBack),
+            w
+        );
+    }
+}

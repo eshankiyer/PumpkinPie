@@ -89,7 +89,10 @@ impl ItemBehaviour for CrossbowItem {
     fn on_stopped_using(&self, _stack: &ItemStack, player: &Player) {
         let stack = player.inventory().held_item();
         // A crossbow loaded during on_use_tick must not draw a second projectile on release.
-        if stack.get_data_component::<ChargedProjectilesImpl>().is_some_and(|charged| !charged.projectiles.is_empty()) {
+        if stack
+            .get_data_component::<ChargedProjectilesImpl>()
+            .is_some_and(|charged| !charged.projectiles.is_empty())
+        {
             player.living_entity.clear_active_hand();
             return;
         }
@@ -101,12 +104,13 @@ impl ItemBehaviour for CrossbowItem {
         player.living_entity.clear_active_hand();
     }
 
-    fn on_use_tick(
-        &self,
-        _stack: &ItemStack,
-        player: &Player,
+    fn on_use_tick<'a>(
+        &'a self,
+        _stack: &'a ItemStack,
+        player: &'a Player,
         remaining_use_ticks: i32,
-    ) {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
             let stack = player.inventory().held_item();
 
             // Already loaded: vanilla's `isCharged` check (CrossbowItem.java:222) stops the
@@ -157,6 +161,7 @@ impl ItemBehaviour for CrossbowItem {
                 // loading-end sound inside is gated on the load succeeding.
                 Self::try_load_projectiles(player);
             }
+        })
     }
 
     fn get_use_duration(&self) -> i32 {

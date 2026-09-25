@@ -1,4 +1,4 @@
-use crate::block::{BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, OnPlaceArgs};
+use crate::block::{BlockBehaviour, GetStateForNeighborUpdateArgs, OnPlaceArgs};
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, MangroveRootsLikeProperties};
 use pumpkin_data::fluid::Fluid;
@@ -22,30 +22,26 @@ pub struct HeavyCoreBlock;
 
 impl BlockBehaviour for HeavyCoreBlock {
     /// `HeavyCoreBlock.getStateForPlacement`: waterlogged iff placed into a water source.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = HeavyCoreProperties::default(args.block);
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = HeavyCoreProperties::default(args.block);
+        props.waterlogged = args.replacing.water_source();
+        props.to_state_id(args.block)
     }
 
     /// `HeavyCoreBlock.updateShape`: keep re-scheduling the water fluid tick while waterlogged.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = HeavyCoreProperties::from_state_id(args.state_id, args.block);
-            if props.waterlogged {
-                args.world.schedule_fluid_tick(
-                    &Fluid::WATER,
-                    *args.position,
-                    Fluid::WATER.flow_speed as u8,
-                    TickPriority::Normal,
-                );
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let props = HeavyCoreProperties::from_state_id(args.state_id, args.block);
+        if props.waterlogged {
+            args.world.schedule_fluid_tick(
+                &Fluid::WATER,
+                *args.position,
+                Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
+        args.state_id
     }
 }

@@ -59,6 +59,7 @@ pub use explosion::{
     ExplosionInteraction, SimpleExplosionDamageCalculator,
 };
 use pumpkin_config::BasicConfiguration;
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{
     BlockProperties, SnowLikeProperties, blocks_movement, is_air,
 };
@@ -67,7 +68,7 @@ use pumpkin_data::chunk_gen_settings::GenerationSettings;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::entity::MobCategory;
-use pumpkin_data::fluid::FluidState;
+use pumpkin_data::fluid::{Falling, FluidState};
 use pumpkin_data::game_rules::{GameRule, GameRuleValue};
 use pumpkin_data::{
     Block, BlockId, BlockStateId,
@@ -180,7 +181,6 @@ pub mod dragon_fight;
 pub mod end_podium;
 pub mod feature_placer;
 pub mod natural_spawner;
-pub mod raid;
 pub mod scoreboard;
 pub mod spawn_finder;
 pub mod stopwatch;
@@ -332,8 +332,6 @@ pub struct World {
     pub raids: std::sync::Mutex<raid::Raids>,
     /// End Dragon fight manager (only present in `THE_END` dimension).
     pub dragon_fight: Option<std::sync::Mutex<dragon_fight::DragonFight>>,
-    /// Fork raid manager, retained for parity behavior not covered by upstream's `Raids`.
-    pub raid_manager: tokio::sync::Mutex<raid::RaidManager>,
     pub spawn_state: ArcSwap<SpawnState>,
     pub active_chunks: ArcSwap<FxHashSet<Vector2<i32>>>,
     /// Block entities indexed by chunk, so ticking only visits the currently
@@ -512,7 +510,6 @@ impl World {
             villager_poi: std::sync::Mutex::new(villager_poi::VillagerPoiStorage::default()),
             raids: std::sync::Mutex::new(raid::Raids::default()),
             dragon_fight,
-            raid_manager: tokio::sync::Mutex::new(raid::RaidManager::new()),
             spawn_state: ArcSwap::new(Arc::new(SpawnState::empty())),
             active_chunks: ArcSwap::new(Arc::new(FxHashSet::default())),
             server,
@@ -693,15 +690,7 @@ impl World {
         }
         let current_chunk = base_entity.block_pos.load().chunk_position();
         let mut nbt = NbtCompound::new();
-        // Vanilla always writes the base `Entity`/`LivingEntity` data (`saveWithoutId`)
-        // before the type specific `addAdditionalSaveData`. Most Pumpkin entity types
-        // have an empty `NBTStorage` impl, which would otherwise persist an empty
-        // compound with no `id` and drop the entity on the next load.
-        if let Some(living) = entity.get_living_entity() {
-            living.write_nbt(&mut nbt);
-        } else {
-            entity.get_entity().write_nbt(&mut nbt);
-        }
+        // EntityBase serializes base, living, and type-specific data in order.
         entity.write_nbt(&mut nbt);
         let chunk = self.level.get_entity_chunk(current_chunk).await;
         chunk
@@ -1579,12 +1568,6 @@ impl World {
         if let Some(ref fight_mutex) = self.dragon_fight {
             dragon_fight::DragonFight::tick(fight_mutex, self);
         }
-
-        let world_for_raid_manager = self.clone();
-        server.spawn_task(async move {
-            raid::RaidManager::tick(&world_for_raid_manager.raid_manager, &world_for_raid_manager)
-                .await;
-        });
 
         let total_elapsed = start.elapsed();
         if total_elapsed.as_millis() > 50 {
@@ -2650,9 +2633,9 @@ impl World {
     /// needed by `RingBell` (`VillagerGoalPackages.java:231-245`).
     #[must_use]
     pub async fn is_raid_pre_raid_at(&self, position: BlockPos) -> bool {
-        self.raid_manager
+        self.raids
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_pre_raid_at(position)
     }
 
@@ -4985,14 +4968,7 @@ impl World {
                         // Pos is zero since it will be read from nbt.
                         let entity =
                             from_type(entity_type, Vector3::new(0.0, 0.0, 0.0), &world, uuid);
-                        // Mirrors the write side: the base data is restored first so
-                        // types with an empty `NBTStorage` impl still get their
-                        // position, health and effects back.
-                        if let Some(living) = entity.get_living_entity() {
-                            living.read_nbt_non_mut(entity_nbt);
-                        } else {
-                            entity.get_entity().read_nbt_non_mut(entity_nbt);
-                        }
+                        // EntityBase restores base, living, and type-specific data once.
                         entity.read_nbt_non_mut(entity_nbt);
                         entity.init_data_tracker();
 
@@ -7690,6 +7666,37 @@ impl World {
         self.raycast_with_check(start_pos, end_pos, hit_check, Self::ray_outline_check)
     }
 
+    // LivingEntity.hasLineOfSight uses ClipContext.Block.COLLIDER, not OUTLINE.
+    fn ray_collision_check(
+        &self,
+        block_pos: &BlockPos,
+        from: Vector3<f64>,
+        to: Vector3<f64>,
+    ) -> (bool, Option<BlockDirection>) {
+        let state = self.get_block_state(block_pos);
+        Self::ray_collision_state_check(state, block_pos, from, to)
+    }
+
+    fn ray_collision_state_check(
+        state: &BlockState,
+        block_pos: &BlockPos,
+        from: Vector3<f64>,
+        to: Vector3<f64>,
+    ) -> (bool, Option<BlockDirection>) {
+        let mut closest_hit: Option<(f64, BlockDirection)> = None;
+        for shape in state.get_block_collision_shapes_at(block_pos) {
+            let world_min = shape.min.add(&block_pos.0.to_f64());
+            let world_max = shape.max.add(&block_pos.0.to_f64());
+            if let Some((t, direction, _)) =
+                Self::intersects_aabb_with_hit(from, to, world_min, world_max)
+                && closest_hit.is_none_or(|(closest_t, _)| t < closest_t)
+            {
+                closest_hit = Some((t, direction));
+            }
+        }
+        closest_hit.map_or((false, None), |(_, direction)| (true, Some(direction)))
+    }
+
     pub fn raycast_collision(
         self: &Arc<Self>,
         start_pos: Vector3<f64>,
@@ -8397,6 +8404,35 @@ mod tests {
     use super::{bedrock_block_breaking_rate, bedrock_chest_block_actor};
 
     use super::*;
+
+    #[test]
+    fn sensing_ray_ignores_selectable_blocks_without_collision() {
+        let pos = BlockPos::new(7, 4, -3);
+        let from = Vector3::new(6.0, 4.5, -2.5);
+        let to = Vector3::new(9.0, 4.5, -2.5);
+        for block in [&Block::AIR, &Block::WATER, &Block::SHORT_GRASS] {
+            assert_eq!(
+                World::ray_collision_state_check(&block.default_state, &pos, from, to),
+                (false, None),
+                "noncolliding block {:?} must not block sensing", block.id
+            );
+        }
+        assert!(World::ray_collision_state_check(&Block::STONE.default_state, &pos, from, to).0);
+    }
+
+    #[test]
+    fn sensing_ray_respects_partial_collision_height() {
+        let pos = BlockPos::new(7, 4, -3);
+        // The default stone slab is bottom-half: a ray above it remains visible.
+        assert!(!World::ray_collision_state_check(
+            &Block::STONE_SLAB.default_state, &pos,
+            Vector3::new(6.0, 4.75, -2.5), Vector3::new(9.0, 4.75, -2.5),
+        ).0);
+        assert!(World::ray_collision_state_check(
+            &Block::STONE_SLAB.default_state, &pos,
+            Vector3::new(6.0, 4.25, -2.5), Vector3::new(9.0, 4.25, -2.5),
+        ).0);
+    }
 
     #[test]
     fn sky_darken_applies_weather_blending() {

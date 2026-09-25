@@ -434,6 +434,5 @@ mod tests {
         // items reach `Mob.wantsToPickUp`'s acceptance.
         assert!(!is_spear(&ItemStack::new(1, &Item::TRIDENT)));
         assert!(!is_spear(&ItemStack::new(1, &Item::NAUTILUS_SHELL)));
-        }
     }
 }

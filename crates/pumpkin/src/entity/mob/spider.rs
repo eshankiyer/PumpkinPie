@@ -5,7 +5,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage,
+    Entity, EntityBase,
     ai::goal::{
         Controls, Goal, GoalFuture, active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -236,7 +236,6 @@ impl SpiderEntity {
     }
 }
 
-impl NBTStorage for SpiderEntity {}
 
 impl Mob for SpiderEntity {
     fn get_mob_entity(&self) -> &MobEntity {

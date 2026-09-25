@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::sound::Sound;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage,
+    Entity, EntityBaseFuture,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
 };
 
@@ -19,7 +19,6 @@ impl StraySkeletonEntity {
     }
 }
 
-impl NBTStorage for StraySkeletonEntity {}
 
 impl Mob for StraySkeletonEntity {
     fn get_mob_entity(&self) -> &MobEntity {

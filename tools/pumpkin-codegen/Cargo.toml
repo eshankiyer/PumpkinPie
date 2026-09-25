@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-codegen"
+name = "pumpkinpie-codegen"
 version = "0.1.0-dev+26.1"
 edition = "2024"
 rust-version = "1.89"
@@ -23,8 +23,8 @@ proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "3.0", features = ["full", "extra-traits"] }
 
-pumpkin-util = { path = "../../crates/pumpkin-util", features = ["codegen"] }
-pumpkin-nbt = { path = "../../crates/pumpkin-nbt" }
+pumpkin-util = { package = "pumpkinpie-util", path = "../../crates/pumpkin-util", features = ["codegen"] }
+pumpkin-nbt = { package = "pumpkinpie-nbt", path = "../../crates/pumpkin-nbt" }
 
 [workspace]
 

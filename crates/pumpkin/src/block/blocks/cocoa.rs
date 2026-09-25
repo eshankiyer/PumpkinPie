@@ -1,6 +1,7 @@
-use pumpkin_data::block_properties::{BlockProperties, CocoaLikeProperties};
+use pumpkin_data::block_properties::{BlockProperties, CocoaLikeProperties, HorizontalFacing};
 use pumpkin_data::{
-    Block, BlockDirection, BlockStateId, HorizontalFacingExt,
+    Block, BlockDirection, BlockState, BlockStateId, FacingExt, HorizontalFacingExt, Mirror,
+    Rotation,
     tag::{self, Taggable},
 };
 use pumpkin_macros::pumpkin_block;
@@ -9,19 +10,19 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    BlockBehaviour, BlockIsReplacing, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     OnPlaceArgs, RandomTickArgs,
 };
+use crate::entity::EntityBase;
 
 /// `CocoaBlock` (`net/minecraft/world/level/block/CocoaBlock.java:28`).
 ///
-/// Cocoa had no behaviour at all: pods never ripened, never responded to bone meal, and stayed
-/// floating when the jungle log they hung on was mined.
+/// Placement, survival, growth, and transforms share one implementation for both module paths.
 #[pumpkin_block("minecraft:cocoa")]
 pub struct CocoaBlock;
 
 /// `CocoaBlock.MAX_AGE` (CocoaBlock.java:30).
-const MAX_AGE: u8 = 2;
+pub const MAX_AGE: u8 = 2;
 
 /// `CocoaBlock#randomTick` grows on a 1-in-5 roll (CocoaBlock.java:53).
 const GROWTH_CHANCE: i32 = 5;
@@ -41,65 +42,89 @@ fn facing_of(state_id: BlockStateId) -> BlockDirection {
         .to_block_direction()
 }
 
+impl CocoaBlock {
+    #[must_use]
+    pub fn can_survive(
+        world: &dyn BlockAccessor,
+        position: &BlockPos,
+        facing: HorizontalFacing,
+    ) -> bool {
+        can_survive(world, position, facing.to_block_direction())
+    }
+}
+
 impl BlockBehaviour for CocoaBlock {
-    /// `CocoaBlock#getStateForPlacement` (CocoaBlock.java:72-88). Pumpkin hands `on_place` the
-    /// direction from the pod toward the block it was placed against, which is exactly the
-    /// `FACING` vanilla stores.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = CocoaLikeProperties::default(args.block);
-            let Some(facing) = args.direction.to_horizontal_facing() else {
-                return BlockStateId::AIR;
-            };
-            props.facing = facing;
-            props.to_state_id(args.block)
-        })
+    /// `CocoaBlock#getStateForPlacement` (CocoaBlock.java:72-88) tries horizontal looking
+    /// directions. `BlockPlaceContext#getNearestLookingDirections` prioritizes the clicked
+    /// support when placement does not replace the clicked block (BlockPlaceContext.java:71-89).
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = CocoaLikeProperties::default(args.block);
+        let mut directions = args.player.get_entity().get_entity_facing_order();
+        if args.replacing == BlockIsReplacing::None {
+            let support = args.direction.to_facing();
+            if let Some(index) = directions
+                .iter()
+                .position(|direction| *direction == support)
+            {
+                directions[..=index].rotate_right(1);
+            }
+        }
+        for direction in directions {
+            if let Some(facing) = direction.to_horizontal_facing()
+                && Self::can_survive(args.world, args.position, facing)
+            {
+                props.facing = facing;
+                return props.to_state_id(args.block);
+            }
+        }
+        BlockStateId::AIR
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
-        let facing = match args.direction {
-            Some(direction) if direction.to_horizontal_facing().is_some() => direction,
-            _ => facing_of(args.state.id),
-        };
-        can_survive(args.block_accessor, args.position, facing)
+        // Player placement validates the default state before selecting its actual facing.
+        if args.player.is_some() && args.use_item_on.is_some() {
+            return [
+                BlockDirection::North,
+                BlockDirection::South,
+                BlockDirection::West,
+                BlockDirection::East,
+            ]
+            .into_iter()
+            .any(|facing| can_survive(args.block_accessor, args.position, facing));
+        }
+        can_survive(args.block_accessor, args.position, facing_of(args.state.id))
     }
 
     /// `CocoaBlock#randomTick` (CocoaBlock.java:51-59). `isRandomlyTicking` stops at age 2
     /// (CocoaBlock.java:46-49), which the age check below reproduces.
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if rand::rng().random_range(0..GROWTH_CHANCE) != 0 {
-                return;
-            }
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = CocoaLikeProperties::from_state_id(state_id, args.block);
-            if props.age >= MAX_AGE {
-                return;
-            }
-            props.age += 1;
-            args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if rand::rng().random_range(0..GROWTH_CHANCE) != 0 {
+            return;
+        }
+        let state_id = args.world.get_block_state_id(args.position);
+        let mut props = CocoaLikeProperties::from_state_id(state_id, args.block);
+        if props.age >= MAX_AGE {
+            return;
+        }
+        props.age += 1;
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
     /// `CocoaBlock#updateShape` (CocoaBlock.java:90-104): only the neighbour the pod faces can
     /// break it, and it breaks immediately rather than scheduling a tick.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let facing = facing_of(args.state_id);
-            if args.direction == facing && !can_survive(args.world, args.position, facing) {
-                return BlockStateId::AIR;
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let facing = facing_of(args.state_id);
+        if args.direction == facing && !can_survive(args.world, args.position, facing) {
+            return BlockStateId::AIR;
+        }
+        args.state_id
     }
 
     /// `CocoaBlock#isValidBonemealTarget` (CocoaBlock.java:106-109).
@@ -114,21 +139,34 @@ impl BlockBehaviour for CocoaBlock {
 
     /// `CocoaBlock#performBonemeal` (CocoaBlock.java:116-119) advances one age step, with no
     /// feature placement, so it is fully portable.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let mut props = CocoaLikeProperties::from_state_id(args.state_id, args.block);
-            if props.age >= MAX_AGE {
-                return;
-            }
-            props.age += 1;
-            args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let mut props = CocoaLikeProperties::from_state_id(args.state_id, args.block);
+        if props.age >= MAX_AGE {
+            return;
+        }
+        props.age += 1;
+        args.world.set_block_state(
+            args.position,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
+    }
+
+    fn rotate(
+        &self,
+        block: &Block,
+        state_id: BlockStateId,
+        rotation: Rotation,
+    ) -> &'static BlockState {
+        let mut props = CocoaLikeProperties::from_state_id(state_id, block);
+        props.facing = rotation.rotate_horizontal(props.facing);
+        BlockState::from_id(props.to_state_id(block))
+    }
+
+    fn mirror(&self, block: &Block, state_id: BlockStateId, mirror: Mirror) -> &'static BlockState {
+        let mut props = CocoaLikeProperties::from_state_id(state_id, block);
+        props.facing = mirror.mirror_horizontal(props.facing);
+        BlockState::from_id(props.to_state_id(block))
     }
 }
 

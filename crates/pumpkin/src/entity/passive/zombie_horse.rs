@@ -8,7 +8,6 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_inventory::screen_handler::BoxFuture;
 use rand::RngExt;
 
 use crate::entity::{
@@ -107,24 +106,14 @@ impl ZombieHorseEntity {
 }
 
 impl NBTStorage for ZombieHorseEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> crate::entity::NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_horse_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        self.write_horse_nbt(nbt);
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> crate::entity::NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_horse_nbt(nbt);
-        })
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.read_horse_nbt(nbt);
     }
 }
 
@@ -164,9 +153,13 @@ impl AbstractHorse for ZombieHorseEntity {
     /// `ZombieHorse.isMobControlled`: `getFirstPassenger() instanceof Mob` -- a non-player
     /// mob riding (e.g. a zombie jockey) counts as being "in control", which keeps
     /// `RunAroundLikeCrazyGoal` from bucking it.
-    fn is_mob_controlled(&self) -> BoxFuture<'_, bool> {
+    fn is_mob_controlled(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async {
-            let passengers = self.get_entity().passengers.lock().await;
+            let passengers = self
+                .get_entity()
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             passengers
                 .first()
                 .is_some_and(|passenger| passenger.get_mob().is_some())

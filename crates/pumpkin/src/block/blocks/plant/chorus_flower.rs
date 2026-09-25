@@ -16,7 +16,7 @@ use rand::RngExt;
 
 use super::chorus_plant;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     OnProjectileHitArgs, OnScheduledTickArgs, RandomTickArgs,
 };
 
@@ -133,23 +133,23 @@ impl BlockBehaviour for ChorusFlowerBlock {
     }
 
     /// `ChorusFlowerBlock.onProjectileHit` (`ChorusFlowerBlock.java:256-262`).
-    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !crate::entity::projectile::projectile_may_interact(
-                args.projectile,
-                args.server,
-                args.world,
-                args.position,
+    fn on_projectile_hit(&self, args: OnProjectileHitArgs<'_>) {
+        if !tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                crate::entity::projectile::projectile_may_interact(
+                    args.projectile,
+                    args.server,
+                    args.world,
+                    args.position,
+                ),
             )
-            .await
-                || !crate::entity::projectile::projectile_may_break(args.projectile, args.world)
-            {
-                return;
-            }
-            args.world
-                .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
-                .await;
         })
+            || !crate::entity::projectile::projectile_may_break(args.projectile, args.world)
+        {
+            return;
+        }
+        args.world
+            .break_block(args.position, None, BlockFlags::NOTIFY_ALL);
     }
 }
 

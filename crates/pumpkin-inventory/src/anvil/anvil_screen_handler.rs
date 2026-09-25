@@ -555,11 +555,11 @@ mod tests {
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use pumpkin_data::item::Item;
     use pumpkin_world::inventory::SimpleInventory;
-    use tokio::sync::Mutex as TokioMutex;
+    use std::sync::Mutex;
 
     fn handler() -> AnvilScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
-            Arc::new(TokioMutex::new(EntityEquipment::new())),
+            Arc::new(Mutex::new(EntityEquipment::new())),
             Arc::new(build_equipment_slots()),
         ));
         let inventory: Arc<dyn Inventory> = Arc::new(SimpleInventory::new(3));

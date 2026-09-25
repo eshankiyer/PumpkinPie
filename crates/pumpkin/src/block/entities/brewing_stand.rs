@@ -318,15 +318,14 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
     }
 
     /// Port of `BrewingStandBlockEntity.canPlaceItem` (`BrewingStandBlockEntity.java:217-226`).
-    fn can_place_item<'a>(
-        &'a self,
-        slot: usize,
-        stack: &'a ItemStack,
-    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            self.is_valid_slot_for(slot, stack)
-                && (slot > 2 || self.items.read().await[slot].is_empty())
-        })
+    fn can_place_item(&self, slot: usize, stack: &ItemStack) -> bool {
+        self.is_valid_slot_for(slot, stack)
+            && (slot > 2
+                || self
+                    .items
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
+                    .is_empty())
     }
 
     fn slots_for_face(&self, direction: pumpkin_data::BlockDirection) -> Vec<usize> {
@@ -337,28 +336,22 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         }
     }
 
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         slot: usize,
-        stack: &'a ItemStack,
+        stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla's `canPlaceItem` additionally refuses to top up an occupied bottle
-            // slot; that part needs to read the slot, so it cannot live in the sync
-            // `is_valid_slot_for`.
-            self.is_valid_slot_for(slot, stack)
-                && (slot > 2 || self.items.read().await[slot].is_empty())
-        })
+    ) -> bool {
+        self.can_place_item(slot, stack)
     }
 
-    fn can_extract_through_face<'a>(
-        &'a self,
+    fn can_extract_through_face(
+        &self,
         slot: usize,
-        stack: &'a ItemStack,
+        stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-        Box::pin(async move { slot != 3 || stack.get_item().id == Item::GLASS_BOTTLE.id })
+    ) -> bool {
+        slot != 3 || stack.get_item().id == Item::GLASS_BOTTLE.id
     }
 
     fn is_valid_slot_for(&self, slot: usize, stack: &ItemStack) -> bool {

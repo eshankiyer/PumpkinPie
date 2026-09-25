@@ -5,7 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, breeze_jump::BreezeJumpGoal,
         breeze_shoot::BreezeShootGoal, breeze_shoot_when_stuck::BreezeShootWhenStuckGoal,
@@ -126,7 +126,6 @@ impl BreezeEntity {
     }
 }
 
-impl NBTStorage for BreezeEntity {}
 
 impl Mob for BreezeEntity {
     fn get_mob_entity(&self) -> &MobEntity {

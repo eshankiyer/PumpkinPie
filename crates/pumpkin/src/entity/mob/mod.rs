@@ -28,10 +28,10 @@ use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::enchantment::Enchantment;
 use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
+use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::item::Item;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
@@ -411,10 +411,9 @@ impl MobEntity {
             let world = entity.world.load_full();
             Arc::ptr_eq(&world, &target_entity.world.load_full())
                 && world
-                    .raycast_collision(from, to, async |block_pos, world| {
+                    .raycast_collision(from, to, |block_pos, world| {
                         !world.get_block_state(block_pos).collision_shapes.is_empty()
                     })
-                    .await
                     .is_none()
         };
 
@@ -1196,8 +1195,7 @@ impl MobEntity {
         let brightness = world
             .level
             .light_engine
-            .get_sky_light_level(&world.level, &eye_block_pos)
-            as f32
+            .get_sky_light_level(&world.level, &eye_block_pos) as f32
             / 15.0;
         if brightness <= 0.5 {
             return false;
@@ -1794,13 +1792,13 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     /// Vanilla `Mob.enchantSpawnedWeapon` override seam (`Mob.java:1065-1067`). The generic
-    /// spawn-equipment pass (`equipment::equip_mob_on_spawn`) already runs the base roll
-    /// (`0.25F * special multiplier` via the `MOB_SPAWN_EQUIPMENT` provider); this hook is then
-    /// invoked with the freshly rolled main-hand stack so subclasses can chain their own
+    /// spawn-equipment pass (`equipment::equip_mob_on_spawn`) and `enchant_spawned_weapon`
+    /// each run the base roll (`0.25F * special multiplier` via the `MOB_SPAWN_EQUIPMENT`
+    /// provider) before invoking this hook with the main-hand stack. Subclasses chain their own
     /// provider roll exactly as vanilla's virtual dispatch does. Default no-op; Pillager
     /// overrides this with its 1-in-300 `PILLAGER_SPAWN_CROSSBOW` Piercing roll
     /// (`Pillager.java:172-181`).
-    fn enchant_spawned_weapon(&self, _main_hand: &mut ItemStack) {}
+    fn apply_spawned_weapon_enchantment_bonus(&self, _main_hand: &mut ItemStack) {}
 
     /// Vanilla `LivingEntity.blockedByItem`: called on the attacker (`self`) when `defender`
     /// successfully shield-blocks one of `self`'s attacks. Default no-op; Ravager overrides this
@@ -2147,6 +2145,15 @@ pub trait Mob: EntityBase + Send + Sync {
             MobEntity::MAX_ENCHANTED_WEAPON_CHANCE,
             difficulty,
         );
+        let mut equipment = self
+            .get_mob_entity()
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(stack) = equipment.equipment.get_mut(&EquipmentSlot::MAIN_HAND) {
+            self.apply_spawned_weapon_enchantment_bonus(stack);
+        }
     }
 
     fn enchant_spawned_armor(
@@ -2209,11 +2216,8 @@ pub trait Mob: EntityBase + Send + Sync {
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
-            self.get_mob_entity().mob_interact_with_leash(
-                player,
-                item_stack,
-                self.can_be_leashed(),
-            )
+            self.get_mob_entity()
+                .mob_interact_with_leash(player, item_stack, self.can_be_leashed())
         })
     }
 
@@ -2276,6 +2280,8 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Defaults to `true`; species that are never leashable (e.g. Turtle) override this.
     fn can_be_leashed(&self) -> bool {
         true
+    }
+
     /// Upstream's synchronous mob interaction entry point.
     fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         self.get_mob_entity().mob_interact(player, item_stack)
@@ -3142,7 +3148,12 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         }
         let amount = self.modify_incoming_damage(amount, damage_type);
         let damaged = self.get_mob_entity().living_entity.damage_with_context(
-            caller, amount, damage_type, position, source, cause,
+            caller,
+            amount,
+            damage_type,
+            position,
+            source,
+            cause,
         );
         if damaged {
             // `Animal.actuallyHurt` (`Animal.java:87-90`) clears love mode after accepted damage.
@@ -3170,10 +3181,14 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             let amount = self.modify_incoming_damage(amount, damage_type);
             let health = self.get_mob_entity().living_entity.health.load();
             let (amount, rescue_lethal) = self.mob_pre_apply_damage(health, amount).await;
-            let damaged = self
-                .get_mob_entity()
-                .living_entity
-                .damage_with_context(caller, amount, damage_type, position, source, cause);
+            let damaged = self.get_mob_entity().living_entity.damage_with_context(
+                caller,
+                amount,
+                damage_type,
+                position,
+                source,
+                cause,
+            );
             if damaged {
                 // `Animal.actuallyHurt` (`Animal.java:87-90`) clears love mode after damage is
                 // accepted. Only animals currently use `love_ticks`, so keeping this in the
@@ -3328,7 +3343,6 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             tamable.read_tamable_nbt(nbt);
         }
         self.mob_read_nbt(nbt);
-    }
     }
 
     fn get_gravity(&self) -> f64 {

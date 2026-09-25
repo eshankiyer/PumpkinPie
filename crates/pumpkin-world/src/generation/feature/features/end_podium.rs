@@ -11,6 +11,43 @@ pub struct EndPodiumFeature {
     pub active: bool,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generation::proto_chunk::test_cache::FlatWorld;
+
+    #[test]
+    fn inactive_podium_keeps_origin_and_spans_chunk_boundaries() {
+        let mut world = FlatWorld::default();
+        let origin = BlockPos::new(15, 40, 15);
+        let interior = Vector3::new(16, 40, 15);
+        world.set_block_state(&interior, Block::STONE.default_state);
+        assert!(EndPodiumFeature::new(false).generate(&mut world, origin));
+        for (pos, block) in [
+            (Vector3::new(15, 43, 15), &Block::BEDROCK),
+            (Vector3::new(18, 40, 15), &Block::BEDROCK),
+            (Vector3::new(18, 39, 15), &Block::END_STONE),
+            (interior, &Block::AIR),
+        ] {
+            assert_eq!(world.get_block_state(&pos), block.default_state.id);
+        }
+    }
+
+    #[test]
+    fn active_podium_places_portal_inside_rim() {
+        let mut world = FlatWorld::default();
+        assert!(EndPodiumFeature::new(true).generate(&mut world, BlockPos::new(0, 64, 0)));
+        assert_eq!(
+            world.get_block_state(&Vector3::new(1, 64, 0)),
+            Block::END_PORTAL.default_state.id,
+        );
+        assert_eq!(
+            world.get_block_state(&Vector3::new(0, 64, 0)),
+            Block::BEDROCK.default_state.id,
+        );
+    }
+}
+
 impl EndPodiumFeature {
     pub const PODIUM_RADIUS: i32 = 4;
     pub const PODIUM_PILLAR_HEIGHT: i32 = 4;
@@ -33,36 +70,13 @@ impl EndPodiumFeature {
     }
 
     pub fn generate<T: GenerationCache>(&self, chunk: &mut T, origin: BlockPos) -> bool {
-        let chunk_x = chunk.get_center_chunk().x;
-        let chunk_z = chunk.get_center_chunk().z;
-        let min_x = chunk_x * 16;
-        let max_x = min_x + 15;
-        let min_z = chunk_z * 16;
-        let max_z = min_z + 15;
-
         let ox = origin.0.x;
-        let mut oy = origin.0.y;
+        let oy = origin.0.y;
         let oz = origin.0.z;
-
-        // Podium spans [ox - 4, ox + 4] and [oz - 4, oz + 4]
-        if ox + 4 < min_x || ox - 4 > max_x || oz + 4 < min_z || oz - 4 > max_z {
-            return false;
-        }
-
-        if oy < 50 {
-            oy = 65;
-        }
-
-        let in_chunk =
-            |x: i32, z: i32| -> bool { x >= min_x && x <= max_x && z >= min_z && z <= max_z };
 
         for y in (oy - 1)..=(oy + 32) {
             for x in (ox - 4)..=(ox + 4) {
                 for z in (oz - 4)..=(oz + 4) {
-                    if !in_chunk(x, z) {
-                        continue;
-                    }
-
                     let dx = (x - ox) as f64;
                     let dy = (y - oy) as f64;
                     let dz = (z - oz) as f64;
@@ -76,7 +90,7 @@ impl EndPodiumFeature {
                         if y < oy {
                             if closer_than_2_5 {
                                 chunk.set_block_state(&target, Block::BEDROCK.default_state);
-                            } else if self.active {
+                            } else {
                                 chunk.set_block_state(&target, Block::END_STONE.default_state);
                             }
                         } else if y > oy {
@@ -93,11 +107,9 @@ impl EndPodiumFeature {
             }
         }
 
-        if in_chunk(ox, oz) {
-            for y in 0..4 {
-                let target = Vector3::new(ox, oy + y, oz);
-                chunk.set_block_state(&target, Block::BEDROCK.default_state);
-            }
+        for y in 0..4 {
+            let target = Vector3::new(ox, oy + y, oz);
+            chunk.set_block_state(&target, Block::BEDROCK.default_state);
         }
 
         let center_of_pillar_y = oy + 2;
@@ -109,12 +121,10 @@ impl EndPodiumFeature {
         ] {
             let tx = ox + dx;
             let tz = oz + dz;
-            if in_chunk(tx, tz) {
-                let props = WallTorchLikeProperties { facing };
-                let state = props.to_state_id(&Block::WALL_TORCH);
-                let target = Vector3::new(tx, center_of_pillar_y, tz);
-                chunk.set_block_state(&target, pumpkin_data::BlockState::from_id(state));
-            }
+            let props = WallTorchLikeProperties { facing };
+            let state = props.to_state_id(&Block::WALL_TORCH);
+            let target = Vector3::new(tx, center_of_pillar_y, tz);
+            chunk.set_block_state(&target, pumpkin_data::BlockState::from_id(state));
         }
 
         true

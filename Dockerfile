@@ -4,31 +4,31 @@ RUN apk add --no-cache musl-dev \
     # Required for git-version
     git
 
-WORKDIR /pumpkin
-COPY . /pumpkin
+WORKDIR /pumpkinpie
+COPY . /pumpkinpie
 
 RUN rustup show active-toolchain || rustup toolchain install
 RUN rustup component add rustfmt
 
 # build release
-RUN --mount=type=cache,sharing=private,target=/pumpkin/target \
+RUN --mount=type=cache,sharing=private,target=/pumpkinpie/target \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-    cargo build --release -p pumpkin && cp target/release/pumpkin ./pumpkin.release
+    cargo build --release -p pumpkinpie && cp target/release/pumpkinpie ./pumpkinpie.release
 
 FROM alpine:3.24
 
-COPY --from=builder /pumpkin/pumpkin.release /bin/pumpkin
+COPY --from=builder /pumpkinpie/pumpkinpie.release /bin/pumpkinpie
 
-# set workdir to /pumpkin, this is required to influence the PWD environment variable
-# it allows for bind mounting the server files without overwriting the pumpkin
+# Keep server data separate from the PumpkinPie executable.
+# This allows bind mounting the server files without overwriting the PumpkinPie
 # executable (without requiring an `docker cp`-ing the binary to the host folder)
-WORKDIR /pumpkin
+WORKDIR /pumpkinpie
 
 RUN apk add --no-cache libgcc && chown 2613:2613 .
 
 ENV RUST_BACKTRACE=1
 EXPOSE 25565
 USER 2613:2613
-ENTRYPOINT [ "/bin/pumpkin" ]
+ENTRYPOINT [ "/bin/pumpkinpie" ]
 HEALTHCHECK CMD nc -z 127.0.0.1 25565 || exit 1

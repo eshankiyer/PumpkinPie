@@ -48,6 +48,7 @@ impl ItemBehaviour for ArmorStandItem {
         _cursor_pos: Vector3<f32>,
         _block: &Block,
         _server: &Server,
+    ) {
             // `ArmorStandItem.useOn` (`world/item/ArmorStandItem.java:28-31`): clicking the
             // underside of a block always fails, before any collision/entity check.
             if face == BlockDirection::Down {

@@ -4,7 +4,7 @@
 # Stages, in order:
 #   1. conformance   method-level vanilla coverage      (static, needs the 26.2 decompile)
 #   2. tracker       registry coverage                  (static, repo-only)
-#   3. fuzzer-build  cargo build -p pumpkin-fuzzer      (static)
+#   3. fuzzer-build  cargo build -p pumpkinpie-fuzzer      (static)
 #   4. bot-build     cargo build in tools/parity-bot    (static, own nightly toolchain)
 #   5. server-boot   boot a scratch server on a free port          (skipped without a binary)
 #   6. parity-bot    join that server for N seconds and record     (skipped if 5 skipped)
@@ -82,8 +82,8 @@ fi
 echo
 
 # ---------------------------------------------------------------- 3. fuzzer build
-echo "--- build pumpkin-fuzzer"
-if bash -c "source '$CARGO_ENV' && cd '$REPO' && cargo build -p pumpkin-fuzzer" \
+echo "--- build pumpkinpie-fuzzer"
+if bash -c "source '$CARGO_ENV' && cd '$REPO' && cargo build -p pumpkinpie-fuzzer" \
     >"$LOGS/fuzzer-build.log" 2>&1; then
   record fuzzer-build PASS ""
 else
@@ -105,14 +105,14 @@ echo
 
 # ---------------------------------------------------------------- 5. server boot
 SERVER_BIN=""
-for cand in "$REPO/target/release/pumpkin" "$REPO/target/debug/pumpkin"; do
+for cand in "$REPO/target/release/pumpkinpie" "$REPO/target/debug/pumpkinpie"; do
   [[ -x "$cand" ]] && { SERVER_BIN="$cand"; break; }
 done
 
 LIVE=0
 echo "--- server boot"
 if [[ -z "$SERVER_BIN" ]]; then
-  record server-boot SKIP "no target/{release,debug}/pumpkin (tree may not compile; not built here)"
+  record server-boot SKIP "no target/{release,debug}/pumpkinpie (tree may not compile; not built here)"
 elif port_open; then
   record server-boot FAIL "port $PORT already in use; set PUMPKIN_TEST_PORT"
 else
@@ -187,11 +187,11 @@ echo
 
 # ---------------------------------------------------------------- 7. fuzzer run
 echo "--- fuzzer run"
-FUZZ_BIN="$REPO/target/debug/pumpkin-fuzzer"
+FUZZ_BIN="$REPO/target/debug/pumpkinpie-fuzzer"
 if (( ! LIVE )); then
   record fuzzer-run SKIP "no live server"
 elif [[ ! -x "$FUZZ_BIN" ]]; then
-  record fuzzer-run SKIP "pumpkin-fuzzer binary not built"
+  record fuzzer-run SKIP "pumpkinpie-fuzzer binary not built"
 else
   if timeout $((FUZZ_SECONDS + 60)) "$FUZZ_BIN" --host 127.0.0.1 --port "$PORT" \
       --duration "$FUZZ_SECONDS" --concurrency 4 >"$LOGS/fuzzer.log" 2>&1; then
@@ -213,7 +213,7 @@ echo
 cleanup
 SERVER_PID=""
 # Fallback only: a server this script started that ignored SIGTERM. Never pkill -f.
-pgrep -x pumpkin >/dev/null && echo "note: a 'pumpkin' process is still running (possibly another agent's); not killed"
+pgrep -x pumpkinpie >/dev/null && echo "note: a 'pumpkinpie' process is still running (possibly another agent's); not killed"
 
 # ---------------------------------------------------------------- summary
 rc=0

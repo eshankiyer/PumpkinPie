@@ -12,7 +12,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
@@ -262,17 +262,35 @@ impl ZombifiedPiglinEntity {
     }
 }
 
-impl NBTStorage for ZombifiedPiglinEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async { self.persistent_anger.write_nbt(nbt).await })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async { self.persistent_anger.read_nbt(nbt).await })
-    }
-}
-
 impl Mob for ZombifiedPiglinEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        let game_time = self
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
+        self.persistent_anger.write_nbt_at_game_time(nbt, game_time);
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        let game_time = self
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .world_age;
+        self.persistent_anger.read_nbt_at_game_time(nbt, game_time);
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

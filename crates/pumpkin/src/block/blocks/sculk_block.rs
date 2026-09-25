@@ -23,7 +23,7 @@ use pumpkin_world::world::BlockAccessor;
 use crate::block::sculk_behaviour::{
     ChargeCursor, SculkBehaviour, SculkSpreaderConfig, SculkWorld,
 };
-use crate::block::{BlockBehaviour, BlockFuture};
+use crate::block::{BlockBehaviour};
 
 #[pumpkin_block("minecraft:sculk")]
 pub struct SculkBlock;
@@ -141,39 +141,37 @@ impl SculkBehaviour for SculkBlock {
         random: &'a mut RandomGenerator,
         spreader: &'a SculkSpreaderConfig,
         _spread_veins: bool,
-    ) -> BlockFuture<'a, i32> {
-        Box::pin(async move {
-            let charge = cursor.charge();
-            if charge == 0 || random.next_bounded_i32(spreader.charge_decay_rate()) != 0 {
-                return charge;
-            }
+    ) -> i32 {
+        let charge = cursor.charge();
+        if charge == 0 || random.next_bounded_i32(spreader.charge_decay_rate()) != 0 {
+            return charge;
+        }
 
-            let charge_pos = cursor.pos();
-            let is_close_to_catalyst =
-                closer_than(charge_pos, origin_pos, spreader.no_growth_radius());
+        let charge_pos = cursor.pos();
+        let is_close_to_catalyst =
+            closer_than(charge_pos, origin_pos, spreader.no_growth_radius());
 
-            if !is_close_to_catalyst && can_place_growth(world.accessor(), charge_pos) {
-                let xp_per_growth_spawn = spreader.growth_spawn_cost();
-                if random.next_bounded_i32(xp_per_growth_spawn) < charge {
-                    let growth_pos = charge_pos.offset(BlockDirection::Up.to_offset());
-                    let (growth_state_id, place_sound) = roll_growth_state(
-                        world.accessor(),
-                        growth_pos,
-                        random,
-                        spreader.is_world_generation(),
-                    );
-                    world.set_block(growth_pos, growth_state_id).await;
-                    world.play_block_sound(charge_pos, place_sound);
-                }
-                (charge - xp_per_growth_spawn).max(0)
-            } else if random.next_bounded_i32(spreader.additional_decay_rate()) != 0 {
-                charge
-            } else if is_close_to_catalyst {
-                charge - 1
-            } else {
-                charge - get_decay_penalty(spreader, charge_pos, origin_pos, charge)
+        if !is_close_to_catalyst && can_place_growth(world.accessor(), charge_pos) {
+            let xp_per_growth_spawn = spreader.growth_spawn_cost();
+            if random.next_bounded_i32(xp_per_growth_spawn) < charge {
+                let growth_pos = charge_pos.offset(BlockDirection::Up.to_offset());
+                let (growth_state_id, place_sound) = roll_growth_state(
+                    world.accessor(),
+                    growth_pos,
+                    random,
+                    spreader.is_world_generation(),
+                );
+                world.set_block(growth_pos, growth_state_id);
+                world.play_block_sound(charge_pos, place_sound);
             }
-        })
+            (charge - xp_per_growth_spawn).max(0)
+        } else if random.next_bounded_i32(spreader.additional_decay_rate()) != 0 {
+            charge
+        } else if is_close_to_catalyst {
+            charge - 1
+        } else {
+            charge - get_decay_penalty(spreader, charge_pos, origin_pos, charge)
+        }
     }
 }
 
@@ -449,16 +447,14 @@ mod tests {
             self
         }
 
-        fn place(&self, _spread_pos: SpreadPos) -> BlockFuture<'_, bool> {
-            Box::pin(async { false })
+        fn place(&self, _spread_pos: SpreadPos) -> bool {
+            false
         }
     }
 
     impl SculkWorld for RecordingSculkWorld {
-        fn set_block(&self, pos: BlockPos, state_id: BlockStateId) -> BlockFuture<'_, ()> {
-            Box::pin(async move {
-                self.states.lock().unwrap().insert(pos, state_id.to_state());
-            })
+        fn set_block(&self, pos: BlockPos, state_id: BlockStateId) {
+            self.states.lock().unwrap().insert(pos, state_id.to_state());
         }
 
         fn play_block_sound(&self, pos: BlockPos, sound: Sound) {
@@ -468,8 +464,8 @@ mod tests {
         fn push_entities_up(&self, _pos: BlockPos) {}
     }
 
-    #[tokio::test]
-    async fn attempt_use_charge_holds_charge_when_charge_is_zero() {
+    #[test]
+    fn attempt_use_charge_holds_charge_when_charge_is_zero() {
         let behaviour = SculkBlock;
         let cursor = ChargeCursor::new(BlockPos::new(0, 0, 0), 0, 1);
         let world = RecordingSculkWorld::new(Block::AIR.default_state);
@@ -484,13 +480,12 @@ mod tests {
                 &mut random,
                 &spreader,
                 true,
-            )
-            .await;
+            );
         assert_eq!(new_charge, 0);
     }
 
-    #[tokio::test]
-    async fn attempt_use_charge_never_grows_too_close_to_the_catalyst() {
+    #[test]
+    fn attempt_use_charge_never_grows_too_close_to_the_catalyst() {
         let behaviour = SculkBlock;
         let origin = BlockPos::new(0, 0, 0);
         // Well within `no_growth_radius` (4): growth is impossible regardless of RNG,
@@ -502,15 +497,14 @@ mod tests {
         for seed in 0..32u64 {
             let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
             let new_charge = behaviour
-                .attempt_use_charge(&cursor, &world, origin, &mut random, &spreader, true)
-                .await;
+                .attempt_use_charge(&cursor, &world, origin, &mut random, &spreader, true);
             assert!(new_charge <= 1000);
             assert!(world.states.lock().unwrap().is_empty());
         }
     }
 
-    #[tokio::test]
-    async fn attempt_use_charge_places_growth_and_spends_full_cost_when_growth_rolls_succeed() {
+    #[test]
+    fn attempt_use_charge_places_growth_and_spends_full_cost_when_growth_rolls_succeed() {
         let behaviour = SculkBlock;
         let origin = BlockPos::new(0, 0, 0);
         // Far from the catalyst, high charge: `nextInt(growthSpawnCost) < charge` is
@@ -527,8 +521,7 @@ mod tests {
         for seed in 0..64u64 {
             let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
             let new_charge = behaviour
-                .attempt_use_charge(&cursor, &world, origin, &mut random, &spreader, true)
-                .await;
+                .attempt_use_charge(&cursor, &world, origin, &mut random, &spreader, true);
             let growth_pos = charge_pos.offset(BlockDirection::Up.to_offset());
             let placed = world.state_at(growth_pos);
             if Block::from_state_id(placed.id) == &Block::SCULK_SENSOR

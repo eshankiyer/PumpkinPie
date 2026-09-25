@@ -1536,7 +1536,7 @@ impl GenerationSchedule {
                 // Wait for an in-flight worker to finish instead of busy-spinning.
                 match self.recv_chunk.recv_timeout(Duration::from_millis(5)) {
                     Ok((pos, data)) => {
-                        self.receive_chunk(pos, data);
+                        self.receive_chunk(pos, data, dim_sections, dim_sky_light);
                         if self.resort_work(self.send_level.get()) {
                             self.garbage_collect_dependencies();
                         }

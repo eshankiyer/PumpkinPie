@@ -915,6 +915,8 @@ mod tests {
 
         let dest = result_with_axis(HorizontalAxis::X);
         assert_eq!(dest.calculate_teleport_yaw(10.0, None), 10.0);
+    }
+
     use pumpkin_util::math::boundingbox::EntityDimensions;
     #[test]
     fn portal_teleport_position_x_axis() {

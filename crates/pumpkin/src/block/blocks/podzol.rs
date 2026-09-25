@@ -7,7 +7,7 @@ use pumpkin_data::{
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 
-use crate::block::{BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, OnPlaceArgs};
+use crate::block::{BlockBehaviour, GetStateForNeighborUpdateArgs, OnPlaceArgs};
 use crate::world::World;
 
 /// `SnowyBlock` (`net/minecraft/world/level/block/SnowyBlock.java:17`), which podzol is registered
@@ -21,30 +21,26 @@ pub struct PodzolBlock;
 
 impl BlockBehaviour for PodzolBlock {
     /// `SnowyBlock#getStateForPlacement` (SnowyBlock.java:47-51).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = GrassBlockLikeProperties::default(args.block);
-            props.snowy = is_snowy_setting(args.world, args.position);
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = GrassBlockLikeProperties::default(args.block);
+        props.snowy = is_snowy_setting(args.world, args.position);
+        props.to_state_id(args.block)
     }
 
     /// `SnowyBlock#updateShape` (SnowyBlock.java:31-45): only the neighbour above matters, and the
     /// value it produces is a function of that block alone, so recomputing it unconditionally from
     /// the block above gives the same state for every direction.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = GrassBlockLikeProperties::from_state_id(args.state_id, &Block::PODZOL);
-            let should_be_snowy = is_snowy_setting(args.world, args.position);
-            if props.snowy == should_be_snowy {
-                return args.state_id;
-            }
-            props.snowy = should_be_snowy;
-            props.to_state_id(&Block::PODZOL)
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let mut props = GrassBlockLikeProperties::from_state_id(args.state_id, &Block::PODZOL);
+        let should_be_snowy = is_snowy_setting(args.world, args.position);
+        if props.snowy == should_be_snowy {
+            return args.state_id;
+        }
+        props.snowy = should_be_snowy;
+        props.to_state_id(&Block::PODZOL)
     }
 }
 

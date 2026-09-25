@@ -7,7 +7,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
-use crate::block::{BlockBehaviour, BlockFuture, BonemealArgs};
+use crate::block::{BlockBehaviour, BonemealArgs};
 use crate::world::World;
 
 /// `NetherrackBlock` (`net/minecraft/world/level/block/NetherrackBlock.java:13`).
@@ -91,34 +91,30 @@ impl BlockBehaviour for NetherrackBlock {
         true
     }
 
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let found = scan_nylium_neighbours(args.world, args.position);
-            if !found.any() {
-                return;
-            }
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let found = scan_nylium_neighbours(args.world, args.position);
+        if !found.any() {
+            return;
+        }
 
-            // NetherrackBlock.java:65-71: with both kinds adjacent vanilla picks one at random.
-            let target = if found.crimson && found.warped {
-                if rand::rng().random::<bool>() {
-                    &Block::WARPED_NYLIUM
-                } else {
-                    &Block::CRIMSON_NYLIUM
-                }
-            } else if found.warped {
+        // NetherrackBlock.java:65-71: with both kinds adjacent vanilla picks one at random.
+        let target = if found.crimson && found.warped {
+            if rand::rng().random::<bool>() {
                 &Block::WARPED_NYLIUM
             } else {
                 &Block::CRIMSON_NYLIUM
-            };
+            }
+        } else if found.warped {
+            &Block::WARPED_NYLIUM
+        } else {
+            &Block::CRIMSON_NYLIUM
+        };
 
-            args.world
-                .set_block_state(
-                    args.position,
-                    target.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+        args.world.set_block_state(
+            args.position,
+            target.default_state.id,
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 }
 

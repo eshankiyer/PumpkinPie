@@ -2363,6 +2363,8 @@ mod tests {
                 .ok(),
             Some("badlands")
         );
+    }
+
     #[test]
     fn wit_particle_ids_match_internal_particle_ids() {
         let cases = [

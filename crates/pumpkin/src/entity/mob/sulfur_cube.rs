@@ -18,7 +18,7 @@ use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ageable::{AgeableData, AgeableMob},
     ai::control::{Control, MoveControlTrait},
     ai::goal::{Controls, Goal, GoalFuture},
@@ -352,47 +352,52 @@ fn is_food_item(item_stack: &ItemStack) -> bool {
         .has_tag(&tag::Item::MINECRAFT_SULFUR_CUBE_FOOD)
 }
 
+fn restored_fuse_metadata(nbt: &NbtCompound) -> Metadata<VarInt> {
+    Metadata::new(
+        tracked_data::sulfur_cube::MAX_FUSE,
+        VarInt(nbt.get_int("fuse").unwrap_or(-1)),
+    )
+}
+
 impl AgeableMob for SulfurCubeEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
     }
 }
 
-impl NBTStorage for SulfurCubeEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("Size", self.get_size() - 1);
-            nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
-            self.write_ageable_nbt(nbt);
-            nbt.put_int("pickup_timer", self.pickup_timer.load(Ordering::Relaxed));
-            nbt.put_bool("from_bucket", self.from_bucket.load(Ordering::Relaxed));
-            nbt.put_int("fuse", self.fuse.load(Ordering::Relaxed));
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.set_size(nbt.get_int("Size").unwrap_or(0) + 1, false);
-            self.was_on_ground.store(
-                nbt.get_bool("wasOnGround").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.read_ageable_nbt(nbt);
-            self.pickup_timer
-                .store(nbt.get_int("pickup_timer").unwrap_or(0), Ordering::Relaxed);
-            self.from_bucket.store(
-                nbt.get_bool("from_bucket").unwrap_or(false),
-                Ordering::Relaxed,
-            );
-            self.fuse
-                .store(nbt.get_int("fuse").unwrap_or(-1), Ordering::Relaxed);
-        })
-    }
-}
-
 impl Mob for SulfurCubeEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int("Size", self.get_size() - 1);
+        nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
+        self.write_ageable_nbt(nbt);
+        nbt.put_int("pickup_timer", self.pickup_timer.load(Ordering::Relaxed));
+        nbt.put_bool("from_bucket", self.from_bucket.load(Ordering::Relaxed));
+        nbt.put_int("fuse", self.fuse.load(Ordering::Relaxed));
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.set_size(nbt.get_int("Size").unwrap_or(0) + 1, false);
+        self.was_on_ground.store(
+            nbt.get_bool("wasOnGround").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        self.read_ageable_nbt(nbt);
+        self.pickup_timer
+            .store(nbt.get_int("pickup_timer").unwrap_or(0), Ordering::Relaxed);
+        self.from_bucket.store(
+            nbt.get_bool("from_bucket").unwrap_or(false),
+            Ordering::Relaxed,
+        );
+        // SulfurCube.readAdditionalSaveData restores both the running fuse and
+        // MAX_FUSE. send_meta_data records the tracker even before viewers exist.
+        let fuse_metadata = restored_fuse_metadata(nbt);
+        self.fuse.store(fuse_metadata.value.0, Ordering::Relaxed);
+        self.entity
+            .living_entity
+            .entity
+            .send_meta_data(&[fuse_metadata], None);
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity
     }
@@ -983,6 +988,22 @@ impl Goal for SulfurCubeTemptGoal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restored_max_fuse_preserves_saved_values_and_unprimed_default() {
+        let mut nbt = NbtCompound::new();
+        assert_eq!(restored_fuse_metadata(&nbt).value.0, -1);
+
+        for fuse in [-1, 0, 80] {
+            nbt.put_int("fuse", fuse);
+            let metadata = restored_fuse_metadata(&nbt);
+            assert_eq!(metadata.value.0, fuse);
+            assert_eq!(
+                metadata.index.v26_2,
+                tracked_data::sulfur_cube::MAX_FUSE.id.v26_2
+            );
+        }
+    }
 
     #[test]
     fn split_count_is_zero_only_while_primed() {

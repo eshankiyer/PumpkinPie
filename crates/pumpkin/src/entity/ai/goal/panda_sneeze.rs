@@ -24,7 +24,7 @@ impl Goal for PandaSneezeGoal {
             let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
                 return false;
             };
-            if !panda.is_baby() || !panda.can_perform_action().await {
+            if !panda.is_baby() || !panda.can_perform_action() {
                 return false;
             }
             let mut rng = rand::rng();

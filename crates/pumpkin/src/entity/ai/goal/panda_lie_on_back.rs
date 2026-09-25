@@ -47,7 +47,7 @@ impl Goal for PandaLieOnBackGoal {
             if self.cooldown >= panda.get_mob_entity().tick_count.load(Relaxed) {
                 return false;
             }
-            if !panda.is_lazy() || !panda.can_perform_action().await {
+            if !panda.is_lazy() || !panda.can_perform_action() {
                 return false;
             }
             rand::rng().random_range(0..self.get_tick_count(400)) == 1

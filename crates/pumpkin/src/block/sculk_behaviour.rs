@@ -16,7 +16,6 @@ use pumpkin_data::tag::{Tag, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::random::RandomGenerator;
 
-use crate::block::BlockFuture;
 use crate::block::blocks::abstract_multiface::FaceSet;
 use crate::block::blocks::multiface_spreader::{self, SpreadTarget};
 use crate::block::blocks::sculk_vein::{self, SculkVeinSpreaderConfig};
@@ -224,7 +223,7 @@ impl SculkSpreaderConfig {
 pub trait SculkWorld: SpreadTarget {
     /// `LevelAccessor.setBlock(pos, state, flags)` for a write that isn't a multiface
     /// spread placement (growth spawn, vein->sculk conversion, vein regrow/discharge).
-    fn set_block(&self, pos: BlockPos, state_id: BlockStateId) -> BlockFuture<'_, ()>;
+    fn set_block(&self, pos: BlockPos, state_id: BlockStateId);
 
     /// `LevelAccessor.playSound(null, pos, sound, SoundSource.BLOCKS, 1.0F, 1.0F)`.
     fn play_block_sound(&self, pos: BlockPos, sound: Sound);
@@ -258,8 +257,7 @@ pub trait SculkBehaviour: Send + Sync {
         _world: &'a dyn SculkWorld,
         _pos: BlockPos,
         _random: &'a mut RandomGenerator,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async {})
+    ) {
     }
 
     /// `depositCharge`. Default `false`; unused by `SculkSpreader` itself in vanilla and
@@ -288,11 +286,9 @@ pub trait SculkBehaviour: Send + Sync {
         source_faces: FaceSet,
         source_is_vein: bool,
         _facings: Option<FaceSet>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move {
-            let config = SculkVeinSpreaderConfig::vein(source_is_vein);
-            multiface_spreader::spread_all(&config, world, source_faces, pos).await > 0
-        })
+    ) -> bool {
+        let config = SculkVeinSpreaderConfig::vein(source_is_vein);
+        multiface_spreader::spread_all(&config, world, source_faces, pos) > 0
     }
 
     /// `canChangeBlockStateOnSpread`. Default `true`; `SculkBlock` overrides to `false`.
@@ -314,7 +310,7 @@ pub trait SculkBehaviour: Send + Sync {
         random: &'a mut RandomGenerator,
         spreader: &'a SculkSpreaderConfig,
         spread_veins: bool,
-    ) -> BlockFuture<'a, i32>;
+    ) -> i32;
 }
 
 /// `SculkBehaviour.DEFAULT`.
@@ -338,32 +334,30 @@ impl SculkBehaviour for DefaultSculkBehaviour {
         source_faces: FaceSet,
         source_is_vein: bool,
         facings: Option<FaceSet>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move {
-            match facings {
-                None => {
-                    let config = SculkVeinSpreaderConfig::same_space(source_is_vein);
-                    multiface_spreader::spread_all(&config, world, source_faces, pos).await > 0
-                }
-                Some(regrow_faces) if !regrow_faces.is_empty() => {
-                    // `!state.isAir() && !state.getFluidState().is(Fluids.WATER) -> false`.
-                    let state = world.accessor().get_block_state(&pos);
-                    let is_water = world
-                        .accessor()
-                        .get_fluid(&pos)
-                        .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER);
-                    if !state.is_air() && !is_water {
-                        false
-                    } else {
-                        sculk_vein::regrow(world, pos, regrow_faces).await
-                    }
-                }
-                Some(_) => {
-                    let config = SculkVeinSpreaderConfig::vein(source_is_vein);
-                    multiface_spreader::spread_all(&config, world, source_faces, pos).await > 0
+    ) -> bool {
+        match facings {
+            None => {
+                let config = SculkVeinSpreaderConfig::same_space(source_is_vein);
+                multiface_spreader::spread_all(&config, world, source_faces, pos) > 0
+            }
+            Some(regrow_faces) if !regrow_faces.is_empty() => {
+                // `!state.isAir() && !state.getFluidState().is(Fluids.WATER) -> false`.
+                let state = world.accessor().get_block_state(&pos);
+                let is_water = world
+                    .accessor()
+                    .get_fluid(&pos)
+                    .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER);
+                if !state.is_air() && !is_water {
+                    false
+                } else {
+                    sculk_vein::regrow(world, pos, regrow_faces)
                 }
             }
-        })
+            Some(_) => {
+                let config = SculkVeinSpreaderConfig::vein(source_is_vein);
+                multiface_spreader::spread_all(&config, world, source_faces, pos) > 0
+            }
+        }
     }
 
     fn update_decay_delay(&self, age: i32) -> i32 {
@@ -378,14 +372,12 @@ impl SculkBehaviour for DefaultSculkBehaviour {
         _random: &'a mut RandomGenerator,
         _spreader: &'a SculkSpreaderConfig,
         _spread_veins: bool,
-    ) -> BlockFuture<'a, i32> {
-        Box::pin(async move {
-            if cursor.decay_delay() > 0 {
-                cursor.charge()
-            } else {
-                0
-            }
-        })
+    ) -> i32 {
+        if cursor.decay_delay() > 0 {
+            cursor.charge()
+        } else {
+            0
+        }
     }
 }
 
@@ -429,12 +421,12 @@ mod tests {
         fn place(
             &self,
             _spread_pos: crate::block::blocks::multiface_spreader::SpreadPos,
-        ) -> BlockFuture<'_, bool> {
+        ) -> bool {
             panic!("unexpected call in DEFAULT.attemptUseCharge test")
         }
     }
     impl SculkWorld for NoWrites {
-        fn set_block(&self, _pos: BlockPos, _state_id: BlockStateId) -> BlockFuture<'_, ()> {
+        fn set_block(&self, _pos: BlockPos, _state_id: BlockStateId) {
             panic!("unexpected call in DEFAULT.attemptUseCharge test")
         }
         fn play_block_sound(&self, _pos: BlockPos, _sound: Sound) {
@@ -445,8 +437,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn default_behaviour_attempt_use_charge_holds_charge_while_decay_delay_positive() {
+    #[test]
+    fn default_behaviour_attempt_use_charge_holds_charge_while_decay_delay_positive() {
         let behaviour = DefaultSculkBehaviour;
         let cursor = ChargeCursor::new(BlockPos::new(0, 0, 0), 42, 1);
         let mut random = pumpkin_util::random::RandomGenerator::Xoroshiro(
@@ -462,13 +454,12 @@ mod tests {
                 &mut random,
                 &spreader,
                 false,
-            )
-            .await;
+            );
         assert_eq!(new_charge, 42);
     }
 
-    #[tokio::test]
-    async fn default_behaviour_attempt_use_charge_discharges_once_decay_delay_is_used_up() {
+    #[test]
+    fn default_behaviour_attempt_use_charge_discharges_once_decay_delay_is_used_up() {
         let behaviour = DefaultSculkBehaviour;
         let cursor = ChargeCursor::new(BlockPos::new(0, 0, 0), 42, 0);
         let mut random = pumpkin_util::random::RandomGenerator::Xoroshiro(
@@ -484,8 +475,7 @@ mod tests {
                 &mut random,
                 &spreader,
                 false,
-            )
-            .await;
+            );
         assert_eq!(new_charge, 0);
     }
 

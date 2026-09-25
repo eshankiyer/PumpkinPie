@@ -443,9 +443,7 @@ impl EntityBase for FallingEntity {
                 Ordering::Relaxed,
             );
     }
-}
 
-impl EntityBase for FallingEntity {
     fn is_pickable(&self) -> bool {
         self.entity.is_alive()
     }
@@ -550,12 +548,8 @@ impl EntityBase for FallingEntity {
     /// false`), and this correctly returns false unconditionally. The crushing-a-living-entity
     /// behavior on landing is a *separate* vanilla method, `causeFallDamage`, driven by the
     /// falling block's own fall-distance tracking, not by this take-damage entry point.
-    /// Pumpkin's fall-distance/fall-damage dispatch (`LivingEntity::handle_fall_damage`) is
-    /// currently `LivingEntity`-only with no generic per-`Entity` hook this non-living entity
-    /// could plug into, so the anvil/`hurt_entities` crush-on-landing behavior (including the
-    /// anvil damage-stage roll) is not implemented. `hurt_entities`/`fall_damage_per_distance`/
-    /// `fall_damage_max` are still tracked and persisted so a follow-up has the state to build
-    /// on; this is a known, reported gap, not something this override should attempt to guess.
+    /// `tick` dispatches the crushing damage and anvil damage-stage progression through
+    /// `crush_and_progress` when the falling block lands.
     fn damage(&self, _caller: &dyn EntityBase, _amount: f32, _damage_type: DamageType) -> bool {
         false
     }

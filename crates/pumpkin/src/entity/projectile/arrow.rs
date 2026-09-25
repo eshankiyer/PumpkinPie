@@ -637,7 +637,7 @@ impl EntityBase for ArrowEntity {
                 // Calculate damage
                 let velocity = entity.velocity.load();
                 let power = velocity.length();
-                let mut damage = (power * self.base_damage.load()).ceil() as i32;
+                let mut damage = calculate_arrow_damage(power, self.base_damage.load());
 
                 // Apply critical hit bonus
                 if self.is_critical.load(Ordering::Relaxed) {
@@ -842,6 +842,10 @@ const fn piercing_hit_limit(pierce: u8) -> usize {
     usize::from(pierce) + 1
 }
 
+const fn calculate_arrow_damage(power: f64, base_damage: f64) -> i32 {
+    (power * base_damage).ceil() as i32
+}
+
 /// Ray intersection algorithm for AABBs
 fn calculate_ray_intersection(
     start: &Vector3<f64>,
@@ -896,7 +900,7 @@ fn get_hit_face(hit_pos: Vector3<f64>, block_pos: BlockPos) -> pumpkin_data::Blo
 
 #[cfg(test)]
 mod tests {
-    use super::ArrowEntity;
+    use super::{ArrowEntity, calculate_arrow_damage, piercing_hit_limit};
     use pumpkin_data::data_component::DataComponent;
     use pumpkin_data::data_component_impl::{
         DataComponentImpl, PotionContentsImpl, PotionDurationScaleImpl,
@@ -983,5 +987,26 @@ mod tests {
     fn post_hurt_effects_require_successful_arrow_damage() {
         assert!(!ArrowEntity::should_apply_post_hurt_effects(false));
         assert!(ArrowEntity::should_apply_post_hurt_effects(true));
+    }
+
+    #[test]
+    fn arrow_damage_uses_configured_base_damage() {
+        assert_eq!(calculate_arrow_damage(1.5, 2.0), 3);
+        assert_eq!(calculate_arrow_damage(1.5, 4.0), 6);
+    }
+
+    #[test]
+    fn piercing_hits_allow_one_more_target_than_the_level() {
+        assert_eq!(piercing_hit_limit(1), 2);
+        assert_eq!(piercing_hit_limit(4), 5);
+    }
+
+    #[test]
+    fn arrow_effect_duration_scale_floors_and_clamps_to_one_tick() {
+        assert_eq!(ArrowEntity::scale_arrow_effect_duration(900, 0.125), 112);
+        assert_eq!(ArrowEntity::scale_arrow_effect_duration(160, 0.125), 20);
+        assert_eq!(ArrowEntity::scale_arrow_effect_duration(1, 0.125), 1);
+        assert_eq!(ArrowEntity::scale_arrow_effect_duration(-1, 0.125), -1);
+        assert_eq!(ArrowEntity::scale_arrow_effect_duration(0, 0.125), 0);
     }
 }

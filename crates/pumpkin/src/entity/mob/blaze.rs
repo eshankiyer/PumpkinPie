@@ -9,7 +9,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
@@ -135,7 +135,6 @@ impl BlazeEntity {
     }
 }
 
-impl NBTStorage for BlazeEntity {}
 
 impl Mob for BlazeEntity {
     fn get_mob_entity(&self) -> &MobEntity {

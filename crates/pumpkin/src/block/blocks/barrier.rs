@@ -1,5 +1,4 @@
 use crate::block::{BlockBehaviour, GetStateForNeighborUpdateArgs, OnPlaceArgs};
-use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{
     BlockProperties, MangroveRootsLikeProperties as BarrierLikeProperties,
 };

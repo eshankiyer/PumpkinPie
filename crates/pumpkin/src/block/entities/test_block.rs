@@ -157,13 +157,11 @@ impl TestBlockBlockEntity {
         }
         let mut props = TestBlockLikeProperties::from_state_id(state.id, block);
         props.mode = mode;
-        world
-            .set_block_state(
-                &self.position,
-                props.to_state_id(block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        world.set_block_state(
+            &self.position,
+            props.to_state_id(block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
     }
 
     /// `reset`: clears the transient trigger flag and, in START mode, drops the emitted
@@ -172,7 +170,7 @@ impl TestBlockBlockEntity {
         self.triggered.store(false, Ordering::Relaxed);
         if self.get_mode().await == TestBlockMode::Start {
             self.set_powered(false);
-            world.update_neighbors(&self.position, None).await;
+            world.update_neighbors(&self.position, None);
         }
     }
 
@@ -182,7 +180,7 @@ impl TestBlockBlockEntity {
         let mode = self.get_mode().await;
         if mode == TestBlockMode::Start {
             self.set_powered(true);
-            world.update_neighbors(&self.position, None).await;
+            world.update_neighbors(&self.position, None);
             // getBlockTicks().willTickThisTick(pos, block): reset on this same tick.
             world.schedule_block_tick(&Block::TEST_BLOCK, self.position, 0, TickPriority::Normal);
             self.log().await;

@@ -719,7 +719,6 @@ impl BlockBehaviour for SignBlock {
                 }
             }
             result
-        }
     }
 }
 

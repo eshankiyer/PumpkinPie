@@ -1,16 +1,16 @@
 [package]
-name = "pumpkin"
+name = "pumpkinpie"
 version.workspace = true
 description = "Empowering everyone to host fast and efficient Minecraft servers."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-default-run = "pumpkin"
+default-run = "pumpkinpie"
 
 [package.metadata.tauri-winres]
 # FileDescription is handled as the Program name by Windows!
 FileDescription = "PumpkinPie"
-OriginalFilename = "pumpkin.exe"
+OriginalFilename = "pumpkinpie.exe"
 LegalCopyright = "Copyright © 2026 Aleksander Medvedev"
 
 # Required to expose pumpkin plugin API

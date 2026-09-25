@@ -1448,13 +1448,8 @@ impl Player {
         let spawn_pos = self.position() + Vector3::new(0.0, 0.7, 0.0);
         let entity = crate::entity::r#type::from_type(entity_type, spawn_pos, &world, uuid);
 
-        if let Some(living) = entity.get_living_entity() {
-            living.read_nbt_non_mut(&tag).await;
-        } else {
-            entity.get_entity().read_nbt_non_mut(&tag).await;
-        }
-        entity.read_nbt_non_mut(&tag).await;
-        entity.init_data_tracker().await;
+        EntityBase::read_nbt_non_mut(entity.as_ref(), &tag);
+        entity.init_data_tracker();
 
         if let Some(parrot) = entity
             .cast_any()
@@ -1918,7 +1913,7 @@ impl Player {
                 SoundCategory::Players,
                 &self.living_entity.entity.pos.load(),
             );
-            self.living_entity.post_piercing_attack(self).await;
+            self.living_entity.post_piercing_attack(self);
             return;
         }
 
@@ -2020,8 +2015,7 @@ impl Player {
                 self.living_entity.entity.entity_uuid,
                 &victim,
                 fall_distance,
-            )
-            .await;
+            );
 
             let wind_burst_level = item_stack.get_enchantment_level(&Enchantment::WIND_BURST);
             if wind_burst_level > 0 {
@@ -2031,8 +2025,7 @@ impl Player {
                     combat::wind_burst_knockback_multiplier(wind_burst_level as u32);
                 let attacker_pos = self.living_entity.entity.pos.load();
                 world
-                    .explode_knockback_only(attacker_pos, 3.5, knockback_multiplier)
-                    .await;
+                    .explode_knockback_only(attacker_pos, 3.5, knockback_multiplier);
                 world.play_sound(
                     Sound::EntityWindChargeWindBurst,
                     SoundCategory::Players,
@@ -2134,7 +2127,7 @@ impl Player {
         //    as a known limitation if refactoring is deemed too invasive.
         self.damage_held_item(Self::combat_weapon_durability_cost(&item_stack));
 
-        self.living_entity.post_piercing_attack(self).await;
+        self.living_entity.post_piercing_attack(self);
 
         // Vanilla `Player#attack` ends the successful-hit branch with
         // `causeFoodExhaustion(0.1F)`. Only landed hits exhaust; the miss/no-damage
@@ -2320,7 +2313,7 @@ impl Player {
     }
 
     /// Matches DedicatedServer.isUnderSpawnProtection for the overworld.
-    pub async fn is_under_spawn_protection(
+    pub fn is_under_spawn_protection(
         &self,
         server: &Server,
         world: &World,
@@ -6678,7 +6671,7 @@ impl Player {
             && self.can_interact_with_block_at(&pos, 4.0)
     }
 
-    pub async fn on_set_beacon(self: &Arc<Self>, packet: SSetBeacon) {
+    pub fn on_set_beacon(self: &Arc<Self>, packet: &SSetBeacon) -> bool {
         self.update_last_action_time();
 
         // `ContainerLevelAccess.NULL.evaluate` -> `Optional.empty()` -> `stillValid`'s
@@ -6687,7 +6680,7 @@ impl Player {
         if let Some(pos) = self.open_container_pos.load()
             && !self.beacon_still_valid(pos)
         {
-            return;
+            return true;
         }
 
         let screen_handler_arc = self
@@ -6703,7 +6696,7 @@ impl Player {
             .as_any()
             .downcast_ref::<pumpkin_inventory::beacon_screen_handler::BeaconScreenHandler>(
         ) else {
-            return;
+            return true;
         };
 
         let Some(beacon) = beacon_handler
@@ -6711,25 +6704,22 @@ impl Player {
             .as_any()
             .downcast_ref::<crate::block::entities::beacon::BeaconBlockEntity>()
         else {
-            return;
+            return true;
         };
 
-        // ServerGamePacketListenerImpl.java:786-789 discards the effect change on a
-        // failed `updateEffects` validation; this codebase does not disconnect on invalid
-        // input, so just refuse the mutation and log it.
-        if !beacon
-            .update_effects(
-                &self.world(),
-                packet.primary_effect.map(|id| id.0),
-                packet.secondary_effect.map(|id| id.0),
-            )
-            .await
-        {
-            warn!(
-                "Player {} sent invalid beacon effects",
-                self.gameprofile.name
-            );
+        let valid = beacon.update_effects(
+            &self.world(),
+            packet.primary_effect.map(|id| id.0),
+            packet.secondary_effect.map(|id| id.0),
+        );
+        drop(screen_handler);
+        if valid {
+            screen_handler_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .sync_state();
         }
+        valid
     }
 
     pub fn open_handled_screen(

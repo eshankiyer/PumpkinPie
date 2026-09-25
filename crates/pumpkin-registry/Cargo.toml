@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-registry"
+name = "pumpkinpie-registry"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

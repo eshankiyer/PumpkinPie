@@ -155,7 +155,7 @@ pub mod warden_spawn_tracker;
 
 use crate::entity::mob::warden_anger::{self, AngerLevel, AngerManagement};
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
@@ -665,7 +665,6 @@ impl WardenEntity {
     }
 }
 
-impl NBTStorage for WardenEntity {}
 
 impl Mob for WardenEntity {
     fn get_mob_entity(&self) -> &MobEntity {

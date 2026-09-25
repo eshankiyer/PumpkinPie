@@ -1,11 +1,10 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
-use super::{Controls, Goal, GoalFuture, ParentHandle};
+use super::{Controls, Goal, ParentHandle};
 use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 use crate::entity::passive::rabbit::RabbitEntity;
@@ -62,79 +61,70 @@ impl RaidGardenGoal {
 }
 
 impl Goal for RaidGardenGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            // Vanilla `canUse` lines 530-537: the mobGriefing check is *inside* the
-            // `nextStartTick <= 0` block, so once the goal is on cooldown it is not consulted
-            // at all. Hoisting it to the top of `can_start` would make the goal re-evaluate
-            // the game rule on every poll, a different (if benign-looking) gate.
-            if self.move_to_target_pos_goal.cooldown <= 0 {
-                let world = mob.get_entity().world.load();
-                if !world.level_info.load().game_rules.mob_griefing {
-                    return false;
-                }
-
-                self.can_raid.store(false, Ordering::Relaxed);
-                self.wants_to_raid = self.rabbit.upgrade().is_some_and(|r| r.wants_more_food());
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        // Vanilla `canUse` lines 530-537: the mobGriefing check is *inside* the
+        // `nextStartTick <= 0` block, so once the goal is on cooldown it is not consulted
+        // at all. Hoisting it to the top of `can_start` would make the goal re-evaluate
+        // the game rule on every poll, a different (if benign-looking) gate.
+        if self.move_to_target_pos_goal.cooldown <= 0 {
+            let world = mob.get_entity().world.load();
+            if !world.level_info.load().game_rules.mob_griefing {
+                return false;
             }
 
-            self.move_to_target_pos_goal.can_start(mob).await
-        })
+            self.can_raid.store(false, Ordering::Relaxed);
+            self.wants_to_raid = self.rabbit.upgrade().is_some_and(|r| r.wants_more_food());
+        }
+
+        self.move_to_target_pos_goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            self.can_raid.load(Ordering::Relaxed)
-                && self.move_to_target_pos_goal.should_continue(mob).await
-        })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        self.can_raid.load(Ordering::Relaxed) && self.move_to_target_pos_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async { self.move_to_target_pos_goal.start(mob).await })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.start(mob)
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async { self.move_to_target_pos_goal.stop(mob).await })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.stop(mob)
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.move_to_target_pos_goal.tick(mob).await;
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.move_to_target_pos_goal.tick(mob);
 
-            let target_pos = self.move_to_target_pos_goal.target_pos;
-            let target_f64 = target_pos.up().to_f64();
-            mob.get_mob_entity().look_control.lock().unwrap().look_at(
-                mob,
-                target_f64.x + 0.5,
-                target_f64.y + 1.0,
-                target_f64.z + 0.5,
-            );
+        let target_pos = self.move_to_target_pos_goal.target_pos;
+        let target_f64 = target_pos.up().to_f64();
+        mob.get_mob_entity().look_control.lock().unwrap().look_at(
+            mob,
+            target_f64.x + 0.5,
+            target_f64.y + 1.0,
+            target_f64.z + 0.5,
+        );
 
-            if !self.move_to_target_pos_goal.reached {
-                return;
-            }
+        if !self.move_to_target_pos_goal.reached {
+            return;
+        }
 
-            let world = mob.get_entity().world.load_full();
-            let crops_pos = target_pos.up();
-            let (block, state_id) = world.get_block_and_state_id(&crops_pos);
+        let world = mob.get_entity().world.load_full();
+        let crops_pos = target_pos.up();
+        let (block, state_id) = world.get_block_and_state_id(&crops_pos);
 
-            if self.can_raid.load(Ordering::Relaxed) && block == &Block::CARROTS {
-                let props = WheatLikeProperties::from_state_id(state_id, block);
-                if props.age == 0 {
-                    world
-                        .break_block(&crops_pos, None, BlockFlags::NOTIFY_ALL)
-                        .await;
-                } else {
-                    let mut new_props = props;
-                    new_props.age -= 1;
-                    let new_state_id = new_props.to_state_id(block);
-                    world
-                        .set_block_state(&crops_pos, new_state_id, BlockFlags::NOTIFY_ALL)
-                        .await;
+        if self.can_raid.load(Ordering::Relaxed) && block == &Block::CARROTS {
+            let props = WheatLikeProperties::from_state_id(state_id, block);
+            if props.age == 0 {
+                world.break_block(&crops_pos, None, BlockFlags::NOTIFY_ALL);
+            } else {
+                let mut new_props = props;
+                new_props.age -= 1;
+                let new_state_id = new_props.to_state_id(block);
+                world.set_block_state(&crops_pos, new_state_id, BlockFlags::NOTIFY_ALL);
 
-                    // Vanilla line 571: the age-decrement path emits BLOCK_CHANGE explicitly
-                    // (the age-0 path goes through `destroyBlock`, which emits it internally).
-                    emit_game_event(
+                // Vanilla line 571: the age-decrement path emits BLOCK_CHANGE explicitly
+                // (the age-0 path goes through `destroyBlock`, which emits it internally).
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(emit_game_event(
                         &world,
                         GameEvent::BlockChange,
                         crops_pos.to_f64(),
@@ -143,26 +133,25 @@ impl Goal for RaidGardenGoal {
                             .map_or_else(GameEventContext::none, |r| {
                                 GameEventContext::of_entity(r as Arc<dyn EntityBase>)
                             }),
-                    )
-                    .await;
+                    ))
+                });
 
-                    let packet = CWorldEvent::new(
-                        WorldEvent::ParticlesDestroyBlock as i32,
-                        crops_pos,
-                        i32::from(state_id.as_u16()),
-                        false,
-                    );
-                    world.broadcast_to_chunk(crops_pos.chunk_position(), &packet);
-                }
-
-                if let Some(rabbit) = self.rabbit.upgrade() {
-                    rabbit.set_more_carrot_delay();
-                }
+                let packet = CWorldEvent::new(
+                    WorldEvent::ParticlesDestroyBlock as i32,
+                    crops_pos,
+                    i32::from(state_id.as_u16()),
+                    false,
+                );
+                world.broadcast_to_chunk(crops_pos.chunk_position(), &packet);
             }
 
-            self.can_raid.store(false, Ordering::Relaxed);
-            self.move_to_target_pos_goal.cooldown = 10;
-        })
+            if let Some(rabbit) = self.rabbit.upgrade() {
+                rabbit.set_more_carrot_delay();
+            }
+        }
+
+        self.can_raid.store(false, Ordering::Relaxed);
+        self.move_to_target_pos_goal.cooldown = 10;
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -175,31 +164,25 @@ impl Goal for RaidGardenGoal {
 }
 
 impl MoveToTargetPos for RaidGardenGoal {
-    fn is_target_pos<'a>(
-        &'a self,
-        world: Arc<World>,
-        block_pos: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async move {
-            let block = world.get_block(&block_pos);
-            if !block.has_tag(&tag::Block::MINECRAFT_SUPPORTS_CROPS)
-                || !self.wants_to_raid
-                || self.can_raid.load(Ordering::Relaxed)
-            {
-                return false;
-            }
+    fn is_target_pos(&self, world: Arc<World>, block_pos: BlockPos) -> bool {
+        let block = world.get_block(&block_pos);
+        if !block.has_tag(&tag::Block::MINECRAFT_SUPPORTS_CROPS)
+            || !self.wants_to_raid
+            || self.can_raid.load(Ordering::Relaxed)
+        {
+            return false;
+        }
 
-            let above_pos = block_pos.up();
-            let (above_block, above_state_id) = world.get_block_and_state_id(&above_pos);
-            if above_block == &Block::CARROTS {
-                let props = WheatLikeProperties::from_state_id(above_state_id, above_block);
-                if props.age == 7 {
-                    self.can_raid.store(true, Ordering::Relaxed);
-                    return true;
-                }
+        let above_pos = block_pos.up();
+        let (above_block, above_state_id) = world.get_block_and_state_id(&above_pos);
+        if above_block == &Block::CARROTS {
+            let props = WheatLikeProperties::from_state_id(above_state_id, above_block);
+            if props.age == 7 {
+                self.can_raid.store(true, Ordering::Relaxed);
+                return true;
             }
+        }
 
-            false
-        })
+        false
     }
 }

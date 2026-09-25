@@ -46,7 +46,7 @@ impl Goal for PandaRollGoal {
             if (!panda.is_baby() && !panda.is_playful()) || !entity.on_ground.load(Relaxed) {
                 return false;
             }
-            if !panda.can_perform_action().await {
+            if !panda.can_perform_action() {
                 return false;
             }
 

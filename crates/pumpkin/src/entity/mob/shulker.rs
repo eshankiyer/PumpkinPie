@@ -36,6 +36,13 @@ const NO_COLOR: u8 = 16;
 const PEEK_PER_TICK: f32 = 0.05;
 const MAX_TELEPORT_DISTANCE: i32 = 8;
 
+fn read_peek_amount(nbt: &NbtCompound) -> u8 {
+    // Older fork saves used PeekAmount; vanilla's Peek takes precedence.
+    nbt.get_byte("Peek")
+        .or_else(|| nbt.get_byte("PeekAmount"))
+        .unwrap_or(0) as u8
+}
+
 /// Axis type for bullet creation (the bullet cannot start moving along this axis)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Axis {
@@ -365,7 +372,7 @@ impl ShulkerEntity {
 impl Mob for ShulkerEntity {
     fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_byte("AttachFace", self.attach_face.load(Ordering::Relaxed) as i8);
-        nbt.put_byte("PeekAmount", self.peek_amount.load(Ordering::Relaxed) as i8);
+        nbt.put_byte("Peek", self.peek_amount.load(Ordering::Relaxed) as i8);
         nbt.put_byte("Color", self.color.load(Ordering::Relaxed) as i8);
     }
 
@@ -373,9 +380,8 @@ impl Mob for ShulkerEntity {
         if let Some(face) = nbt.get_byte("AttachFace") {
             self.attach_face.store(face as u8, Ordering::Relaxed);
         }
-        if let Some(peek) = nbt.get_byte("PeekAmount") {
-            self.peek_amount.store(peek as u8, Ordering::Relaxed);
-        }
+        self.peek_amount
+            .store(read_peek_amount(nbt), Ordering::Relaxed);
         if let Some(color) = nbt.get_byte("Color") {
             self.color.store(color as u8, Ordering::Relaxed);
         }
@@ -701,6 +707,27 @@ impl Goal for ShulkerDefenseAttackGoal {
 
     fn controls(&self) -> Controls {
         self.track_target_goal.controls()
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::read_peek_amount;
+    use pumpkin_nbt::compound::NbtCompound;
+
+    #[test]
+    fn peek_reads_vanilla_legacy_and_missing_tags() {
+        let mut nbt = NbtCompound::new();
+        assert_eq!(read_peek_amount(&nbt), 0);
+
+        nbt.put_byte("PeekAmount", 100);
+        assert_eq!(read_peek_amount(&nbt), 100);
+
+        nbt.put_byte("Peek", 30);
+        assert_eq!(read_peek_amount(&nbt), 30);
+
+        nbt.put_byte("Peek", 0);
+        assert_eq!(read_peek_amount(&nbt), 0);
     }
 }
 

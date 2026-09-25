@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::block::entities::BlockEntity;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
+use pumpkin_world::inventory::{Clearable, Inventory};
 
 pub struct LecternBlockEntity {
     pub position: BlockPos,
@@ -220,13 +220,13 @@ impl Inventory for LecternBlockEntity {
     /// book slot never accepts an item through this container interface - a book only ever
     /// gets in via `LecternBlock.tryPlaceBook`. Without this a hopper facing a lectern could
     /// insert (or overwrite) whatever item it is holding into slot 0.
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         _slot: usize,
-        _stack: &'a ItemStack,
+        _stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async { false })
+    ) -> bool {
+        false
     }
 
     fn as_any(&self) -> &dyn Any {

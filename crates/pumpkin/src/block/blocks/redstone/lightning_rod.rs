@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::block::blocks::copper_weathering;
 use crate::block::{
-    BlockBehaviour, EmitsRedstonePowerArgs, GetRedstonePowerArgs, OnPlaceArgs,
-    OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs, RandomTickArgs,
+    BlockBehaviour, EmitsRedstonePowerArgs, GetRedstonePowerArgs, OnPlaceArgs, OnScheduledTickArgs,
+    OnStateReplacedArgs, PlacedArgs, RandomTickArgs,
 };
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, LightningRodLikeProperties};
@@ -40,7 +40,11 @@ impl LightningRodBlock {
         world.update_neighbors(&attached_pos, None);
     }
 
-    fn update_attached_neighbor(world: &Arc<World>, pos: &BlockPos, props: LightningRodLikeProperties) {
+    fn update_attached_neighbor(
+        world: &Arc<World>,
+        pos: &BlockPos,
+        props: LightningRodLikeProperties,
+    ) {
         let attached_pos = pos.offset(props.facing.opposite().to_block_direction().to_offset());
         world.update_neighbors(&attached_pos, None);
     }
@@ -58,21 +62,34 @@ impl BlockBehaviour for LightningRodBlock {
     /// `LightningRodBlock.onPlace` (LightningRodBlock.java:97-103): restore the reset tick for
     /// a powered state that arrives without one (piston move, setblock, or chunk edit).
     fn placed(&self, args: PlacedArgs<'_>) {
-        if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block { return; }
+        if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block {
+            return;
+        }
         let props = LightningRodLikeProperties::from_state_id(args.state_id, args.block);
-        if props.powered && !args.world.is_block_tick_scheduled(args.position, args.block) {
-            args.world.schedule_block_tick(args.block, *args.position, 8, TickPriority::Normal);
+        if props.powered
+            && !args
+                .world
+                .is_block_tick_scheduled(args.position, args.block)
+        {
+            args.world
+                .schedule_block_tick(args.block, *args.position, 8, TickPriority::Normal);
         }
     }
 
-    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool { true }
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
+        true
+    }
     fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
         let props = LightningRodLikeProperties::from_state_id(args.state.id, args.block);
         if props.powered { 15 } else { 0 }
     }
     fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
         let props = LightningRodLikeProperties::from_state_id(args.state.id, args.block);
-        if props.powered && props.facing.to_block_direction() == args.direction { 15 } else { 0 }
+        if props.powered && props.facing.to_block_direction() == args.direction {
+            15
+        } else {
+            0
+        }
     }
 
     fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
@@ -80,7 +97,11 @@ impl BlockBehaviour for LightningRodBlock {
         let mut props = LightningRodLikeProperties::from_state_id(state.id, args.block);
         if props.powered {
             props.powered = false;
-            args.world.set_block_state(args.position, props.to_state_id(args.block), BlockFlags::NOTIFY_ALL);
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
             Self::update_neighbors(args.world, args.position, props);
         }
     }
@@ -88,7 +109,9 @@ impl BlockBehaviour for LightningRodBlock {
     /// `LightningRodBlock.affectNeighborsAfterRemoval` (`LightningRodBlock.java:112-116`).
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
         let props = LightningRodLikeProperties::from_state_id(args.old_state_id, args.block);
-        if props.powered { Self::update_attached_neighbor(args.world, args.position, props); }
+        if props.powered {
+            Self::update_attached_neighbor(args.world, args.position, props);
+        }
     }
 
     /// Only non-waxed rods oxidize; the collection contains the four oxidation stages and the
@@ -102,15 +125,17 @@ impl BlockBehaviour for LightningRodBlock {
         ];
         let current_state_id = args.world.get_block_state_id(args.position);
         let current_props = LightningRodLikeProperties::from_state_id(current_state_id, args.block);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(copper_weathering::try_oxidize_copper(
-                args.world, args.position, args.block, &oxidation_stages, |next_block| {
-                    let mut new_props = LightningRodLikeProperties::default(next_block);
-                    new_props.facing = current_props.facing;
-                    new_props.powered = current_props.powered;
-                    new_props.to_state_id(next_block)
-                },
-            ));
-        });
+        copper_weathering::try_oxidize_copper(
+            args.world,
+            args.position,
+            args.block,
+            &oxidation_stages,
+            |next_block| {
+                let mut new_props = LightningRodLikeProperties::default(next_block);
+                new_props.facing = current_props.facing;
+                new_props.powered = current_props.powered;
+                new_props.to_state_id(next_block)
+            },
+        );
     }
 }

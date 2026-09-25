@@ -612,6 +612,34 @@ impl Mob for WitherEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `WitherBoss.checkDespawn` only removes the wither in Peaceful;
+    /// otherwise it resets `noActionTime` instead of applying distance despawn.
+    fn check_despawn(&self) {
+        let entity = self.mob_entity.living_entity.entity.clone();
+        if entity.is_removed() {
+            return;
+        }
+
+        let world = entity.world.load();
+        if world.level_info.load().difficulty == Difficulty::Peaceful
+            && !entity.entity_type.allowed_in_peaceful
+        {
+            entity.remove();
+        } else {
+            self.mob_entity.no_action_time.store(0, Ordering::Relaxed);
+        }
+    }
+
+    fn can_attack(&self, target: &Entity) -> bool {
+        !target
+            .entity_type
+            .has_tag(&tag::EntityType::MINECRAFT_WITHER_FRIENDS)
+    }
+
+    fn get_mob_gravity(&self) -> f64 {
+        0.0
+    }
+
     fn mob_init_data_tracker(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         entity.send_meta_data(

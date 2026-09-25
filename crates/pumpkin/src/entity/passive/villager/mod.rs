@@ -2169,10 +2169,10 @@ impl VillagerEntity {
     pub(super) fn send_breeding_event(&self, status: pumpkin_data::entity::EntityStatus) {
         let world = self.get_entity().world.load();
         let bedrock = match status {
-            pumpkin_data::entity::EntityStatus::InLoveHearts => Some(ActorEventType::InLoveHearts),
-            pumpkin_data::entity::EntityStatus::LoveHearts => Some(ActorEventType::LoveHearts),
+            pumpkin_data::entity::EntityStatus::InLoveHearts => Some(ActorEventID::InLoveHearts),
+            pumpkin_data::entity::EntityStatus::LoveHearts => Some(ActorEventID::LoveHearts),
             pumpkin_data::entity::EntityStatus::VillagerAngry => {
-                Some(ActorEventType::VillagerAngry)
+                Some(ActorEventID::VillagerAngry)
             }
             _ => None,
         };
@@ -2900,6 +2900,7 @@ impl VillagerEntity {
                         });
                     }
                 }
+            }
         }
 
         // Inventory
@@ -3217,7 +3218,7 @@ impl VillagerEntity {
                 world.send_entity_status(
                     self.get_entity(),
                     pumpkin_data::entity::EntityStatus::VillagerHappy,
-                    Some(ActorEventType::VillagerHappy),
+                    Some(ActorEventID::VillagerHappy),
                 );
             }
 
@@ -3728,7 +3729,6 @@ impl VillagerEntity {
                     }
                 }
             }
-        }
         })
     }
 }

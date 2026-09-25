@@ -7,7 +7,7 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 
 use crate::block::blocks::abstract_multiface::can_attach_to;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    BlockBehaviour, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     OnScheduledTickArgs,
 };
 
@@ -50,31 +50,26 @@ impl BlockBehaviour for PaleHangingMossBlock {
 
     /// `HangingMossBlock#updateShape` (HangingMossBlock.java:70-86): schedules a 1-tick
     /// self-check when support is gone, and always recomputes `TIP` from the block below.
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if !can_stay_at_position(args.world, args.position) {
-                args.world
-                    .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            }
-            let mut props = PaleHangingMossLikeProperties::from_state_id(args.state_id, args.block);
-            props.tip = args.world.get_block(&args.position.down()) != &Block::PALE_HANGING_MOSS;
-            props.to_state_id(args.block)
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if !can_stay_at_position(args.world, args.position) {
+            args.world
+                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+        }
+        let mut props = PaleHangingMossLikeProperties::from_state_id(args.state_id, args.block);
+        props.tip = args.world.get_block(&args.position.down()) != &Block::PALE_HANGING_MOSS;
+        props.to_state_id(args.block)
     }
 
     /// `HangingMossBlock#tick` (HangingMossBlock.java:88-93): `destroyBlock(pos, true)`, i.e.
     /// break with drops.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !can_stay_at_position(args.world.as_ref(), args.position) {
-                args.world
-                    .break_block(args.position, None, BlockFlags::empty())
-                    .await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        if !can_stay_at_position(args.world.as_ref(), args.position) {
+            args.world
+                .break_block(args.position, None, BlockFlags::empty());
+        }
     }
 
     /// `HangingMossBlock#isValidBonemealTarget` (HangingMossBlock.java:100-104).
@@ -91,22 +86,18 @@ impl BlockBehaviour for PaleHangingMossBlock {
     /// `NOTIFY_ALL` is this codebase's `setBlockAndUpdate` and runs that same cascade
     /// (`World::set_block_state` -> `BlockRegistry::update_neighbors`), so one write suffices here
     /// too.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let grow_pos = get_tip(args.world.as_ref(), args.position).down();
-            if !args.world.get_block_state(&grow_pos).is_air() {
-                return;
-            }
-            let mut props = PaleHangingMossLikeProperties::from_state_id(args.state_id, args.block);
-            props.tip = true;
-            args.world
-                .set_block_state(
-                    &grow_pos,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let grow_pos = get_tip(args.world.as_ref(), args.position).down();
+        if !args.world.get_block_state(&grow_pos).is_air() {
+            return;
+        }
+        let mut props = PaleHangingMossLikeProperties::from_state_id(args.state_id, args.block);
+        props.tip = true;
+        args.world.set_block_state(
+            &grow_pos,
+            props.to_state_id(args.block),
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 }
 

@@ -4863,4 +4863,420 @@ mod tests {
         let dims = Entity::SLEEPING_DIMENSIONS;
         assert_eq!((dims.width, dims.height, dims.eye_height), (0.2, 0.2, 0.2));
     }
+
+    #[test]
+    fn avatar_pose_table_matches_vanilla() {
+        let standing = Entity::get_entity_dimensions(EntityPose::Standing);
+        assert_eq!(
+            (standing.width, standing.height, standing.eye_height),
+            (0.6, 1.8, 1.62)
+        );
+        let crouching = Entity::get_entity_dimensions(EntityPose::Crouching);
+        assert_eq!(
+            (crouching.width, crouching.height, crouching.eye_height),
+            (0.6, 1.5, 1.27)
+        );
+        for pose in [
+            EntityPose::Swimming,
+            EntityPose::FallFlying,
+            EntityPose::SpinAttack,
+        ] {
+            let dims = Entity::get_entity_dimensions(pose);
+            assert_eq!((dims.width, dims.height, dims.eye_height), (0.6, 0.6, 0.4));
+        }
+        let dying = Entity::get_entity_dimensions(EntityPose::Dying);
+        assert_eq!((dying.width, dying.height, dying.eye_height), (0.2, 0.2, 1.62));
+    }
+
+    #[test]
+    fn ordinary_mounting_requires_an_eligible_rider() {
+        const fn can_start_riding_state(
+            sneaking: bool,
+            riding_cooldown: i32,
+            has_vehicle: bool,
+        ) -> bool {
+            !sneaking && riding_cooldown <= 0 && !has_vehicle
+        }
+
+        assert!(can_start_riding_state(false, 0, false));
+        assert!(!can_start_riding_state(true, 0, false));
+        assert!(!can_start_riding_state(false, 1, false));
+        assert!(!can_start_riding_state(false, 0, true));
+    }
+}
+
+#[cfg(test)]
+mod position_sync_tests {
+    use super::delta_needs_position_sync;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn a_small_step_stays_a_delta_packet() {
+        assert!(!delta_needs_position_sync(Vector3::new(4096, -2048, 0)));
+    }
+
+    #[test]
+    fn eight_blocks_is_the_edge() {
+        assert!(!delta_needs_position_sync(Vector3::new(i16::MAX as i64, 0, 0)));
+        assert!(delta_needs_position_sync(Vector3::new(
+            i16::MAX as i64 + 1,
+            0,
+            0
+        )));
+        assert!(delta_needs_position_sync(Vector3::new(
+            0,
+            i16::MIN as i64 - 1,
+            0
+        )));
+    }
+
+    #[test]
+    fn a_teleport_across_the_world_needs_a_sync() {
+        assert!(delta_needs_position_sync(Vector3::new(
+            4096 * 10_000,
+            0,
+            -4096 * 10_000
+        )));
+    }
+}
+
+#[cfg(test)]
+mod velocity_resend_tests {
+    use super::velocity_needs_resend;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn an_unchanged_velocity_is_not_resent() {
+        let velocity = Vector3::new(0.1, -0.2, 0.3);
+        assert!(!velocity_needs_resend(velocity, velocity));
+    }
+
+    #[test]
+    fn a_knockback_sized_change_is_sent() {
+        assert!(velocity_needs_resend(
+            Vector3::new(0.4, 0.4, 0.0),
+            Vector3::new(0.0, 0.0, 0.0)
+        ));
+    }
+
+    #[test]
+    fn a_change_below_the_threshold_is_dropped() {
+        assert!(!velocity_needs_resend(
+            Vector3::new(1.0e-5, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 0.0)
+        ));
+    }
+
+    #[test]
+    fn coming_to_a_stop_is_always_sent() {
+        assert!(velocity_needs_resend(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0e-5, 0.0, 0.0)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod metadata_type_resolves_on_target_version_tests {
+    use pumpkin_data::meta_data_type::MetaDataType;
+    use pumpkin_util::version::JavaMinecraftVersion;
+    use std::path::{Path, PathBuf};
+
+    const MARKER: &str = "PENDING-INDEX-FIX";
+    const MARKER_LOOKBACK: usize = 12;
+
+    fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("readable source directory") {
+            let path = entry.expect("readable directory entry").path();
+            if path.is_dir() {
+                rust_sources(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn constant_name_at(line: &str) -> Option<&str> {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") || trimmed.starts_with('*') {
+            return None;
+        }
+        let rest = line.split_once("MetaDataType::")?.1;
+        let end = rest
+            .find(|c: char| !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_')
+            .unwrap_or(rest.len());
+        let name = &rest[..end];
+        if name.is_empty() { None } else { Some(name) }
+    }
+
+    fn resolve(name: &str) -> Option<MetaDataType> {
+        Some(match name {
+            "ARM" => MetaDataType::ARM,
+            "ARMADILLO_STATE" => MetaDataType::ARMADILLO_STATE,
+            "BLOCK_POS" => MetaDataType::BLOCK_POS,
+            "BLOCK_STATE" => MetaDataType::BLOCK_STATE,
+            "BOOLEAN" => MetaDataType::BOOLEAN,
+            "BYTE" => MetaDataType::BYTE,
+            "CAT_SOUND_VARIANT" => MetaDataType::CAT_SOUND_VARIANT,
+            "CAT_VARIANT" => MetaDataType::CAT_VARIANT,
+            "CHICKEN_SOUND_VARIANT" => MetaDataType::CHICKEN_SOUND_VARIANT,
+            "CHICKEN_VARIANT" => MetaDataType::CHICKEN_VARIANT,
+            "COMPONENT" => MetaDataType::COMPONENT,
+            "COPPER_GOLEM_STATE" => MetaDataType::COPPER_GOLEM_STATE,
+            "COW_SOUND_VARIANT" => MetaDataType::COW_SOUND_VARIANT,
+            "COW_VARIANT" => MetaDataType::COW_VARIANT,
+            "DIRECTION" => MetaDataType::DIRECTION,
+            "ENTITY_POSE" => MetaDataType::ENTITY_POSE,
+            "FACING" => MetaDataType::FACING,
+            "FLOAT" => MetaDataType::FLOAT,
+            "FROG_VARIANT" => MetaDataType::FROG_VARIANT,
+            "HUMANOID_ARM" => MetaDataType::HUMANOID_ARM,
+            "INT" => MetaDataType::INT,
+            "INTEGER" => MetaDataType::INTEGER,
+            "ITEM_STACK" => MetaDataType::ITEM_STACK,
+            "LAZY_ENTITY_REFERENCE" => MetaDataType::LAZY_ENTITY_REFERENCE,
+            "LONG" => MetaDataType::LONG,
+            "NBT_COMPOUND" => MetaDataType::NBT_COMPOUND,
+            "OPTIONAL_BLOCK_POS" => MetaDataType::OPTIONAL_BLOCK_POS,
+            "OPTIONAL_BLOCK_STATE" => MetaDataType::OPTIONAL_BLOCK_STATE,
+            "OPTIONAL_COMPONENT" => MetaDataType::OPTIONAL_COMPONENT,
+            "OPTIONAL_GLOBAL_POS" => MetaDataType::OPTIONAL_GLOBAL_POS,
+            "OPTIONAL_INT" => MetaDataType::OPTIONAL_INT,
+            "OPTIONAL_LIVING_ENTITY_REFERENCE" => MetaDataType::OPTIONAL_LIVING_ENTITY_REFERENCE,
+            "OPTIONAL_TEXT_COMPONENT" => MetaDataType::OPTIONAL_TEXT_COMPONENT,
+            "OPTIONAL_UNSIGNED_INT" => MetaDataType::OPTIONAL_UNSIGNED_INT,
+            "OPTIONAL_UUID" => MetaDataType::OPTIONAL_UUID,
+            "OXIDATION_LEVEL" => MetaDataType::OXIDATION_LEVEL,
+            "PAINTING_VARIANT" => MetaDataType::PAINTING_VARIANT,
+            "PARTICLE" => MetaDataType::PARTICLE,
+            "PARTICLE_LIST" => MetaDataType::PARTICLE_LIST,
+            "PARTICLES" => MetaDataType::PARTICLES,
+            "PIG_SOUND_VARIANT" => MetaDataType::PIG_SOUND_VARIANT,
+            "PIG_VARIANT" => MetaDataType::PIG_VARIANT,
+            "POSE" => MetaDataType::POSE,
+            "PROFILE" => MetaDataType::PROFILE,
+            "QUATERNION" => MetaDataType::QUATERNION,
+            "QUATERNION_F" => MetaDataType::QUATERNION_F,
+            "RESOLVABLE_PROFILE" => MetaDataType::RESOLVABLE_PROFILE,
+            "ROTATION" => MetaDataType::ROTATION,
+            "ROTATIONS" => MetaDataType::ROTATIONS,
+            "SNIFFER_STATE" => MetaDataType::SNIFFER_STATE,
+            "STRING" => MetaDataType::STRING,
+            "TEXT_COMPONENT" => MetaDataType::TEXT_COMPONENT,
+            "VECTOR3" => MetaDataType::VECTOR3,
+            "VECTOR_3F" => MetaDataType::VECTOR_3F,
+            "VILLAGER_DATA" => MetaDataType::VILLAGER_DATA,
+            "WEATHERING_COPPER_STATE" => MetaDataType::WEATHERING_COPPER_STATE,
+            "WOLF_SOUND_VARIANT" => MetaDataType::WOLF_SOUND_VARIANT,
+            "WOLF_VARIANT" => MetaDataType::WOLF_VARIANT,
+            "ZOMBIE_NAUTILUS_VARIANT" => MetaDataType::ZOMBIE_NAUTILUS_VARIANT,
+            _ => return None,
+        })
+    }
+
+    #[test]
+    fn no_metadata_type_used_in_this_crate_is_dropped_on_26_2() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_sources(&src, &mut files);
+        assert!(!files.is_empty());
+
+        let mut checked = 0usize;
+        let mut unresolved = Vec::new();
+        let mut dropped = Vec::new();
+        for file in &files {
+            let text = std::fs::read_to_string(file).expect("readable Rust source");
+            let lines: Vec<&str> = text.lines().collect();
+            for (number, line) in lines.iter().enumerate() {
+                let Some(name) = constant_name_at(line) else { continue };
+                if line.contains("=> MetaDataType::") { continue; }
+                let Some(constant) = resolve(name) else {
+                    unresolved.push(format!("{}:{}: {name}", file.display(), number + 1));
+                    continue;
+                };
+                checked += 1;
+                if constant.id(JavaMinecraftVersion::V_26_2) >= 0 { continue; }
+                let start = number.saturating_sub(MARKER_LOOKBACK);
+                if lines[start..number].iter().any(|l| l.contains(MARKER)) { continue; }
+                dropped.push(format!("{}:{}: {name}", file.display(), number + 1));
+            }
+        }
+        assert!(unresolved.is_empty(), "unresolved metadata types: {}", unresolved.join("\n"));
+        assert!(checked > 0, "found no metadata types to check");
+        assert!(dropped.is_empty(), "dropped metadata types: {}", dropped.join("\n"));
+    }
+
+    #[test]
+    fn integer_is_now_an_alias_of_int() {
+        // PENDING-INDEX-FIX: this asserts the table shape rather than a send site.
+        assert_eq!(
+            MetaDataType::INTEGER.id(JavaMinecraftVersion::V_26_2),
+            MetaDataType::INT.id(JavaMinecraftVersion::V_26_2)
+        );
+        assert!(MetaDataType::INT.id(JavaMinecraftVersion::V_26_2) >= 0);
+    }
+
+    fn tracked_data_table()
+    -> std::collections::HashMap<String, std::collections::HashMap<String, u8>> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../pumpkin-data/src/generated/tracked_data.rs");
+        let text = std::fs::read_to_string(path).expect("readable generated tracked_data.rs");
+        let mut table: std::collections::HashMap<String, std::collections::HashMap<String, u8>> =
+            std::collections::HashMap::new();
+        let mut module = String::new();
+        let mut pending: Option<String> = None;
+        let mut aliases: Vec<(String, String, String)> = Vec::new();
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("pub mod ")
+                && let Some(name) = rest.strip_suffix(" {")
+            {
+                module = name.to_string();
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("pub const ")
+                && let Some((name, tail)) = rest.split_once(": TrackedData = ")
+            {
+                if tail.starts_with("TrackedData {") {
+                    pending = Some(name.to_string());
+                } else if let Some(source) = tail.strip_suffix(';') {
+                    aliases.push((module.clone(), name.to_string(), source.to_string()));
+                }
+                continue;
+            }
+            if let Some(name) = pending.take()
+                && let Some(rest) = trimmed.strip_prefix("id: TrackedId { v26_2: ")
+                && let Some(value) = rest.strip_suffix("u8 },")
+                && let Ok(id) = value.parse::<u8>()
+            {
+                table.entry(module.clone()).or_default().insert(name, id);
+            }
+        }
+        for (module, name, source) in aliases {
+            if let Some(id) = table.get(&module).and_then(|m| m.get(&source)).copied() {
+                table.entry(module).or_default().insert(name, id);
+            }
+        }
+        table
+    }
+
+    #[test]
+    fn tracked_data_call_sites_use_their_own_entity_module() {
+        let table = tracked_data_table();
+        assert!(table.len() > 50);
+        let roots = ["entity/passive", "entity/mob", "entity/decoration"];
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_sources(&src, &mut files);
+        let mut checked = 0usize;
+        let mut wrong = Vec::new();
+        for file in &files {
+            let as_text = file.to_string_lossy().replace('\\', "/");
+            if !roots.iter().any(|root| as_text.contains(root)) { continue; }
+            let Some(stem) = file.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+                continue;
+            };
+            let text = std::fs::read_to_string(file).expect("readable Rust source");
+            let owned: Vec<&String> = table.keys().filter(|module| {
+                **module == stem || {
+                    let camel: String = module.split('_').map(|word| {
+                        let mut chars = word.chars();
+                        chars.next().map_or_else(String::new, |first| {
+                            first.to_ascii_uppercase().to_string() + chars.as_str()
+                        })
+                    }).collect();
+                    text.contains(&format!("struct {camel}Entity"))
+                }
+            }).collect();
+            let Some(own) = owned.first().map(|module| (*module).clone()) else { continue };
+            let owned_names: std::collections::HashSet<&str> =
+                owned.iter().map(|module| module.as_str()).collect();
+            let Some(own_module) = table.get(&own) else { continue };
+            let lines: Vec<&str> = text.lines().collect();
+            for (number, line) in lines.iter().enumerate() {
+                let start = number.saturating_sub(MARKER_LOOKBACK);
+                if lines[start..number].iter().any(|l| l.contains(MARKER)) { continue; }
+                let mut rest = *line;
+                while let Some(at) = rest.find("tracked_data::") {
+                    rest = &rest[at + "tracked_data::".len()..];
+                    let mut parts = rest.splitn(3, "::");
+                    let (Some(module), Some(tail)) = (parts.next(), parts.next()) else { break };
+                    let name: String = tail.chars()
+                        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                        .collect();
+                    if name.is_empty() || owned_names.contains(module) { continue; }
+                    let Some(referenced) = table.get(module).and_then(|m| m.get(&name)).copied()
+                    else { continue };
+                    checked += 1;
+                    match own_module.get(&name) {
+                        Some(&mine) if mine == referenced => {}
+                        Some(&mine) => wrong.push(format!(
+                            "{}:{}: uses {module}::{name} (id {referenced}) but {own}::{name} is id {mine}",
+                            file.display(), number + 1
+                        )),
+                        None => wrong.push(format!(
+                            "{}:{}: uses {module}::{name}, which {own} does not have",
+                            file.display(), number + 1
+                        )),
+                    }
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "wrong tracked-data ids ({checked} checked):\n{}", wrong.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod tracked_data_replay_tests {
+    use pumpkin_data::tracked_data;
+    use pumpkin_protocol::codec::var_int::VarInt;
+    use pumpkin_protocol::java::client::play::Metadata;
+    use pumpkin_util::version::JavaMinecraftVersion;
+    use super::{record_tracked_data_into, serialize_tracked_data};
+
+    #[test]
+    fn published_values_are_retained_and_replayable() {
+        let mut snapshot = Vec::new();
+        record_tracked_data_into(
+            &mut snapshot,
+            &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(4))],
+        );
+        assert_eq!(snapshot.len(), 1);
+        let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
+        assert_eq!(buf[0], tracked_data::slime::ID_SIZE.id.v26_2);
+        assert_eq!(buf[0], 18);
+        assert!(buf.len() > 2);
+        assert_eq!(*buf.last().unwrap(), 4);
+    }
+
+    #[test]
+    fn republishing_a_field_replaces_the_stored_value() {
+        let mut snapshot = Vec::new();
+        for size in [1i32, 4] {
+            record_tracked_data_into(
+                &mut snapshot,
+                &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(size))],
+            );
+        }
+        assert_eq!(snapshot.len(), 1);
+        let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
+        assert_eq!(*buf.last().unwrap(), 4);
+    }
+
+    #[test]
+    fn distinct_fields_accumulate() {
+        let mut snapshot = Vec::new();
+        record_tracked_data_into(
+            &mut snapshot,
+            &[Metadata::new(tracked_data::creeper::DATA_SWELL_DIR, VarInt(1))],
+        );
+        record_tracked_data_into(
+            &mut snapshot,
+            &[Metadata::new(tracked_data::creeper::DATA_IS_IGNITED, true)],
+        );
+        assert_eq!(snapshot.len(), 2);
+        let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
+        assert!(buf.contains(&tracked_data::creeper::DATA_SWELL_DIR.id.v26_2));
+        assert!(buf.contains(&tracked_data::creeper::DATA_IS_IGNITED.id.v26_2));
+    }
 }

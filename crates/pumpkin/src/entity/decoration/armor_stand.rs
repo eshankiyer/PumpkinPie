@@ -380,11 +380,7 @@ impl EntityBase for ArmorStandEntity {
             return false;
         };
         let block_pos = entity.block_pos.load();
-        let spawn_protected = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(
-                source.is_under_spawn_protection(&server, &world, &block_pos),
-            )
-        });
+        let spawn_protected = source.is_under_spawn_protection(&server, &world, &block_pos);
         spawn_protected
             || !world
                 .worldborder

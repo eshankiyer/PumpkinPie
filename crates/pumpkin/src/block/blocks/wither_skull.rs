@@ -32,7 +32,6 @@ impl BlockBehaviour for WitherSkeletonSkullBlock {
             let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
             args.world.add_block_entity(std::sync::Arc::new(entity));
             check_spawn(args.world, args.position);
-        }
     }
 }
 
@@ -60,7 +59,6 @@ impl BlockBehaviour for WitherWallSkullBlock {
             let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
             args.world.add_block_entity(std::sync::Arc::new(entity));
             check_spawn(args.world, args.position);
-        }
     }
 }
 

@@ -14,9 +14,8 @@ use pumpkin_macros::pumpkin_block;
 use crate::block::entities::decorated_pot::{DecoratedPotBlockEntity, WobbleStyle};
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, GetComparatorOutputArgs,
-    NormalUseArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs, PlayerWillDestroyArgs,
-    UseWithItemArgs,
+    BlockBehaviour, BrokenArgs, GetCloneItemStackArgs, GetComparatorOutputArgs, NormalUseArgs,
+    OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs, PlayerWillDestroyArgs, UseWithItemArgs,
 };
 use pumpkin_world::world::BlockFlags;
 
@@ -93,7 +92,9 @@ impl BlockBehaviour for DecoratedPotBlock {
         // `DecoratedPotBlock.useWithoutItem` wobbles negatively on a failed interaction
         // (`DecoratedPotBlock.java:140`).
         if let Some(block_entity) = args.world.get_block_entity(args.position)
-            && let Some(pot_entity) = block_entity.as_any().downcast_ref::<DecoratedPotBlockEntity>()
+            && let Some(pot_entity) = block_entity
+                .as_any()
+                .downcast_ref::<DecoratedPotBlockEntity>()
         {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
@@ -123,7 +124,8 @@ impl BlockBehaviour for DecoratedPotBlock {
                     if let Some(item) = Item::from_registry_key(
                         decoration.strip_prefix("minecraft:").unwrap_or(&decoration),
                     ) {
-                        args.world.drop_stack(args.position, ItemStack::new(1, item));
+                        args.world
+                            .drop_stack(args.position, ItemStack::new(1, item));
                     }
                 }
             }
@@ -153,26 +155,21 @@ impl BlockBehaviour for DecoratedPotBlock {
     /// `DecoratedPotBlock.playerWillDestroy` (`DecoratedPotBlock.java:195-203`): tools in
     /// `#minecraft:breaks_decorated_pots` crack the state unless they have an enchantment in
     /// `#minecraft:prevents_decorated_pot_shattering` (currently Silk Touch).
-    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let tool = args.player.inventory().held_item().await;
-            if tool
-                .item
-                .has_tag(&tag::Item::MINECRAFT_BREAKS_DECORATED_POTS)
-                && tool.get_enchantment_level(&Enchantment::SILK_TOUCH) == 0
-            {
-                let mut props =
-                    DecoratedPotLikeProperties::from_state_id(args.state.id, args.block);
-                props.cracked = true;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::empty(),
-                    )
-                    .await;
-            }
-        })
+    fn player_will_destroy(&self, args: PlayerWillDestroyArgs<'_>) {
+        let tool = args.player.inventory().held_item();
+        if tool
+            .item
+            .has_tag(&tag::Item::MINECRAFT_BREAKS_DECORATED_POTS)
+            && tool.get_enchantment_level(&Enchantment::SILK_TOUCH) == 0
+        {
+            let mut props = DecoratedPotLikeProperties::from_state_id(args.state.id, args.block);
+            props.cracked = true;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::empty(),
+            );
+        }
     }
 
     /// `DecoratedPotBlock.getCloneItemStack` (`DecoratedPotBlock.java:226-233`): creative

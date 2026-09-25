@@ -21,13 +21,13 @@ use tokio::signal::ctrl_c;
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 
-use pumpkin::{
+use pumpkinpie::{
     CRASH_REPORT, SERVER_EXIT_CODE, SERVER_IS_STOPPING,
     crash::{CrashReport, FullBacktrace},
     data::VanillaData,
     stop_or_exit_server,
 };
-use pumpkin::{PumpkinServer, stop_server};
+use pumpkinpie::{PumpkinServer, stop_server};
 
 use pumpkin_config::{LoadConfiguration, PumpkinConfig};
 use pumpkin_util::text::{
@@ -67,7 +67,7 @@ async fn main() {
 
     let vanilla_data = VanillaData::load();
 
-    pumpkin::init_logger(&config.advanced);
+    pumpkinpie::init_logger(&config.advanced);
 
     info!(
         "{}",

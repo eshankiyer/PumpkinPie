@@ -38,7 +38,6 @@ impl MoveTowardsTargetGoal {
         }
     }
 }
-}
 
 impl Goal for MoveTowardsTargetGoal {
     fn can_start(&mut self, mob: &dyn Mob) -> bool {

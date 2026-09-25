@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-world"
+name = "pumpkinpie-world"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

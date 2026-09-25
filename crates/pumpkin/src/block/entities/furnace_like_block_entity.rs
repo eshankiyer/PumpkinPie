@@ -313,42 +313,43 @@ macro_rules! impl_inventory_for_cooking {
             /// Vanilla `AbstractFurnaceBlockEntity.canPlaceItemThroughFace` ->
             /// `canPlaceItem`: never into the output slot; the fuel slot only accepts real
             /// fuel, or a bucket if the fuel slot doesn't already hold one.
-            fn can_insert_through_face<'a>(
-                &'a self,
+            fn can_insert_through_face(
+                &self,
                 slot: usize,
-                stack: &'a ItemStack,
+                stack: &ItemStack,
                 _direction: pumpkin_data::BlockDirection,
-            ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-                Box::pin(async move {
-                    if slot == 2 {
-                        return false;
-                    }
-                    if slot != 1 {
-                        return true;
-                    }
-                    pumpkin_data::fuels::get_item_burn_ticks(stack.item.id).is_some()
-                        || (stack.item.id == pumpkin_data::item::Item::BUCKET.id
-                            && self.items.read().await[1].item.id
-                                != pumpkin_data::item::Item::BUCKET.id)
-                })
+            ) -> bool {
+                if slot == 2 {
+                    return false;
+                }
+                if slot != 1 {
+                    return true;
+                }
+                pumpkin_data::fuels::get_item_burn_ticks(stack.item.id).is_some()
+                    || (stack.item.id == pumpkin_data::item::Item::BUCKET.id
+                        && self
+                            .items
+                            .read()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)[1]
+                            .item
+                            .id
+                            != pumpkin_data::item::Item::BUCKET.id)
             }
 
             /// Vanilla `AbstractFurnaceBlockEntity.canTakeItemThroughFace`: only the fuel
             /// slot is restricted, and only from below (empty/water buckets left behind by
             /// lava-bucket fuel may be pulled out that way).
-            fn can_extract_through_face<'a>(
-                &'a self,
+            fn can_extract_through_face(
+                &self,
                 slot: usize,
-                stack: &'a ItemStack,
+                stack: &ItemStack,
                 direction: pumpkin_data::BlockDirection,
-            ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-                Box::pin(async move {
-                    if direction == pumpkin_data::BlockDirection::Down && slot == 1 {
-                        return stack.item.id == pumpkin_data::item::Item::WATER_BUCKET.id
-                            || stack.item.id == pumpkin_data::item::Item::BUCKET.id;
-                    }
-                    true
-                })
+            ) -> bool {
+                if direction == pumpkin_data::BlockDirection::Down && slot == 1 {
+                    return stack.item.id == pumpkin_data::item::Item::WATER_BUCKET.id
+                        || stack.item.id == pumpkin_data::item::Item::BUCKET.id;
+                }
+                true
             }
 
             fn is_empty(&self) -> bool {

@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, ExplodeArgs, OnNeighborUpdateArgs, PlacedArgs,
-    UseWithItemArgs,
+    BlockBehaviour, BrokenArgs, ExplodeArgs, OnNeighborUpdateArgs, PlacedArgs, UseWithItemArgs,
 };
 use crate::entity::Entity;
 use crate::entity::tnt::TNTEntity;
@@ -29,6 +28,10 @@ pub struct TNTBlock;
 
 impl TNTBlock {
     pub fn prime(world: &Arc<World>, location: &BlockPos) {
+        // TntBlock.prime must not spawn primed TNT while the game rule is disabled.
+        if !world.level_info.load().game_rules.tnt_explodes {
+            return;
+        }
         let mut event = crate::plugin::api::events::block::tnt_prime::TNTPrimeEvent::new(
             *location,
             "REDSTONE".to_string(),
@@ -40,7 +43,7 @@ impl TNTBlock {
             return;
         }
 
-        let entity = Entity::new(world.clone(), location.to_f64(), &EntityType::TNT);
+        let entity = Entity::new(world.clone(), primed_position(location), &EntityType::TNT);
         let mut prime_event =
             crate::plugin::api::events::entity::explosion_prime::ExplosionPrimeEvent::new(
                 entity.entity_id,
@@ -56,6 +59,8 @@ impl TNTBlock {
             return;
         }
 
+        let angle = rand::random::<f64>() * std::f64::consts::TAU;
+        entity.set_velocity(Vector3::new(-angle.sin() * 0.02, 0.2, -angle.cos() * 0.02));
         let pos = entity.pos.load();
         let tnt = Arc::new(TNTEntity::new(entity, DEFAULT_POWER, DEFAULT_FUSE));
         world.spawn_entity(tnt);
@@ -82,6 +87,11 @@ impl TNTBlock {
 
 const DEFAULT_FUSE: u32 = 80;
 const DEFAULT_POWER: f32 = 4.0;
+
+fn primed_position(position: &BlockPos) -> Vector3<f64> {
+    let pos = position.to_f64();
+    Vector3::new(pos.x + 0.5, pos.y, pos.z + 0.5)
+}
 
 impl BlockBehaviour for TNTBlock {
     fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
@@ -128,15 +138,33 @@ impl BlockBehaviour for TNTBlock {
         if !args.world.level_info.load().game_rules.tnt_explodes {
             return;
         }
-            let entity = Entity::new(args.world.clone(), args.position.to_f64(), &EntityType::TNT);
-            let angle = rand::random::<f64>() * std::f64::consts::TAU;
-            entity.set_velocity(Vector3::new(-angle.sin() * 0.02, 0.2, -angle.cos() * 0.02));
-            let fuse = rand::rng().random_range(0..DEFAULT_FUSE / 4) + DEFAULT_FUSE / 8;
-            let tnt = Arc::new(TNTEntity::new(entity, DEFAULT_POWER, fuse));
-            args.world.spawn_entity(tnt);
+        let entity = Entity::new(
+            args.world.clone(),
+            primed_position(args.position),
+            &EntityType::TNT,
+        );
+        let angle = rand::random::<f64>() * std::f64::consts::TAU;
+        entity.set_velocity(Vector3::new(-angle.sin() * 0.02, 0.2, -angle.cos() * 0.02));
+        let fuse = rand::rng().random_range(0..DEFAULT_FUSE / 4) + DEFAULT_FUSE / 8;
+        let tnt = Arc::new(TNTEntity::new(entity, DEFAULT_POWER, fuse));
+        args.world.spawn_entity(tnt);
     }
 
     fn should_drop_items_on_explosion(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::primed_position;
+    use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+
+    #[test]
+    fn primed_tnt_is_centered_horizontally_without_raising_its_base() {
+        assert_eq!(
+            primed_position(&BlockPos(Vector3::new(-4, 63, 7))),
+            Vector3::new(-3.5, 63.0, 7.5)
+        );
     }
 }

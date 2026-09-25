@@ -4,7 +4,7 @@ use pumpkin_data::{effect::StatusEffect, potion::Effect};
 use pumpkin_util::Difficulty;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     mob::{Mob, MobEntity, spider::SpiderEntity},
 };
 
@@ -27,7 +27,6 @@ impl CaveSpiderEntity {
     }
 }
 
-impl NBTStorage for CaveSpiderEntity {}
 
 impl Mob for CaveSpiderEntity {
     fn get_mob_entity(&self) -> &MobEntity {

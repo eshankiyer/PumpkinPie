@@ -5,7 +5,10 @@ use pumpkin_world::{block::entities::PropertyDelegate, inventory::Inventory};
 
 use crate::{
     player::player_inventory::PlayerInventory,
-    screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenProperty},
+    screen_handler::{
+        InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerListener,
+        ScreenProperty,
+    },
     slot::BeaconPaymentSlot,
 };
 
@@ -42,6 +45,20 @@ impl BeaconScreenHandler {
         inventory: Arc<dyn Inventory>,
         property_delegate: Arc<dyn PropertyDelegate>,
     ) -> Self {
+        struct BeaconScreenListener;
+        impl ScreenHandlerListener for BeaconScreenListener {
+            fn on_property_update(
+                &self,
+                screen_handler: &ScreenHandlerBehaviour,
+                property: u8,
+                value: i32,
+            ) {
+                if let Some(sync_handler) = screen_handler.sync_handler.as_ref() {
+                    sync_handler.update_property(screen_handler, i32::from(property), value);
+                }
+            }
+        }
+
         let mut handler = Self {
             inventory: inventory.clone(),
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Beacon)),
@@ -52,6 +69,7 @@ impl BeaconScreenHandler {
         handler.add_property(ScreenProperty::new(property_delegate.clone(), 0));
         handler.add_property(ScreenProperty::new(property_delegate.clone(), 1));
         handler.add_property(ScreenProperty::new(property_delegate, 2));
+        handler.add_listener(Arc::new(BeaconScreenListener));
         handler.add_slot(Arc::new(BeaconPaymentSlot::new(inventory, 0)));
 
         let player_inventory_arc: Arc<dyn Inventory> = player_inventory.clone();

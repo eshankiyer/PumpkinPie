@@ -4,7 +4,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 
 use crate::command::args::{
-    FindArg, entity::WaypointArgumentConsumer, hex_color::HexColorArgumentConsumer,
+    FindArg, entity::{EntityArgumentConsumer, WaypointArgumentConsumer}, hex_color::HexColorArgumentConsumer,
     resource_location::ResourceLocationArgumentConsumer, team_color::TeamColorArgumentConsumer,
 };
 use crate::command::tree::builder::{argument, literal};
@@ -49,11 +49,6 @@ enum ColorAction {
 struct ColorExecutor(ColorAction);
 
 impl CommandExecutor for ColorExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
     fn execute(
         &self,
         sender: &CommandSender,

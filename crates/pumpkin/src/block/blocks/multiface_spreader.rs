@@ -7,7 +7,6 @@
 //! `abstract_multiface.rs`'s `FaceSet`. No block in this codebase calls into this
 //! module yet; it is pure, inert infrastructure for future consumers.
 
-use crate::block::BlockFuture;
 use crate::block::blocks::abstract_multiface::FaceSet;
 use pumpkin_data::BlockDirection;
 use pumpkin_util::math::position::BlockPos;
@@ -72,8 +71,7 @@ impl SpreadType {
 /// `MultifaceSpreader.SpreadConfig`.
 ///
 /// All candidate-search methods are synchronous and pure given a `BlockAccessor`;
-/// actual world mutation is a separate concern (see `SpreadTarget` below), since this
-/// codebase's block writes are async.
+/// actual world mutation is a separate concern (see `SpreadTarget` below).
 pub trait SpreadConfig: Send + Sync {
     /// `SpreadConfig.hasFace`. Default delegates straight to the `FaceSet`.
     fn has_face(&self, faces: FaceSet, direction: BlockDirection) -> bool {
@@ -175,11 +173,11 @@ pub fn shuffled_directions(random: &mut RandomGenerator) -> [BlockDirection; 6] 
     dirs
 }
 
-/// `MultifaceSpreader.SpreadConfig#placeBlock` split across the sync/async boundary.
+/// `MultifaceSpreader.SpreadConfig#placeBlock` world-mutation interface.
 ///
 /// Placing a block needs to both read (`canSpreadInto`, already covered by
 /// `SpreadConfig`) and write the target block. Writes in this codebase go through
-/// `World::set_block_state`, which is async, so the actual placement step is a separate
+/// `World::set_block_state`; the actual placement step is a separate
 /// trait a consumer implements around its own world reference — this mirrors
 /// `DefaultSpreaderConfig` wrapping a `MultifaceBlock` reference in vanilla.
 ///
@@ -191,11 +189,11 @@ pub trait SpreadTarget: Send + Sync {
     fn accessor(&self) -> &dyn BlockAccessor;
 
     /// Attempts to place at `spread_pos`, returning whether it succeeded.
-    fn place(&self, spread_pos: SpreadPos) -> BlockFuture<'_, bool>;
+    fn place(&self, spread_pos: SpreadPos) -> bool;
 }
 
 /// `MultifaceSpreader.spreadFromFaceTowardDirection`.
-pub async fn spread_from_face_toward_direction(
+pub fn spread_from_face_toward_direction(
     config: &dyn SpreadConfig,
     target: &dyn SpreadTarget,
     faces: FaceSet,
@@ -211,11 +209,11 @@ pub async fn spread_from_face_toward_direction(
         starting_face,
         spread_direction,
     )?;
-    target.place(candidate).await.then_some(candidate)
+    target.place(candidate).then_some(candidate)
 }
 
 /// `MultifaceSpreader.spreadFromFaceTowardRandomDirection`.
-pub async fn spread_from_face_toward_random_direction(
+pub fn spread_from_face_toward_random_direction(
     config: &dyn SpreadConfig,
     target: &dyn SpreadTarget,
     faces: FaceSet,
@@ -232,7 +230,6 @@ pub async fn spread_from_face_toward_random_direction(
             starting_face,
             spread_direction,
         )
-        .await
         {
             return Some(candidate);
         }
@@ -241,7 +238,7 @@ pub async fn spread_from_face_toward_random_direction(
 }
 
 /// `MultifaceSpreader.spreadFromRandomFaceTowardRandomDirection`.
-pub async fn spread_from_random_face_toward_random_direction(
+pub fn spread_from_random_face_toward_random_direction(
     config: &dyn SpreadConfig,
     target: &dyn SpreadTarget,
     faces: FaceSet,
@@ -260,7 +257,6 @@ pub async fn spread_from_random_face_toward_random_direction(
             starting_face,
             random,
         )
-        .await
         {
             return Some(candidate);
         }
@@ -269,7 +265,7 @@ pub async fn spread_from_random_face_toward_random_direction(
 }
 
 /// `MultifaceSpreader.spreadFromFaceTowardAllDirections`.
-pub async fn spread_from_face_toward_all_directions(
+pub fn spread_from_face_toward_all_directions(
     config: &dyn SpreadConfig,
     target: &dyn SpreadTarget,
     faces: FaceSet,
@@ -286,7 +282,6 @@ pub async fn spread_from_face_toward_all_directions(
             starting_face,
             spread_direction,
         )
-        .await
         .is_some()
         {
             count += 1;
@@ -300,7 +295,7 @@ pub async fn spread_from_face_toward_all_directions(
 /// Each candidate is read and (if valid) placed before the next candidate is
 /// evaluated, so later checks see earlier writes — see the `SpreadTarget` doc comment
 /// for why this can't be reduced to a pre-collected list.
-pub async fn spread_all(
+pub fn spread_all(
     config: &dyn SpreadConfig,
     target: &dyn SpreadTarget,
     faces: FaceSet,
@@ -310,8 +305,7 @@ pub async fn spread_all(
     for starting_face in BlockDirection::all() {
         if config.can_spread_from(faces, starting_face) {
             total +=
-                spread_from_face_toward_all_directions(config, target, faces, pos, starting_face)
-                    .await;
+                spread_from_face_toward_all_directions(config, target, faces, pos, starting_face);
         }
     }
     total
@@ -694,34 +688,32 @@ mod tests {
             self
         }
 
-        fn place(&self, spread_pos: SpreadPos) -> BlockFuture<'_, bool> {
-            Box::pin(async move {
-                let mut occupied = self.occupied.lock().unwrap();
-                if occupied.contains(&spread_pos.pos) {
-                    false
-                } else {
-                    occupied.insert(spread_pos.pos);
-                    true
-                }
-            })
+        fn place(&self, spread_pos: SpreadPos) -> bool {
+            let mut occupied = self.occupied.lock().unwrap();
+            if occupied.contains(&spread_pos.pos) {
+                false
+            } else {
+                occupied.insert(spread_pos.pos);
+                true
+            }
         }
     }
 
-    #[tokio::test]
-    async fn spread_all_places_and_counts_successful_spreads() {
+    #[test]
+    fn spread_all_places_and_counts_successful_spreads() {
         let target = RecordingTarget::new(Block::AIR.default_state);
         let config = OpenAirConfig;
         let faces = FaceSet::from_directions([BlockDirection::North]);
         let pos = BlockPos::new(0, 0, 0);
 
-        let count = spread_all(&config, &target, faces, pos).await;
+        let count = spread_all(&config, &target, faces, pos);
         assert!(count > 0);
 
         assert_eq!(count, target.placed_count() as u64);
     }
 
-    #[tokio::test]
-    async fn spread_all_does_not_double_place_the_same_position() {
+    #[test]
+    fn spread_all_does_not_double_place_the_same_position() {
         // SAME_POSITION candidates for every non-North spread direction all target the
         // origin itself; only the first should succeed, later ones must see it already
         // occupied and be rejected by `can_spread_into` — this only holds if writes and
@@ -737,8 +729,7 @@ mod tests {
             faces,
             pos,
             BlockDirection::North,
-        )
-        .await;
+        );
 
         // Exactly one spread direction (the first non-same-axis one tried, Down) can
         // land its SAME_POSITION candidate at `pos`; every other direction must fall

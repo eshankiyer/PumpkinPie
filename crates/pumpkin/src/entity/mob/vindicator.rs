@@ -325,3 +325,5 @@ mod tests {
                 .unwrap_or_default();
             assert_eq!(applied, vec![(sharpness_id, expected)]);
         }
+    }
+}

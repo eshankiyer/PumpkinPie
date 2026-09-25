@@ -1,5 +1,5 @@
 [package]
-name = "pumpkin-protocol-fuzz"
+name = "pumpkinpie-protocol-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -17,9 +17,11 @@ tokio = { version = "1", features = ["full"] }
 libfuzzer-sys = "0.4"
 
 [dependencies.pumpkin-protocol]
+package = "pumpkinpie-protocol"
 path = ".."
 
 [dependencies.pumpkin-util]
+package = "pumpkinpie-util"
 path = "../../pumpkin-util"
 
 [[bin]]

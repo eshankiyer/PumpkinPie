@@ -86,7 +86,7 @@ use crate::entity::ai::brain::sensor::nearest_living_entities::NearestLivingEnti
 use crate::entity::ai::brain::{Activity, ActivityData, Brain};
 use crate::entity::player::Player;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     mob::{Mob, MobEntity},
 };
 use crate::world::World;
@@ -477,7 +477,6 @@ fn on_item_thrown(mob: &dyn Mob, _item: &ItemStack, _target_pos: BlockPos, game_
     );
 }
 
-impl NBTStorage for AllayEntity {}
 
 impl Mob for AllayEntity {
     fn get_mob_entity(&self) -> &MobEntity {

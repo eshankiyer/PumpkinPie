@@ -37,10 +37,14 @@ pub struct TreeNode {
 }
 
 impl TreeFeature {
+    #[expect(clippy::too_many_arguments)]
     pub fn generate<T: GenerationCache>(
         &self,
         block_registry: &dyn WorldPortalExt,
         chunk: &mut T,
+        min_y: i8,
+        height: u16,
+        feature_name: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,
         pos: BlockPos,
     ) -> bool {

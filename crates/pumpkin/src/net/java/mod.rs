@@ -1115,9 +1115,8 @@ impl JavaClient {
                 player.on_rename_item(&SRenameItem::read(&mut payload, &version)?);
             }
             id if id == SSetBeacon::to_id(version) => {
-                player
-                    .on_set_beacon(SSetBeacon::read(&mut payload, &version)?)
-                    .await;
+                let packet = SSetBeacon::read(&mut payload, &version)?;
+                self.handle_set_beacon(player, &packet);
             }
             id if id == SPlaceRecipe::to_id(version) => {
                 let packet = SPlaceRecipe::read(&mut payload, &version)?;
@@ -1170,22 +1169,17 @@ impl JavaClient {
                     &SChangeDifficulty::read(&mut payload, &version)?,
                 );
             }
-            id if id == SSetBeacon::to_id(version) => {
-                self.handle_set_beacon(player, &SSetBeacon::read(&mut payload, &version)?);
-            }
             id if id == SContainerSlotStateChanged::to_id(version) => {
-                self.handle_container_slot_state_changed(
-                    player,
-                    &SContainerSlotStateChanged::read(&mut payload, &version)?,
-                )
-                .await;
+                let packet = SContainerSlotStateChanged::read(&mut payload, &version)?;
+                tokio::task::block_in_place(|| {
+                    self.rt_handle.block_on(self.handle_container_slot_state_changed(player, &packet))
+                });
             }
             id if id == SSpectatorAction::to_id(version) => {
-                self.handle_spectator_action(
-                    player,
-                    SSpectatorAction::read(&mut payload, &version)?,
-                )
-                .await;
+                let packet = SSpectatorAction::read(&mut payload, &version)?;
+                tokio::task::block_in_place(|| {
+                    self.rt_handle.block_on(self.handle_spectator_action(player, packet))
+                });
             }
             id if id == SSpectateEntity::to_id(version) => {
                 self.handle_spectate_entity(

@@ -428,7 +428,6 @@ impl StructurePieceBase for IglooPiece {
                     trap_door_pos.z,
                     Block::SNOW_BLOCK.default_state,
                 );
-
             }
         }
 

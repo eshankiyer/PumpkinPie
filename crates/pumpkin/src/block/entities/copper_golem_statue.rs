@@ -71,12 +71,7 @@ impl CopperGolemStatueBlockEntity {
     /// `waterlogged` mirrors `Level.removeBlock(pos, false)`, which replaces the block with
     /// `getFluidState(pos).createLegacyBlock()`: a waterlogged statue leaves a water source
     /// behind, not air.
-    pub async fn remove_statue(
-        &self,
-        world: &Arc<World>,
-        facing: HorizontalFacing,
-        waterlogged: bool,
-    ) {
+    pub fn remove_statue(&self, world: &Arc<World>, facing: HorizontalFacing, waterlogged: bool) {
         let pos = self.position;
         let center = Vector3::new(
             f64::from(pos.0.x) + 0.5,

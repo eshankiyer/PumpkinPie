@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage,
+    Entity, EntityBaseFuture,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
     mob::equipment::RegionalDifficulty,
 };
@@ -19,7 +19,6 @@ impl SkeletonEntity {
     }
 }
 
-impl NBTStorage for SkeletonEntity {}
 
 impl Mob for SkeletonEntity {
     fn get_mob_entity(&self) -> &MobEntity {

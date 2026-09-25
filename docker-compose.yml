@@ -1,15 +1,13 @@
 services:
-  pumpkin:
-    # Make sure to change the tag to the pumpkin version you want to use.
-    # https://github.com/Pumpkin-MC/Pumpkin/pkgs/container/pumpkin/versions?filters%5Bversion_type%5D=tagged
-    #image: ghcr.io/pumpkin-mc/pumpkin:master
+  pumpkinpie:
+    # Build this fork locally. Published images belong under ghcr.io/eshankiyer/pumpkinpie.
     build: .
     ports:
       - "25565:25565"
     volumes:
-      - ./data:/pumpkin
+      - ./data:/pumpkinpie
       # Use the following, if you want to make your config immutable
-      #- ./config:/pumpkin/config:ro
+      #- ./config:/pumpkinpie/config:ro
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped

@@ -188,9 +188,7 @@ impl EntityBase for FireballEntity {
             self.set_explosion_power(exp);
         }
     }
-}
 
-impl EntityBase for FireballEntity {
     fn is_pickable(&self) -> bool {
         true
     }
@@ -241,10 +239,6 @@ impl EntityBase for FireballEntity {
 
     fn get_living_entity(&self) -> Option<&crate::entity::living::LivingEntity> {
         None
-    }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {

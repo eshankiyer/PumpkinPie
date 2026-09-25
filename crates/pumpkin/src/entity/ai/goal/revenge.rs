@@ -35,6 +35,8 @@ pub struct RevengeGoal {
     /// itself is a baby (`PolarBear.java:284-291`). When set, gates the alert loop below on
     /// that condition instead of always running it.
     alert_only_when_self_is_baby: bool,
+    /// Optional species-specific `HurtByTargetGoal.alertOther` eligibility override.
+    alert_filter: Option<fn(&dyn Mob) -> bool>,
 }
 
 impl RevengeGoal {
@@ -51,6 +53,7 @@ impl RevengeGoal {
             exclude_raiders: false,
             alert_only_adults: false,
             alert_only_when_self_is_baby: false,
+            alert_filter: None,
         }
     }
 
@@ -69,6 +72,12 @@ impl RevengeGoal {
     #[must_use]
     pub const fn alert_only_when_self_is_baby(mut self) -> Self {
         self.alert_only_when_self_is_baby = true;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_alert_filter(mut self, filter: fn(&dyn Mob) -> bool) -> Self {
+        self.alert_filter = Some(filter);
         self
     }
 }
@@ -170,6 +179,9 @@ impl Goal for RevengeGoal {
                 continue;
             };
             if self.alert_only_adults && nearby.get_entity().age.load(Relaxed) < 0 {
+                continue;
+            }
+            if self.alert_filter.is_some_and(|filter| !filter(nearby_mob)) {
                 continue;
             }
             if nearby_mob

@@ -22,15 +22,14 @@ use crate::entity::{
     Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
-        look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, ranged_crossbow_attack::RangedCrossbowAttackGoal,
-        revenge::RevengeGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        ranged_crossbow_attack::RangedCrossbowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{
         Mob, MobEntity,
-        equipment::enchant_item_from_single_enchantment,
         crossbow_attack_mob::CrossbowAttackMob,
+        equipment::enchant_item_from_single_enchantment,
         patrol::{LongDistancePatrolGoal, PatrolData, PatrollingMonster},
         raider::{
             HoldGroundAttackGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal, Raider,
@@ -113,13 +112,16 @@ impl PillagerEntity {
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
             );
             goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
-            goal_selector.add_goal(10, LookAtEntityGoal::with_default_any_mob(
-                {
-                    let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-                    Arc::downgrade(&mob_arc)
-                },
-                15.0,
-            ));
+            goal_selector.add_goal(
+                10,
+                LookAtEntityGoal::with_default_any_mob(
+                    {
+                        let mob_arc: Arc<dyn Mob> = mob_arc.clone();
+                        Arc::downgrade(&mob_arc)
+                    },
+                    15.0,
+                ),
+            );
 
             let mut target_selector = mob_arc
                 .mob_entity
@@ -210,8 +212,8 @@ impl Mob for PillagerEntity {
     /// provider (`VanillaEnchantmentProviders.java:25`) — a `SingleEnchantment(Piercing,
     /// ConstantInt.of(1))` (`VanillaEnchantmentProviders.java:28`, `piercing` at level 1), so
     /// the crossbow carries exactly Piercing I.
-    fn enchant_spawned_weapon(&self, main_hand: &mut ItemStack) {
-        if self.get_random().random_range(0..300) == 0 {
+    fn apply_spawned_weapon_enchantment_bonus(&self, main_hand: &mut ItemStack) {
+        if self.get_random().random_range(0..300) == 0 && main_hand.get_item() == &Item::CROSSBOW {
             enchant_item_from_single_enchantment(main_hand, &Enchantment::PIERCING, 1);
         }
     }

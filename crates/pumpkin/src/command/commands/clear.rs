@@ -73,9 +73,9 @@ fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
         let crafting_inventory = target
             .player_screen_handler
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get_crafting_inventory();
-        let crafting_count = clear_inventory(crafting_inventory.as_ref(), item, max).await;
+        let crafting_count = clear_inventory(crafting_inventory.as_ref(), item, max);
         count += crafting_count;
         if max > 0 {
             max -= crafting_count;
@@ -86,9 +86,19 @@ fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
     // Vanilla then processes the current menu's carried stack and normalizes an
     // empty result back to ItemStack.EMPTY (Inventory.java:185-189).
     if !is_done {
-        let current_screen_handler = target.current_screen_handler.lock().await.clone();
-        let screen_handler = current_screen_handler.lock().await;
-        let mut carried = screen_handler.get_behaviour().cursor_stack.lock().await;
+        let current_screen_handler = target
+            .current_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let screen_handler = current_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut carried = screen_handler
+            .get_behaviour()
+            .cursor_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         test_and_clear(&mut count, &mut max, item, &mut carried, &mut is_done);
         if carried.is_empty() {
             *carried = ItemStack::EMPTY.clone();
@@ -100,35 +110,29 @@ fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
     target
         .current_screen_handler
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .lock()
-        .await
-        .send_content_updates()
-        .await;
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .send_content_updates();
     target
         .player_screen_handler
         .lock()
-        .await
-        .send_content_updates()
-        .await;
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .send_content_updates();
 
     count
 }
 
-/// Clears or counts matching stacks in an async inventory, preserving the
+/// Clears or counts matching stacks in an inventory, preserving the
 /// `ContainerHelper.clearOrCountMatchingItems` ordering and amount semantics
 /// (ContainerHelper.java:48-80).
-async fn clear_inventory(
-    inventory: &dyn Inventory,
-    item: &ItemPredicate,
-    amount_to_remove: i32,
-) -> i32 {
+fn clear_inventory(inventory: &dyn Inventory, item: &ItemPredicate, amount_to_remove: i32) -> i32 {
     let counting_only = amount_to_remove == 0;
     let mut remaining = amount_to_remove;
     let mut count = 0;
 
     for slot in 0..inventory.size() {
-        let stack = inventory.get_stack(slot).await;
+        let stack = inventory.get_stack(slot);
         if stack.is_empty() || !item.test_item_stack(&stack) {
             continue;
         }
@@ -143,7 +147,7 @@ async fn clear_inventory(
         } else {
             remaining.min(i32::from(stack.item_count)) as u8
         };
-        let removed = inventory.remove_stack_specific(slot, amount).await;
+        let removed = inventory.remove_stack_specific(slot, amount);
         count += i32::from(removed.item_count);
         if remaining > 0 {
             remaining -= i32::from(removed.item_count);

@@ -10,7 +10,7 @@ use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use pumpkin_world::lighting::light_dampening_into;
 use pumpkin_world::world::BlockFlags;
 
-use crate::block::{BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, RandomTickArgs};
+use crate::block::{BlockBehaviour, GetStateForNeighborUpdateArgs, RandomTickArgs};
 use crate::world::World;
 
 /// `LevelReader#getMaxLightLevel` in vanilla. A covering block that dims light by at least this
@@ -45,66 +45,57 @@ const SPREAD_ATTEMPTS: u8 = 4;
 pub struct MyceliumBlock;
 
 impl BlockBehaviour for MyceliumBlock {
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let world = args.world;
-            let position = args.position;
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let world = args.world;
+        let position = args.position;
 
-            if !can_stay_alive(world, position) {
-                world
-                    .set_block_state(
-                        position,
-                        Block::DIRT.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-                return;
+        if !can_stay_alive(world, position) {
+            world.set_block_state(
+                position,
+                Block::DIRT.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+            return;
+        }
+
+        if world.get_max_local_raw_brightness(&position.up()) < MIN_SPREAD_BRIGHTNESS {
+            return;
+        }
+
+        for _ in 0..SPREAD_ATTEMPTS {
+            // Vanilla: `pos.offset(random.nextInt(3) - 1, random.nextInt(5) - 3, random.nextInt(3) - 1)`
+            let target = position.offset(Vector3::new(
+                rand::random_range(-1..=1),
+                rand::random_range(-3..=1),
+                rand::random_range(-1..=1),
+            ));
+
+            if world.get_block(&target) != &Block::DIRT || !can_propagate(world, &target) {
+                continue;
             }
 
-            if world.get_max_local_raw_brightness(&position.up()) < MIN_SPREAD_BRIGHTNESS {
-                return;
-            }
-
-            for _ in 0..SPREAD_ATTEMPTS {
-                // Vanilla: `pos.offset(random.nextInt(3) - 1, random.nextInt(5) - 3, random.nextInt(3) - 1)`
-                let target = position.offset(Vector3::new(
-                    rand::random_range(-1..=1),
-                    rand::random_range(-3..=1),
-                    rand::random_range(-1..=1),
-                ));
-
-                if world.get_block(&target) != &Block::DIRT || !can_propagate(world, &target) {
-                    continue;
-                }
-
-                let mut props = GrassBlockLikeProperties::default(&Block::MYCELIUM);
-                props.snowy = is_snowy_setting(world, &target);
-                world
-                    .set_block_state(
-                        &target,
-                        props.to_state_id(&Block::MYCELIUM),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+            let mut props = GrassBlockLikeProperties::default(&Block::MYCELIUM);
+            props.snowy = is_snowy_setting(world, &target);
+            world.set_block_state(
+                &target,
+                props.to_state_id(&Block::MYCELIUM),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props =
-                GrassBlockLikeProperties::from_state_id(args.state_id, &Block::MYCELIUM);
-            let should_be_snowy = is_snowy_setting(args.world, args.position);
-            if props.snowy == should_be_snowy {
-                return args.state_id;
-            }
-            props.snowy = should_be_snowy;
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let mut props = GrassBlockLikeProperties::from_state_id(args.state_id, &Block::MYCELIUM);
+        let should_be_snowy = is_snowy_setting(args.world, args.position);
+        if props.snowy == should_be_snowy {
+            return args.state_id;
+        }
+        props.snowy = should_be_snowy;
 
-            props.to_state_id(&Block::MYCELIUM)
-        })
+        props.to_state_id(&Block::MYCELIUM)
     }
 }
 

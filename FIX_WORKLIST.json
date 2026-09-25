@@ -1,0 +1,32 @@
+[
+  {
+    "file": "crates/pumpkin-inventory/src/beacon_screen_handler.rs",
+    "lost_prod_fns": [
+      "on_property_update"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin-inventory/src/enchanting/enchanting_screen_handler.rs",
+    "lost_prod_fns": [],
+    "lost_test_fns": [
+      "primary_item_falls_back_to_supported_items",
+      "table_rolls_fire_aspect_only_on_melee_weapons",
+      "table_rolls_thorns_only_on_chest_armor"
+    ]
+  },
+  {
+    "file": "crates/pumpkin/src/block/blocks/redstone/copper_bulb.rs",
+    "lost_prod_fns": [
+      "get_comparator_output"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/entity/ai/goal/pathfind_to_raid.rs",
+    "lost_prod_fns": [
+      "raid_membership"
+    ],
+    "lost_test_fns": []
+  }
+]

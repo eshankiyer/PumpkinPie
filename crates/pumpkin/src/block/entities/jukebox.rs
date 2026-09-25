@@ -14,7 +14,7 @@ use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_util::math::vector3::Vector3;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
+use pumpkin_world::inventory::{Clearable, Inventory};
 
 /// Matches vanilla's `JukeboxBlockEntity`
 pub struct JukeboxBlockEntity {
@@ -92,18 +92,8 @@ impl BlockEntity for JukeboxBlockEntity {
             if ticks >= song_length + SONG_END_PADDING_TICKS {
                 self.stop_playing();
                 world.update_neighbors(&self.position, None);
-                let world_for_events = world.clone();
-                let position = self.position;
-                tokio::spawn(async move {
-                    world_for_events
-                        .update_comparators(&position, &Block::JUKEBOX)
-                        .await;
-                    Self::emit_jukebox_event(
-                        world_for_events,
-                        position,
-                        GameEvent::JukeboxStopPlay,
-                    );
-                });
+                world.update_comparators(&self.position, &Block::JUKEBOX);
+                Self::emit_jukebox_event(world.clone(), self.position, GameEvent::JukeboxStopPlay);
             } else if ticks.is_multiple_of(20) {
                 // JukeboxSongPlayer.PLAY_EVENT_INTERVAL_TICKS = 20.
                 Self::emit_jukebox_event(world.clone(), self.position, GameEvent::JukeboxPlay);
@@ -217,16 +207,16 @@ impl JukeboxBlockEntity {
     fn emit_jukebox_event(world: Arc<World>, position: BlockPos, event: GameEvent) {
         tokio::spawn(async move {
             emit_game_event(
-            &world,
-            event,
-            Vector3::new(
-                f64::from(position.0.x) + 0.5,
-                f64::from(position.0.y) + 0.5,
-                f64::from(position.0.z) + 0.5,
-            ),
-            GameEventContext::none(),
-        )
-        .await;
+                &world,
+                event,
+                Vector3::new(
+                    f64::from(position.0.x) + 0.5,
+                    f64::from(position.0.y) + 0.5,
+                    f64::from(position.0.z) + 0.5,
+                ),
+                GameEventContext::none(),
+            )
+            .await;
         });
     }
 }
@@ -278,20 +268,14 @@ impl Inventory for JukeboxBlockEntity {
 
     /// Vanilla `JukeboxBlockEntity.canPlaceItem` (JukeboxBlockEntity.java:143-145):
     /// hoppers may insert only a playable record, and only into the empty slot.
-    fn can_place_item<'a>(
-        &'a self,
-        slot: usize,
-        stack: &'a ItemStack,
-    ) -> InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            slot == 0
-                && stack.get_data_component::<JukeboxPlayableImpl>().is_some()
-                && self
-                    .record_stack
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_empty()
-        })
+    fn can_place_item(&self, slot: usize, stack: &ItemStack) -> bool {
+        slot == 0
+            && stack.get_data_component::<JukeboxPlayableImpl>().is_some()
+            && self
+                .record_stack
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
     }
 
     fn mark_dirty(&self) {

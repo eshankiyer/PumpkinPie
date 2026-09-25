@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    GetStateForNeighborUpdateArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    UseWithItemArgs,
+    AttackArgs, GetStateForNeighborUpdateArgs, NormalUseArgs, OnNeighborUpdateArgs,
+    OnPlaceArgs, UseWithItemArgs,
 };
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{Axis, NoteblockInstrument};
@@ -91,6 +91,17 @@ impl BlockBehaviour for NoteBlock {
                 BlockFlags::NOTIFY_ALL,
             );
         }
+    }
+
+    fn attack(&self, args: AttackArgs<'_>) {
+        let props = NoteBlockLikeProperties::from_state_id(args.state.id, args.block);
+        Self::play_note(&props, args.world, args.position);
+
+        args.player.increment_stat(
+            pumpkin_data::statistic::StatisticCategory::Custom,
+            pumpkin_data::statistic::CustomStatistic::PlayNoteblock as i32,
+            1,
+        );
     }
 
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {

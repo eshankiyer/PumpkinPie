@@ -6,7 +6,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal,
         melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
@@ -75,7 +75,6 @@ impl SilverfishEntity {
     }
 }
 
-impl NBTStorage for SilverfishEntity {}
 
 impl Mob for SilverfishEntity {
     fn get_mob_entity(&self) -> &MobEntity {

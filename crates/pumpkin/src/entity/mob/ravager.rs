@@ -263,15 +263,12 @@ impl Mob for RavagerEntity {
 
     fn mob_read_nbt(&self, nbt: &NbtCompound) {
         self.read_raider_nbt(nbt);
-        if let Some(v) = nbt.get_int("AttackTick") {
-            self.attack_tick.store(v, Relaxed);
-        }
-        if let Some(v) = nbt.get_int("StunTick") {
-            self.stunned_tick.store(v, Relaxed);
-        }
-        if let Some(v) = nbt.get_int("RoarTick") {
-            self.roar_tick.store(v, Relaxed);
-        }
+        self.attack_tick
+            .store(nbt.get_int("AttackTick").unwrap_or(0), Relaxed);
+        self.stunned_tick
+            .store(nbt.get_int("StunTick").unwrap_or(0), Relaxed);
+        self.roar_tick
+            .store(nbt.get_int("RoarTick").unwrap_or(0), Relaxed);
     }
 
     /// Vanilla: `Ravager.aiStep` (the counter-driven parts of it; movement is handled above via

@@ -47,7 +47,7 @@ impl Goal for PandaAvoidGoal {
             let Some(panda) = mob.cast_any().downcast_ref::<PandaEntity>() else {
                 return false;
             };
-            if !panda.is_worried() || !panda.can_perform_action().await {
+            if !panda.is_worried() || !panda.can_perform_action() {
                 return false;
             }
             self.inner.can_start(mob).await

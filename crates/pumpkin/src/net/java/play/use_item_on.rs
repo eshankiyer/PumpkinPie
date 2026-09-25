@@ -59,42 +59,36 @@ impl JavaClient {
         // ServerGamePacketListenerImpl.handleUseItemOn reports the build limit to the
         // player instead of silently dropping an out-of-range interaction.
         if position.0.y > world.get_top_y() {
-            player
-                .send_system_message_raw(
-                    &TextComponent::translate_cross(
-                        translation::java::BUILD_TOOHIGH,
-                        translation::bedrock::BUILD_TOOHIGH,
-                        vec![TextComponent::text(world.get_top_y().to_string())],
-                    )
-                    .color_named(pumpkin_util::text::color::NamedColor::Red),
-                    true,
+            player.send_system_message_raw(
+                &TextComponent::translate_cross(
+                    translation::java::BUILD_TOOHIGH,
+                    translation::bedrock::BUILD_TOOHIGH,
+                    vec![TextComponent::text(world.get_top_y().to_string())],
                 )
-                .await;
+                .color_named(pumpkin_util::text::color::NamedColor::Red),
+                true,
+            );
             return Ok(());
         }
         if position.0.y < world.get_bottom_y() {
-            player
-                .send_system_message_raw(
-                    &TextComponent::translate_cross(
-                        translation::java::BUILD_TOOLOW,
-                        translation::bedrock::BUILD_TOOLOW,
-                        vec![TextComponent::text(world.get_bottom_y().to_string())],
-                    )
-                    .color_named(pumpkin_util::text::color::NamedColor::Red),
-                    true,
+            player.send_system_message_raw(
+                &TextComponent::translate_cross(
+                    translation::java::BUILD_TOOLOW,
+                    translation::bedrock::BUILD_TOOLOW,
+                    vec![TextComponent::text(world.get_bottom_y().to_string())],
                 )
-                .await;
+                .color_named(pumpkin_util::text::color::NamedColor::Red),
+                true,
+            );
             return Ok(());
         }
         // isUnderSpawnProtection and ServerLevel.mayInteract both gate the
         // interaction before ServerPlayerGameMode.useItemOn runs.
-        if player
-            .is_under_spawn_protection(server, &world, &position)
-            .await
+        if player.is_under_spawn_protection(server, &world, &position)
             || !world
                 .worldborder
                 .lock()
-                .await
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains_block(position.0.x, position.0.z)
         {
             return Ok(());
@@ -111,8 +105,7 @@ impl JavaClient {
             };
             server
                 .block_registry
-                .on_use_for_spectator(block, player, &position, &hit, server, &world)
-                .await;
+                .on_use_for_spectator(block, player, &position, &hit, server, &world);
             return Ok(());
         }
 
