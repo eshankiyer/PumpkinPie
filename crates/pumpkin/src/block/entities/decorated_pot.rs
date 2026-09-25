@@ -100,9 +100,7 @@ impl BlockEntity for DecoratedPotBlockEntity {
         Some(nbt)
     }
 
-    /// Vanilla `BlockEntity.preRemoveSideEffects` drops contents for block entities implementing
-    /// `Container` (`BlockEntity.java:233-237`); decorated pots implement
-    /// `ContainerSingleItem.BlockContainerSingleItem` (`DecoratedPotBlockEntity.java:27`).
+    /// `BlockEntity.preRemoveSideEffects` (`BlockEntity.java:233-237`) via `Containers.dropItemStack` (`Containers.java:32-49`).
     fn on_block_replaced<'a>(
         self: Arc<Self>,
         world: Arc<World>,
@@ -113,7 +111,14 @@ impl BlockEntity for DecoratedPotBlockEntity {
     {
         Box::pin(async move {
             if let Some(item) = self.take_item().await {
-                world.drop_stack(&position, item).await;
+                world
+                    .scatter_stack(
+                        f64::from(position.0.x),
+                        f64::from(position.0.y),
+                        f64::from(position.0.z),
+                        item,
+                    )
+                    .await;
             }
         })
     }
