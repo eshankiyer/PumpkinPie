@@ -49,7 +49,7 @@ use pumpkin_protocol::{
         server::play::SlotActionType,
     },
 };
-use pumpkin_util::text::TextComponent;
+use pumpkin_util::{math::boundingbox::BoundingBox, text::TextComponent};
 use pumpkin_world::{
     block::entities::PropertyDelegate,
     inventory::{ComparableInventory, Inventory},
@@ -155,7 +155,8 @@ pub type PlayerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 ///
 /// Pumpkin has no stable block-entity identity to compare against here, so the second
 /// family is modelled as [`ContainerAccess::RangeOnly`]; the "block entity replaced"
-/// half is covered separately by `World::close_container_screens_at`.
+/// half is covered separately by `World::close_container_screens_at`. Entity-backed menus use
+/// [`ContainerAccess::Entity`] and retain the entity bounding box instead.
 #[derive(Clone, Copy)]
 pub enum ContainerAccess {
     /// The menu has no backing world position and is never invalidated by movement
@@ -172,6 +173,9 @@ pub enum ContainerAccess {
     /// (`AbstractContainerMenu.java:93-95`) and `ItemCombinerMenu.isValidBlock`
     /// (`ItemCombinerMenu.java:32`, `AnvilMenu.java:65-67`, `SmithingMenu.java:66-68`).
     Block(fn(&Block) -> bool),
+    /// Entity bounding-box range check for menus opened by a vehicle or other entity
+    /// (`ContainerEntity.java:168-170`).
+    Entity(BoundingBox),
 }
 
 impl ContainerAccess {
@@ -189,7 +193,9 @@ impl ContainerAccess {
     #[must_use]
     pub fn accepts_block(self, block: &Block) -> bool {
         match self {
-            Self::None | Self::RangeOnly => true,
+            // Entity-backed containers do not validate a block at an opening position
+            // (`ContainerEntity.java:168-170`).
+            Self::None | Self::RangeOnly | Self::Entity(_) => true,
             Self::Block(predicate) => predicate(block),
         }
     }
@@ -1642,6 +1648,19 @@ mod container_access_tests {
         assert!(access.requires_position());
         // `Container.stillValidBlockEntity` (`Container.java:94-101`) compares block
         // entities, never block ids, so any block passes the block half here.
+        assert!(access.accepts_block(&Block::STONE));
+    }
+
+    #[test]
+    fn entity_family_does_not_require_a_block_position() {
+        let access = ContainerAccess::Entity(
+            pumpkin_util::math::boundingbox::BoundingBox::from_block_raw(
+                &pumpkin_util::math::position::BlockPos::ZERO,
+            ),
+        );
+        // `ContainerEntity.isChestVehicleStillValid` uses the entity box directly
+        // (`ContainerEntity.java:168-170`).
+        assert!(access.requires_position());
         assert!(access.accepts_block(&Block::STONE));
     }
 

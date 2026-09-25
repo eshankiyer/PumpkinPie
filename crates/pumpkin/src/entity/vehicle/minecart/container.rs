@@ -7,7 +7,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_inventory::generic_container_screen_handler::{create_generic_9x3, create_hopper};
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    BoxFuture, ContainerAccess, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::vector3::Vector3;
@@ -17,6 +17,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::entity::{Entity, EntityBase, player::Player};
 use crate::world::loot::fill_chest_inventory;
+use crate::world::{World, game_event};
 use pumpkin_data::chest_loot_table::get_chest_loot_table;
 
 pub struct MinecartInventory {
@@ -24,6 +25,9 @@ pub struct MinecartInventory {
     size: usize,
     loot_table: Mutex<Option<(String, i64)>>,
     drops_claimed: AtomicBool,
+    // A live chest-vehicle close emits at the entity position
+    // (`AbstractChestBoat.java:197-199`).
+    close_event: Mutex<Option<(Arc<World>, Vector3<f64>)>>,
 }
 
 impl MinecartInventory {
@@ -33,6 +37,7 @@ impl MinecartInventory {
             size,
             loot_table: Mutex::new(None),
             drops_claimed: AtomicBool::new(false),
+            close_event: Mutex::new(None),
         }
     }
 
@@ -73,7 +78,7 @@ impl MinecartInventory {
         self.loot_table.lock().await.is_some()
     }
 
-    pub async fn unpack_loot(self: &Arc<Self>) {
+    pub async fn unpack_loot(&self) {
         let loot_table = self.loot_table.lock().await.take();
         let Some((loot_table, seed)) = loot_table else {
             return;
@@ -83,8 +88,13 @@ impl MinecartInventory {
             return;
         };
 
-        let inventory: Arc<dyn Inventory> = self.clone();
-        fill_chest_inventory(&inventory, table, seed).await;
+        fill_chest_inventory(self, table, seed).await;
+    }
+
+    async fn set_close_event(&self, world: Arc<World>, position: Vector3<f64>) {
+        // Store the event source until the shared container handler closes
+        // (`AbstractChestBoat.java:197-199`).
+        *self.close_event.lock().await = Some((world, position));
     }
 }
 
@@ -128,6 +138,23 @@ impl Inventory for MinecartInventory {
         })
     }
 
+    fn on_close(&self) -> InventoryFuture<'_, ()> {
+        Box::pin(async move {
+            // `AbstractChestBoat.stopOpen` emits CONTAINER_CLOSE when the menu is removed
+            // (`AbstractChestBoat.java:197-199`); the generic screen handler calls this inventory
+            // hook on every live chest-vehicle close.
+            if let Some((world, position)) = self.close_event.lock().await.take() {
+                game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::ContainerClose,
+                    position,
+                    game_event::GameEventContext::none(),
+                )
+                .await;
+            }
+        })
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -136,6 +163,9 @@ impl Inventory for MinecartInventory {
 impl Clearable for MinecartInventory {
     fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
+            // `clearChestVehicleContent` unpacks deferred loot before clearing its item list
+            // (`AbstractChestBoat.java:108-111`).
+            self.unpack_loot().await;
             self.items
                 .write()
                 .await
@@ -148,6 +178,9 @@ struct MinecartScreenFactory {
     inventory: Arc<MinecartInventory>,
     title: TextComponent,
     hopper: bool,
+    // The entity-backed still-valid check uses the entity bounding box
+    // (`ContainerEntity.java:168-170`).
+    entity_bounds: pumpkin_util::math::boundingbox::BoundingBox,
 }
 
 impl ScreenHandlerFactory for MinecartScreenFactory {
@@ -159,11 +192,14 @@ impl ScreenHandlerFactory for MinecartScreenFactory {
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
             let inventory: Arc<dyn Inventory> = self.inventory.clone();
-            let handler = if self.hopper {
+            let mut handler = if self.hopper {
                 create_hopper(sync_id, player_inventory, inventory).await
             } else {
                 create_generic_9x3(sync_id, player_inventory, inventory).await
             };
+            // `ContainerEntity.isChestVehicleStillValid` checks the live entity bounding box
+            // (`ContainerEntity.java:168-170`), not a block position.
+            handler.set_container_access(ContainerAccess::Entity(self.entity_bounds));
             Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
         })
     }
@@ -187,17 +223,26 @@ pub async fn open(
         inventory.unpack_loot().await;
     }
 
-    player
+    let opened = player
         .open_handled_screen(
             &MinecartScreenFactory {
                 inventory: inventory.clone(),
                 title: entity.custom_name.load().as_ref().clone().unwrap_or(title),
                 hopper,
+                entity_bounds: entity.bounding_box.load(),
             },
             None,
         )
         .await
-        .is_some()
+        .is_some();
+    if opened {
+        // `AbstractChestBoat.stopOpen` uses the entity position for the close event
+        // (`AbstractChestBoat.java:197-199`).
+        inventory
+            .set_close_event(entity.world.load_full(), entity.pos.load())
+            .await;
+    }
+    opened
 }
 
 pub async fn velocity(
@@ -226,7 +271,7 @@ mod tests {
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_nbt::compound::NbtCompound;
-    use pumpkin_world::inventory::Inventory;
+    use pumpkin_world::inventory::{Clearable, Inventory};
 
     #[tokio::test]
     async fn deferred_mineshaft_loot_is_preserved_until_unpacked() {
@@ -272,5 +317,22 @@ mod tests {
         let stack = restored.get_stack(8).await;
         assert_eq!(stack.get_item().id, Item::POWERED_RAIL.id);
         assert_eq!(stack.item_count, 3);
+    }
+
+    #[tokio::test]
+    async fn clear_unpacks_then_clears_deferred_loot() {
+        let inventory = MinecartInventory::new(27);
+        let mut source = NbtCompound::new();
+        source.put_string(
+            "LootTable",
+            "minecraft:chests/abandoned_mineshaft".to_string(),
+        );
+        source.put_long("LootTableSeed", 4321);
+        inventory.read_nbt(&source).await;
+
+        inventory.clear().await;
+
+        assert!(!inventory.has_loot_table().await);
+        assert!(inventory.is_empty().await);
     }
 }

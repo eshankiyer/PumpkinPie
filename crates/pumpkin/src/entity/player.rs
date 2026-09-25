@@ -8799,6 +8799,12 @@ impl InventoryPlayer for Player {
     /// (`Player.java:2014-2016`) - measured eye to block AABB, not the flat 8 blocks an
     /// older note claimed.
     fn evaluate_container_access(&self, access: ContainerAccess) -> bool {
+        if let ContainerAccess::Entity(bounds) = access {
+            // `ContainerEntity.isChestVehicleStillValid` uses the entity bounding box and a
+            // four-block additional range (`ContainerEntity.java:168-170`).
+            return !self.get_entity().is_removed()
+                && self.is_within_entity_interaction_range(bounds, 4.0);
+        }
         if !access.requires_position() {
             return true;
         }

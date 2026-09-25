@@ -5873,6 +5873,15 @@ impl Entity {
         )
     }
 
+    fn chest_boat_passenger_offset(resource_name: &str) -> f64 {
+        if resource_name.ends_with("_chest_boat") || resource_name == "minecraft:bamboo_chest_raft"
+        {
+            0.15
+        } else {
+            0.0
+        }
+    }
+
     /// Vanilla `Entity.positionRider` with Pumpkin's shared fallback attachment geometry.
     ///
     /// Vanilla stores entity-specific attachment points in generated entity data. That data is
@@ -5896,10 +5905,14 @@ impl Entity {
         let yaw = f64::from(self.yaw.load().to_radians());
         let lateral =
             passenger_width * (passenger_index as f64 - (passenger_count as f64 - 1.0) / 2.0);
+        // `AbstractChestBoat.getSinglePassengerXOffset` supplies the longitudinal seat offset
+        // used by `AbstractBoat.getPassengerAttachmentPoint`
+        // (`AbstractChestBoat.java:42-45`; `AbstractBoat.java:135-151`).
+        let longitudinal = chest_boat_passenger_offset(self.entity_type.resource_name);
         let position = Vector3::new(
-            vehicle_position.x + lateral * yaw.cos(),
+            vehicle_position.x + lateral * yaw.cos() - longitudinal * yaw.sin(),
             vehicle_position.y + vehicle_height,
-            vehicle_position.z + lateral * yaw.sin(),
+            vehicle_position.z + lateral * yaw.sin() + longitudinal * yaw.cos(),
         );
         passenger.get_entity().set_pos(position);
         passenger.get_entity().sync_passenger_positions().await;
@@ -7169,7 +7182,7 @@ mod entity_hook_tests {
 
 #[cfg(test)]
 mod passenger_count_tests {
-    use super::exactly_one_player_passenger;
+    use super::{Entity, exactly_one_player_passenger};
 
     #[test]
     fn only_one_player_passenger_qualifies_for_parent_vehicle_save() {
@@ -7178,6 +7191,24 @@ mod passenger_count_tests {
         assert!(!exactly_one_player_passenger(0));
         assert!(exactly_one_player_passenger(1));
         assert!(!exactly_one_player_passenger(2));
+    }
+
+    #[test]
+    fn chest_boats_use_the_single_passenger_offset() {
+        // `AbstractChestBoat.getSinglePassengerXOffset` is 0.15, while the abstract boat
+        // default is 0 (`AbstractChestBoat.java:42-45`; `AbstractBoat.java:611-613`).
+        assert_eq!(
+            Entity::chest_boat_passenger_offset("minecraft:oak_chest_boat"),
+            0.15
+        );
+        assert_eq!(
+            Entity::chest_boat_passenger_offset("minecraft:bamboo_chest_raft"),
+            0.15
+        );
+        assert_eq!(
+            Entity::chest_boat_passenger_offset("minecraft:oak_boat"),
+            0.0
+        );
     }
 }
 
