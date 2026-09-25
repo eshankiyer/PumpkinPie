@@ -31,29 +31,51 @@ impl CoralMushroomFeature {
         for m in 0..=j {
             for n in 0..=i {
                 for o in 0..=k {
-                    let mut pos = pos;
-                    pos = pos.offset(Vector3::new(m, n, o));
-                    pos = pos.down_height(l);
+                    // Vanilla CoralMushroomFeature.placeFeature sets the mutable position
+                    // from the untouched origin on every iteration (CoralMushroomFeature.java:22-28).
+                    let candidate = pos.offset(Vector3::new(m, n, o)).down_height(l);
 
                     let condition_a = (m != 0 && m != j) || (n != 0 && n != i);
                     let condition_b = (o != 0 && o != k) || (n != 0 && n != i);
                     let condition_c = (m != 0 && m != j) || (o != 0 && o != k);
                     let condition_d = m == 0 || m == j || n == 0 || n == i || o == 0 || o == k;
-                    let random_check = random.next_f32() < 0.1f32;
 
-                    if !((condition_a && condition_b && condition_c && condition_d)
-                        && !random_check
+                    // Vanilla CoralMushroomFeature.placeFeature draws nextFloat only after
+                    // all four shape checks pass (CoralMushroomFeature.java:29-34).
+                    if condition_a
+                        && condition_b
+                        && condition_c
+                        && condition_d
+                        && random.next_f32() >= 0.1f32
                         && CoralFeature::generate_coral_piece(
                             chunk,
                             block_registry,
                             random,
                             block,
-                            pos,
-                        ))
+                            candidate,
+                        )
                     {}
                 }
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn candidate_position_is_origin_relative_not_self_fed() {
+        // This test covers the origin-relative assignment in CoralMushroomFeature.java:22-28.
+        let origin = BlockPos::new(100, 64, -200);
+        let (m, n, o, l) = (2, 1, 3, 2);
+
+        let candidate = origin.offset(Vector3::new(m, n, o)).down_height(l);
+
+        assert_eq!(candidate.0.x, origin.0.x + m);
+        assert_eq!(candidate.0.y, origin.0.y + n - l);
+        assert_eq!(candidate.0.z, origin.0.z + o);
     }
 }

@@ -2,7 +2,7 @@ use crate::{
     block::{
         BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, CanPlaceAtArgs,
         GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
-        blocks::coral::{is_dead_coral, scan_for_water, try_schedule_die_tick},
+        blocks::coral::{is_dead_coral, scan_for_water_waterlogged, try_schedule_die_tick},
     },
     entity::EntityBase,
 };
@@ -107,7 +107,13 @@ impl BlockBehaviour for CoralFanBlock {
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if !scan_for_water(args.world, args.position).await {
+            if !scan_for_water_waterlogged(
+                args.block.is_waterlogged(args.state_id),
+                args.world,
+                args.position,
+            )
+            .await
+            {
                 try_schedule_die_tick(args.block, args.world, args.position).await;
             }
         })
@@ -115,9 +121,15 @@ impl BlockBehaviour for CoralFanBlock {
 
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if !scan_for_water(args.world, args.position).await && !is_dead_coral(args.block) {
-                let current_state = args.world.get_block_state(args.position);
-
+            let current_state = args.world.get_block_state(args.position);
+            if !scan_for_water_waterlogged(
+                args.block.is_waterlogged(current_state.id),
+                args.world,
+                args.position,
+            )
+            .await
+                && !is_dead_coral(args.block)
+            {
                 let Some(dead_block) = get_dead_type(args.block.id) else {
                     return;
                 };
@@ -172,6 +184,19 @@ impl BlockBehaviour for CoralFanBlock {
                 if !support_block.is_center_solid(BlockDirection::Up) {
                     return BlockStateId::AIR;
                 }
+            }
+
+            // Vanilla CoralFanBlock.updateShape calls tryScheduleDieTick on every neighbor
+            // update after the survival check (CoralFanBlock.java:45-64).
+            if !is_dead_coral(args.block)
+                && !scan_for_water_waterlogged(
+                    args.block.is_waterlogged(args.state_id),
+                    args.world,
+                    args.position,
+                )
+                .await
+            {
+                try_schedule_die_tick(args.block, args.world, args.position).await;
             }
 
             args.state_id
