@@ -3495,7 +3495,15 @@ impl LivingEntity {
                 }
             }
 
-            // Plays the death sound
+            // `CamelHusk.getDeathSound` (`CamelHusk.java:80-83`) is an instance override; the
+            // generic entity-type table has no death-sound entry for it.
+            if let Some(mob) = dyn_self.get_mob()
+                && let Some(sound) = mob.get_death_sound()
+            {
+                world.play_sound(sound, mob.get_sound_source(), &self.entity.pos.load());
+            }
+
+            // Plays the death status
             world.send_entity_status(
                 &self.entity,
                 EntityStatus::Death,

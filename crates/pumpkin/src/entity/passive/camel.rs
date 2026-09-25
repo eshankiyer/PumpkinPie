@@ -3,7 +3,10 @@ use std::sync::{Arc, Weak};
 
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_protocol::java::client::play::Metadata;
 
@@ -103,6 +106,25 @@ impl CamelEntity {
         self.dashing.load(Relaxed)
     }
 
+    fn is_camel_husk(&self) -> bool {
+        self.get_entity().entity_type.id == EntityType::CAMEL_HUSK.id
+    }
+
+    /// `CamelHusk.isFood` (`CamelHusk.java:51-53`).
+    fn is_food(&self, item_stack: &ItemStack) -> bool {
+        self.is_camel_husk() && is_camel_husk_food(item_stack.get_item())
+    }
+
+    /// `CamelHusk.canBeABaby` (`CamelHusk.java:75-78`).
+    fn can_be_a_baby(&self) -> bool {
+        !self.is_camel_husk()
+    }
+
+    /// `CamelHusk` sound overrides (`CamelHusk.java:56-57,81-87,100-127`).
+    pub const fn sound(is_husk: bool, camel: Sound, husk: Sound) -> Sound {
+        if is_husk { husk } else { camel }
+    }
+
     /// `Camel.setDashing` (`Camel.java:323-325`).
     pub fn set_dashing(&self, dashing: bool) {
         self.dashing.store(dashing, Relaxed);
@@ -132,7 +154,40 @@ impl CamelEntity {
     pub fn dash(&self) {
         self.dash_cooldown.store(DASH_COOLDOWN_TICKS, Relaxed);
         self.set_dashing(true);
+        self.get_entity().play_sound(self.dashing_sound());
     }
+
+    fn dashing_sound(&self) -> Sound {
+        Self::sound(
+            self.is_camel_husk(),
+            Sound::EntityCamelDash,
+            Sound::EntityCamelHuskDash,
+        )
+    }
+
+    fn dash_ready_sound(&self) -> Sound {
+        Self::sound(
+            self.is_camel_husk(),
+            Sound::EntityCamelDashReady,
+            Sound::EntityCamelHuskDashReady,
+        )
+    }
+
+    pub const fn sit_down_sound(is_husk: bool) -> Sound {
+        Self::sound(is_husk, Sound::EntityCamelSit, Sound::EntityCamelHuskSit)
+    }
+
+    pub const fn stand_up_sound(is_husk: bool) -> Sound {
+        Self::sound(
+            is_husk,
+            Sound::EntityCamelStand,
+            Sound::EntityCamelHuskStand,
+        )
+    }
+}
+
+fn is_camel_husk_food(item: &Item) -> bool {
+    item.has_tag(&tag::Item::MINECRAFT_CAMEL_HUSK_FOOD)
 }
 
 impl NBTStorage for CamelEntity {}
@@ -140,6 +195,26 @@ impl NBTStorage for CamelEntity {}
 impl Mob for CamelEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        // `Camel.getHurtSound`/`CamelHusk.getHurtSound` (`Camel.java:361-364`;
+        // `CamelHusk.java:85-88`).
+        Some(Self::sound(
+            self.is_camel_husk(),
+            Sound::EntityCamelHurt,
+            Sound::EntityCamelHuskHurt,
+        ))
+    }
+
+    fn get_death_sound(&self) -> Option<Sound> {
+        // `Camel.getDeathSound`/`CamelHusk.getDeathSound` (`Camel.java:356-359`;
+        // `CamelHusk.java:80-83`).
+        Some(Self::sound(
+            self.is_camel_husk(),
+            Sound::EntityCamelDeath,
+            Sound::EntityCamelHuskDeath,
+        ))
     }
 
     /// `AbstractHorse.getControllingPassenger` (`AbstractHorse.java:961-962`), which Camel
@@ -167,6 +242,12 @@ impl Mob for CamelEntity {
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
+            if self.is_camel_husk() {
+                // `CamelHusk.interact` (`CamelHusk.java:40-43`) makes a husk persistent on any
+                // interaction before dispatching to `Camel.mobInteract`.
+                self.set_persistence_required();
+            }
+
             if self
                 .mob_entity
                 .mob_interact(player, item_stack, self.can_be_leashed())
@@ -175,8 +256,20 @@ impl Mob for CamelEntity {
                 return true;
             }
 
+            if self.is_food(item_stack) {
+                let living = &self.mob_entity.living_entity;
+                if living.health.load() < living.get_max_health() {
+                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                    living.heal(2.0);
+                    // `Camel.handleEating`/`CamelHusk.getEatingSound` (`Camel.java:421-467`;
+                    // `CamelHusk.java:109-112`).
+                    self.get_entity().play_sound(Sound::EntityCamelHuskEat);
+                }
+                return true;
+            }
+
             // `Camel.java:400`: a baby camel never rides and never equips.
-            if self.is_baby() {
+            if self.can_be_a_baby() && self.is_baby() {
                 return false;
             }
 
@@ -203,7 +296,7 @@ impl Mob for CamelEntity {
             // Re-sends `BABY_ID` (dropped by overriding `mob_init_data_tracker`), matching the
             // blanket `Mob` `EntityBase` impl's default behavior (`mob/mod.rs`) -- same reason
             // `CatEntity` re-sends it manually.
-            if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
+            if self.can_be_a_baby() && entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
                 entity.send_meta_data(&[Metadata::new(tracked_data::camel::BABY_ID, true)], None);
             }
             entity.send_meta_data(&[Metadata::new(tracked_data::camel::DASH, false)], None);
@@ -228,8 +321,38 @@ impl Mob for CamelEntity {
             }
 
             if cooldown > 0 {
+                if cooldown == 1 {
+                    self.get_entity().play_sound(self.dash_ready_sound());
+                }
                 self.dash_cooldown.store(cooldown - 1, Relaxed);
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CamelEntity, is_camel_husk_food};
+    use pumpkin_data::{item::Item, sound::Sound};
+
+    #[test]
+    fn camel_husk_food_is_rabbit_foot_only() {
+        // `CamelHusk.isFood` (`CamelHusk.java:51-53`) uses `#camel_husk_food`.
+        assert!(is_camel_husk_food(&Item::RABBIT_FOOT));
+        assert!(!is_camel_husk_food(&Item::CACTUS));
+    }
+
+    #[test]
+    fn camel_husk_uses_its_overridden_sounds() {
+        // `CamelHusk` sound overrides (`CamelHusk.java:56-57,81-87,100-127`).
+        assert_eq!(
+            CamelEntity::sound(true, Sound::EntityCamelDash, Sound::EntityCamelHuskDash),
+            Sound::EntityCamelHuskDash
+        );
+        assert_eq!(CamelEntity::sit_down_sound(true), Sound::EntityCamelHuskSit);
+        assert_eq!(
+            CamelEntity::stand_up_sound(true),
+            Sound::EntityCamelHuskStand
+        );
     }
 }

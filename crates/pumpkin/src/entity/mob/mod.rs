@@ -159,6 +159,9 @@ const fn is_animal_entity(id: u16) -> bool {
         || id == EntityType::AXOLOTL.id
         || id == EntityType::BEE.id
         || id == EntityType::CAMEL.id
+        // `CamelHusk` extends `Camel`, and therefore inherits `Animal.getAmbientSoundInterval`
+        // (`CamelHusk.java:24-27`; `Animal.java:121-124`).
+        || id == EntityType::CAMEL_HUSK.id
         || id == EntityType::CAT.id
         || id == EntityType::CHICKEN.id
         || id == EntityType::COW.id
@@ -1666,6 +1669,15 @@ pub trait Mob: EntityBase + Send + Sync {
     /// idle sound. The base `Mob.baseTick` roll still happens for those mobs; it just makes no
     /// sound, so a mob without an entry here stays silent rather than borrowing another's.
     fn get_ambient_sound(&self) -> Option<Sound> {
+        let id = self.get_entity().entity_type.id;
+        // `Camel.getAmbientSound`/`CamelHusk.getAmbientSound` (`Camel.java:351-353`;
+        // `CamelHusk.java:55-58`).
+        if id == pumpkin_data::entity::EntityType::CAMEL.id {
+            return Some(Sound::EntityCamelAmbient);
+        }
+        if id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+            return Some(Sound::EntityCamelHuskAmbient);
+        }
         None
     }
 
@@ -1690,6 +1702,29 @@ pub trait Mob: EntityBase + Send + Sync {
     /// server-visible part for horse-family entities.
     fn get_step_sound(&self) -> Option<Sound> {
         let entity_type = self.get_entity().entity_type;
+        if entity_type.id == pumpkin_data::entity::EntityType::CAMEL.id
+            || entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id
+        {
+            // `Camel.playStepSound`/`CamelHusk.playStepSound` (`Camel.java:366-372`;
+            // `CamelHusk.java:90-97`).
+            let entity = self.get_entity();
+            let sand = entity
+                .world
+                .load()
+                .get_block(&entity.block_pos.load().down())
+                .has_tag(&pumpkin_data::tag::Block::MINECRAFT_CAMEL_SAND_STEP_SOUND_BLOCKS);
+            return Some(if sand {
+                if entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+                    Sound::EntityCamelHuskStepSand
+                } else {
+                    Sound::EntityCamelStepSand
+                }
+            } else if entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+                Sound::EntityCamelHuskStep
+            } else {
+                Sound::EntityCamelStep
+            });
+        }
         let is_horse = matches!(
             entity_type.id,
             id if id == pumpkin_data::entity::EntityType::HORSE.id
@@ -1731,6 +1766,12 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Only mobs whose hurt sound depends on instance state override this, e.g. the copper
     /// golem's oxidation stage (`CopperGolem.getHurtSound`, `CopperGolem.java:389-391`).
     fn get_hurt_sound(&self) -> Option<Sound> {
+        None
+    }
+
+    /// Instance-specific death sound override, consumed by `LivingEntity.on_death`. The Camel
+    /// implementation follows `CamelHusk.getDeathSound` (`CamelHusk.java:80-83`).
+    fn get_death_sound(&self) -> Option<Sound> {
         None
     }
 
@@ -1936,6 +1977,10 @@ pub trait Mob: EntityBase + Send + Sync {
         let category = self.get_entity().entity_type.category;
         let mob_entity = self.get_mob_entity();
         match self.get_entity().entity_type.id {
+            id if id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id => {
+                // `CamelHusk.removeWhenFarAway` (`CamelHusk.java:29-32`).
+                true
+            }
             // Cat.java: untamed cats become removable after 120 seconds.
             id if id == pumpkin_data::entity::EntityType::CAT.id => {
                 !mob_entity.is_tamed() && mob_entity.tick_count.load(Relaxed) > 2400
@@ -2101,6 +2146,10 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.chargeSpeedModifier` (`Mob.java:1480`) scales the mounted spear
     /// approach/reposition speeds; the base mob has no modifier.
     fn charge_speed_modifier(&self) -> f32 {
+        if self.get_entity().entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+            // `CamelHusk.chargeSpeedModifier` (`CamelHusk.java:129-132`).
+            return 4.0;
+        }
         1.0
     }
 
@@ -2518,6 +2567,18 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.canBeLeashed`: whether a lead can be attached to this mob at all.
     /// Defaults to `true`; species that are never leashable (e.g. Turtle) override this.
     fn can_be_leashed(&self) -> bool {
+        if self.get_entity().entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+            // `CamelHusk.canBeLeashed` (`CamelHusk.java:45-48`) checks the first passenger.
+            return self
+                .get_entity()
+                .passengers
+                .try_lock()
+                .is_ok_and(|passengers| {
+                    !passengers
+                        .first()
+                        .is_some_and(|passenger| passenger.get_mob().is_some())
+                });
+        }
         true
     }
 
@@ -2929,12 +2990,17 @@ pub trait Mob: EntityBase + Send + Sync {
 
     /// Species-specific gate used by the generic animal breeding goal.
     fn can_breed(&self) -> bool {
+        if self.get_entity().entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+            // `CamelHusk.canMate`/`canFallInLove` (`CamelHusk.java:60-73`).
+            return false;
+        }
         true
     }
 
     /// Species-specific partner gate used by the generic animal breeding goal.
     fn can_breed_with(&self, _mate: &dyn EntityBase) -> bool {
-        true
+        // `CamelHusk.canMate` (`CamelHusk.java:60-63`) rejects every partner.
+        self.get_entity().entity_type.id != pumpkin_data::entity::EntityType::CAMEL_HUSK.id
     }
 
     /// Vanilla `Animal.getBreedOffspring`: builds the baby entity to spawn after a successful
@@ -2947,6 +3013,10 @@ pub trait Mob: EntityBase + Send + Sync {
         world: &'a Arc<World>,
     ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
         Box::pin(async move {
+            if self.get_entity().entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+                // `CamelHusk.getBreedOffspring` (`CamelHusk.java:65-68`) returns null.
+                return None;
+            }
             let entity = self.get_entity();
             Some(crate::entity::r#type::from_type(
                 entity.entity_type,
