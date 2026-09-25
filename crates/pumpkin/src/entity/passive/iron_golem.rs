@@ -321,3 +321,31 @@ impl Mob for IronGolemEntity {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Crackiness, attack_damage_roll, golem_crackiness};
+
+    #[test]
+    fn crackiness_tiers_match_golem_thresholds() {
+        assert_eq!(golem_crackiness(100.0, 100.0), Crackiness::None);
+        assert_eq!(golem_crackiness(75.0, 100.0), Crackiness::None);
+        assert_eq!(golem_crackiness(74.0, 100.0), Crackiness::Low);
+        assert_eq!(golem_crackiness(50.0, 100.0), Crackiness::Low);
+        assert_eq!(golem_crackiness(49.0, 100.0), Crackiness::Medium);
+        assert_eq!(golem_crackiness(25.0, 100.0), Crackiness::Medium);
+        assert_eq!(golem_crackiness(24.0, 100.0), Crackiness::High);
+    }
+
+    #[test]
+    fn damage_roll_adds_half_base_to_the_roll() {
+        assert_eq!(attack_damage_roll(15.0, 0), 7.5);
+        assert_eq!(attack_damage_roll(15.0, 14), 21.5);
+    }
+
+    #[test]
+    fn non_positive_base_damage_is_flat() {
+        assert_eq!(attack_damage_roll(0.0, 0), 0.0);
+        assert_eq!(attack_damage_roll(0.5, 3), 0.5);
+    }
+}

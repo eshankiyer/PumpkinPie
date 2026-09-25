@@ -13,7 +13,8 @@ use pumpkin_world::{tick::TickPriority, world::BlockFlags};
 use crate::{
     block::{
         BlockBehaviour, BrokenArgs, GetInsideCollisionShapeArgs, GetStateForNeighborUpdateArgs,
-        OnEntityCollisionArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+        OnEntityCollisionArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs,
+        PlayerWillDestroyArgs, PlacedArgs,
     },
     world::game_event::{GameEventContext, emit_game_event},
     world::World,
@@ -118,6 +119,29 @@ impl BlockBehaviour for TripwireBlock {
                 GameEventContext::of_entity(args.player.clone()),
             );
             // TODO: Deduct 1 durability from held shears (skip in Creative mode).
+        }
+    }
+
+    /// `TripWireBlock.playerWillDestroy` (`TripWireBlock.java:115-122`) marks the wire disarmed
+    /// and emits `SHEAR` before the generic destroy path removes it.
+    fn player_will_destroy(&self, args: PlayerWillDestroyArgs<'_>) {
+        let has_shears = args.player.inventory().held_item().get_item() == &Item::SHEARS;
+        if has_shears {
+            let mut props = TripwireProperties::from_state_id(args.state.id, args.block);
+            props.disarmed = true;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::empty(),
+            );
+            // `LevelAccessor.gameEvent(Entity, Holder<GameEvent>, BlockPos)`
+            // (`LevelAccessor.java:94-99`) emits at the block center.
+            emit_game_event(
+                args.world,
+                GameEvent::Shear,
+                args.position.to_centered_f64(),
+                GameEventContext::of_entity(args.player.clone()),
+            );
         }
     }
 

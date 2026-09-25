@@ -151,6 +151,30 @@ pub trait Slot: Send + Sync {
         self.can_insert(&self.get_cloned_stack()) && self.can_take_items(player)
     }
 
+    /// Called when an item is taken from this slot, for achievement/stat tracking.
+    ///
+    /// Mojang name: `checkTakeAchievements`
+    fn check_take_achievements(&self, _stack: &ItemStack) {}
+
+    /// Whether this slot is a fake/recipe-book slot.
+    ///
+    /// Mojang name: `isFake`
+    fn is_fake(&self) -> bool {
+        false
+    }
+
+    /// Whether this slot can be highlighted by the recipe book.
+    ///
+    /// Mojang name: `isHighlightable`
+    fn is_highlightable(&self) -> bool {
+        true
+    }
+
+    /// Called when items are swapped in a crafting grid.
+    ///
+    /// Mojang name: `onSwapCraft`
+    fn on_swap_craft(&self, _count: i32) {}
+
     /// Tries to take a stack in the given range.
     ///
     /// Returns `None` if can't take items or if slot is empty.

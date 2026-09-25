@@ -1,0 +1,30 @@
+[
+  {
+    "file": "crates/pumpkin/src/entity/ai/goal/melee_attack.rs",
+    "lost_prod_fns": [
+      "trim_cauldron_path"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/block/blocks/dragon_egg.rs",
+    "lost_prod_fns": [
+      "attack"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/world/mod.rs",
+    "lost_prod_fns": [
+      "ray_collision_check"
+    ],
+    "lost_test_fns": []
+  },
+  {
+    "file": "crates/pumpkin/src/entity/ai/goal/offer_flower.rs",
+    "lost_prod_fns": [
+      "find_candidate"
+    ],
+    "lost_test_fns": []
+  }
+]
