@@ -41,7 +41,7 @@ async fn unpack_shulker_loot(entity: &Arc<dyn BlockEntity>) {
     };
     // `RandomizableContainerBlockEntity.createMenu` (`RandomizableContainerBlockEntity.java:84-87`)
     // unpacks deferred loot immediately before creating the menu.
-    crate::world::loot::fill_chest_inventory(&inventory, table, seed).await;
+    crate::world::loot::fill_chest_inventory(inventory.as_ref(), table, seed).await;
     inventory.mark_dirty();
 }
 

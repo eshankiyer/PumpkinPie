@@ -303,7 +303,7 @@ async fn unpack_chest_loot(entity: &Arc<dyn BlockEntity>) {
         && let Some(table) = get_chest_loot_table(&loot_key)
         && let Some(inventory) = entity.clone().get_inventory()
     {
-        fill_chest_inventory(&inventory, table, seed).await;
+        fill_chest_inventory(inventory.as_ref(), table, seed).await;
         inventory.mark_dirty();
     }
 }

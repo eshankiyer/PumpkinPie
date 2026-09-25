@@ -49,7 +49,7 @@ use pumpkin_protocol::{
         server::play::SlotActionType,
     },
 };
-use pumpkin_util::{math::boundingbox::BoundingBox, text::TextComponent};
+use pumpkin_util::text::TextComponent;
 use pumpkin_world::{
     block::entities::PropertyDelegate,
     inventory::{ComparableInventory, Inventory},
@@ -156,7 +156,7 @@ pub type PlayerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// Pumpkin has no stable block-entity identity to compare against here, so the second
 /// family is modelled as [`ContainerAccess::RangeOnly`]; the "block entity replaced"
 /// half is covered separately by `World::close_container_screens_at`. Entity-backed menus use
-/// [`ContainerAccess::Entity`] and retain the entity bounding box instead.
+/// [`ContainerAccess::Entity`] and resolve the container entity by id instead.
 #[derive(Clone, Copy)]
 pub enum ContainerAccess {
     /// The menu has no backing world position and is never invalidated by movement
@@ -173,9 +173,9 @@ pub enum ContainerAccess {
     /// (`AbstractContainerMenu.java:93-95`) and `ItemCombinerMenu.isValidBlock`
     /// (`ItemCombinerMenu.java:32`, `AnvilMenu.java:65-67`, `SmithingMenu.java:66-68`).
     Block(fn(&Block) -> bool),
-    /// Entity bounding-box range check for menus opened by a vehicle or other entity
-    /// (`ContainerEntity.java:168-170`).
-    Entity(BoundingBox),
+    /// The container entity with this id must not be removed, and the player must be in range
+    /// of its current bounding box (`ContainerEntity.java:168-170`).
+    Entity(i32),
 }
 
 impl ContainerAccess {
@@ -1653,12 +1653,8 @@ mod container_access_tests {
 
     #[test]
     fn entity_family_does_not_require_a_block_position() {
-        let access = ContainerAccess::Entity(
-            pumpkin_util::math::boundingbox::BoundingBox::from_block_raw(
-                &pumpkin_util::math::position::BlockPos::ZERO,
-            ),
-        );
-        // `ContainerEntity.isChestVehicleStillValid` uses the entity box directly
+        let access = ContainerAccess::Entity(0);
+        // `ContainerEntity.isChestVehicleStillValid` checks the entity, not a block
         // (`ContainerEntity.java:168-170`).
         assert!(access.requires_position());
         assert!(access.accepts_block(&Block::STONE));

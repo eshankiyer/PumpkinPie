@@ -606,6 +606,7 @@ macro_rules! impl_block_entity_for_cooking {
                 })
             }
 
+            /// `AbstractFurnaceBlockEntity.preRemoveSideEffects` (`AbstractFurnaceBlockEntity.java:376-381`)
             fn on_block_replaced<'a>(
                 self: Arc<Self>,
                 world: Arc<$crate::world::World>,
@@ -617,9 +618,9 @@ macro_rules! impl_block_entity_for_cooking {
                 Box::pin(async move {
                     // The furnace calls its superclass side effects first, then awards pending
                     // recipe XP before the entity is removed
-                    // (`AbstractFurnaceBlockEntity.java:375-380`); `World::set_block_state_internal`
+                    // (`AbstractFurnaceBlockEntity.java:376-381`); `World::set_block_state_internal`
                     // reaches this hook before removal.
-                    if let Some(inventory) = self.get_inventory() {
+                    if let Some(inventory) = self.clone().get_inventory() {
                         world.scatter_inventory(&position, &inventory).await;
                     }
 
@@ -627,7 +628,7 @@ macro_rules! impl_block_entity_for_cooking {
                     if experience > 0 {
                         $crate::entity::experience_orb::ExperienceOrbEntity::spawn(
                             &world,
-                            position.to_f64(),
+                            position.to_centered_f64(),
                             experience as u32,
                         )
                         .await;

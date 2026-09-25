@@ -8797,13 +8797,21 @@ impl InventoryPlayer for Player {
     /// the position the menu was opened against must still satisfy the menu's predicate, and
     /// the player must still be within `blockInteractionRange() + 4.0` of it
     /// (`Player.java:2014-2016`) - measured eye to block AABB, not the flat 8 blocks an
-    /// older note claimed.
+    /// older note claimed. Entity menus use `ContainerEntity.isChestVehicleStillValid`
+    /// (`ContainerEntity.java:168-170`).
     fn evaluate_container_access(&self, access: ContainerAccess) -> bool {
-        if let ContainerAccess::Entity(bounds) = access {
+        if let ContainerAccess::Entity(entity_id) = access {
             // `ContainerEntity.isChestVehicleStillValid` uses the entity bounding box and a
             // four-block additional range (`ContainerEntity.java:168-170`).
-            return !self.get_entity().is_removed()
-                && self.is_within_entity_interaction_range(bounds, 4.0);
+            return self
+                .world()
+                .get_entity_by_id(entity_id)
+                .is_some_and(|container| {
+                    let container = container.get_entity();
+                    !container.is_removed()
+                        && self
+                            .is_within_entity_interaction_range(container.bounding_box.load(), 4.0)
+                });
         }
         if !access.requires_position() {
             return true;

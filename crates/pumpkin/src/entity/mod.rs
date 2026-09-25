@@ -5873,8 +5873,10 @@ impl Entity {
         )
     }
 
-    fn chest_boat_passenger_offset(resource_name: &str) -> f64 {
-        if resource_name.ends_with("_chest_boat") || resource_name == "minecraft:bamboo_chest_raft"
+    /// `AbstractChestBoat.getSinglePassengerXOffset` (`AbstractChestBoat.java:42-45`)
+    fn chest_boat_passenger_offset(entity_type: &EntityType) -> f64 {
+        if entity_type.id == EntityType::BAMBOO_CHEST_RAFT.id
+            || entity_type.resource_name.ends_with("_chest_boat")
         {
             0.15
         } else {
@@ -5908,7 +5910,7 @@ impl Entity {
         // `AbstractChestBoat.getSinglePassengerXOffset` supplies the longitudinal seat offset
         // used by `AbstractBoat.getPassengerAttachmentPoint`
         // (`AbstractChestBoat.java:42-45`; `AbstractBoat.java:135-151`).
-        let longitudinal = chest_boat_passenger_offset(self.entity_type.resource_name);
+        let longitudinal = Self::chest_boat_passenger_offset(self.entity_type);
         let position = Vector3::new(
             vehicle_position.x + lateral * yaw.cos() - longitudinal * yaw.sin(),
             vehicle_position.y + vehicle_height,
@@ -7182,7 +7184,7 @@ mod entity_hook_tests {
 
 #[cfg(test)]
 mod passenger_count_tests {
-    use super::{Entity, exactly_one_player_passenger};
+    use super::{Entity, EntityType, exactly_one_player_passenger};
 
     #[test]
     fn only_one_player_passenger_qualifies_for_parent_vehicle_save() {
@@ -7198,15 +7200,19 @@ mod passenger_count_tests {
         // `AbstractChestBoat.getSinglePassengerXOffset` is 0.15, while the abstract boat
         // default is 0 (`AbstractChestBoat.java:42-45`; `AbstractBoat.java:611-613`).
         assert_eq!(
-            Entity::chest_boat_passenger_offset("minecraft:oak_chest_boat"),
+            Entity::chest_boat_passenger_offset(&EntityType::OAK_CHEST_BOAT),
             0.15
         );
         assert_eq!(
-            Entity::chest_boat_passenger_offset("minecraft:bamboo_chest_raft"),
+            Entity::chest_boat_passenger_offset(&EntityType::BAMBOO_CHEST_RAFT),
             0.15
         );
         assert_eq!(
-            Entity::chest_boat_passenger_offset("minecraft:oak_boat"),
+            Entity::chest_boat_passenger_offset(&EntityType::OAK_BOAT),
+            0.0
+        );
+        assert_eq!(
+            Entity::chest_boat_passenger_offset(&EntityType::BAMBOO_RAFT),
             0.0
         );
     }

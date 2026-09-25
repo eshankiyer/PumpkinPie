@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_inventory::generic_container_screen_handler::{create_generic_9x3, create_hopper};
@@ -27,8 +27,10 @@ pub struct MinecartInventory {
     drops_claimed: AtomicBool,
     // A live chest-vehicle close emits at the entity position
     // (`AbstractChestBoat.java:197-199`).
-    close_event: Mutex<Option<(Arc<World>, Vector3<f64>)>>,
+    close_event: Mutex<Option<CloseEventSource>>,
 }
+
+type CloseEventSource = (Weak<World>, i32, Vector3<f64>);
 
 impl MinecartInventory {
     pub fn new(size: usize) -> Self {
@@ -91,10 +93,9 @@ impl MinecartInventory {
         fill_chest_inventory(self, table, seed).await;
     }
 
-    async fn set_close_event(&self, world: Arc<World>, position: Vector3<f64>) {
-        // Store the event source until the shared container handler closes
-        // (`AbstractChestBoat.java:197-199`).
-        *self.close_event.lock().await = Some((world, position));
+    /// `MinecartChest.stopOpen` (`MinecartChest.java:59-62`)
+    async fn set_close_event(&self, world: &Arc<World>, entity_id: i32, position: Vector3<f64>) {
+        *self.close_event.lock().await = Some((Arc::downgrade(world), entity_id, position));
     }
 }
 
@@ -138,20 +139,26 @@ impl Inventory for MinecartInventory {
         })
     }
 
+    /// `AbstractChestBoat.stopOpen` (`AbstractChestBoat.java:196-199`)
     fn on_close(&self) -> InventoryFuture<'_, ()> {
         Box::pin(async move {
-            // `AbstractChestBoat.stopOpen` emits CONTAINER_CLOSE when the menu is removed
-            // (`AbstractChestBoat.java:197-199`); the generic screen handler calls this inventory
-            // hook on every live chest-vehicle close.
-            if let Some((world, position)) = self.close_event.lock().await.take() {
-                game_event::emit_game_event(
-                    &world,
-                    pumpkin_data::game_event::GameEvent::ContainerClose,
-                    position,
-                    game_event::GameEventContext::none(),
-                )
-                .await;
-            }
+            let source = self.close_event.lock().await.clone();
+            let Some((world, entity_id, last_position)) = source else {
+                return;
+            };
+            let Some(world) = world.upgrade() else {
+                return;
+            };
+            let position = world
+                .get_entity_by_id(entity_id)
+                .map_or(last_position, |entity| entity.get_entity().pos.load());
+            game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::ContainerClose,
+                position,
+                game_event::GameEventContext::none(),
+            )
+            .await;
         })
     }
 
@@ -178,12 +185,13 @@ struct MinecartScreenFactory {
     inventory: Arc<MinecartInventory>,
     title: TextComponent,
     hopper: bool,
-    // The entity-backed still-valid check uses the entity bounding box
+    // The entity-backed still-valid check resolves the container entity
     // (`ContainerEntity.java:168-170`).
-    entity_bounds: pumpkin_util::math::boundingbox::BoundingBox,
+    entity_id: i32,
 }
 
 impl ScreenHandlerFactory for MinecartScreenFactory {
+    /// `ContainerEntity.isChestVehicleStillValid` (`ContainerEntity.java:168-170`)
     fn create_screen_handler<'a>(
         &'a self,
         sync_id: u8,
@@ -199,7 +207,7 @@ impl ScreenHandlerFactory for MinecartScreenFactory {
             };
             // `ContainerEntity.isChestVehicleStillValid` checks the live entity bounding box
             // (`ContainerEntity.java:168-170`), not a block position.
-            handler.set_container_access(ContainerAccess::Entity(self.entity_bounds));
+            handler.set_container_access(ContainerAccess::Entity(self.entity_id));
             Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
         })
     }
@@ -209,6 +217,7 @@ impl ScreenHandlerFactory for MinecartScreenFactory {
     }
 }
 
+/// `ContainerEntity.interactWithContainerVehicle` (`ContainerEntity.java:88-91`)
 pub async fn open(
     entity: &Entity,
     player: &Arc<Player>,
@@ -229,17 +238,21 @@ pub async fn open(
                 inventory: inventory.clone(),
                 title: entity.custom_name.load().as_ref().clone().unwrap_or(title),
                 hopper,
-                entity_bounds: entity.bounding_box.load(),
+                entity_id: entity.entity_id,
             },
             None,
         )
         .await
         .is_some();
-    if opened {
+    if opened && !hopper {
         // `AbstractChestBoat.stopOpen` uses the entity position for the close event
         // (`AbstractChestBoat.java:197-199`).
         inventory
-            .set_close_event(entity.world.load_full(), entity.pos.load())
+            .set_close_event(
+                &entity.world.load_full(),
+                entity.entity_id,
+                entity.pos.load(),
+            )
             .await;
     }
     opened
