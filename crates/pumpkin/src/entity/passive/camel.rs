@@ -121,6 +121,7 @@ impl CamelEntity {
     }
 
     /// `CamelHusk` sound overrides (`CamelHusk.java:56-57,81-87,100-127`).
+    #[must_use]
     pub const fn sound(is_husk: bool, camel: Sound, husk: Sound) -> Sound {
         if is_husk { husk } else { camel }
     }
@@ -148,21 +149,12 @@ impl CamelEntity {
         is_valid_saddle_item(&saddle, self.get_entity().entity_type)
     }
 
-    /// `Camel.dash` (`Camel.java:312-316`): sets the cooldown and the dashing flag. Nothing
-    /// currently calls this (see the struct doc), but it's kept ready for the future rider-input
-    /// path.
+    /// `Camel.executeRidersJump` (`Camel.java:314-315`): sets the cooldown and the dashing flag.
+    /// Nothing currently calls this (see the struct doc), but it's kept ready for the future
+    /// rider-input path.
     pub fn dash(&self) {
         self.dash_cooldown.store(DASH_COOLDOWN_TICKS, Relaxed);
         self.set_dashing(true);
-        self.get_entity().play_sound(self.dashing_sound());
-    }
-
-    fn dashing_sound(&self) -> Sound {
-        Self::sound(
-            self.is_camel_husk(),
-            Sound::EntityCamelDash,
-            Sound::EntityCamelHuskDash,
-        )
     }
 
     fn dash_ready_sound(&self) -> Sound {
@@ -173,10 +165,12 @@ impl CamelEntity {
         )
     }
 
+    #[must_use]
     pub const fn sit_down_sound(is_husk: bool) -> Sound {
         Self::sound(is_husk, Sound::EntityCamelSit, Sound::EntityCamelHuskSit)
     }
 
+    #[must_use]
     pub const fn stand_up_sound(is_husk: bool) -> Sound {
         Self::sound(
             is_husk,
@@ -207,28 +201,18 @@ impl Mob for CamelEntity {
         ))
     }
 
-    fn get_death_sound(&self) -> Option<Sound> {
-        // `Camel.getDeathSound`/`CamelHusk.getDeathSound` (`Camel.java:356-359`;
-        // `CamelHusk.java:80-83`).
-        Some(Self::sound(
-            self.is_camel_husk(),
-            Sound::EntityCamelDeath,
-            Sound::EntityCamelHuskDeath,
-        ))
-    }
-
     /// `AbstractHorse.getControllingPassenger` (`AbstractHorse.java:961-962`), which Camel
     /// inherits unchanged: a saddled camel is controlled by its first player passenger.
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move {
             if !self.is_saddled().await {
-                return Mob::has_controlling_passenger(self).await;
+                return self.default_has_controlling_passenger().await;
             }
             let passenger = self.get_entity().passengers.lock().await.first().cloned();
             if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
                 return true;
             }
-            Mob::has_controlling_passenger(self).await
+            self.default_has_controlling_passenger().await
         })
     }
 
@@ -258,13 +242,24 @@ impl Mob for CamelEntity {
 
             if self.is_food(item_stack) {
                 let living = &self.mob_entity.living_entity;
-                if living.health.load() < living.get_max_health() {
-                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                    living.heal(2.0);
-                    // `Camel.handleEating`/`CamelHusk.getEatingSound` (`Camel.java:421-467`;
-                    // `CamelHusk.java:109-112`).
-                    self.get_entity().play_sound(Sound::EntityCamelHuskEat);
+                if living.health.load() >= living.get_max_health() {
+                    return false;
                 }
+                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                living.heal(2.0);
+                // `Camel.handleEating`/`CamelHusk.getEatingSound` (`Camel.java:421-467`;
+                // `CamelHusk.java:109-112`).
+                let entity = self.get_entity();
+                if !entity.is_silent() {
+                    entity.world.load().play_sound_fine(
+                        Sound::EntityCamelHuskEat,
+                        self.get_sound_source(),
+                        &entity.pos.load(),
+                        1.0,
+                        (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.2, 1.0),
+                    );
+                }
+                self.mob_entity.ate().await;
                 return true;
             }
 

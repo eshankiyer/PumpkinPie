@@ -3495,15 +3495,7 @@ impl LivingEntity {
                 }
             }
 
-            // `CamelHusk.getDeathSound` (`CamelHusk.java:80-83`) is an instance override; the
-            // generic entity-type table has no death-sound entry for it.
-            if let Some(mob) = dyn_self.get_mob()
-                && let Some(sound) = mob.get_death_sound()
-            {
-                world.play_sound(sound, mob.get_sound_source(), &self.entity.pos.load());
-            }
-
-            // Plays the death status
+            // Plays the death sound
             world.send_entity_status(
                 &self.entity,
                 EntityStatus::Death,
@@ -5201,15 +5193,17 @@ impl LivingEntity {
                 pitch,
             );
         } else if on_ground && !supporting_state.is_air() {
-            let (sound, volume, pitch) =
-                caller.get_mob().and_then(Mob::get_step_sound).map_or_else(
-                    || {
-                        let (sound, _, sound_volume, sound_pitch) =
-                            crate::block::block_sound_type(supporting_block);
-                        (sound, 0.15 * sound_volume, sound_pitch)
-                    },
-                    |sound| (sound, 0.15, 1.0),
-                );
+            let (sound, volume, pitch) = caller
+                .get_mob()
+                .and_then(|mob| {
+                    mob.get_step_sound()
+                        .map(|sound| (sound, mob.get_step_sound_volume(), 1.0))
+                })
+                .unwrap_or_else(|| {
+                    let (sound, _, sound_volume, sound_pitch) =
+                        crate::block::block_sound_type(supporting_block);
+                    (sound, 0.15 * sound_volume, sound_pitch)
+                });
             // `vibrationAndSoundEffectsFromBlock` only calls `walkingStepSound` ->
             // `playStepSound` when `onGround() || climbable || (crouching && no vertical
             // movement) || onRails()` (Entity.java:993-994); this checks only the common

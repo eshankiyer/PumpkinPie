@@ -159,9 +159,6 @@ const fn is_animal_entity(id: u16) -> bool {
         || id == EntityType::AXOLOTL.id
         || id == EntityType::BEE.id
         || id == EntityType::CAMEL.id
-        // `CamelHusk` extends `Camel`, and therefore inherits `Animal.getAmbientSoundInterval`
-        // (`CamelHusk.java:24-27`; `Animal.java:121-124`).
-        || id == EntityType::CAMEL_HUSK.id
         || id == EntityType::CAT.id
         || id == EntityType::CHICKEN.id
         || id == EntityType::COW.id
@@ -1753,6 +1750,18 @@ pub trait Mob: EntityBase + Send + Sync {
         }
     }
 
+    /// `Camel.playStepSound` (`Camel.java:366-373`) and `CamelHusk.playStepSound` (`CamelHusk.java:90-97`)
+    fn get_step_sound_volume(&self) -> f32 {
+        let id = self.get_entity().entity_type.id;
+        if id == pumpkin_data::entity::EntityType::CAMEL.id {
+            1.0
+        } else if id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
+            0.4
+        } else {
+            0.15
+        }
+    }
+
     /// Vanilla `LivingEntity.getVoicePitch` is consumed by `makeSound` for mob sounds
     /// (`LivingEntity.java:1431-1434, 2321-2325`).
     fn get_sound_pitch(&self) -> f32 {
@@ -1769,12 +1778,6 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
-    /// Instance-specific death sound override, consumed by `LivingEntity.on_death`. The Camel
-    /// implementation follows `CamelHusk.getDeathSound` (`CamelHusk.java:80-83`).
-    fn get_death_sound(&self) -> Option<Sound> {
-        None
-    }
-
     /// Vanilla `Mob.getLootTableSeed` returns the saved seed used by entity loot generation
     /// (`Mob.java:418-424`; `LivingEntity.java:1536-1538, 1577-1578`).
     fn get_loot_table_seed(&self) -> i64 {
@@ -1783,8 +1786,14 @@ pub trait Mob: EntityBase + Send + Sync {
 
     /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276), with the
     /// `AbstractGolem` override (`AbstractGolem.java:29-31`) for every concrete golem.
+    /// `AbstractHorse.getAmbientSoundInterval` (`AbstractHorse.java:401-404`) for camels.
     fn get_ambient_sound_interval(&self) -> i32 {
         match self.get_entity().entity_type.id {
+            id if id == pumpkin_data::entity::EntityType::CAMEL.id
+                || id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id =>
+            {
+                400
+            }
             id if id == pumpkin_data::entity::EntityType::IRON_GOLEM.id
                 || id == pumpkin_data::entity::EntityType::SNOW_GOLEM.id
                 || id == pumpkin_data::entity::EntityType::COPPER_GOLEM.id =>
@@ -2566,15 +2575,15 @@ pub trait Mob: EntityBase + Send + Sync {
 
     /// Vanilla `Mob.canBeLeashed`: whether a lead can be attached to this mob at all.
     /// Defaults to `true`; species that are never leashable (e.g. Turtle) override this.
+    /// `CamelHusk.canBeLeashed` (`CamelHusk.java:45-48`)
     fn can_be_leashed(&self) -> bool {
         if self.get_entity().entity_type.id == pumpkin_data::entity::EntityType::CAMEL_HUSK.id {
-            // `CamelHusk.canBeLeashed` (`CamelHusk.java:45-48`) checks the first passenger.
-            return self
+            return !self
                 .get_entity()
                 .passengers
                 .try_lock()
                 .is_ok_and(|passengers| {
-                    !passengers
+                    passengers
                         .first()
                         .is_some_and(|passenger| passenger.get_mob().is_some())
                 });

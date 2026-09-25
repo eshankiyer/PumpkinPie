@@ -83,6 +83,7 @@ pub(crate) fn saddle_equip_on_interact(stack: &ItemStack, entity_type: &EntityTy
         })
 }
 
+/// `Camel.getEquipSound` (`Camel.java:634-641`)
 pub(crate) async fn equip_saddle_item(
     mob_entity: &MobEntity,
     player: &Arc<Player>,
@@ -104,6 +105,8 @@ pub(crate) async fn equip_saddle_item(
         // `AbstractHorse.getEquipSound` (`AbstractHorse.java:315-317`) returns the horse saddle
         // sound for the saddle slot, even when the item's equippable component has another sound.
         IdOr::Id(Sound::EntityHorseSaddle)
+    } else if mob_entity.living_entity.entity.entity_type.id == EntityType::CAMEL.id {
+        IdOr::Id(Sound::EntityCamelSaddle)
     } else if mob_entity.living_entity.entity.entity_type.id == EntityType::CAMEL_HUSK.id {
         // `CamelHusk.getSaddleSound` (`CamelHusk.java:124-127`).
         IdOr::Id(Sound::EntityCamelHuskSaddle)
