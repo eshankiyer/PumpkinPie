@@ -141,6 +141,33 @@ impl NbtCompound {
         self.child_tags.insert(name.into(), value.into());
     }
 
+    /// Returns a mutable reference to the named tag.
+    #[must_use]
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut NbtTag> {
+        self.child_tags.get_mut(name)
+    }
+
+    /// Removes and returns the named tag, if present.
+    pub fn remove(&mut self, name: &str) -> Option<NbtTag> {
+        self.child_tags.remove(name)
+    }
+
+    /// Recursively merges `other` into `self`: a key present as a compound on both sides is
+    /// merged recursively, everything else is overwritten by `other`'s value. Mirrors vanilla's
+    /// `CompoundTag.merge` (`CompoundTag.java:435-444`).
+    pub fn merge(&mut self, other: &Self) -> &mut Self {
+        for (name, other_tag) in &other.child_tags {
+            if let NbtTag::Compound(other_compound) = other_tag
+                && let Some(NbtTag::Compound(self_compound)) = self.child_tags.get_mut(name)
+            {
+                self_compound.merge(other_compound);
+            } else {
+                self.child_tags.insert(name.clone(), other_tag.clone());
+            }
+        }
+        self
+    }
+
     /// Inserts a string tag when `name` is not already present.
     pub fn put_string(&mut self, name: &str, value: String) {
         self.put(name, NbtTag::String(value.into()));

@@ -231,6 +231,8 @@ pub mod heightmap;
 pub mod hex_color;
 pub mod identifier;
 pub mod nbt;
+// Vanilla NbtPathArgument.java:62-149 supplies the parser exposed by this argument type.
+pub mod nbt_path;
 pub mod objective;
 pub mod placed_feature;
 pub mod pool;

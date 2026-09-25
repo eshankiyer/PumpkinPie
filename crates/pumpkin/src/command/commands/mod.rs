@@ -161,7 +161,6 @@ pub fn default_dispatcher(
         "minecraft:command.spawnpoint",
     );
     dispatcher.register(spectate::init_command_tree(), "minecraft:command.spectate");
-    dispatcher.register(data::init_command_tree(), "minecraft:command.data");
     dispatcher.register(waypoint::init_command_tree(), "minecraft:command.waypoint");
     // Three
     dispatcher.register(deop::init_command_tree(), "minecraft:command.deop");
@@ -221,6 +220,8 @@ pub fn default_dispatcher(
     teammsg::register(&mut dispatcher, registry);
     clone::register(&mut dispatcher, registry);
     attribute::register(&mut dispatcher, registry);
+    // Vanilla DataCommands.java:48-105 registers the entity/block data command branches.
+    data::register(&mut dispatcher, registry);
     swing::register(&mut dispatcher, registry);
     datapack::register(&mut dispatcher, registry);
     function::register(&mut dispatcher, registry);

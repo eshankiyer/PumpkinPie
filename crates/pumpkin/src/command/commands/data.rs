@@ -1,39 +1,209 @@
-use crate::command::CommandResult;
-use crate::command::args::entity::EntityArgumentConsumer;
-use crate::command::tree::builder::literal;
-use crate::command::{
-    CommandError, CommandExecutor, CommandSender,
-    args::{Arg, ConsumedArgs},
-    tree::{CommandTree, builder::argument},
-};
+use std::sync::Arc;
+
+// Vanilla DataCommands.java:48-105 defines the entity/block get, merge, and remove command tree.
+use crate::block::entities::BlockEntity;
+use crate::command::argument_builder::{argument, command, literal};
+use crate::command::argument_types::coordinates::block_pos::BlockPosArgumentType;
+use crate::command::argument_types::core::double::DoubleArgumentType;
+use crate::command::argument_types::entity::EntityArgumentType;
+use crate::command::argument_types::nbt::NbtCompoundArgumentType;
+use crate::command::argument_types::nbt_path::NbtPath;
+use crate::command::context::command_context::CommandContext;
+use crate::command::errors::command_syntax_error::CommandSyntaxError;
+use crate::command::errors::error_types::CommandErrorType;
+use crate::command::node::dispatcher::CommandDispatcher;
+use crate::command::node::{CommandExecutor, CommandExecutorResult};
 use crate::entity::EntityBase;
-use CommandError::InvalidConsumption;
 use pumpkin_data::translation;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
+use pumpkin_util::PermissionLvl;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::color::NamedColor;
 
-const NAMES: [&str; 1] = ["data"];
 const DESCRIPTION: &str = "Query and modify data of entities and blocks";
-
+const PERMISSION: &str = "minecraft:command.data";
 const ARG_ENTITY: &str = "entity";
+const ARG_POS: &str = "pos";
+const ARG_PATH: &str = "path";
+const ARG_SCALE: &str = "scale";
+const ARG_NBT: &str = "nbt";
 
-struct GetEntityDataExecutor;
+const MERGE_UNCHANGED_ERROR: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::COMMANDS_DATA_MERGE_FAILED,
+    translation::java::COMMANDS_DATA_MERGE_FAILED,
+);
+const GET_NOT_NUMBER_ERROR: CommandErrorType<1> = CommandErrorType::new(
+    translation::java::COMMANDS_DATA_GET_INVALID,
+    translation::java::COMMANDS_DATA_GET_INVALID,
+);
+const GET_NON_EXISTENT_ERROR: CommandErrorType<1> = CommandErrorType::new(
+    translation::java::COMMANDS_DATA_GET_UNKNOWN,
+    translation::java::COMMANDS_DATA_GET_UNKNOWN,
+);
+const MULTIPLE_TAGS_ERROR: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::COMMANDS_DATA_GET_MULTIPLE,
+    translation::java::COMMANDS_DATA_GET_MULTIPLE,
+);
+const NO_PLAYERS_ERROR: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::COMMANDS_DATA_ENTITY_INVALID,
+    translation::java::COMMANDS_DATA_ENTITY_INVALID,
+);
+const INVALID_BLOCK_ENTITY_ERROR: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::COMMANDS_DATA_BLOCK_INVALID,
+    translation::java::COMMANDS_DATA_BLOCK_INVALID,
+);
 
-impl CommandExecutor for GetEntityDataExecutor {
-    fn execute<'a>(
-        &'a self,
-        sender: &'a CommandSender,
-        _server: &'a crate::server::Server,
-        args: &'a ConsumedArgs<'a>,
-    ) -> CommandResult<'a> {
-        Box::pin(async move {
-            let Some(Arg::Entity(entity)) = args.get(&ARG_ENTITY) else {
-                return Err(InvalidConsumption(Some(ARG_ENTITY.into())));
-            };
-            display_data(entity.as_ref(), entity.get_display_name().await, sender).await
+#[derive(Clone, Copy)]
+enum TargetKind {
+    Entity,
+    Block,
+}
+
+enum DataTarget {
+    Entity(Arc<dyn EntityBase>),
+    Block {
+        entity: Arc<dyn BlockEntity>,
+        position: BlockPos,
+    },
+}
+
+async fn resolve_target(
+    context: &CommandContext<'_>,
+    target_kind: TargetKind,
+) -> Result<DataTarget, CommandSyntaxError> {
+    match target_kind {
+        TargetKind::Entity => Ok(DataTarget::Entity(
+            EntityArgumentType::get_entity(context, ARG_ENTITY).await?,
+        )),
+        TargetKind::Block => {
+            let position = BlockPosArgumentType::get_loaded_block_pos(context, ARG_POS)?;
+            let entity = context
+                .source
+                .world()
+                .get_block_entity(&position)
+                .ok_or_else(|| INVALID_BLOCK_ENTITY_ERROR.create_without_context())?;
+            Ok(DataTarget::Block { entity, position })
+        }
+    }
+}
+
+impl DataTarget {
+    // Vanilla EntityDataAccessor.java:51-66 and BlockDataAccessor.java:56-65 expose full NBT.
+    async fn get_data(&self) -> NbtCompound {
+        let mut data = NbtCompound::new();
+        match self {
+            Self::Entity(entity) => entity.write_nbt(&mut data).await,
+            Self::Block { entity, position } => {
+                entity.write_nbt(&mut data).await;
+                data.put_string("id", entity.resource_location().to_string());
+                data.put_int("x", position.0.x);
+                data.put_int("y", position.0.y);
+                data.put_int("z", position.0.z);
+            }
+        }
+        data
+    }
+
+    // Vanilla EntityDataAccessor.java:40-49 refuses players before loading modified NBT;
+    // BlockDataAccessor.java:40-53 applies the result to the existing block entity.
+    async fn set_data(
+        self,
+        context: &CommandContext<'_>,
+        mut data: NbtCompound,
+    ) -> Result<(), CommandSyntaxError> {
+        match self {
+            Self::Entity(entity) => {
+                if entity.get_player().is_some() {
+                    return Err(NO_PLAYERS_ERROR.create_without_context());
+                }
+                entity.read_nbt_non_mut(&data).await;
+            }
+            Self::Block { entity, position } => {
+                if !data.has("id") {
+                    data.put_string("id", entity.resource_location().to_string());
+                }
+                let replacement = crate::block::entities::block_entity_from_nbt_at(&data, position)
+                    .ok_or_else(|| INVALID_BLOCK_ENTITY_ERROR.create_without_context())?;
+                context.source.world().add_block_entity(replacement);
+            }
+        }
+        Ok(())
+    }
+
+    async fn query_message(&self, tag: &NbtTag) -> Result<TextComponent, CommandSyntaxError> {
+        let display = snbt_colorful_display(tag, 0).map_err(|string| {
+            CommandSyntaxError::create_without_context(
+                &INVALID_BLOCK_ENTITY_ERROR,
+                TextComponent::text(string),
+            )
+        })?;
+        Ok(match self {
+            Self::Entity(entity) => TextComponent::translate_cross(
+                translation::java::COMMANDS_DATA_ENTITY_QUERY,
+                translation::java::COMMANDS_DATA_ENTITY_QUERY,
+                [entity.get_display_name().await, display],
+            ),
+            Self::Block { position, .. } => TextComponent::translate_cross(
+                translation::java::COMMANDS_DATA_BLOCK_QUERY,
+                translation::java::COMMANDS_DATA_BLOCK_QUERY,
+                [
+                    TextComponent::text(position.0.x.to_string()),
+                    TextComponent::text(position.0.y.to_string()),
+                    TextComponent::text(position.0.z.to_string()),
+                    display,
+                ],
+            ),
         })
+    }
+
+    async fn modified_message(&self) -> TextComponent {
+        match self {
+            Self::Entity(entity) => TextComponent::translate_cross(
+                translation::java::COMMANDS_DATA_ENTITY_MODIFIED,
+                translation::java::COMMANDS_DATA_ENTITY_MODIFIED,
+                [entity.get_display_name().await],
+            ),
+            Self::Block { position, .. } => TextComponent::translate_cross(
+                translation::java::COMMANDS_DATA_BLOCK_MODIFIED,
+                translation::java::COMMANDS_DATA_BLOCK_MODIFIED,
+                [
+                    TextComponent::text(position.0.x.to_string()),
+                    TextComponent::text(position.0.y.to_string()),
+                    TextComponent::text(position.0.z.to_string()),
+                ],
+            ),
+        }
+    }
+
+    async fn get_message(&self, path: &NbtPath, scale: f64, value: i32) -> TextComponent {
+        let scale = TextComponent::text(format!("{scale:.2}"));
+        match self {
+            Self::Entity(entity) => TextComponent::translate_cross(
+                translation::java::COMMANDS_DATA_ENTITY_GET,
+                translation::java::COMMANDS_DATA_ENTITY_GET,
+                [
+                    TextComponent::text(path.as_string().to_owned()),
+                    entity.get_display_name().await,
+                    scale,
+                    TextComponent::text(value.to_string()),
+                ],
+            ),
+            Self::Block { position, .. } => TextComponent::translate_cross(
+                translation::java::COMMANDS_DATA_BLOCK_GET,
+                translation::java::COMMANDS_DATA_BLOCK_GET,
+                [
+                    TextComponent::text(path.as_string().to_owned()),
+                    TextComponent::text(position.0.x.to_string()),
+                    TextComponent::text(position.0.y.to_string()),
+                    TextComponent::text(position.0.z.to_string()),
+                    scale,
+                    TextComponent::text(value.to_string()),
+                ],
+            ),
+        }
     }
 }
 
@@ -216,65 +386,259 @@ pub fn snbt_colorful_display(tag: &NbtTag, depth: usize) -> Result<TextComponent
     }
 }
 
-async fn display_data(
-    entity: &dyn EntityBase,
-    target_name: TextComponent,
-    sender: &CommandSender,
-) -> Result<i32, CommandError> {
-    let mut nbt = NbtCompound::new();
-    entity.write_nbt(&mut nbt).await;
-    let tag = NbtTag::Compound(nbt);
-
-    let result = get_i32_result(&tag)?;
-    let display = snbt_colorful_display(&tag, 0)
-        .map_err(|string| CommandError::CommandFailed(TextComponent::text(string)))?;
-    sender
-        .send_message(TextComponent::translate_cross(
-            translation::java::COMMANDS_DATA_ENTITY_QUERY,
-            translation::java::COMMANDS_DATA_ENTITY_QUERY,
-            [target_name, display],
-        ))
-        .await;
-
-    Ok(result)
+struct GetExecutor {
+    target_kind: TargetKind,
+    has_path: bool,
+    has_scale: bool,
 }
 
-fn get_i32_result(tag: &NbtTag) -> Result<i32, CommandError> {
-    match tag {
-        NbtTag::End => Err(CommandError::CommandFailed(TextComponent::translate_cross(
-            translation::java::COMMANDS_DATA_GET_UNKNOWN,
-            translation::java::COMMANDS_DATA_GET_UNKNOWN,
-            [],
-        ))),
+impl CommandExecutor for GetExecutor {
+    // Vanilla DataCommands.java:330-369 defines whole-tag, path, and scaled numeric get results.
+    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
+        Box::pin(async move {
+            let target = resolve_target(context, self.target_kind).await?;
+            let data = target.get_data().await;
+            if !self.has_path {
+                let root = NbtTag::Compound(data);
+                context
+                    .source
+                    .send_feedback(target.query_message(&root).await?, false)
+                    .await;
+                return Ok(1);
+            }
 
-        NbtTag::Byte(b) => Ok(*b as i32),
-        NbtTag::Short(s) => Ok(*s as i32),
-        NbtTag::Int(i) => Ok(*i),
-        NbtTag::Long(l) => Ok((*l).clamp(i32::MIN as i64, i32::MAX as i64) as i32),
-        NbtTag::Float(f) => Ok({
-            let i = *f as i32;
-            if *f < i as f32 { i - 1 } else { i }
-        }),
-        NbtTag::Double(d) => Ok({
-            let i = *d as i32;
-            if *d < i as f64 { i - 1 } else { i }
-        }),
-
-        NbtTag::ByteArray(items) => Ok(items.len() as i32),
-        NbtTag::IntArray(items) => Ok(items.len() as i32),
-        NbtTag::LongArray(items) => Ok(items.len() as i32),
-
-        NbtTag::String(string) => Ok(string.len() as i32),
-        NbtTag::List(nbt_tags) => Ok(nbt_tags.len() as i32),
-        NbtTag::Compound(nbt_compound) => Ok(nbt_compound.child_tags.len() as i32),
+            let path = context.get_argument::<NbtPath>(ARG_PATH)?;
+            let root = NbtTag::Compound(data);
+            let tag = get_single_tag(path, &root)?;
+            let value = if self.has_scale {
+                let scale = DoubleArgumentType::get(context, ARG_SCALE)?;
+                let (NbtTag::Byte(_)
+                | NbtTag::Short(_)
+                | NbtTag::Int(_)
+                | NbtTag::Long(_)
+                | NbtTag::Float(_)
+                | NbtTag::Double(_)) = tag
+                else {
+                    return Err(GET_NOT_NUMBER_ERROR
+                        .create_without_context(TextComponent::text(path.as_string().to_owned())));
+                };
+                let numeric = match tag {
+                    NbtTag::Byte(value) => f64::from(*value),
+                    NbtTag::Short(value) => f64::from(*value),
+                    NbtTag::Int(value) => f64::from(*value),
+                    NbtTag::Long(value) => *value as f64,
+                    NbtTag::Float(value) => f64::from(*value),
+                    NbtTag::Double(value) => *value,
+                    _ => unreachable!(),
+                };
+                let value = (numeric * scale).floor() as i32;
+                context
+                    .source
+                    .send_feedback(target.get_message(path, scale, value).await, false)
+                    .await;
+                return Ok(value);
+            } else {
+                tag_result(tag, path)?
+            };
+            context
+                .source
+                .send_feedback(target.query_message(value).await?, false)
+                .await;
+            Ok(value_result(value))
+        })
     }
 }
 
-pub fn init_command_tree() -> CommandTree {
-    CommandTree::new(NAMES, DESCRIPTION).then(
-        literal("get").then(
-            literal("entity")
-                .then(argument(ARG_ENTITY, EntityArgumentConsumer).execute(GetEntityDataExecutor)),
-        ),
-    )
+struct MergeExecutor {
+    target_kind: TargetKind,
+}
+
+impl CommandExecutor for MergeExecutor {
+    // Vanilla DataCommands.java:374-386 copies, merges, depth-checks, and rejects unchanged data.
+    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
+        Box::pin(async move {
+            let target = resolve_target(context, self.target_kind).await?;
+            let nbt = context.get_argument::<NbtCompound>(ARG_NBT)?.clone();
+            if NbtPath::is_too_deep(&NbtTag::Compound(nbt.clone()), 0) {
+                return Err(
+                    crate::command::argument_types::nbt_path::DATA_TOO_DEEP_ERROR
+                        .create_without_context(),
+                );
+            }
+            let old = target.get_data().await;
+            let mut merged = old.clone();
+            merged.merge(&nbt);
+            if old == merged {
+                return Err(MERGE_UNCHANGED_ERROR.create_without_context());
+            }
+            target.set_data(context, merged).await?;
+            context
+                .source
+                .send_feedback(target.modified_message().await, true)
+                .await;
+            Ok(1)
+        })
+    }
+}
+
+struct RemoveExecutor {
+    target_kind: TargetKind,
+}
+
+impl CommandExecutor for RemoveExecutor {
+    // Vanilla DataCommands.java:318-328 removes matching path nodes and rejects a zero count.
+    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
+        Box::pin(async move {
+            let target = resolve_target(context, self.target_kind).await?;
+            let path = context.get_argument::<NbtPath>(ARG_PATH)?;
+            let data = target.get_data().await;
+            let mut root = NbtTag::Compound(data);
+            let count = path.remove(&mut root);
+            if count == 0 {
+                return Err(MERGE_UNCHANGED_ERROR.create_without_context());
+            }
+            let NbtTag::Compound(data) = root else {
+                unreachable!()
+            };
+            target.set_data(context, data).await?;
+            context
+                .source
+                .send_feedback(target.modified_message().await, true)
+                .await;
+            Ok(count)
+        })
+    }
+}
+
+fn get_single_tag<'a>(path: &NbtPath, root: &'a NbtTag) -> Result<&'a NbtTag, CommandSyntaxError> {
+    let tags = path.get(root)?;
+    let Some(tag) = tags.first() else {
+        return Err(GET_NON_EXISTENT_ERROR
+            .create_without_context(TextComponent::text(path.as_string().to_owned())));
+    };
+    if tags.len() > 1 {
+        return Err(MULTIPLE_TAGS_ERROR.create_without_context());
+    }
+    Ok(tag)
+}
+
+fn tag_result<'a>(tag: &'a NbtTag, path: &NbtPath) -> Result<&'a NbtTag, CommandSyntaxError> {
+    if matches!(tag, NbtTag::End) {
+        Err(GET_NON_EXISTENT_ERROR
+            .create_without_context(TextComponent::text(path.as_string().to_owned())))
+    } else {
+        Ok(tag)
+    }
+}
+
+fn value_result(tag: &NbtTag) -> i32 {
+    match tag {
+        NbtTag::Byte(value) => i32::from(*value),
+        NbtTag::Short(value) => i32::from(*value),
+        NbtTag::Int(value) => *value,
+        NbtTag::Long(value) => (*value).clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+        NbtTag::Float(value) => value.floor() as i32,
+        NbtTag::Double(value) => value.floor() as i32,
+        NbtTag::ByteArray(value) => value.len() as i32,
+        NbtTag::IntArray(value) => value.len() as i32,
+        NbtTag::LongArray(value) => value.len() as i32,
+        NbtTag::String(value) => value.len() as i32,
+        NbtTag::List(value) => value.len() as i32,
+        NbtTag::Compound(value) => value.child_tags.len() as i32,
+        NbtTag::End => 0,
+    }
+}
+
+pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistry) {
+    registry.register_permission_or_panic(Permission::new(
+        PERMISSION,
+        DESCRIPTION,
+        PermissionDefault::Op(PermissionLvl::Two),
+    ));
+
+    let entity_path = || crate::command::argument_types::nbt_path::NbtPathArgumentType;
+    let entity_get = literal("entity").then(
+        argument(ARG_ENTITY, EntityArgumentType::Entity)
+            .executes(GetExecutor {
+                target_kind: TargetKind::Entity,
+                has_path: false,
+                has_scale: false,
+            })
+            .then(
+                argument(ARG_PATH, entity_path())
+                    .executes(GetExecutor {
+                        target_kind: TargetKind::Entity,
+                        has_path: true,
+                        has_scale: false,
+                    })
+                    .then(
+                        argument(ARG_SCALE, DoubleArgumentType::any()).executes(GetExecutor {
+                            target_kind: TargetKind::Entity,
+                            has_path: true,
+                            has_scale: true,
+                        }),
+                    ),
+            ),
+    );
+    let block_get = literal("block").then(
+        argument(ARG_POS, BlockPosArgumentType)
+            .executes(GetExecutor {
+                target_kind: TargetKind::Block,
+                has_path: false,
+                has_scale: false,
+            })
+            .then(
+                argument(ARG_PATH, entity_path())
+                    .executes(GetExecutor {
+                        target_kind: TargetKind::Block,
+                        has_path: true,
+                        has_scale: false,
+                    })
+                    .then(
+                        argument(ARG_SCALE, DoubleArgumentType::any()).executes(GetExecutor {
+                            target_kind: TargetKind::Block,
+                            has_path: true,
+                            has_scale: true,
+                        }),
+                    ),
+            ),
+    );
+    let merge = literal("merge")
+        .then(
+            literal("entity").then(argument(ARG_ENTITY, EntityArgumentType::Entity).then(
+                argument(ARG_NBT, NbtCompoundArgumentType).executes(MergeExecutor {
+                    target_kind: TargetKind::Entity,
+                }),
+            )),
+        )
+        .then(
+            literal("block").then(argument(ARG_POS, BlockPosArgumentType).then(
+                argument(ARG_NBT, NbtCompoundArgumentType).executes(MergeExecutor {
+                    target_kind: TargetKind::Block,
+                }),
+            )),
+        );
+    let remove = literal("remove")
+        .then(
+            literal("entity").then(argument(ARG_ENTITY, EntityArgumentType::Entity).then(
+                argument(ARG_PATH, entity_path()).executes(RemoveExecutor {
+                    target_kind: TargetKind::Entity,
+                }),
+            )),
+        )
+        .then(
+            literal("block").then(argument(ARG_POS, BlockPosArgumentType).then(
+                argument(ARG_PATH, entity_path()).executes(RemoveExecutor {
+                    target_kind: TargetKind::Block,
+                }),
+            )),
+        );
+
+    dispatcher.register(
+        command("data", DESCRIPTION)
+            .requires(PERMISSION)
+            .then(literal("get").then(entity_get).then(block_get))
+            .then(merge)
+            .then(remove),
+    );
 }

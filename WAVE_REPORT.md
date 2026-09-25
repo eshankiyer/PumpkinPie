@@ -1,0 +1,7 @@
+# NBT path and data commands
+
+Implemented the vanilla-parity NBT path argument and the `/data get`, `/data merge`, and `/data remove` command branches for `entity` and `block` targets. The path engine ports the six `NbtPathArgument` node behaviors, partial `NbtUtils.compareNbt` matching, depth checks, negative list indices, parent creation, and mutation counting. Entity data uses the existing full `write_nbt`/`read_nbt_non_mut` round trip and rejects players; block data writes full metadata and rebuilds/registers the block entity through the existing NBT factory and world registration path.
+
+Deliberately deferred `/data modify` and the `storage` target. Storage requires a persisted command-storage NBT store that does not exist in Pumpkin and is separate future work.
+
+The vanilla path examples include `{foo=bar}` (`NbtPathArgument.java:35`), while Pumpkin's command SNBT grammar requires `:` (`crates/pumpkin/src/command/snbt/rules.rs:672`). The path tests therefore use the equivalent `{foo:bar}` spelling and retain the vanilla example spelling in the argument examples. A grep of `NbtPathArgument.java:155-529` confirmed that its `MatchElementNode` and collection operations are `ListTag`-specific; the Rust path engine consequently mutates `NbtTag::List` rather than numeric array variants. No build, clippy, or test command was run per task instructions; Rust formatting/parsing verification was run on the touched Rust files.
