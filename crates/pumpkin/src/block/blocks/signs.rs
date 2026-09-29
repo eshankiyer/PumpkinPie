@@ -9,6 +9,7 @@ use crate::command::CommandSender;
 use pumpkin_data::Block;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockId;
+use pumpkin_data::BlockState;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::HorizontalFacingExt;
 use pumpkin_data::block_properties::EnumVariants;
@@ -258,12 +259,20 @@ impl SignBlock {
         }
     }
 
+    /// Mirrors `CeilingHangingSignBlock.canSurvive`: the block above must be
+    /// `isFaceSturdy(DOWN, SupportType.CENTER)` (`CeilingHangingSignBlock.java:92-94`). That
+    /// reads the block's support shape, which hanging signs override to their own shape
+    /// (`CeilingHangingSignBlock.java:133-136`) and leaves override to empty
+    /// (`LeavesBlock.java:56-59`); the generated `DOWN_CENTER_SOLID` flag already encodes all
+    /// of it, so no tag exception belongs here.
+    const fn supports_ceiling_hanging_sign(state_above: &BlockState) -> bool {
+        state_above.is_center_solid(BlockDirection::Down)
+    }
+
     /// Detects available support points around a position.
     fn detect_support(world: &dyn BlockAccessor, position: &BlockPos) -> SupportInfo {
-        let (block_above, state_above) = world.get_block_and_state(&position.up());
-        let above_is_valid = state_above.is_side_solid(BlockDirection::Down)
-            || block_above.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SIGNS)
-            || block_above.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES);
+        let above_is_valid =
+            Self::supports_ceiling_hanging_sign(world.get_block_state(&position.up()));
 
         let mut side_direction = None;
         for direction in BlockDirection::horizontal() {
@@ -583,9 +592,7 @@ impl BlockBehaviour for SignBlock {
             BlockDirection::Up => {
                 !is_hanging && (state.is_center_solid(BlockDirection::Up) || is_permissive)
             }
-            BlockDirection::Down => {
-                is_hanging && (state.is_side_solid(BlockDirection::Down) || is_permissive)
-            }
+            BlockDirection::Down => is_hanging && Self::supports_ceiling_hanging_sign(state),
             _ => state.is_side_solid(clicked_face.opposite()) || is_permissive,
         }
     }
@@ -629,9 +636,10 @@ impl BlockBehaviour for SignBlock {
                     let is_sign = support_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SIGNS);
 
                     let is_valid = match dir {
-                        BlockDirection::Up => {
-                            support_state.is_side_solid(BlockDirection::Down) || is_leaf || is_sign
-                        }
+                        // Only ceiling hanging signs look Up; vanilla breaks them through
+                        // `canSurvive` when the neighbour above changes
+                        // (`CeilingHangingSignBlock.java:138-152`).
+                        BlockDirection::Up => Self::supports_ceiling_hanging_sign(support_state),
                         BlockDirection::Down => {
                             support_state.is_center_solid(BlockDirection::Up) || is_leaf || is_sign
                         }
@@ -988,8 +996,10 @@ fn has_editable_text(text: &crate::block::entities::sign::Text) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{click_command, should_open_text_editor, wall_hanging_attachment_directions};
-    use pumpkin_data::BlockDirection;
+    use super::{
+        SignBlock, click_command, should_open_text_editor, wall_hanging_attachment_directions,
+    };
+    use pumpkin_data::{Block, BlockDirection};
 
     #[test]
     fn click_command_reads_root_run_command_events() {
@@ -1029,5 +1039,32 @@ mod tests {
         // superclass update (`SignItem.java:23-35`).
         assert!(!should_open_text_editor(true));
         assert!(should_open_text_editor(false));
+    }
+
+    #[test]
+    fn ceiling_hanging_sign_needs_centre_support_only() {
+        // `CeilingHangingSignBlock.canSurvive` is `isFaceSturdy(DOWN, SupportType.CENTER)`
+        // (`CeilingHangingSignBlock.java:92-94`): a centre-only face such as a fence's or another
+        // hanging sign's holds the sign, empty support shapes (leaves, plain signs) do not
+        // (`LeavesBlock.java:56-59`).
+        for block in [
+            &Block::STONE,
+            &Block::OAK_FENCE,
+            &Block::OAK_HANGING_SIGN,
+            &Block::OAK_WALL_HANGING_SIGN,
+        ] {
+            assert!(
+                SignBlock::supports_ceiling_hanging_sign(block.default_state),
+                "{} should support a ceiling hanging sign",
+                block.name
+            );
+        }
+        for block in [&Block::AIR, &Block::OAK_LEAVES, &Block::OAK_SIGN] {
+            assert!(
+                !SignBlock::supports_ceiling_hanging_sign(block.default_state),
+                "{} should not support a ceiling hanging sign",
+                block.name
+            );
+        }
     }
 }
