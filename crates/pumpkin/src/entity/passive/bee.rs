@@ -7,6 +7,7 @@ use std::sync::{
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::BlockStateId;
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{
     BlockProperties, DoubleBlockHalf, TallSeagrassLikeProperties,
 };
@@ -37,7 +38,8 @@ use crate::entity::{
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
         swim::SwimGoal, wander_around::WanderAroundGoal,
     },
-    ai::pathfinder::NavigatorGoal,
+    ai::control::flying_move_control::FlyingMoveControl,
+    ai::pathfinder::{NavigatorGoal, node::PathType},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     persistent_anger::PersistentAnger,
@@ -143,8 +145,36 @@ pub struct BeeEntity {
 }
 
 impl BeeEntity {
+    /// Bee constructor and `Bee.createNavigation` flight setup.
+    fn install_flight(mob_entity: &MobEntity) {
+        // `new FlyingMoveControl<>(this, 20, true)` (`Bee.java:152`).
+        *mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(FlyingMoveControl::new(20.0, true));
+        // `Bee.createNavigation`: a `FlyingPathNavigation` with doors and floating off.
+        // Not carried over: the `isStableDestination` override (`!below.isAir()`), the
+        // `requiredPathLength` of 48 and the no-tick-while-pollinating override, which live in
+        // `Navigator` (`ai/pathfinder`).
+        let mut navigator = mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        navigator.set_flying(true);
+        navigator.set_can_float(false);
+        navigator.set_can_open_doors(false);
+        // `Bee.java:153-158`; the `PathType.FIRE` malus is omitted since Pumpkin splits
+        // vanilla's fire types into `DangerFire`/`DamageFire` with different semantics.
+        navigator.set_pathfinding_malus(PathType::Water, -1.0);
+        navigator.set_pathfinding_malus(PathType::WaterBorder, 16.0);
+        navigator.set_pathfinding_malus(PathType::Cocoa, -1.0);
+        navigator.set_pathfinding_malus(PathType::Fence, -1.0);
+    }
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
+        Self::install_flight(&mob_entity);
         let bee = Self {
             mob_entity,
             flags: AtomicU8::new(0),
@@ -1245,6 +1275,36 @@ impl Mob for BeeEntity {
                     None,
                 );
             }
+        })
+    }
+
+    /// `Bee.doHurtTarget` deals the `sting` damage type with the attack damage truncated to an
+    /// int, and never calls `super`, so there is no knockback or weapon wear.
+    fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            if living.dead.load(Relaxed) {
+                return false;
+            }
+            let damage = living
+                .get_attribute_value(&Attributes::ATTACK_DAMAGE)
+                .trunc() as f32;
+            let entity = &living.entity;
+            let caller = entity.world.load().get_entity_by_id(entity.entity_id);
+            let damaged = target
+                .damage_with_context(
+                    target,
+                    damage,
+                    DamageType::STING,
+                    Some(entity.pos.load()),
+                    caller.as_deref(),
+                    caller.as_deref(),
+                )
+                .await;
+            if damaged {
+                self.on_successful_attack(target).await;
+            }
+            damaged
         })
     }
 
