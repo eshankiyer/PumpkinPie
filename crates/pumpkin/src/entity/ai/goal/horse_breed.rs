@@ -2,20 +2,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::Arc;
 
-use pumpkin_data::{attributes::Attributes, entity::EntityType};
+use pumpkin_data::entity::EntityType;
 use rand::{RngExt, rng};
 use uuid::Uuid;
 
 use crate::entity::{
-    EntityBase,
-    ai::pathfinder::NavigatorGoal,
-    experience_orb::ExperienceOrbEntity,
-    mob::Mob,
-    passive::equine::{
-        MAX_HEALTH, MAX_JUMP_STRENGTH, MAX_MOVEMENT_SPEED, MIN_HEALTH, MIN_JUMP_STRENGTH,
-        MIN_MOVEMENT_SPEED, apply_offspring_attribute,
-    },
-    r#type::from_type,
+    EntityBase, ai::pathfinder::NavigatorGoal, experience_orb::ExperienceOrbEntity, mob::Mob,
+    passive::equine::set_offspring_attributes, r#type::from_type,
 };
 
 use super::{Controls, Goal, GoalFuture};
@@ -133,53 +126,7 @@ impl HorseBreedGoal {
                 Uuid::new_v4(),
             );
             if let Some(baby_mob) = baby.get_mob() {
-                let mut random = rand::rng();
-                let parent_a = mob.get_mob_entity();
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MAX_HEALTH,
-                    parent_a
-                        .living_entity
-                        .get_attribute_base(&Attributes::MAX_HEALTH),
-                    mate.get_mob().map_or(MIN_HEALTH, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::MAX_HEALTH)
-                    }),
-                    MIN_HEALTH,
-                    MAX_HEALTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::JUMP_STRENGTH,
-                    parent_a
-                        .living_entity
-                        .get_attribute_base(&Attributes::JUMP_STRENGTH),
-                    mate.get_mob().map_or(MIN_JUMP_STRENGTH, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::JUMP_STRENGTH)
-                    }),
-                    MIN_JUMP_STRENGTH,
-                    MAX_JUMP_STRENGTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MOVEMENT_SPEED,
-                    parent_a
-                        .living_entity
-                        .get_attribute_base(&Attributes::MOVEMENT_SPEED),
-                    mate.get_mob().map_or(MIN_MOVEMENT_SPEED, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::MOVEMENT_SPEED)
-                    }),
-                    MIN_MOVEMENT_SPEED,
-                    MAX_MOVEMENT_SPEED,
-                    &mut random,
-                );
+                set_offspring_attributes(mob, mate, baby_mob);
             }
             Some(baby)
         } else {

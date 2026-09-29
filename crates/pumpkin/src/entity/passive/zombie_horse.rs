@@ -3,11 +3,13 @@
 use std::sync::{Arc, Weak, atomic::Ordering::Relaxed};
 
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockState};
 use pumpkin_inventory::screen_handler::BoxFuture;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
@@ -23,7 +25,7 @@ use crate::entity::{
     mob::{Mob, MobEntity},
     passive::{
         animal::Animal,
-        equine::{AbstractHorse, AbstractHorseData, MountPanicGoal},
+        equine::{AbstractHorse, AbstractHorseData},
     },
     player::Player,
 };
@@ -87,16 +89,14 @@ impl ZombieHorseEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            // `ZombieHorse.java:126-129` (`addBehaviourGoals`): float + tempt only, no panic
-            // goal. Wander/look/stand/run-around-like-crazy and mount panic come from the base
-            // `AbstractHorse.registerGoals` (`AbstractHorse.java:134-151`).
+            // `ZombieHorse.java:125-129` (`addBehaviourGoals`): float + tempt only, no panic
+            // goal. Wander/look/stand/run-around-like-crazy come from the base
+            // `AbstractHorse.registerGoals` (`AbstractHorse.java:132-145`); its `BreedGoal` never
+            // fires since `AbstractHorse.canMate` is `false`.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
-            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
-            // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
-            // horse-family parent within 16 blocks.
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new_water_avoiding(0.7)));
             goal_selector.add_goal(
                 7,
@@ -241,10 +241,6 @@ impl Mob for ZombieHorseEntity {
         AbstractHorse::handle_stop_jump(self);
     }
 
-    fn is_bred(&self) -> bool {
-        AbstractHorse::is_bred(self)
-    }
-
     fn on_elastic_leash_pull(&self) {
         AbstractHorse::on_elastic_leash_pull(self);
     }
@@ -253,8 +249,48 @@ impl Mob for ZombieHorseEntity {
         AbstractHorse::custom_travel(self, caller)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    /// `AbstractHorse.tick`/`aiStep` run for `NoAI` horses too, so this is `post_tick`, which
+    /// `Mob::tick` runs every tick, rather than `mob_tick`.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
         AbstractHorse::tick_horse_ai(self)
+    }
+
+    /// `AbstractHorse.hurtServer` (`AbstractHorse.java:319-327`).
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        _source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            AbstractHorse::horse_on_damage(self);
+        })
+    }
+
+    /// `AbstractHorse.isImmobile` (`AbstractHorse.java:504-507`): a grazing or rearing horse
+    /// runs no AI.
+    fn suppress_ai_goals(&self) -> bool {
+        AbstractHorse::is_immobile(self)
+    }
+
+    /// `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`).
+    fn ground_step_sounds(
+        &self,
+        supporting_block: &Block,
+        supporting_state: &BlockState,
+        above_block: &Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        Some(AbstractHorse::horse_step_sounds(
+            self,
+            supporting_block,
+            supporting_state,
+            above_block,
+        ))
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.send_horse_init_metadata();
+        })
     }
 
     /// `ZombieHorse.getAmbientSound` (`ZombieHorse.java:90-93`).

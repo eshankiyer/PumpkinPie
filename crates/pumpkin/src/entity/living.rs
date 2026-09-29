@@ -3169,7 +3169,7 @@ impl LivingEntity {
         self.current_impulse_impact_pos.store(None);
     }
 
-    async fn get_jump_velocity(&self, mut strength: f64) -> f64 {
+    pub(crate) async fn get_jump_velocity(&self, mut strength: f64) -> f64 {
         strength *= self.get_attribute_value(&Attributes::JUMP_STRENGTH);
         strength *= f64::from(self.entity.get_jump_velocity_multiplier());
         if let Some(effect) = self.get_effect(&StatusEffect::JUMP_BOOST).await {
@@ -3615,6 +3615,11 @@ impl LivingEntity {
                     should_drop_loot,
                 )
                 .await;
+                // The mobs that override `dropEquipment` with more than the equipment slots
+                // (`AbstractHorse.java:518-529`, `AbstractChestedHorse.java:73-79`).
+                if let Some(mob) = dyn_self.get_mob() {
+                    mob.drop_death_inventory().await;
+                }
             }
 
             // Broadcast death message if it's a player and the gamerule is enabled
@@ -3698,7 +3703,7 @@ impl LivingEntity {
     /// `EnchantmentHelper.has(itemStack, PREVENT_EQUIPMENT_DROP)` for the mob death path
     /// (`Mob.java:904-906`). The workspace's enchantment effect table is the existing source
     /// for the Vanishing Curse effect.
-    fn item_prevents_equipment_drop(stack: &ItemStack) -> bool {
+    pub(crate) fn item_prevents_equipment_drop(stack: &ItemStack) -> bool {
         stack
             .get_data_component::<EnchantmentsImpl>()
             .is_some_and(|enchantments| {
@@ -5127,7 +5132,8 @@ impl LivingEntity {
 
         // `Entity.walkingStepSound` reads the supporting block's sound type
         // (`Entity.java:1457-1460`).
-        let (_, supporting_block, supporting_state) = self.entity.get_block_with_y_offset(0.00001);
+        let (supporting_pos, supporting_block, supporting_state) =
+            self.entity.get_block_with_y_offset(0.00001);
 
         // `Entity.applyMovementEmissionAndPlaySound` emits STEP from the supporting block, or
         // SWIM when no step side effect was produced (`Entity.java:867-901`).
@@ -5198,22 +5204,49 @@ impl LivingEntity {
                 pitch,
             );
         } else if on_ground && !supporting_state.is_air() {
-            let mob = caller.get_mob();
-            let (sound, volume, pitch) = Self::ground_step_sound(mob, supporting_block);
-            // `vibrationAndSoundEffectsFromBlock` only calls `walkingStepSound` ->
-            // `playStepSound` when `onGround() || climbable || (crouching && no vertical
-            // movement) || onRails()` (Entity.java:993-994); this checks only the common
-            // `onGround()` case, so a skeleton mid-air (falling, not swimming) no longer
-            // plays its step sound, but climbing/crouching/on-rails still won't.
-            // `Entity.playSound` uses `getSoundSource` (`Entity.java:1486-1490`), which is
-            // `HOSTILE` for `Monster` (`Monster.java:37-39`).
-            self.entity.world.load().play_sound_fine(
-                sound,
-                mob.map_or(SoundCategory::Neutral, Mob::get_sound_source),
-                &self.entity.pos.load(),
-                volume,
-                pitch,
+            self.play_ground_step_sounds(
+                caller.get_mob(),
+                supporting_pos,
+                supporting_block,
+                supporting_state,
             );
+        }
+    }
+
+    /// The ground half of `Entity.walkingStepSound`.
+    ///
+    /// `vibrationAndSoundEffectsFromBlock` only calls `walkingStepSound` -> `playStepSound` when
+    /// `onGround() || climbable || (crouching && no vertical movement) || onRails()`
+    /// (Entity.java:993-994); the caller checks only the common `onGround()` case, so a skeleton
+    /// mid-air (falling, not swimming) no longer plays its step sound, but
+    /// climbing/crouching/on-rails still won't.
+    fn play_ground_step_sounds(
+        &self,
+        mob: Option<&dyn Mob>,
+        supporting_pos: BlockPos,
+        supporting_block: &pumpkin_data::Block,
+        supporting_state: &pumpkin_data::BlockState,
+    ) {
+        // `Entity.playSound` uses `getSoundSource` (`Entity.java:1486-1490`), which is
+        // `HOSTILE` for `Monster` (`Monster.java:37-39`).
+        let category = mob.map_or(SoundCategory::Neutral, Mob::get_sound_source);
+        let world = self.entity.world.load();
+        // A mob whose own `playStepSound` plays several sounds (`AbstractHorse`) supplies the
+        // whole list; an empty one is a silent step.
+        let own_sounds = mob.and_then(|mob| {
+            mob.ground_step_sounds(
+                supporting_block,
+                supporting_state,
+                world.get_block(&supporting_pos.up()),
+            )
+        });
+        if let Some(sounds) = own_sounds {
+            for (sound, volume, pitch) in sounds {
+                world.play_sound_fine(sound, category, &self.entity.pos.load(), volume, pitch);
+            }
+        } else {
+            let (sound, volume, pitch) = Self::ground_step_sound(mob, supporting_block);
+            world.play_sound_fine(sound, category, &self.entity.pos.load(), volume, pitch);
         }
     }
 

@@ -22,6 +22,9 @@ pub enum AdvancementTrigger {
     Bullseye,
     CuredZombieVillager,
     TradedWithVillager,
+    /// `CriteriaTriggers.TAME_ANIMAL` (`TameAnimalTrigger.java:20-23`), fired by
+    /// `AbstractHorse.tameWithName` (`AbstractHorse.java:712-714`).
+    TamedAnimal,
 }
 
 impl Player {
@@ -677,6 +680,13 @@ impl Player {
                 self.trigger_advancement_criterion(
                     Advancement::HUSBANDRY_BRED_ALL_ANIMALS,
                     &parent_type,
+                )
+                .await;
+            }
+            AdvancementTrigger::TamedAnimal => {
+                self.trigger_advancement_criterion(
+                    Advancement::HUSBANDRY_TAME_AN_ANIMAL,
+                    "tamed_animal",
                 )
                 .await;
             }

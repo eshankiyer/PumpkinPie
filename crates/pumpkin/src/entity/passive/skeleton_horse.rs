@@ -5,10 +5,12 @@ use std::sync::{
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockState};
 use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
 
@@ -18,12 +20,12 @@ use crate::entity::{
         ambient_stand::AmbientStandGoal, follow_parent::FollowParentGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         run_around_like_crazy::RunAroundLikeCrazyGoal, skeleton_trap::SkeletonTrapGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     passive::{
         animal::Animal,
-        equine::{AbstractHorse, AbstractHorseData, MountPanicGoal},
+        equine::{AbstractHorse, AbstractHorseData},
     },
     player::Player,
 };
@@ -71,22 +73,17 @@ impl SkeletonHorseEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            // Both at vanilla priority 1: `RunAroundLikeCrazyGoal` from the base
-            // `AbstractHorse.registerGoals` (`AbstractHorse.java:134-151`) -- effectively inert here
-            // since `mob_interact` below never lets a player mount an untamed skeleton horse,
-            // but kept for architectural parity -- and `skeletonTrapGoal`, dynamically
-            // added/removed via `setTrap` in vanilla; see `SkeletonTrapGoal`'s doc comment for
-            // why Pumpkin registers it unconditionally.
+            // `SkeletonHorse.java:64-66`: `addBehaviourGoals` is overridden to empty, so there is
+            // no float, mount panic or tempt goal; the base `AbstractHorse.registerGoals`
+            // (`AbstractHorse.java:132-145`) supplies the rest (its `BreedGoal` never fires since
+            // `AbstractHorse.canMate` is `false`). Two goals share priority 1:
+            // `RunAroundLikeCrazyGoal`, effectively inert here since `mob_interact` below never
+            // lets a player mount an untamed skeleton horse but kept for architectural parity,
+            // and `skeletonTrapGoal`, dynamically added/removed via `setTrap` in vanilla; see
+            // `SkeletonTrapGoal`'s doc comment for why Pumpkin registers it unconditionally.
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
-            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(1, SkeletonTrapGoal::new(Arc::downgrade(&mob_arc)));
-            // `SkeletonHorse.java:65-66`: `addBehaviourGoals` is overridden to empty, so no
-            // tempt goal here; `AbstractHorse.registerGoals` (`AbstractHorse.java:134-151`)
-            // still supplies float and mount panic alongside priorities 4/6/7/8/9.
-            // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
-            // horse-family parent within 16 blocks.
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new_water_avoiding(0.7)));
             goal_selector.add_goal(
                 7,
@@ -218,10 +215,6 @@ impl Mob for SkeletonHorseEntity {
         AbstractHorse::handle_stop_jump(self);
     }
 
-    fn is_bred(&self) -> bool {
-        AbstractHorse::is_bred(self)
-    }
-
     fn on_elastic_leash_pull(&self) {
         AbstractHorse::on_elastic_leash_pull(self);
     }
@@ -252,6 +245,45 @@ impl Mob for SkeletonHorseEntity {
         AbstractHorse::has_saddled_player_passenger(self)
     }
 
+    /// `AbstractHorse.hurtServer` (`AbstractHorse.java:319-327`).
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        _source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            AbstractHorse::horse_on_damage(self);
+        })
+    }
+
+    /// `AbstractHorse.isImmobile` (`AbstractHorse.java:504-507`): a grazing or rearing horse
+    /// runs no AI.
+    fn suppress_ai_goals(&self) -> bool {
+        AbstractHorse::is_immobile(self)
+    }
+
+    /// `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`); the in-water half is
+    /// `SkeletonHorse.getSwimSound`, which `tick_swim_sound` dispatches separately.
+    fn ground_step_sounds(
+        &self,
+        supporting_block: &Block,
+        supporting_state: &BlockState,
+        above_block: &Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        Some(AbstractHorse::horse_step_sounds(
+            self,
+            supporting_block,
+            supporting_state,
+            above_block,
+        ))
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.send_horse_init_metadata();
+        })
+    }
+
     /// `SkeletonHorse.mobInteract` (`SkeletonHorse.java:174-176`): the trap-despawn timer above
     /// is already correctly ported; this is the one missing gate -- an untamed (non-trap-yet)
     /// skeleton horse cannot be fed/ridden/opened at all until tamed by some other mechanism
@@ -275,7 +307,6 @@ impl Mob for SkeletonHorseEntity {
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            self.tick_horse_ai().await;
             // Vanilla: `SkeletonHorse.aiStep` -- an untriggered trap horse despawns after
             // `TRAP_MAX_LIFE` ticks. `isPersistenceRequired` gating is skipped (Pumpkin doesn't
             // expose that flag to entities generically here); this only matters once something
@@ -287,5 +318,11 @@ impl Mob for SkeletonHorseEntity {
                 }
             }
         })
+    }
+
+    /// `AbstractHorse.tick`/`aiStep` run for `NoAI` horses too, so this is `post_tick`, which
+    /// `Mob::tick` runs every tick, rather than `mob_tick`.
+    fn post_tick(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
+        AbstractHorse::tick_horse_ai(self)
     }
 }

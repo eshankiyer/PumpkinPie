@@ -3,10 +3,12 @@
 use std::sync::{Arc, Weak, atomic::Ordering::Relaxed};
 
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockState};
 use rand::RngExt;
 use uuid::Uuid;
 
@@ -23,8 +25,7 @@ use crate::entity::{
         animal::Animal,
         equine::{
             AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData,
-            HORSE_TEMPT_ITEMS, MAX_HEALTH, MAX_JUMP_STRENGTH, MAX_MOVEMENT_SPEED, MIN_HEALTH,
-            MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED, MountPanicGoal, apply_offspring_attribute,
+            HORSE_TEMPT_ITEMS, MountPanicGoal, set_offspring_attributes,
         },
     },
     player::Player,
@@ -73,9 +74,7 @@ impl DonkeyEntity {
             goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(2, HorseBreedGoal::new(1.0, COMPATIBLE_MATES));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, HORSE_TEMPT_ITEMS, false)));
-            // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
-            // horse-family parent within 16 blocks.
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new_water_avoiding(0.7)));
             goal_selector.add_goal(
                 7,
@@ -98,7 +97,7 @@ impl NBTStorage for DonkeyEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_animal_nbt(nbt);
             self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
+            self.write_chested_horse_nbt(nbt).await;
         })
     }
 
@@ -132,6 +131,11 @@ impl AbstractHorse for DonkeyEntity {
 
     fn eating_sound(&self) -> Option<Sound> {
         Some(Sound::EntityDonkeyEat)
+    }
+
+    /// `AbstractChestedHorse` clears `canGallop` (`AbstractChestedHorse.java:38`).
+    fn can_gallop(&self) -> bool {
+        false
     }
 
     /// `AbstractChestedHorse.randomizeAttributes`: only max-health is rolled.
@@ -201,10 +205,6 @@ impl Mob for DonkeyEntity {
         AbstractHorse::handle_stop_jump(self);
     }
 
-    fn is_bred(&self) -> bool {
-        AbstractHorse::is_bred(self)
-    }
-
     fn on_elastic_leash_pull(&self) {
         AbstractHorse::on_elastic_leash_pull(self);
     }
@@ -213,8 +213,58 @@ impl Mob for DonkeyEntity {
         AbstractHorse::custom_travel(self, caller)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    /// `AbstractHorse.tick`/`aiStep` run for `NoAI` horses too, so this is `post_tick`, which
+    /// `Mob::tick` runs every tick, rather than `mob_tick`.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
         AbstractHorse::tick_horse_ai(self)
+    }
+
+    /// `AbstractHorse.hurtServer` (`AbstractHorse.java:319-327`).
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        _source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            AbstractHorse::horse_on_damage(self);
+        })
+    }
+
+    /// `AbstractHorse.isImmobile` (`AbstractHorse.java:504-507`): a grazing or rearing donkey
+    /// runs no AI.
+    fn suppress_ai_goals(&self) -> bool {
+        AbstractHorse::is_immobile(self)
+    }
+
+    /// `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`); a donkey never gallops.
+    fn ground_step_sounds(
+        &self,
+        supporting_block: &Block,
+        supporting_state: &BlockState,
+        above_block: &Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        Some(AbstractHorse::horse_step_sounds(
+            self,
+            supporting_block,
+            supporting_state,
+            above_block,
+        ))
+    }
+
+    /// `Donkey.getAmbientSound`.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityDonkeyAmbient)
+    }
+
+    fn drop_death_inventory(&self) -> EntityBaseFuture<'_, ()> {
+        AbstractChestedHorse::drop_chest_contents(self)
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.send_horse_init_metadata();
+            self.send_initial_chest();
+        })
     }
 
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
@@ -230,7 +280,7 @@ impl Mob for DonkeyEntity {
     }
 
     /// `Donkey.getBreedOffspring`: Donkey+Horse -> Mule, Donkey+Donkey -> Donkey (both handled
-    /// generically by `HorseBreedGoal`/`horse_family_offspring`) plus max-health inheritance.
+    /// generically by `HorseBreedGoal`/`horse_family_offspring`) plus attribute inheritance.
     fn create_offspring<'a>(
         &'a self,
         mate: &'a dyn EntityBase,
@@ -245,55 +295,8 @@ impl Mob for DonkeyEntity {
                 Uuid::new_v4(),
             );
 
-            let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
-                m.get_mob_entity()
-                    .living_entity
-                    .get_attribute_base(&Attributes::MAX_HEALTH)
-            });
-
             if let Some(baby_mob) = baby.get_mob() {
-                let mut random = rand::rng();
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MAX_HEALTH,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::MAX_HEALTH),
-                    mate_max_health,
-                    MIN_HEALTH,
-                    MAX_HEALTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::JUMP_STRENGTH,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::JUMP_STRENGTH),
-                    mate.get_mob().map_or(MIN_JUMP_STRENGTH, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::JUMP_STRENGTH)
-                    }),
-                    MIN_JUMP_STRENGTH,
-                    MAX_JUMP_STRENGTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MOVEMENT_SPEED,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::MOVEMENT_SPEED),
-                    mate.get_mob().map_or(MIN_MOVEMENT_SPEED, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::MOVEMENT_SPEED)
-                    }),
-                    MIN_MOVEMENT_SPEED,
-                    MAX_MOVEMENT_SPEED,
-                    &mut random,
-                );
+                set_offspring_attributes(self, mate, baby_mob);
             }
 
             Some(baby)

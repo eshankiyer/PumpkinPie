@@ -30,7 +30,10 @@ use crate::entity::{
     mob::{Mob, MobEntity},
     passive::{
         animal::Animal,
-        equine::{AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData},
+        equine::{
+            AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData,
+            set_offspring_attributes,
+        },
     },
     player::Player,
 };
@@ -41,9 +44,6 @@ const TEMPT_ITEMS: &[&Item] = &[&Item::HAY_BLOCK];
 
 const MAX_STRENGTH: u8 = 5;
 const LLAMA_MAX_TEMPER: i32 = 30;
-/// `AbstractHorse.MIN_HEALTH`/`MAX_HEALTH` bounds shared with Donkey/Mule.
-const MIN_HEALTH: f64 = 15.0;
-const MAX_HEALTH: f64 = 30.0;
 
 /// `AbstractChestedHorse.randomizeAttributes`: only max-health is rolled, shared by
 /// `LlamaEntity` and `TraderLlamaEntity`.
@@ -347,24 +347,9 @@ pub trait LlamaMob: AbstractChestedHorse {
             let mut random = rand::rng();
 
             // `AbstractHorse.setOffspringAttributes` (`Llama.java:322`, called before the
-            // strength/variant rolls).
+            // strength/variant rolls): max health, jump strength and movement speed.
             if let Some(baby_mob) = baby.get_mob() {
-                let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
-                    m.get_mob_entity()
-                        .living_entity
-                        .get_attribute_base(&pumpkin_data::attributes::Attributes::MAX_HEALTH)
-                });
-                crate::entity::passive::equine::apply_offspring_attribute(
-                    baby_mob,
-                    &pumpkin_data::attributes::Attributes::MAX_HEALTH,
-                    self.get_mob_entity()
-                        .living_entity
-                        .get_attribute_base(&pumpkin_data::attributes::Attributes::MAX_HEALTH),
-                    mate_max_health,
-                    MIN_HEALTH,
-                    MAX_HEALTH,
-                    &mut random,
-                );
+                set_offspring_attributes(self, mate, baby_mob);
             }
 
             let a = self.llama_data().strength.load(Relaxed);
@@ -433,7 +418,7 @@ impl NBTStorage for LlamaEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_animal_nbt(nbt);
             self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
+            self.write_chested_horse_nbt(nbt).await;
             self.write_llama_nbt(nbt);
         })
     }
@@ -550,7 +535,9 @@ impl Mob for LlamaEntity {
         })
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    /// `AbstractHorse.tick`/`aiStep` run for `NoAI` horses too, so this is `post_tick`, which
+    /// `Mob::tick` runs every tick, rather than `mob_tick`.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
         AbstractHorse::tick_horse_ai(self)
     }
 
@@ -570,7 +557,13 @@ impl Mob for LlamaEntity {
         Box::pin(async move {
             send_baby_id_if_baby(self.get_entity());
             self.send_llama_metadata();
+            self.send_initial_horse_flags();
+            self.send_initial_chest();
         })
+    }
+
+    fn drop_death_inventory(&self) -> EntityBaseFuture<'_, ()> {
+        AbstractChestedHorse::drop_chest_contents(self)
     }
 
     fn create_offspring<'a>(

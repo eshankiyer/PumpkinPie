@@ -1,8 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 
-use pumpkin_data::entity::EntityType;
-
 use super::{Controls, Goal, GoalFuture, to_goal_ticks};
 use crate::entity::{EntityBase, ai::pathfinder::NavigatorGoal, mob::Mob};
 
@@ -12,21 +10,10 @@ const MAX_DISTANCE_SQ: f64 = 256.0;
 
 const SEARCH_Y_RANGE: f64 = 4.0;
 
-// `AbstractHorse.followMommy` accepts the horse-family parent types (`AbstractHorse.java:561-568`).
-const fn is_horse_family(entity_type: &EntityType) -> bool {
-    let id = entity_type.id;
-    id == EntityType::HORSE.id
-        || id == EntityType::DONKEY.id
-        || id == EntityType::MULE.id
-        || id == EntityType::SKELETON_HORSE.id
-        || id == EntityType::ZOMBIE_HORSE.id
-}
-
 pub struct FollowParentGoal {
     speed: f64,
     parent: Option<Arc<dyn EntityBase>>,
     delay: i32,
-    horse_family: bool,
 }
 
 impl FollowParentGoal {
@@ -36,46 +23,22 @@ impl FollowParentGoal {
             speed,
             parent: None,
             delay: 0,
-            horse_family: false,
         }
     }
 
-    /// `AbstractHorse.followMommy` searches all bred adult horse-family entities, not only the
-    /// baby's exact entity type (`AbstractHorse.java:561-568`).
-    #[must_use]
-    pub fn new_horse(speed: f64) -> Self {
-        Self {
-            speed,
-            parent: None,
-            delay: 0,
-            horse_family: true,
-        }
-    }
-
-    fn find_parent(mob: &dyn Mob, horse_family: bool) -> Option<Arc<dyn EntityBase>> {
+    fn find_parent(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let mob_entity = mob.get_mob_entity();
         let entity = &mob_entity.living_entity.entity;
         let pos = entity.pos.load();
         let my_type = entity.entity_type;
         let world = entity.world.load();
 
-        let nearby =
-            world.get_nearby_entities(pos, if horse_family { 16.0 } else { SEARCH_RADIUS });
+        let nearby = world.get_nearby_entities(pos, SEARCH_RADIUS);
         let mut closest: Option<(f64, Arc<dyn EntityBase>)> = None;
 
         for candidate in nearby.values() {
             let c_entity = candidate.get_entity();
-            let same_horse_family = is_horse_family(c_entity.entity_type);
-            if horse_family {
-                if !same_horse_family
-                    || c_entity.age.load(Relaxed) < 0
-                    || !candidate
-                        .get_mob()
-                        .is_some_and(crate::entity::mob::Mob::is_bred)
-                {
-                    continue;
-                }
-            } else if c_entity.entity_type != my_type || c_entity.age.load(Relaxed) < 0 {
+            if c_entity.entity_type != my_type || c_entity.age.load(Relaxed) < 0 {
                 continue;
             }
             let c_pos = c_entity.pos.load();
@@ -103,10 +66,7 @@ impl Goal for FollowParentGoal {
             if age >= 0 {
                 return false;
             }
-            if self.horse_family && !mob.is_bred() {
-                return false;
-            }
-            self.parent = Self::find_parent(mob, self.horse_family);
+            self.parent = Self::find_parent(mob);
             self.parent.is_some()
         })
     }
@@ -165,23 +125,5 @@ impl Goal for FollowParentGoal {
 
     fn controls(&self) -> Controls {
         Controls::MOVE
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_horse_family;
-    use pumpkin_data::entity::EntityType;
-
-    /// `AbstractHorse.followMommy` targets `AbstractHorse.class`, not the baby's exact class
-    /// (`AbstractHorse.java:561-568`).
-    #[test]
-    fn horse_parent_search_accepts_every_horse_family_type() {
-        assert!(is_horse_family(&EntityType::HORSE));
-        assert!(is_horse_family(&EntityType::DONKEY));
-        assert!(is_horse_family(&EntityType::MULE));
-        assert!(is_horse_family(&EntityType::SKELETON_HORSE));
-        assert!(is_horse_family(&EntityType::ZOMBIE_HORSE));
-        assert!(!is_horse_family(&EntityType::PIG));
     }
 }

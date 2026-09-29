@@ -148,8 +148,25 @@ pub mod zombified_piglin;
 pub const DEFAULT_AMBIENT_SOUND_INTERVAL: i32 = 80;
 /// Vanilla `AbstractGolem.getAmbientSoundInterval` (`AbstractGolem.java:29-31`).
 const GOLEM_AMBIENT_SOUND_INTERVAL: i32 = 120;
+/// Vanilla `AbstractHorse.getAmbientSoundInterval` (`AbstractHorse.java:401-404`), which also
+/// backs `getAmbientStandInterval` (`AbstractHorse.java:1033-1035`).
+pub const ABSTRACT_HORSE_AMBIENT_SOUND_INTERVAL: i32 = 400;
 /// Vanilla `Mob.ITEM_PICKUP_REACH` (`Mob.java:104-105`).
 const DEFAULT_ITEM_PICKUP_REACH: (f64, f64, f64) = (1.0, 0.0, 1.0);
+
+/// Every concrete `AbstractHorse` (`Camel` and `CamelHusk` extend it too, with no interval
+/// override of their own), which replaces `Animal`'s interval below.
+const fn is_abstract_horse_entity(id: u16) -> bool {
+    id == EntityType::HORSE.id
+        || id == EntityType::DONKEY.id
+        || id == EntityType::MULE.id
+        || id == EntityType::SKELETON_HORSE.id
+        || id == EntityType::ZOMBIE_HORSE.id
+        || id == EntityType::LLAMA.id
+        || id == EntityType::TRADER_LLAMA.id
+        || id == EntityType::CAMEL.id
+        || id == EntityType::CAMEL_HUSK.id
+}
 
 /// Vanilla `Animal.getAmbientSoundInterval` (`Animal.java:121-124`). The Java method is
 /// inherited by every animal, while Pumpkin dispatches the sound cadence through `Mob`; keep
@@ -1544,12 +1561,6 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn handle_stop_jump(&self) {}
 
-    /// `AbstractHorse.isBred` is consumed by its cross-species follow-mommy goal. Other mobs do
-    /// not have that flag and therefore remain ineligible as horse parents.
-    fn is_bred(&self) -> bool {
-        false
-    }
-
     /// Vanilla `Leashable.onElasticLeashPull` (`Leashable.java:176-178`) delegates to
     /// `Entity.checkFallDistanceAccumulation` before entity-specific leash behavior.
     fn default_on_elastic_leash_pull(&self) {
@@ -1685,37 +1696,23 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     /// Sound emitted by the mob's `playStepSound` hook, or `None` when the mob uses the generic
-    /// block step path. `AbstractHorse.playStepSound` (`AbstractHorse.java:342-360`) uses the
-    /// horse step sound for ordinary ground movement; the generic sound hook supplies that
-    /// server-visible part for horse-family entities.
+    /// block step path. A mob whose `playStepSound` plays several sounds, or none, at
+    /// block-dependent volume and pitch overrides [`Self::ground_step_sounds`] instead.
     fn get_step_sound(&self) -> Option<Sound> {
-        let entity_type = self.get_entity().entity_type;
-        let is_horse = matches!(
-            entity_type.id,
-            id if id == pumpkin_data::entity::EntityType::HORSE.id
-                || id == pumpkin_data::entity::EntityType::DONKEY.id
-                || id == pumpkin_data::entity::EntityType::MULE.id
-                || id == pumpkin_data::entity::EntityType::SKELETON_HORSE.id
-                || id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id
-        );
-        if !is_horse {
-            return None;
-        }
-        let entity = self.get_entity();
-        let ridden = entity
-            .passengers
-            .try_lock()
-            .is_ok_and(|passengers| !passengers.is_empty());
-        let tick_count = self.get_mob_entity().tick_count.load(Relaxed);
-        if ridden && tick_count > 5 && tick_count % 3 == 0 {
-            // `AbstractHorse.playGallopSound` (`AbstractHorse.java:350-375`) is selected after
-            // the initial ridden steps; `tick_swim_sound` supplies the shared step dispatch.
-            Some(Sound::EntityHorseGallop)
-        } else if entity.age.load(Relaxed) < 0 {
-            Some(Sound::EntityBabyHorseStep)
-        } else {
-            Some(Sound::EntityHorseStep)
-        }
+        None
+    }
+
+    /// A `playStepSound` override that decides its whole footstep, as `(sound, volume, pitch)`
+    /// entries played in order, or `None` for the generic path (`get_step_sound`). An empty list
+    /// is a silent step. `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`) is the one
+    /// user: it reads the supporting block's sound type, or that of a snow layer above it.
+    fn ground_step_sounds(
+        &self,
+        _supporting_block: &pumpkin_data::Block,
+        _supporting_state: &pumpkin_data::BlockState,
+        _above_block: &pumpkin_data::Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        None
     }
 
     /// Volume of the [`Self::get_step_sound`] sound. `Entity.playStepSound` scales the supporting
@@ -1791,6 +1788,7 @@ pub trait Mob: EntityBase + Send + Sync {
             {
                 GOLEM_AMBIENT_SOUND_INTERVAL
             }
+            id if is_abstract_horse_entity(id) => ABSTRACT_HORSE_AMBIENT_SOUND_INTERVAL,
             id if is_animal_entity(id) => 120,
             _ => DEFAULT_AMBIENT_SOUND_INTERVAL,
         }
@@ -2409,6 +2407,14 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     fn on_eating_grass(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async {})
+    }
+
+    /// Vanilla `dropEquipment(ServerLevel)` overrides that drop more than the equipment slots
+    /// on death -- `AbstractHorse.java:518-529` (its inventory) and
+    /// `AbstractChestedHorse.java:73-79` (the chest itself). Called from the mob death path after
+    /// the equipment-slot drops.
+    fn drop_death_inventory(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
     }
 
@@ -3109,6 +3115,13 @@ pub(crate) fn tick_mob_ai<'a>(
         if mob.suppress_ai_goals() {
             mob_entity.living_entity.jumping.store(false, Relaxed);
             mob_entity.jump_requested.store(false, Relaxed);
+            // The `isImmobile` branch of `LivingEntity.aiStep` also zeroes `xxa`/`zza`
+            // (`LivingEntity.java:3076-3080`), so a grazing or rearing horse stops rather than
+            // gliding on its last input.
+            mob_entity
+                .living_entity
+                .movement_input
+                .store(Vector3::default());
             mob.mob_tick(caller).await;
             return;
         }
@@ -3787,12 +3800,34 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 mod tests {
     use super::{
         DEFAULT_ITEM_PICKUP_REACH, EntityType, MobEntity, attack_knockback_strength,
-        can_replace_equal_item, fire_aspect_ticks, is_preserved_equipment_drop_chance,
-        knockback_enchantment_strength, max_fall_distance_for_state, max_spawn_cluster_size_for,
-        mob_use_remainder, mob_weapon_durability_cost, uses_monster_no_action_time,
+        can_replace_equal_item, fire_aspect_ticks, is_abstract_horse_entity,
+        is_preserved_equipment_drop_chance, knockback_enchantment_strength,
+        max_fall_distance_for_state, max_spawn_cluster_size_for, mob_use_remainder,
+        mob_weapon_durability_cost, uses_monster_no_action_time,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
+
+    /// `AbstractHorse.getAmbientSoundInterval` (`AbstractHorse.java:401-404`) covers every class
+    /// extending `AbstractHorse`, and only those.
+    #[test]
+    fn abstract_horse_ambient_interval_covers_the_horse_family() {
+        for entity_type in [
+            &EntityType::HORSE,
+            &EntityType::DONKEY,
+            &EntityType::MULE,
+            &EntityType::SKELETON_HORSE,
+            &EntityType::ZOMBIE_HORSE,
+            &EntityType::LLAMA,
+            &EntityType::TRADER_LLAMA,
+            &EntityType::CAMEL,
+            &EntityType::CAMEL_HUSK,
+        ] {
+            assert!(is_abstract_horse_entity(entity_type.id));
+        }
+        assert!(!is_abstract_horse_entity(EntityType::COW.id));
+        assert!(!is_abstract_horse_entity(EntityType::NAUTILUS.id));
+    }
 
     #[test]
     fn fire_aspect_uses_eighty_ticks_per_level() {

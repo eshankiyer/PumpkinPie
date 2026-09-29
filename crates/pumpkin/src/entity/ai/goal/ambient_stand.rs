@@ -3,11 +3,11 @@ use std::sync::Weak;
 use rand::RngExt;
 
 use super::{Controls, Goal};
-use crate::entity::{ai::goal::GoalFuture, mob::Mob, passive::equine::AbstractHorse};
-
-/// `AbstractHorse.getAmbientStandInterval` delegates to `getAmbientSoundInterval`,
-/// which `AbstractHorse` overrides to 400 ticks (`AbstractHorse.java:401-405`).
-const AMBIENT_STAND_INTERVAL_TICKS: i32 = 400;
+use crate::entity::{
+    ai::goal::GoalFuture,
+    mob::{ABSTRACT_HORSE_AMBIENT_SOUND_INTERVAL, Mob},
+    passive::equine::AbstractHorse,
+};
 
 /// Vanilla `RandomStandGoal.canUse` (`RandomStandGoal.java:30-40`), factored out as a pure
 /// function of the post-increment counter and the two random rolls it consumes.
@@ -40,8 +40,9 @@ impl<T: AbstractHorse + Mob> AmbientStandGoal<T> {
     pub fn new(horse: Weak<T>) -> Box<Self> {
         Box::new(Self {
             horse,
-            // `RandomStandGoal`'s constructor calls `resetStandInterval` immediately.
-            next_stand: -AMBIENT_STAND_INTERVAL_TICKS,
+            // `RandomStandGoal`'s constructor calls `resetStandInterval` immediately; every
+            // `AbstractHorse` reports the same `getAmbientStandInterval`.
+            next_stand: -ABSTRACT_HORSE_AMBIENT_SOUND_INTERVAL,
         })
     }
 }
@@ -60,7 +61,9 @@ impl<T: AbstractHorse + Mob + Send + Sync + 'static> Goal for AmbientStandGoal<T
                 evaluate_stand_trigger(self.next_stand, roll_1000, roll_10, horse.is_immobile());
 
             if should_reset {
-                self.next_stand = -AMBIENT_STAND_INTERVAL_TICKS;
+                // `resetStandInterval`: `getAmbientStandInterval` is `getAmbientSoundInterval`
+                // (`AbstractHorse.java:1033-1035`).
+                self.next_stand = -mob.get_ambient_sound_interval();
             }
 
             should_stand
@@ -72,14 +75,26 @@ impl<T: AbstractHorse + Mob + Send + Sync + 'static> Goal for AmbientStandGoal<T
         Box::pin(async { false })
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            // `RandomStandGoal.start` also calls `playStandSound()`; skipped here since this
-            // codebase has no per-species "play ambient sound now" hook to call it through
-            // (same simplification the `equine` module doc already notes for the standing
-            // pose itself never auto-clearing).
             if let Some(horse) = self.horse.upgrade() {
                 horse.stand_if_possible();
+            }
+            // `RandomStandGoal.playStandSound` (`RandomStandGoal.java:17-25`): the ambient sound
+            // (`AbstractHorse.getAmbientStandSound`, `AbstractHorse.java:692-694`) through the
+            // plain `Entity.playSound(sound)`, so volume and pitch are `1.0`
+            // (`Entity.java:1492-1496`).
+            let entity = mob.get_entity();
+            if !entity.is_silent()
+                && let Some(sound) = mob.get_ambient_sound()
+            {
+                entity.world.load().play_sound_fine(
+                    sound,
+                    mob.get_sound_source(),
+                    &entity.pos.load(),
+                    1.0,
+                    1.0,
+                );
             }
         })
     }

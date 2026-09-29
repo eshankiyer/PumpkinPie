@@ -11,7 +11,11 @@ use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::equipment::{
     RegionalDifficulty, clear_enchantments, enchant_item_from_mob_spawn_equipment,
 };
-use crate::entity::{EntityBase, mob::Mob, passive::skeleton_horse::SkeletonHorseEntity};
+use crate::entity::{
+    EntityBase,
+    mob::Mob,
+    passive::{equine::AbstractHorse, skeleton_horse::SkeletonHorseEntity},
+};
 
 /// Nearby-player range that arms the trap (vanilla: `hasNearbyAlivePlayer(x, y, z, 10.0)`).
 const TRIGGER_RANGE: f64 = 10.0;
@@ -79,6 +83,10 @@ impl SkeletonTrapGoal {
         );
 
         world.spawn_entity(horse.clone()).await;
+        // `SkeletonTrapGoal.createHorse` (`SkeletonTrapGoal.java:70`): `horse.setTamed(true)`.
+        if let Some(horse) = horse.cast_any().downcast_ref::<SkeletonHorseEntity>() {
+            horse.set_tamed_ownerless();
+        }
         world.spawn_entity(skeleton.clone()).await;
         Self::finalize_skeleton_equipment(&skeleton, difficulty).await;
 
@@ -167,10 +175,9 @@ impl Goal for SkeletonTrapGoal {
                 return;
             };
             // Vanilla: `this.horse.setTrap(false); this.horse.setTamed(true); this.horse.setAge(0);`
-            // Pumpkin's generic "tamed" concept (`MobEntity::is_tamed`) is owner-uuid-based and
-            // has no "tamed but ownerless" state to set here, so only the trap flag and age are
-            // reset.
+            // The tamed-but-ownerless state is `AbstractHorse`'s stored `FLAG_TAME` bit.
             horse.set_trap(false);
+            horse.set_tamed_ownerless();
             mob.get_entity()
                 .age
                 .store(0, std::sync::atomic::Ordering::Relaxed);

@@ -97,7 +97,7 @@ impl NBTStorage for TraderLlamaEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_animal_nbt(nbt);
             self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
+            self.write_chested_horse_nbt(nbt).await;
             self.write_llama_nbt(nbt);
             nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
         })
@@ -225,7 +225,13 @@ impl Mob for TraderLlamaEntity {
         Box::pin(async move {
             crate::entity::passive::llama::send_baby_id_if_baby(self.get_entity());
             self.send_llama_metadata();
+            self.send_initial_horse_flags();
+            self.send_initial_chest();
         })
+    }
+
+    fn drop_death_inventory(&self) -> EntityBaseFuture<'_, ()> {
+        AbstractChestedHorse::drop_chest_contents(self)
     }
 
     fn create_offspring<'a>(
@@ -246,7 +252,6 @@ impl Mob for TraderLlamaEntity {
     /// the trader's timer; otherwise it decrements independently.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            self.tick_horse_ai().await;
             let entity = &self.mob_entity.living_entity.entity;
             let holder = entity.leashed_to.lock().await.clone();
 
@@ -277,5 +282,11 @@ impl Mob for TraderLlamaEntity {
                 world.remove_entity(self).await;
             }
         })
+    }
+
+    /// `AbstractHorse.tick`/`aiStep` run for `NoAI` horses too, so this is `post_tick`, which
+    /// `Mob::tick` runs every tick, rather than `mob_tick`.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
+        AbstractHorse::tick_horse_ai(self)
     }
 }

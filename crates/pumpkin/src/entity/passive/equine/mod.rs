@@ -28,19 +28,25 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::{Block, entity::EntityType, tag::Taggable};
+use pumpkin_data::{
+    Block, BlockState,
+    entity::{EntityStatus, EntityType},
+    tag::Taggable,
+    tracked_data,
+};
 use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::{Inventory, SimpleInventory};
 use rand::RngExt;
 use tokio::sync::Mutex as TokioMutex;
-use uuid::Uuid;
 
 pub(crate) fn is_valid_saddle_item(stack: &ItemStack, entity_type: &EntityType) -> bool {
     stack
@@ -183,7 +189,7 @@ use crate::entity::{
     ai::goal::{Controls, Goal, GoalFuture, escape_danger::EscapeDangerGoal},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
-    player::Player,
+    player::{Player, advancement::trigger::AdvancementTrigger},
 };
 
 /// `ItemTags.HORSE_TEMPT_ITEMS` (`AbstractHorse.java:151`): golden carrot, golden apple,
@@ -207,10 +213,13 @@ pub const MAX_JUMP_STRENGTH: f64 = 1.0;
 pub const MIN_MOVEMENT_SPEED: f64 = 0.1125;
 pub const MAX_MOVEMENT_SPEED: f64 = 0.3375;
 
-/// `AbstractHorse.java` `DATA_ID_FLAGS` bits.
+/// `AbstractHorse.java` `DATA_ID_FLAGS` bits (`AbstractHorse.java:97-101`).
 ///
-/// `FLAG_TAME` (2) is intentionally not here -- `MobEntity::is_tamed`/`set_owner` is the single
-/// source of truth for tame state (see the module doc comment on `AbstractHorse::is_tamed`).
+/// `FLAG_TAME` is stored in `AbstractHorseData::flags` only for a horse that is tame without an
+/// owner (a skeleton trap horse or a `Tame:1b` entity with no `Owner`); a horse with an owner is
+/// tame through `MobEntity::owner` (see `AbstractHorse::is_tamed`). The synched byte gets the
+/// bit from `AbstractHorse::is_tamed` in `AbstractHorse::horse_flags_byte`.
+pub const FLAG_TAME: u8 = 2;
 pub const FLAG_BRED: u8 = 8;
 pub const FLAG_EATING: u8 = 16;
 pub const FLAG_STANDING: u8 = 32;
@@ -223,10 +232,17 @@ pub struct AbstractHorseData {
     pub temper: AtomicI32,
     pub eating_counter: AtomicI32,
     pub stand_counter: AtomicI32,
+    /// Vanilla `AbstractHorse.mouthCounter` (`AbstractHorse.java:109`): ticks since `openMouth`,
+    /// 0 while the mouth is closed.
+    pub mouth_counter: AtomicI32,
     /// Vanilla `AbstractHorse.gallopSoundCounter` (`AbstractHorse.java:123-124`).
     pub gallop_sound_counter: AtomicI32,
     pub jump_pending_scale: AtomicI32,
     pub allow_stand_sliding: AtomicBool,
+    /// The `DATA_ID_FLAGS` byte last published to clients. `SynchedEntityData.set` ignores an
+    /// unchanged value (`SynchedEntityData.java:60-68`), so the sync helpers compare against
+    /// this rather than resending on every per-tick `set_flag`.
+    pub synced_flags: AtomicU8,
 }
 
 impl Default for AbstractHorseData {
@@ -236,9 +252,11 @@ impl Default for AbstractHorseData {
             temper: AtomicI32::new(0),
             eating_counter: AtomicI32::new(0),
             stand_counter: AtomicI32::new(0),
+            mouth_counter: AtomicI32::new(0),
             gallop_sound_counter: AtomicI32::new(0),
             jump_pending_scale: AtomicI32::new(0),
             allow_stand_sliding: AtomicBool::new(false),
+            synced_flags: AtomicU8::new(0),
         }
     }
 }
@@ -325,6 +343,8 @@ impl<T: AbstractHorse + Mob + ?Sized + Send + Sync + 'static> Goal for MountPani
 pub struct ChestedHorseData {
     pub has_chest: std::sync::atomic::AtomicBool,
     pub inventory: TokioMutex<Arc<SimpleInventory>>,
+    /// The `DATA_ID_CHEST` value last published to clients (`AbstractChestedHorse.java:32,49-53`).
+    pub synced_chest: AtomicBool,
 }
 
 impl Default for ChestedHorseData {
@@ -332,6 +352,7 @@ impl Default for ChestedHorseData {
         Self {
             has_chest: std::sync::atomic::AtomicBool::new(false),
             inventory: TokioMutex::new(Arc::new(SimpleInventory::new(0))),
+            synced_chest: AtomicBool::new(false),
         }
     }
 }
@@ -421,6 +442,69 @@ fn player_jump_pending_scale(jump_amount: i32) -> i32 {
     }
 }
 
+/// The synched `DATA_ID_FLAGS` byte (`AbstractHorse.java:96-101`) from the stored bred, eating,
+/// standing and open-mouth bits and the owner-derived tame bit.
+#[must_use]
+const fn synced_flags_byte(stored: u8, tamed: bool) -> u8 {
+    let stored = stored & (FLAG_BRED | FLAG_EATING | FLAG_STANDING | FLAG_OPEN_MOUTH);
+    if tamed { stored | FLAG_TAME } else { stored }
+}
+
+/// `AbstractHorse.tick`'s `mouthCounter` step (`AbstractHorse.java:579-582`): `++mouthCounter`
+/// while it is running, resetting once it passes 30. Returns the next counter and whether the
+/// open-mouth flag clears.
+#[must_use]
+const fn next_mouth_counter(counter: i32) -> (i32, bool) {
+    if counter <= 0 {
+        return (counter, false);
+    }
+    let next = counter + 1;
+    if next > 30 { (0, true) } else { (next, false) }
+}
+
+/// What one ridden footstep of a gallop-capable horse plays (`AbstractHorse.java:350-356`).
+#[derive(Debug, PartialEq, Eq)]
+enum GallopStep {
+    /// `playGallopSound`.
+    Gallop,
+    /// `HORSE_STEP_WOOD`, for the first five steps.
+    Step,
+    /// Neither: `gallopSoundCounter > 5` on the two steps between gallops.
+    Silent,
+}
+
+/// Picks the sound of a ridden step from `gallopSoundCounter` after its increment
+/// (`AbstractHorse.java:351-356`).
+const fn gallop_step(counter: i32) -> GallopStep {
+    if counter > 5 && counter % 3 == 0 {
+        GallopStep::Gallop
+    } else if counter <= 5 {
+        GallopStep::Step
+    } else {
+        GallopStep::Silent
+    }
+}
+
+/// `AbstractHorse.isWoodSoundType` (`AbstractHorse.java:365-371`): `WOOD`, `NETHER_WOOD`, `STEM`,
+/// `CHERRY_WOOD` and `BAMBOO_WOOD`, told apart by the step sound `block_sound_type` reports.
+const fn is_wood_step_sound(step: Sound) -> bool {
+    matches!(
+        step,
+        Sound::BlockWoodStep
+            | Sound::BlockNetherWoodStep
+            | Sound::BlockStemStep
+            | Sound::BlockCherryWoodStep
+            | Sound::BlockBambooWoodStep
+    )
+}
+
+/// `AbstractHorse.playGallopSound` (`AbstractHorse.java:373-375`) as `(sound, volume, pitch)`,
+/// given the block sound type's volume and pitch.
+#[must_use]
+pub const fn gallop_sound(block_volume: f32, block_pitch: f32) -> (Sound, f32, f32) {
+    (Sound::EntityHorseGallop, block_volume * 0.15, block_pitch)
+}
+
 struct HorseChestScreenFactory(Arc<dyn Inventory>);
 
 impl ScreenHandlerFactory for HorseChestScreenFactory {
@@ -486,17 +570,53 @@ pub trait AbstractHorse: Animal {
         true
     }
 
-    /// Server-side portion of `AbstractHorse.aiStep` and `tick`: start haystack
-    /// eating beneath the horse and expire the 20-tick standing pose.
+    /// Server-side portion of `AbstractHorse.aiStep` and `tick`: expire the open mouth and the
+    /// 20-tick standing pose, heal slowly, and start haystack eating beneath the horse.
+    ///
+    /// Species call this from `Mob::post_tick`, not `mob_tick`: neither vanilla method is gated
+    /// on `NoAI` (only `Mob.serverAiStep` is), whereas `mob_tick` is skipped for a `NoAI` mob, and
+    /// a `NoAI` horse that reared or ate would keep the pose and open mouth forever.
     fn tick_horse_ai(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let data = self.horse_data();
+            // `AbstractHorse.tick` (`AbstractHorse.java:579-582`).
+            let previous_mouth = data
+                .mouth_counter
+                .fetch_update(Relaxed, Relaxed, |counter| {
+                    Some(next_mouth_counter(counter).0)
+                })
+                .unwrap_or_default();
+            if next_mouth_counter(previous_mouth).1 {
+                self.set_horse_flag(FLAG_OPEN_MOUTH, false);
+            }
             if data.stand_counter.load(Relaxed) > 0 && data.stand_counter.fetch_sub(1, Relaxed) <= 1
             {
                 self.clear_standing();
             }
+            // `AbstractHorse.tick` (`AbstractHorse.java:620-622`): the rider's steering freeze
+            // while rearing is only lifted for the pose a jump started.
+            if !data.get_flag(FLAG_STANDING) {
+                data.allow_stand_sliding.store(false, Relaxed);
+            }
 
+            // The rest of `AbstractHorse.aiStep` only runs for a living horse
+            // (`AbstractHorse.java:538`); `LivingEntity.isAlive` is `!isRemoved() && health > 0`,
+            // so a horse in its death animation neither heals nor grazes.
             let entity = self.get_entity();
+            if !entity.is_alive() || self.get_mob_entity().living_entity.is_dead_or_dying() {
+                return;
+            }
+
+            // Natural regeneration (`AbstractHorse.java:539-541`); `deathTime == 0` holds for
+            // any horse that is still alive. `heal` clamps to full health, so skipping it there
+            // only spares a regain-health event for a no-op.
+            if self.get_random().random_range(0..900) == 0 {
+                let living = &self.get_mob_entity().living_entity;
+                if living.health.load() < living.get_max_health() {
+                    living.heal(1.0);
+                }
+            }
+
             let is_vehicle = !entity.passengers.lock().await.is_empty();
             if self.can_eat_grass()
                 && !data.get_flag(FLAG_EATING)
@@ -509,14 +629,70 @@ pub trait AbstractHorse: Animal {
                     .id
                     == Block::GRASS_BLOCK.id
             {
-                data.set_flag(FLAG_EATING, true);
+                self.set_horse_flag(FLAG_EATING, true);
             }
 
             if data.get_flag(FLAG_EATING) && data.eating_counter.fetch_add(1, Relaxed) + 1 > 50 {
                 data.eating_counter.store(0, Relaxed);
-                data.set_flag(FLAG_EATING, false);
+                self.set_horse_flag(FLAG_EATING, false);
             }
         })
+    }
+
+    /// The synched `DATA_ID_FLAGS` byte (`AbstractHorse.java:96-101`): the stored bred, eating,
+    /// standing and open-mouth bits plus `FLAG_TAME`, which is derived from the owner.
+    fn horse_flags_byte(&self) -> u8 {
+        synced_flags_byte(self.horse_data().flags.load(Relaxed), self.is_tamed())
+    }
+
+    fn send_horse_flags_byte(&self, byte: u8) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::abstract_horse::DATA_ID_FLAGS,
+                byte as i8,
+            )],
+            None,
+        );
+    }
+
+    /// Publishes `DATA_ID_FLAGS` when it differs from what clients already have, as
+    /// `SynchedEntityData.set` does for every `setFlag` (`AbstractHorse.java:163-170`).
+    fn sync_horse_flags(&self) {
+        let byte = self.horse_flags_byte();
+        if self.horse_data().synced_flags.swap(byte, Relaxed) != byte {
+            self.send_horse_flags_byte(byte);
+        }
+    }
+
+    /// `AbstractHorse.setFlag`: stores the bit and syncs it.
+    fn set_horse_flag(&self, flag: u8, value: bool) {
+        self.horse_data().set_flag(flag, value);
+        self.sync_horse_flags();
+    }
+
+    /// The `mob_init_data_tracker` half of `AbstractHorse.defineSynchedData`
+    /// (`AbstractHorse.java:154-157`): the client default is 0, so only a non-zero byte -- a
+    /// tamed horse, or one loaded with NBT flags -- has to be sent.
+    fn send_initial_horse_flags(&self) {
+        let byte = self.horse_flags_byte();
+        self.horse_data().synced_flags.store(byte, Relaxed);
+        if byte != 0 {
+            self.send_horse_flags_byte(byte);
+        }
+    }
+
+    /// What a species' `mob_init_data_tracker` publishes for an `AbstractHorse`: the
+    /// `AgeableMob` baby flag, which overriding the `Mob` default would otherwise drop, and the
+    /// horse flags.
+    fn send_horse_init_metadata(&self) {
+        let entity = self.get_entity();
+        if entity.age.load(Relaxed) < 0 {
+            entity.send_meta_data(
+                &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
+                None,
+            );
+        }
+        self.send_initial_horse_flags();
     }
 
     /// `AbstractHorse.isImmobile`: `super.isImmobile() && isVehicle() && isSaddled() ||
@@ -534,6 +710,92 @@ pub trait AbstractHorse: Animal {
 
     fn eating_sound(&self) -> Option<Sound> {
         None
+    }
+
+    /// `AbstractHorse.openMouth` (`AbstractHorse.java:670-675`).
+    fn open_mouth(&self) {
+        self.horse_data().mouth_counter.store(1, Relaxed);
+        self.set_horse_flag(FLAG_OPEN_MOUTH, true);
+    }
+
+    /// `AbstractHorse.eating` (`AbstractHorse.java:258-276`): opens the mouth and plays the
+    /// species' eating sound at `1.0` volume with a `1.0 +- 0.2` pitch spread.
+    fn eating(&self) {
+        self.open_mouth();
+        let entity = self.get_entity();
+        if !entity.is_silent()
+            && let Some(sound) = self.eating_sound()
+        {
+            let mut random = self.get_random();
+            let pitch = 1.0 + (random.random::<f32>() - random.random::<f32>()) * 0.2;
+            entity.world.load().play_sound_fine(
+                sound,
+                self.get_sound_source(),
+                &entity.pos.load(),
+                1.0,
+                pitch,
+            );
+        }
+    }
+
+    /// `AbstractHorse.canGallop` (`AbstractHorse.java:123`); `AbstractChestedHorse` clears it
+    /// (`AbstractChestedHorse.java:38`).
+    fn can_gallop(&self) -> bool {
+        true
+    }
+
+    /// `AbstractHorse.playGallopSound` (`AbstractHorse.java:373-375`) as `(sound, volume, pitch)`
+    /// entries; `Horse` adds its breathing on top (`Horse.java:123-128`).
+    fn gallop_sounds(&self, block_volume: f32, block_pitch: f32) -> Vec<(Sound, f32, f32)> {
+        vec![gallop_sound(block_volume, block_pitch)]
+    }
+
+    /// `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`) as `(sound, volume, pitch)`
+    /// entries, empty when the step is silent.
+    ///
+    /// `block_sound_type` supplies the `SoundType` volume and pitch; the snow layer above the
+    /// supporting block takes over its sound type, as in vanilla. Whether the horse is a
+    /// vehicle is read with `try_lock` (the hook is not async), so a contended lock counts as
+    /// unridden for that one step.
+    fn horse_step_sounds(
+        &self,
+        supporting_block: &Block,
+        supporting_state: &BlockState,
+        above_block: &Block,
+    ) -> Vec<(Sound, f32, f32)> {
+        if supporting_state.is_liquid() {
+            return Vec::new();
+        }
+        let sound_block = if above_block.id == Block::SNOW.id {
+            above_block
+        } else {
+            supporting_block
+        };
+        let (step_sound, _, block_volume, block_pitch) =
+            crate::block::block_sound_type(sound_block);
+        let step_volume = block_volume * 0.15;
+
+        let entity = self.get_entity();
+        let is_vehicle = entity
+            .passengers
+            .try_lock()
+            .is_ok_and(|passengers| !passengers.is_empty());
+        if is_vehicle && self.can_gallop() {
+            let counter = self.horse_data().gallop_sound_counter.fetch_add(1, Relaxed) + 1;
+            match gallop_step(counter) {
+                GallopStep::Gallop => self.gallop_sounds(block_volume, block_pitch),
+                GallopStep::Step => {
+                    vec![(Sound::EntityHorseStepWood, step_volume, block_pitch)]
+                }
+                GallopStep::Silent => Vec::new(),
+            }
+        } else if is_wood_step_sound(step_sound) {
+            vec![(Sound::EntityHorseStepWood, step_volume, block_pitch)]
+        } else if self.is_baby() {
+            vec![(Sound::EntityBabyHorseStep, step_volume, block_pitch)]
+        } else {
+            vec![(Sound::EntityHorseStep, step_volume, block_pitch)]
+        }
     }
 
     fn angry_sound(&self) -> Option<Sound> {
@@ -573,21 +835,36 @@ pub trait AbstractHorse: Animal {
         self.get_entity().age.load(Relaxed) < 0
     }
 
-    /// `AbstractHorse.isTamed`. `FLAG_TAME` is folded into `MobEntity::owner` -- every vanilla
-    /// code path sets the owner and the tame flag together, so `owner.is_some()` is equivalent
-    /// and avoids a duplicate bool that could desync from the owner reference.
+    /// `AbstractHorse.isTamed` (`AbstractHorse.java:169-171`). Vanilla's tame flag is
+    /// independent of its owner reference (`SkeletonTrapGoal` tames with no owner), so a horse is
+    /// tame with an owner (`MobEntity::owner`) or with the stored `FLAG_TAME` bit.
     fn is_tamed(&self) -> bool {
-        self.get_mob_entity().is_tamed()
+        self.get_mob_entity().is_tamed() || self.horse_data().get_flag(FLAG_TAME)
     }
 
-    /// `AbstractHorse.tameWithName`, minus the advancement trigger (no
-    /// `CriteriaTriggers.TAME_ANIMAL` equivalent wired up yet).
-    fn set_tamed(&self, owner: Uuid) {
-        self.get_mob_entity().set_owner(owner);
-        let entity = self.get_entity();
-        let world = entity.world.load();
-        let pos = entity.pos.load() + Vector3::new(0.0, f64::from(entity.height()), 0.0);
-        world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Heart);
+    /// `AbstractHorse.setTamed(true)` with no owner, as `SkeletonTrapGoal.tick` does
+    /// (`SkeletonTrapGoal.java:36`).
+    fn set_tamed_ownerless(&self) {
+        self.set_horse_flag(FLAG_TAME, true);
+    }
+
+    /// `AbstractHorse.tameWithName` (`AbstractHorse.java:709-718`): the tamer becomes the owner,
+    /// the synched tame bit goes out, `TAME_ANIMAL` fires, and clients spawn the heart particles
+    /// from entity event 7 (`handleEntityEvent`, `AbstractHorse.java:919-921`).
+    fn set_tamed<'a>(&'a self, player: &'a Player) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.get_mob_entity().set_owner(player.gameprofile.id);
+            self.sync_horse_flags();
+            player
+                .trigger_advancement(AdvancementTrigger::TamedAnimal)
+                .await;
+            let entity = self.get_entity();
+            entity.world.load().send_entity_status(
+                entity,
+                EntityStatus::TamingSucceeded,
+                Some(ActorEventType::TamingSucceeded),
+            );
+        })
     }
 
     fn can_use_saddle_slot(&self) -> bool {
@@ -652,6 +929,16 @@ pub trait AbstractHorse: Animal {
             self.horse_data().set_flag(FLAG_EATING, false);
             self.horse_data().set_flag(FLAG_STANDING, true);
             self.horse_data().stand_counter.store(20, Relaxed);
+            self.sync_horse_flags();
+        }
+    }
+
+    /// `AbstractHorse.hurtServer` (`AbstractHorse.java:319-327`): a hit that landed makes the
+    /// horse rear one time in three. Called from the species' `Mob::on_damage`, which only runs
+    /// for accepted damage.
+    fn horse_on_damage(&self) {
+        if self.get_random().random_range(0..3) == 0 {
+            self.stand_if_possible();
         }
     }
 
@@ -659,13 +946,14 @@ pub trait AbstractHorse: Animal {
     fn clear_standing(&self) {
         self.horse_data().set_flag(FLAG_STANDING, false);
         self.horse_data().stand_counter.store(0, Relaxed);
+        self.sync_horse_flags();
     }
 
     /// `AbstractHorse.onElasticLeashPull` (`AbstractHorse.java:189-195`) stops grazing when
     /// the shared leash solver applies an elastic pull.
     fn on_elastic_leash_pull(&self) {
         self.default_on_elastic_leash_pull();
-        self.horse_data().set_flag(FLAG_EATING, false);
+        self.set_horse_flag(FLAG_EATING, false);
     }
 
     /// `AbstractHorse.supportQuadLeash`/`getQuadLeashOffsets` (`AbstractHorse.java:197-205`).
@@ -763,23 +1051,31 @@ pub trait AbstractHorse: Animal {
     /// `AbstractHorse.handleStopJump` (`AbstractHorse.java:904-905`) has no server-side action.
     fn handle_stop_jump(&self) {}
 
-    /// `AbstractHorse.executeRidersJump` (`AbstractHorse.java:771-780`).
-    fn execute_riders_jump(&self, scale_thousandths: i32, input: Vector3<f64>) {
-        let amount = f64::from(scale_thousandths) / 1000.0;
-        let impulse = self
-            .get_mob_entity()
-            .living_entity
-            .get_attribute_value(&pumpkin_data::attributes::Attributes::JUMP_STRENGTH)
-            * amount;
-        let entity = self.get_entity();
-        let mut velocity = entity.velocity.load();
-        velocity.y = impulse;
-        if input.z > 0.0 {
-            let yaw = f64::from(entity.yaw.load()).to_radians();
-            velocity.x += -0.4 * yaw.sin() * amount;
-            velocity.z += 0.4 * yaw.cos() * amount;
-        }
-        entity.set_velocity(velocity);
+    /// `AbstractHorse.executeRidersJump` (`AbstractHorse.java:771-780`). The impulse is
+    /// `getJumpPower(amount)` (`LivingEntity.java:2371-2373`): the jump-strength attribute scaled
+    /// by the block jump factor, plus the Jump Boost bonus.
+    fn execute_riders_jump(
+        &self,
+        scale_thousandths: i32,
+        input: Vector3<f64>,
+    ) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let amount = f64::from(scale_thousandths) / 1000.0;
+            let impulse = self
+                .get_mob_entity()
+                .living_entity
+                .get_jump_velocity(amount)
+                .await;
+            let entity = self.get_entity();
+            let mut velocity = entity.velocity.load();
+            velocity.y = impulse;
+            if input.z > 0.0 {
+                let yaw = f64::from(entity.yaw.load()).to_radians();
+                velocity.x += -0.4 * yaw.sin() * amount;
+                velocity.z += 0.4 * yaw.cos() * amount;
+            }
+            entity.set_velocity(velocity);
+        })
     }
 
     /// `AbstractHorse.tickRidden` (`AbstractHorse.java:720-738`) and the existing
@@ -813,12 +1109,13 @@ pub trait AbstractHorse: Animal {
             if input.z <= 0.0 {
                 self.horse_data().gallop_sound_counter.store(0, Relaxed);
             }
-            let pending = self.horse_data().jump_pending_scale.swap(0, Relaxed);
-            if entity.on_ground.load(Relaxed)
-                && pending > 0
-                && !self.get_mob_entity().living_entity.jumping.load(Relaxed)
-            {
-                self.execute_riders_jump(pending, input);
+            // Only a grounded horse consumes the pending jump (`AbstractHorse.java:731-737`);
+            // a jump requested mid-air is kept until the landing tick.
+            if entity.on_ground.load(Relaxed) {
+                let pending = self.horse_data().jump_pending_scale.swap(0, Relaxed);
+                if pending > 0 && !self.get_mob_entity().living_entity.jumping.load(Relaxed) {
+                    self.execute_riders_jump(pending, input).await;
+                }
             }
 
             entity.update_velocity_from_input(input, self.get_ridden_speed());
@@ -950,8 +1247,11 @@ pub trait AbstractHorse: Animal {
                 item_used = true;
             }
 
+            // `AbstractHorse.java:486-489`: `eating()` (open mouth + eating sound), then the
+            // `EAT` game event. This is not the grazing pose, so `FLAG_EATING` is untouched.
             if item_used {
-                self.horse_data().set_flag(FLAG_EATING, true);
+                self.eating();
+                mob_entity.ate().await;
             }
 
             item_used
@@ -1046,14 +1346,19 @@ pub trait AbstractHorse: Animal {
         })
     }
 
-    /// `AbstractHorse.addAdditionalSaveData` (`AbstractHorse.java:788-793`, minus `Owner`/`Tame`
-    /// which `MobEntity`'s generic owner persistence already handles) plus the randomized
+    /// `AbstractHorse.addAdditionalSaveData` (`AbstractHorse.java:788-795`) plus the randomized
     /// attribute base values (see the module doc comment on `randomize_attributes`).
+    ///
+    /// `MobEntity` has no generic owner persistence, so `Tame` and `Owner` are written here.
     fn write_horse_nbt(&self, nbt: &mut NbtCompound) {
         let data = self.horse_data();
         nbt.put_bool("EatingHaystack", data.get_flag(FLAG_EATING));
         nbt.put_bool("Bred", data.get_flag(FLAG_BRED));
         nbt.put_int("Temper", data.temper.load(Relaxed));
+        nbt.put_bool("Tame", self.is_tamed());
+        if let Some(owner) = self.get_mob_entity().owner.load() {
+            nbt.put_uuid("Owner", owner);
+        }
 
         let attributes = self
             .get_mob_entity()
@@ -1078,6 +1383,13 @@ pub trait AbstractHorse: Animal {
         data.set_flag(FLAG_BRED, nbt.get_bool("Bred").unwrap_or(false));
         data.temper
             .store(nbt.get_int("Temper").unwrap_or(0), Relaxed);
+        // `AbstractHorse.readAdditionalSaveData` (`AbstractHorse.java:798-805`). The tame bit is
+        // kept apart from the owner so that `Tame:1b` without an `Owner` stays tame. Like every
+        // other read here this precedes `mob_init_data_tracker`, which publishes the flags.
+        data.set_flag(FLAG_TAME, nbt.get_bool("Tame").unwrap_or(false));
+        if let Some(owner) = nbt.get_uuid("Owner") {
+            self.get_mob_entity().set_owner(owner);
+        }
 
         let mut attributes = self
             .get_mob_entity()
@@ -1115,22 +1427,32 @@ pub trait AbstractHorse: Animal {
     }
 }
 
-/// `AbstractHorse.setOffspringAttribute` (`AbstractHorse.java:835-840`).
-///
-/// Applied to a freshly spawned baby's attribute base value. `range_min`/`range_max` are the
-/// species' randomize-attribute bounds (the same bounds `generate_max_health`/`generate_speed`/
-/// `generate_jump_strength` roll within).
-pub fn apply_offspring_attribute(
+/// `AbstractHorse.setOffspringAttribute` (`AbstractHorse.java:831-838`): the baby's base value
+/// for `attribute` becomes `create_offspring_attribute` of the two parents' base values.
+/// `range_min`/`range_max` are the species-independent bounds shared by every horse family
+/// member (`AbstractHorse.java:83-88`). A partner that is not a mob (never the case in vanilla,
+/// where it is an `AgeableMob`) counts as sitting at the range minimum.
+fn apply_offspring_attribute(
+    parent: &dyn Mob,
+    partner: &dyn EntityBase,
     baby: &dyn Mob,
     attribute: &'static pumpkin_data::attributes::Attributes,
-    parent_a_value: f64,
-    parent_b_value: f64,
     range_min: f64,
     range_max: f64,
     random: &mut impl RngExt,
 ) {
+    let parent_value = parent
+        .get_mob_entity()
+        .living_entity
+        .get_attribute_base(attribute);
+    let partner_value = partner.get_mob().map_or(range_min, |partner| {
+        partner
+            .get_mob_entity()
+            .living_entity
+            .get_attribute_base(attribute)
+    });
     let new_value =
-        create_offspring_attribute(parent_a_value, parent_b_value, range_min, range_max, random);
+        create_offspring_attribute(parent_value, partner_value, range_min, range_max, random);
     let mut attributes = baby
         .get_mob_entity()
         .living_entity
@@ -1141,6 +1463,49 @@ pub fn apply_offspring_attribute(
         a.base_value = new_value;
         a.dirty.store(true, Relaxed);
     }
+}
+
+/// `AbstractHorse.setOffspringAttributes` (`AbstractHorse.java:825-829`): the baby inherits
+/// max health, jump strength and movement speed from `parent` and `partner`.
+///
+/// Vanilla builds the baby from the plain 53-health base attributes, so lowering its max health
+/// to the inherited value clamps its health to it (`LivingEntity.onAttributeUpdated`,
+/// `LivingEntity.java:1133-1138`) and the foal starts at full inherited health. Pumpkin builds
+/// it through `randomize_attributes`, which leaves health at an unrelated rolled maximum, so the
+/// same result is set explicitly once the attributes are in.
+pub fn set_offspring_attributes(parent: &dyn Mob, partner: &dyn EntityBase, baby: &dyn Mob) {
+    use pumpkin_data::attributes::Attributes;
+
+    let mut random = rand::rng();
+    apply_offspring_attribute(
+        parent,
+        partner,
+        baby,
+        &Attributes::MAX_HEALTH,
+        MIN_HEALTH,
+        MAX_HEALTH,
+        &mut random,
+    );
+    apply_offspring_attribute(
+        parent,
+        partner,
+        baby,
+        &Attributes::JUMP_STRENGTH,
+        MIN_JUMP_STRENGTH,
+        MAX_JUMP_STRENGTH,
+        &mut random,
+    );
+    apply_offspring_attribute(
+        parent,
+        partner,
+        baby,
+        &Attributes::MOVEMENT_SPEED,
+        MIN_MOVEMENT_SPEED,
+        MAX_MOVEMENT_SPEED,
+        &mut random,
+    );
+    let baby_living = &baby.get_mob_entity().living_entity;
+    baby_living.health.store(baby_living.get_max_health());
 }
 
 /// Mirrors vanilla `AbstractChestedHorse` (Donkey/Mule; Llama is out of scope for this task).
@@ -1182,9 +1547,10 @@ pub trait AbstractChestedHorse: AbstractHorse {
         );
     }
 
-    /// `AbstractChestedHorse.setChest` + `createInventory`: replaces the backing inventory,
-    /// preserving any existing stacks in the overlapping slot range.
-    fn set_chest(&self, value: bool) -> EntityBaseFuture<'_, ()> {
+    /// The `createInventory` half of `AbstractChestedHorse.setChest`: replaces the backing
+    /// inventory, preserving any existing stacks in the overlapping slot range, without telling
+    /// clients. NBT loading uses this directly since `mob_init_data_tracker` publishes the state.
+    fn resize_chest_inventory(&self, value: bool) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.chested_data().has_chest.store(value, Relaxed);
             let new_size = if value {
@@ -1207,8 +1573,77 @@ pub trait AbstractChestedHorse: AbstractHorse {
         })
     }
 
+    /// `AbstractChestedHorse.setChest` + `createInventory` (`AbstractChestedHorse.java:63-65`).
+    fn set_chest(&self, value: bool) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.resize_chest_inventory(value).await;
+            self.sync_chest();
+        })
+    }
+
+    fn send_chest_flag(&self, has_chest: bool) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::donkey::DATA_ID_CHEST,
+                has_chest,
+            )],
+            None,
+        );
+    }
+
+    /// Publishes `DATA_ID_CHEST` when it differs from what clients already have.
+    fn sync_chest(&self) {
+        let has_chest = self.has_chest();
+        if self.chested_data().synced_chest.swap(has_chest, Relaxed) != has_chest {
+            self.send_chest_flag(has_chest);
+        }
+    }
+
+    /// The `mob_init_data_tracker` half of `AbstractChestedHorse.defineSynchedData`
+    /// (`AbstractChestedHorse.java:49-53`); the client default is no chest.
+    fn send_initial_chest(&self) {
+        let has_chest = self.has_chest();
+        self.chested_data().synced_chest.store(has_chest, Relaxed);
+        if has_chest {
+            self.send_chest_flag(true);
+        }
+    }
+
+    /// `AbstractHorse.dropEquipment` (`AbstractHorse.java:518-529`) followed by
+    /// `AbstractChestedHorse.dropEquipment` (`AbstractChestedHorse.java:73-79`): every stack in
+    /// the chest that is not bound by Curse of Vanishing is dropped, then the chest itself.
+    fn drop_chest_contents(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let world = entity.world.load();
+            let pos = entity.block_pos.load();
+            let inventory = self.chested_data().inventory.lock().await.clone();
+            for slot in 0..inventory.size() {
+                let stack = inventory.get_stack(slot).await;
+                if !stack.is_empty()
+                    && !crate::entity::living::LivingEntity::item_prevents_equipment_drop(&stack)
+                {
+                    world.drop_stack(&pos, stack).await;
+                }
+            }
+            if self.has_chest() {
+                world
+                    .drop_stack(&pos, ItemStack::new(1, &Item::CHEST))
+                    .await;
+                self.set_chest(false).await;
+            }
+        })
+    }
+
+    /// Opens the chest as a generic 9x3 screen. Without a chest there is nothing to show -- the
+    /// screen would be 27 slots over a size-0 inventory that silently discards what is moved into
+    /// them -- so, until the real mount menu with its saddle and armor slots exists (see the
+    /// module doc comment), a chestless horse opens nothing.
     fn open_chest_inventory<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            if !self.has_chest() {
+                return;
+            }
             let inventory = self.chested_data().inventory.lock().await.clone();
             player
                 .open_handled_screen(
@@ -1269,14 +1704,34 @@ pub trait AbstractChestedHorse: AbstractHorse {
         })
     }
 
-    fn write_chested_horse_nbt(&self, nbt: &mut NbtCompound) {
-        nbt.put_bool("ChestedHorse", self.has_chest());
+    /// `AbstractChestedHorse.addAdditionalSaveData` (`AbstractChestedHorse.java:82-95`): the
+    /// `ChestedHorse` flag and, with a chest, an `Items` list of `Slot`-tagged stacks.
+    fn write_chested_horse_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            nbt.put_bool("ChestedHorse", self.has_chest());
+            if self.has_chest() {
+                let inventory = self.chested_data().inventory.lock().await.clone();
+                inventory.write_inventory_nbt(nbt, true).await;
+            }
+        })
     }
 
+    /// `AbstractChestedHorse.readAdditionalSaveData` (`AbstractChestedHorse.java:98-109`): the
+    /// chest is sized first, then every `Items` entry whose slot fits it is put back.
     fn read_chested_horse_nbt<'a>(&'a self, nbt: &'a NbtCompound) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let has_chest = nbt.get_bool("ChestedHorse").unwrap_or(false);
-            self.set_chest(has_chest).await;
+            self.resize_chest_inventory(has_chest).await;
+            if has_chest {
+                let inventory = self.chested_data().inventory.lock().await.clone();
+                let mut stacks = vec![ItemStack::EMPTY.clone(); inventory.size()];
+                inventory.read_data(nbt, &mut stacks);
+                for (slot, stack) in stacks.into_iter().enumerate() {
+                    if !stack.is_empty() {
+                        inventory.set_stack(slot, stack).await;
+                    }
+                }
+            }
         })
     }
 }
@@ -1284,10 +1739,13 @@ pub trait AbstractChestedHorse: AbstractHorse {
 #[cfg(test)]
 mod tests {
     use super::{
-        create_offspring_attribute, generate_jump_strength, generate_max_health, generate_speed,
-        generate_zombie_horse_jump_strength, generate_zombie_horse_speed, mount_panic_allowed,
-        player_jump_pending_scale,
+        FLAG_BRED, FLAG_EATING, FLAG_OPEN_MOUTH, FLAG_STANDING, FLAG_TAME, GallopStep,
+        create_offspring_attribute, gallop_sound, gallop_step, generate_jump_strength,
+        generate_max_health, generate_speed, generate_zombie_horse_jump_strength,
+        generate_zombie_horse_speed, is_wood_step_sound, mount_panic_allowed, next_mouth_counter,
+        player_jump_pending_scale, synced_flags_byte,
     };
+    use pumpkin_data::sound::Sound;
     use rand::rng;
 
     /// `AbstractHorse.MIN_HEALTH`/`MAX_HEALTH`: `generateMaxHealth(i -> 0)` and
@@ -1370,5 +1828,68 @@ mod tests {
     fn mount_panic_is_disabled_for_mob_controlled_horses() {
         assert!(mount_panic_allowed(false));
         assert!(!mount_panic_allowed(true));
+    }
+
+    /// `AbstractHorse.java:96-101`: the vanilla bit values, with the tame bit added from the
+    /// owner and no bit outside the five defined ones ever sent.
+    #[test]
+    fn synced_flags_byte_uses_the_vanilla_bit_layout() {
+        assert_eq!(FLAG_TAME, 2);
+        assert_eq!(FLAG_BRED, 8);
+        assert_eq!(FLAG_EATING, 16);
+        assert_eq!(FLAG_STANDING, 32);
+        assert_eq!(FLAG_OPEN_MOUTH, 64);
+        assert_eq!(synced_flags_byte(0, false), 0);
+        assert_eq!(synced_flags_byte(0, true), 2);
+        assert_eq!(synced_flags_byte(FLAG_EATING | FLAG_STANDING, true), 50);
+        assert_eq!(synced_flags_byte(FLAG_BRED | FLAG_OPEN_MOUTH, false), 72);
+        assert_eq!(synced_flags_byte(0b1, false), 0);
+        assert_eq!(synced_flags_byte(FLAG_TAME, false), 0);
+    }
+
+    /// `AbstractHorse.tick` (`AbstractHorse.java:579-582`): `mouthCounter` runs 1..=30 after
+    /// `openMouth` and the flag clears on the tick it passes 30.
+    #[test]
+    fn mouth_counter_closes_after_thirty_ticks() {
+        assert_eq!(next_mouth_counter(0), (0, false));
+        assert_eq!(next_mouth_counter(1), (2, false));
+        assert_eq!(next_mouth_counter(29), (30, false));
+        assert_eq!(next_mouth_counter(30), (0, true));
+    }
+
+    /// `AbstractHorse.playStepSound` (`AbstractHorse.java:350-356`): the first five ridden steps
+    /// play the wood step, then every third step gallops and the ones between are silent.
+    #[test]
+    fn ridden_steps_follow_the_gallop_counter() {
+        for counter in 1..=5 {
+            assert_eq!(gallop_step(counter), GallopStep::Step, "step {counter}");
+        }
+        assert_eq!(gallop_step(6), GallopStep::Gallop);
+        assert_eq!(gallop_step(7), GallopStep::Silent);
+        assert_eq!(gallop_step(8), GallopStep::Silent);
+        assert_eq!(gallop_step(9), GallopStep::Gallop);
+        assert_eq!(gallop_step(12), GallopStep::Gallop);
+    }
+
+    /// `AbstractHorse.isWoodSoundType` (`AbstractHorse.java:365-371`).
+    #[test]
+    fn wood_sound_types_are_recognised_by_step_sound() {
+        assert!(is_wood_step_sound(Sound::BlockWoodStep));
+        assert!(is_wood_step_sound(Sound::BlockNetherWoodStep));
+        assert!(is_wood_step_sound(Sound::BlockStemStep));
+        assert!(is_wood_step_sound(Sound::BlockCherryWoodStep));
+        assert!(is_wood_step_sound(Sound::BlockBambooWoodStep));
+        assert!(!is_wood_step_sound(Sound::BlockStoneStep));
+        assert!(!is_wood_step_sound(Sound::BlockBambooStep));
+    }
+
+    /// `AbstractHorse.playGallopSound` (`AbstractHorse.java:373-375`) scales the block volume by
+    /// `0.15` and keeps its pitch.
+    #[test]
+    fn gallop_sound_scales_block_volume() {
+        let (sound, volume, pitch) = gallop_sound(0.5, 1.2);
+        assert_eq!(sound, Sound::EntityHorseGallop);
+        assert!((volume - 0.075).abs() < f32::EPSILON);
+        assert!((pitch - 1.2).abs() < f32::EPSILON);
     }
 }

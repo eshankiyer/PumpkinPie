@@ -127,7 +127,7 @@ impl<T: AbstractHorse + Mob + ?Sized + Send + Sync + 'static> Goal for RunAround
                 let temper = horse.get_temper();
                 let max_temper = horse.max_temper();
                 if max_temper > 0 && mob.get_random().random_range(0..max_temper) < temper {
-                    horse.set_tamed(player.gameprofile.id);
+                    horse.set_tamed(player).await;
                     return;
                 }
                 horse.modify_temper(TEMPER_GAIN_ON_FAILURE);

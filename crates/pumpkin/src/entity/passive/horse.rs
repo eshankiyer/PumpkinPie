@@ -3,11 +3,13 @@
 use std::sync::{Arc, Weak, atomic::Ordering::Relaxed};
 
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
+use pumpkin_data::{Block, BlockState};
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use rand::RngExt;
@@ -25,9 +27,8 @@ use crate::entity::{
     passive::{
         animal::Animal,
         equine::{
-            AbstractHorse, AbstractHorseData, HORSE_TEMPT_ITEMS, MAX_HEALTH, MAX_JUMP_STRENGTH,
-            MAX_MOVEMENT_SPEED, MIN_HEALTH, MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED, MountPanicGoal,
-            apply_offspring_attribute,
+            AbstractHorse, AbstractHorseData, HORSE_TEMPT_ITEMS, MountPanicGoal, gallop_sound,
+            set_offspring_attributes,
         },
     },
     player::Player,
@@ -91,9 +92,7 @@ impl HorseEntity {
             goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(2, HorseBreedGoal::new(1.0, COMPATIBLE_MATES));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, HORSE_TEMPT_ITEMS, false)));
-            // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
-            // horse-family parent within 16 blocks.
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new_water_avoiding(0.7)));
             goal_selector.add_goal(
                 7,
@@ -180,8 +179,28 @@ impl AbstractHorse for HorseEntity {
         Some(Sound::EntityHorseAngry)
     }
 
+    /// `Horse.getEatingSound`.
     fn eating_sound(&self) -> Option<Sound> {
-        Some(Sound::EntityHorseEat)
+        Some(if self.is_baby() {
+            Sound::EntityBabyHorseEat
+        } else {
+            Sound::EntityHorseEat
+        })
+    }
+
+    /// `Horse.playGallopSound` (`Horse.java:123-128`): the base gallop sound, then a breath one
+    /// time in ten at `0.6` of the block volume.
+    fn gallop_sounds(&self, block_volume: f32, block_pitch: f32) -> Vec<(Sound, f32, f32)> {
+        let mut sounds = vec![gallop_sound(block_volume, block_pitch)];
+        if self.get_random().random_range(0..10) == 0 {
+            let breath = if self.is_baby() {
+                Sound::EntityBabyHorseBreathe
+            } else {
+                Sound::EntityHorseBreathe
+            };
+            sounds.push((breath, block_volume * 0.6, block_pitch));
+        }
+        sounds
     }
 
     /// `Horse.randomizeAttributes`: rolls max-health, speed AND jump-strength (unlike the
@@ -231,10 +250,6 @@ impl Mob for HorseEntity {
         AbstractHorse::handle_stop_jump(self);
     }
 
-    fn is_bred(&self) -> bool {
-        AbstractHorse::is_bred(self)
-    }
-
     fn on_elastic_leash_pull(&self) {
         AbstractHorse::on_elastic_leash_pull(self);
     }
@@ -243,8 +258,51 @@ impl Mob for HorseEntity {
         AbstractHorse::custom_travel(self, caller)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    /// `AbstractHorse.tick`/`aiStep` run for `NoAI` horses too, so this is `post_tick`, which
+    /// `Mob::tick` runs every tick, rather than `mob_tick`.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
         AbstractHorse::tick_horse_ai(self)
+    }
+
+    /// `AbstractHorse.hurtServer` (`AbstractHorse.java:319-327`).
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        _source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            AbstractHorse::horse_on_damage(self);
+        })
+    }
+
+    /// `AbstractHorse.isImmobile` (`AbstractHorse.java:504-507`): a grazing or rearing horse
+    /// runs no AI.
+    fn suppress_ai_goals(&self) -> bool {
+        AbstractHorse::is_immobile(self)
+    }
+
+    /// `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`).
+    fn ground_step_sounds(
+        &self,
+        supporting_block: &Block,
+        supporting_state: &BlockState,
+        above_block: &Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        Some(AbstractHorse::horse_step_sounds(
+            self,
+            supporting_block,
+            supporting_state,
+            above_block,
+        ))
+    }
+
+    /// `Horse.getAmbientSound`.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(if AbstractHorse::is_baby(self) {
+            Sound::EntityBabyHorseAmbient
+        } else {
+            Sound::EntityHorseAmbient
+        })
     }
 
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
@@ -262,6 +320,7 @@ impl Mob for HorseEntity {
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.sync_type_variant();
+            self.send_horse_init_metadata();
         })
     }
 
@@ -286,12 +345,6 @@ impl Mob for HorseEntity {
             let baby_horse = baby.cast_any().downcast_ref::<Self>();
 
             let mut random = rand::rng();
-            let mate_max_health = mate.get_mob().map_or(MIN_HEALTH, |m| {
-                m.get_mob_entity()
-                    .living_entity
-                    .get_attribute_base(&Attributes::MAX_HEALTH)
-            });
-
             if let (Some(mate_horse), Some(baby_horse)) = (mate_horse, baby_horse) {
                 let select_skin = random.random_range(0..9);
                 let variant = if select_skin < 4 {
@@ -315,47 +368,7 @@ impl Mob for HorseEntity {
             }
 
             if let Some(baby_mob) = baby.get_mob() {
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MAX_HEALTH,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::MAX_HEALTH),
-                    mate_max_health,
-                    MIN_HEALTH,
-                    MAX_HEALTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::JUMP_STRENGTH,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::JUMP_STRENGTH),
-                    mate.get_mob().map_or(MIN_JUMP_STRENGTH, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::JUMP_STRENGTH)
-                    }),
-                    MIN_JUMP_STRENGTH,
-                    MAX_JUMP_STRENGTH,
-                    &mut random,
-                );
-                apply_offspring_attribute(
-                    baby_mob,
-                    &Attributes::MOVEMENT_SPEED,
-                    self.mob_entity
-                        .living_entity
-                        .get_attribute_base(&Attributes::MOVEMENT_SPEED),
-                    mate.get_mob().map_or(MIN_MOVEMENT_SPEED, |m| {
-                        m.get_mob_entity()
-                            .living_entity
-                            .get_attribute_base(&Attributes::MOVEMENT_SPEED)
-                    }),
-                    MIN_MOVEMENT_SPEED,
-                    MAX_MOVEMENT_SPEED,
-                    &mut random,
-                );
+                set_offspring_attributes(self, mate, baby_mob);
             }
 
             Some(baby)
