@@ -245,6 +245,34 @@ impl Mob for FrogEntity {
             - 5
     }
 
+    /// `Frog.playStepSound` (`Frog.java:293-296`): `FROG_STEP` at volume 0.15, pitch 1.0 (the
+    /// default [`Mob::get_step_sound_volume`]) instead of the supporting block's step sound.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityFrogStep)
+    }
+
+    /// `Frog.isPushedByFluid` (`Frog.java:298-301`).
+    fn mob_is_pushed_by_fluids(&self) -> bool {
+        false
+    }
+
+    /// `Frog.travelInWater` (`Frog.java:308-313`): `moveRelative(getSpeed(), input)`, move, then a
+    /// flat 0.9 drag, replacing the generic water friction, gravity and jump-out logic. Outside
+    /// water the generic travel path applies.
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            let entity = &living.entity;
+            if !entity.touching_water.load(Ordering::Relaxed) {
+                return false;
+            }
+            entity.update_velocity_from_input(living.movement_input.load(), living.speed.load());
+            entity.move_entity(caller, entity.velocity.load()).await;
+            entity.velocity.store(entity.velocity.load() * 0.9);
+            true
+        })
+    }
+
     fn mob_set_variant_name(&self, name: &str) {
         self.set_variant(FrogVariant::from_name(name));
     }
