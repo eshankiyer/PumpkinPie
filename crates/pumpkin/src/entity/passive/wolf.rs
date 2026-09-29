@@ -219,6 +219,26 @@ impl WolfEntity {
         flags
     }
 
+    /// Pushes the tameable flag byte and owner (vanilla `TamableAnimal` synched data) to
+    /// clients after taming changes them.
+    fn sync_tame_metadata(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::wolf::TAMEABLE_FLAGS,
+                self.get_tame_flags(),
+            )],
+            None,
+        );
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::wolf::OWNER_UUID,
+                self.mob_entity.owner.load(),
+            )],
+            None,
+        );
+    }
+
     pub fn set_collar_color(&self, color: u8) {
         self.collar_color.store(color, Ordering::Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
@@ -392,6 +412,27 @@ impl Mob for WolfEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `Wolf.canMate` (Wolf.java:620-633): both wolves must be tamed, the partner must
+    /// not be sitting, and both must be in love.
+    fn can_breed_with(&self, mate: &dyn EntityBase) -> bool {
+        if mate.get_entity().entity_uuid == self.get_entity().entity_uuid
+            || !self.mob_entity.is_tamed()
+            || mate.get_entity().entity_type != &EntityType::WOLF
+        {
+            return false;
+        }
+        let Some(mate_mob) = mate.get_mob() else {
+            return false;
+        };
+        let mate_entity = mate_mob.get_mob_entity();
+        // Vanilla tests `isInSittingPose()`; Pumpkin's wolf derives its sitting state from the
+        // ordered-to-sit flag, so that is used as the approximation.
+        mate_entity.is_tamed()
+            && !mate_entity.is_ordered_to_sit()
+            && self.mob_entity.is_in_love()
+            && mate_entity.is_in_love()
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.persistent_anger.tick().await;
@@ -473,6 +514,16 @@ impl Mob for WolfEntity {
 
             if self.get_random().random_range(0..3) == 0 {
                 self.mob_entity.set_owner(player.gameprofile.id);
+                // Wolf.tryToTame (Wolf.java:508-518): navigation stopped, target cleared and
+                // the fresh pet ordered to sit.
+                self.mob_entity
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .stop();
+                self.mob_entity.set_target(None).await;
+                self.mob_entity.set_ordered_to_sit(true);
+                self.sync_tame_metadata();
                 // TamableAnimal.setTame invokes Wolf.applyTamingSideEffects
                 // (TamableAnimal.java:119-133; Wolf.java:432-440): a tamed wolf has a
                 // 40-health maximum and is healed to that value.
