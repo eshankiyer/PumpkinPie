@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pumpkin_data::{attributes::Attributes, effect::StatusEffect, potion::Effect};
+use pumpkin_data::{attributes::Attributes, effect::StatusEffect, potion::Effect, sound::Sound};
 use pumpkin_util::Difficulty;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -33,6 +33,11 @@ impl NBTStorage for CaveSpiderEntity {}
 impl Mob for CaveSpiderEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         self.spider.get_mob_entity()
+    }
+
+    /// `CaveSpider` inherits `Spider.playStepSound` (`Spider.java:108-111`).
+    fn get_step_sound(&self) -> Option<Sound> {
+        self.spider.get_step_sound()
     }
 
     /// Vanilla `CaveSpider.getVehicleAttachmentPoint` (`CaveSpider.java:59-60`) lowers a

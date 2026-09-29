@@ -1611,8 +1611,8 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
-    /// Called from the blanket `damage_with_context` after `modify_incoming_damage`, before the
-    /// amount is applied to the underlying `LivingEntity`. Lets a mob clamp incoming damage
+    /// Called from the blanket `damage_with_context` after `modify_incoming_damage_from`, before
+    /// the amount is applied to the underlying `LivingEntity`. Lets a mob clamp incoming damage
     /// (e.g. the ender dragon refusing to let a killing blow drop its health below 1 while not
     /// sitting, `EnderDragon.handleKillingBlow`, `EnderDragon.java:484-490`). The bool return
     /// says whether `mob_on_lethal_rescue` should run once the hit is confirmed to have landed.
@@ -2420,6 +2420,19 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn modify_incoming_damage(&self, amount: f32, _damage_type: DamageType) -> f32 {
         amount
+    }
+
+    /// `modify_incoming_damage` for a `LivingEntity.getDamageAfterMagicAbsorb` override that also
+    /// reads the damage's entities: `Witch.java:207-219` zeroes damage it caused itself. `source`
+    /// and `cause` are the `damage_with_context` arguments. Defaults to `modify_incoming_damage`.
+    fn modify_incoming_damage_from(
+        &self,
+        amount: f32,
+        damage_type: DamageType,
+        _source: Option<&dyn EntityBase>,
+        _cause: Option<&dyn EntityBase>,
+    ) -> f32 {
+        self.modify_incoming_damage(amount, damage_type)
     }
 
     fn can_attack_with_owner(&self, _target: &dyn EntityBase, _owner: &dyn EntityBase) -> bool {
@@ -3509,7 +3522,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 return false;
             }
             // Mob-specific damage modifier (e.g. shulker armor when closed).
-            let amount = self.modify_incoming_damage(amount, damage_type);
+            let amount = self.modify_incoming_damage_from(amount, damage_type, source, cause);
             let health = self.get_mob_entity().living_entity.health.load();
             let (amount, rescue_lethal) = self.mob_pre_apply_damage(health, amount).await;
             let damaged = self

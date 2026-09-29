@@ -16,6 +16,8 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Potion;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::tracked_data;
+use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::attributes::{AttributeInstance, Modifier, ModifierOperation};
 use crate::entity::{
@@ -107,6 +109,35 @@ impl WitchEntity {
         self.drink_ticks_remaining.load(Relaxed) >= 0
     }
 
+    /// Vanilla `Witch.setUsingItem` (`Witch.java:98-100`): publishes the synched
+    /// `DATA_USING_ITEM` flag clients read to draw the witch drinking. The server-side state
+    /// itself lives in `drink_ticks_remaining`.
+    fn set_using_item(&self, using: bool) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(tracked_data::witch::DATA_USING_ITEM, using)],
+            None,
+        );
+    }
+
+    /// Vanilla `Witch.getDamageAfterMagicAbsorb`'s `damageSource.getEntity() == this`
+    /// (`Witch.java:210`). `getEntity` is the causing entity, so a projectile counts through the
+    /// owner it was fired by, and a call site may hand that entity over as either `source` or
+    /// `cause`.
+    fn caused_damage_to_self(
+        &self,
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        let own_id = self.get_entity().entity_id;
+        [source, cause].into_iter().flatten().any(|attacker| {
+            is_own_damage(
+                own_id,
+                attacker.get_entity().entity_id,
+                crate::entity::projectile::projectile_owner_id(attacker),
+            )
+        })
+    }
+
     /// Vanilla `Witch.aiStep`'s potion-drinking state machine (non-client only).
     async fn tick_drinking(&self) {
         if self.is_drinking_potion() {
@@ -114,6 +145,8 @@ impl WitchEntity {
             // decrementing so the zero-count tick reaches the finish path.
             if self.drink_ticks_remaining.fetch_sub(1, Relaxed) <= 0 {
                 self.drink_ticks_remaining.store(-1, Relaxed);
+                // `Witch.java:122`: the flag drops before the potion is consumed.
+                self.set_using_item(false);
                 self.finish_drinking().await;
             }
             return;
@@ -228,6 +261,7 @@ impl WitchEntity {
             .await
             .put(&EquipmentSlot::MAIN_HAND, stack);
         self.drink_ticks_remaining.store(use_ticks, Relaxed);
+        self.set_using_item(true);
 
         living.entity.world.load().play_sound(
             Sound::EntityWitchDrink,
@@ -286,16 +320,57 @@ impl Mob for WitchEntity {
         })
     }
 
-    /// Vanilla: `Witch.getDamageAfterMagicAbsorb`'s `WITCH_RESISTANT_TO`-tag 85% reduction.
-    ///
-    /// Scope reduction: the `damageSource.getEntity() == this` self-damage-zeroing branch is not
-    /// ported -- `modify_incoming_damage` has no source/attacker parameter, and widening its
-    /// signature would touch every `Mob` implementor for one mob's self-damage-immunity rule.
+    /// Vanilla: `Witch.getDamageAfterMagicAbsorb`'s `WITCH_RESISTANT_TO`-tag 85% reduction
+    /// (`Witch.java:214-216`). The self-inflicted zeroing before it is in
+    /// [`Self::modify_incoming_damage_from`], which is the only place that sees the damage's
+    /// entities.
     fn modify_incoming_damage(&self, amount: f32, damage_type: DamageType) -> f32 {
         if damage_type.has_tag(&tag::DamageType::MINECRAFT_WITCH_RESISTANT_TO) {
             amount * 0.15
         } else {
             amount
         }
+    }
+
+    /// Vanilla: `Witch.getDamageAfterMagicAbsorb` (`Witch.java:207-219`): damage the witch caused
+    /// itself is zeroed, then the tag reduction applies.
+    fn modify_incoming_damage_from(
+        &self,
+        amount: f32,
+        damage_type: DamageType,
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> f32 {
+        let amount = if self.caused_damage_to_self(source, cause) {
+            0.0
+        } else {
+            amount
+        };
+        self.modify_incoming_damage(amount, damage_type)
+    }
+
+    /// Vanilla: `Witch.canBeLeader` (`Witch.java:266-269`) returns `false`, so a witch is never
+    /// picked as a raid wave's leader (`Raid.java:537`).
+    fn can_be_raid_leader(&self) -> bool {
+        false
+    }
+}
+
+/// Whether a damage entity, `attacker_id`, or the owner it was fired by, `attacker_owner_id`,
+/// is the witch `own_id`.
+const fn is_own_damage(own_id: i32, attacker_id: i32, attacker_owner_id: Option<i32>) -> bool {
+    attacker_id == own_id || matches!(attacker_owner_id, Some(owner_id) if owner_id == own_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_own_damage;
+
+    #[test]
+    fn own_damage_is_the_witch_itself_or_a_projectile_it_fired() {
+        assert!(is_own_damage(7, 7, None));
+        assert!(is_own_damage(7, 30, Some(7)));
+        assert!(!is_own_damage(7, 30, Some(8)));
+        assert!(!is_own_damage(7, 30, None));
     }
 }

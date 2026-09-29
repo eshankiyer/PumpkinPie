@@ -1,6 +1,7 @@
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
@@ -241,5 +242,11 @@ impl NBTStorage for SpiderEntity {}
 impl Mob for SpiderEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Spider.playStepSound` (`Spider.java:108-111`) ignores the block and plays
+    /// `SPIDER_STEP` at `0.15` volume and `1.0` pitch, which is the default step volume.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntitySpiderStep)
     }
 }
