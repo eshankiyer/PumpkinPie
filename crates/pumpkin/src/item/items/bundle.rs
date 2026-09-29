@@ -4,7 +4,8 @@ use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::data_component_impl::BundleContentsImpl;
 use pumpkin_data::item::Item;
-use pumpkin_data::sound::Sound;
+use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_data::tag;
 use pumpkin_util::Hand;
 
@@ -45,7 +46,7 @@ impl ItemBehaviour for BundleItem {
 
     fn on_use_tick<'a>(
         &'a self,
-        _stack: &'a pumpkin_data::item_stack::ItemStack,
+        stack: &'a pumpkin_data::item_stack::ItemStack,
         player: &'a Player,
         remaining_use_ticks: i32,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
@@ -72,13 +73,30 @@ impl ItemBehaviour for BundleItem {
                 Hand::Left => 40, // OFF_HAND_SLOT
             };
             let position = player.position();
-            player.world().play_sound(
+            let world = player.world();
+            // `removeOneItemFromBundle` plays BUNDLE_REMOVE_ONE at 0.8F volume and
+            // `0.8F + random * 0.4F` pitch (`BundleItem.java:207-217,257-259`).
+            world.play_sound_fine(
                 Sound::ItemBundleRemoveOne,
-                pumpkin_data::sound::SoundCategory::Players,
+                SoundCategory::Players,
                 &position,
+                0.8,
+                rand::random::<f32>().mul_add(0.4, 0.8),
             );
             player.drop_item(extracted_stack).await;
             player.sync_hand_slot(slot, bundle).await;
+            // A successful `dropContent` then plays BUNDLE_DROP_CONTENTS and awards ITEM_USED
+            // (`BundleItem.java:145-150,269-273`).
+            world.play_sound_fine(
+                Sound::ItemBundleDropContents,
+                SoundCategory::Players,
+                &position,
+                0.8,
+                rand::random::<f32>().mul_add(0.4, 0.8),
+            );
+            player
+                .increment_stat(StatisticCategory::Used, i32::from(stack.item.id), 1)
+                .await;
         })
     }
 

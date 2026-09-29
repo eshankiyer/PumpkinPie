@@ -16,6 +16,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::inventory::Inventory;
@@ -464,6 +465,13 @@ impl CrossbowItem {
                 .retain(|(id, _)| *id != DataComponent::ChargedProjectiles);
             player.damage_held_item(total_durability_use).await;
             player.inventory().set_held_item(held).await;
+            // Vanilla `performShooting` awards ITEM_USED for the weapon after shooting
+            // (`CrossbowItem.java:184-187`).
+            if shot_index > 0 {
+                player
+                    .increment_stat(StatisticCategory::Used, i32::from(Item::CROSSBOW.id), 1)
+                    .await;
+            }
         }
     }
 }
