@@ -1,4 +1,7 @@
-use std::sync::{Arc, Weak};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicBool, Ordering::Relaxed},
+};
 
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
@@ -6,39 +9,32 @@ use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
-    ai::goal::{
-        active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        move_towards_restriction::MoveTowardsRestrictionGoal, wander_around::WanderAroundGoal,
+    ai::{
+        control::guardian_move_control::GuardianMoveControl,
+        goal::{
+            active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
+            look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+            move_towards_restriction::MoveTowardsRestrictionGoal, wander_around::WanderAroundGoal,
+        },
     },
     mob::{Mob, MobEntity},
 };
 
 /// Vanilla `Guardian.hurtServer` (Guardian.java:311-324): a guardian that is not currently
 /// swimming reflects 2.0 thorns damage back at whatever living entity dealt the blow directly,
-/// unless the damage already avoids guardian thorns or is itself thorns.
+/// unless the damage already avoids guardian thorns or is itself thorns. `moving` is the
+/// `isMoving()` flag published by `GuardianMoveControl`.
 ///
-/// Two scope reductions, both from machinery Pumpkin does not have:
-///
-/// * `isMoving()` is driven by vanilla's `Guardian.GuardianMoveControl` (Guardian.java:477/480),
-///   which Pumpkin does not port. `!Navigator::is_idle()` stands in for it: it is true exactly
-///   while the guardian is following a path, which is the same window in which vanilla's move
-///   control is running a `MOVE_TO` operation with an unfinished navigation.
-/// * `randomStrollGoal.trigger()` (Guardian.java:319-321) is skipped; a mob cannot reach an
-///   individual goal instance out of `goals_selector` here, so a hurt guardian does not
-///   immediately re-roll its stroll destination.
+/// Scope reduction: `randomStrollGoal.trigger()` (Guardian.java:319-321) is skipped; a mob
+/// cannot reach an individual goal instance out of `goals_selector` here, so a hurt guardian
+/// does not immediately re-roll its stroll destination.
 pub(super) fn guardian_thorns<'a>(
-    guardian: &'a dyn Mob,
+    moving: &AtomicBool,
     damage_type: DamageType,
     source: Option<&'a dyn EntityBase>,
 ) -> EntityBaseFuture<'a, ()> {
+    let moving = moving.load(Relaxed);
     Box::pin(async move {
-        let moving = !guardian
-            .get_mob_entity()
-            .navigator
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_idle();
         if moving
             || damage_type.has_tag(&tag::DamageType::MINECRAFT_AVOIDS_GUARDIAN_THORNS)
             || damage_type == DamageType::THORNS
@@ -55,14 +51,53 @@ pub(super) fn guardian_thorns<'a>(
     })
 }
 
+/// Installs `Guardian.GuardianMoveControl` (Guardian.java:65) and returns the shared
+/// `isMoving` flag it maintains.
+pub(super) fn install_move_control(mob_entity: &MobEntity) -> Arc<AtomicBool> {
+    let moving = Arc::new(AtomicBool::new(false));
+    *mob_entity
+        .move_control
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Box::new(GuardianMoveControl::new(moving.clone()));
+    moving
+}
+
+/// `Guardian.travelInWater` (Guardian.java:331-339): `moveRelative(0.1, input)`, move, a flat
+/// 0.9 drag and a slight sink when idle and untargeted, replacing the generic water friction.
+/// Outside water the generic travel path applies.
+pub(super) async fn travel_in_water(
+    guardian: &dyn Mob,
+    moving: &AtomicBool,
+    caller: &Arc<dyn EntityBase>,
+) -> bool {
+    let mob_entity = guardian.get_mob_entity();
+    let living = &mob_entity.living_entity;
+    let entity = &living.entity;
+    if !entity.touching_water.load(Relaxed) {
+        return false;
+    }
+    entity.update_velocity_from_input(living.movement_input.load(), 0.1);
+    entity.move_entity(caller, entity.velocity.load()).await;
+    let mut velocity = entity.velocity.load() * 0.9;
+    if !moving.load(Relaxed) && mob_entity.get_target().await.is_none() {
+        velocity.y -= 0.005;
+    }
+    entity.velocity.store(velocity);
+    true
+}
+
 pub struct GuardianEntity {
     pub mob_entity: MobEntity,
+    /// Vanilla `Guardian.isMoving`, written by `GuardianMoveControl`.
+    moving: Arc<AtomicBool>,
 }
 
 impl GuardianEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
-        let guardian = Self { mob_entity };
+        let moving = install_move_control(&mob_entity);
+        let guardian = Self { mob_entity, moving };
         let mob_arc = Arc::new(guardian);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -157,6 +192,10 @@ impl Mob for GuardianEntity {
         damage_type: DamageType,
         source: Option<&'a dyn EntityBase>,
     ) -> EntityBaseFuture<'a, ()> {
-        guardian_thorns(self, damage_type, source)
+        guardian_thorns(&self.moving, damage_type, source)
+    }
+
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(travel_in_water(self, &self.moving, caller))
     }
 }

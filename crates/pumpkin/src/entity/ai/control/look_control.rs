@@ -68,6 +68,18 @@ impl LookControl {
         self.look_at_timer = 2;
     }
 
+    /// Vanilla `LookControl.isLookingAtTarget`: a look request is still pending.
+    #[must_use]
+    pub const fn is_looking_at_target(&self) -> bool {
+        self.look_at_timer > 0
+    }
+
+    /// Vanilla `LookControl.getWantedX/Y/Z`.
+    #[must_use]
+    pub const fn get_wanted_position(&self) -> Vector3<f64> {
+        self.position
+    }
+
     pub fn tick(&mut self, mob: &dyn Mob) {
         let entity = mob.get_entity();
         if Self::should_stay_horizontal() {

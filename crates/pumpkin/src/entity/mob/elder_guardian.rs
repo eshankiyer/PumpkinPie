@@ -1,6 +1,6 @@
 use std::sync::{
     Arc, Weak,
-    atomic::{AtomicI32, Ordering::Relaxed},
+    atomic::{AtomicBool, AtomicI32, Ordering::Relaxed},
 };
 
 use pumpkin_data::damage::DamageType;
@@ -17,7 +17,10 @@ use crate::entity::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         move_towards_restriction::MoveTowardsRestrictionGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity, guardian::guardian_thorns},
+    mob::{
+        Mob, MobEntity,
+        guardian::{guardian_thorns, install_move_control, travel_in_water},
+    },
 };
 
 /// `ElderGuardian.EFFECT_INTERVAL` / `EFFECT_RADIUS` / `EFFECT_DURATION` /
@@ -34,13 +37,17 @@ pub struct ElderGuardianEntity {
     /// in Pumpkin it is the breeding age (negative means baby) and is never advanced
     /// per tick.
     tick_count: AtomicI32,
+    /// Vanilla `Guardian.isMoving`, written by `GuardianMoveControl`.
+    moving: Arc<AtomicBool>,
 }
 
 impl ElderGuardianEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
+        let moving = install_move_control(&mob_entity);
         let guardian = Self {
             mob_entity,
+            moving,
             tick_count: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(guardian);
@@ -188,7 +195,11 @@ impl Mob for ElderGuardianEntity {
         damage_type: DamageType,
         source: Option<&'a dyn EntityBase>,
     ) -> EntityBaseFuture<'a, ()> {
-        guardian_thorns(self, damage_type, source)
+        guardian_thorns(&self.moving, damage_type, source)
+    }
+
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(travel_in_water(self, &self.moving, caller))
     }
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

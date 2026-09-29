@@ -125,7 +125,7 @@ impl MoveControlTrait for DrownedMoveControl {
 }
 
 impl DrownedMoveControl {
-    fn rotlerp(start: f32, end: f32, max_change: f32) -> f32 {
+    pub(super) fn rotlerp(start: f32, end: f32, max_change: f32) -> f32 {
         let diff = wrap_degrees(end - start).clamp(-max_change, max_change);
         let result = start + diff;
         if result < 0.0 {
