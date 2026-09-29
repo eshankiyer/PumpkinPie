@@ -181,12 +181,19 @@ pub struct PiglinEntity {
     /// runs from the synchronous `Mob::wants_to_pick_up_item`, which cannot await the target
     /// mutex. The sample is at most one tick stale.
     has_attack_target: AtomicBool,
+    /// `Piglin.cannotHunt` (`Piglin.java:87`), read by `canHunt` (`Piglin.java:264-266`) and
+    /// persisted as `CannotHunt`. Shared with the hunt target predicate.
+    cannot_hunt: Arc<AtomicBool>,
+    /// `DATA_IS_CHARGING_CROSSBOW` (`Piglin.java:66,301-308`), which the client reads for
+    /// `getArmPose`'s `CROSSBOW_CHARGE` state.
+    is_charging_crossbow: AtomicBool,
 }
 
 impl PiglinEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let admiring_ticks = Arc::new(AtomicI32::new(0));
+        let cannot_hunt = Arc::new(AtomicBool::new(false));
         // `PiglinAi.initMemories` (`PiglinAi.java:131-134`): a fresh piglin already counts as
         // having hunted recently, so it waits out one interval before its first hunt.
         let hunted_recently_ticks = Arc::new(AtomicI32::new(
@@ -201,6 +208,8 @@ impl PiglinEntity {
             hunting_hoglin: AtomicBool::new(false),
             pending_offhand: std::sync::Mutex::new(None),
             has_attack_target: AtomicBool::new(false),
+            cannot_hunt: cannot_hunt.clone(),
+            is_charging_crossbow: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(piglin);
         let mob_weak: Weak<dyn Mob> = {
@@ -215,7 +224,7 @@ impl PiglinEntity {
         };
 
         Self::register_goals(&mob_arc, mob_weak, admiring_ticks, is_baby.clone());
-        Self::register_target_goals(&mob_arc, is_baby, hunted_recently_ticks);
+        Self::register_target_goals(&mob_arc, is_baby, hunted_recently_ticks, cannot_hunt);
 
         mob_arc
     }
@@ -318,6 +327,7 @@ impl PiglinEntity {
         mob_arc: &Arc<Self>,
         is_baby: F,
         hunted_recently_ticks: Arc<AtomicI32>,
+        cannot_hunt: Arc<AtomicBool>,
     ) where
         F: Fn() -> bool + Clone + Send + Sync + 'static,
     {
@@ -384,8 +394,12 @@ impl PiglinEntity {
                 Some(move |target: TargetData, _world: Arc<World>| {
                     let hunt_gate = is_baby.clone();
                     let hunted = hunted_recently_ticks.clone();
+                    let cannot_hunt = cannot_hunt.clone();
                     async move {
-                        !hunt_gate() && target.age >= 0 && hunted.load(Ordering::Relaxed) <= 0
+                        !hunt_gate()
+                            && !cannot_hunt.load(Ordering::Relaxed)
+                            && target.age >= 0
+                            && hunted.load(Ordering::Relaxed) <= 0
                     }
                 }),
             )),
@@ -426,6 +440,10 @@ impl PiglinEntity {
         let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
         let previous = equipment.put(&EquipmentSlot::OFF_HAND, stack.clone());
         drop(equipment);
+        // `Piglin.holdInOffHand` -> `setItemSlotAndDropWhenKilled` (`Piglin.java:363-364`,
+        // `Mob.java:563-566`): the held item always drops on death. The trailing
+        // `setPersistenceRequired` is skipped for the barter ingot (`Piglin.java:365`).
+        self.set_guaranteed_drop(EquipmentSlot::OFF_HAND).await;
         if !previous.is_empty() {
             let pos = self.mob_entity.living_entity.entity.block_pos.load();
             self.mob_entity
@@ -450,6 +468,7 @@ impl NBTStorage for PiglinEntity {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.zombification.write_nbt(nbt);
+            nbt.put_bool("CannotHunt", self.cannot_hunt.load(Ordering::Relaxed));
         })
     }
 
@@ -460,6 +479,10 @@ impl NBTStorage for PiglinEntity {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.zombification.read_nbt(nbt);
+            self.cannot_hunt.store(
+                nbt.get_bool("CannotHunt").unwrap_or(false),
+                Ordering::Relaxed,
+            );
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
                     pumpkin_data::tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
@@ -481,6 +504,24 @@ impl Mob for PiglinEntity {
     fn can_use_non_melee_weapon(&self, item: &ItemStack) -> bool {
         item.item.id == Item::CROSSBOW.id
             || item.get_data_component::<KineticWeaponImpl>().is_some()
+    }
+
+    /// `Piglin.playStepSound` (`Piglin.java:432-435`); the volume stays at the default `0.15`.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPiglinStep)
+    }
+
+    /// `Piglin.setChargingCrossbow` (`Piglin.java:305-308`): a synced-data write.
+    fn set_charging_crossbow(&self, charging: bool) {
+        if self.is_charging_crossbow.swap(charging, Ordering::Relaxed) != charging {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::piglin::DATA_IS_CHARGING_CROSSBOW,
+                    charging,
+                )],
+                None,
+            );
+        }
     }
 
     /// `AbstractPiglin`'s constructor calls `setCanPickUpLoot(true)` unconditionally

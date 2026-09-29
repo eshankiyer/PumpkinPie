@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
@@ -232,6 +232,11 @@ impl Goal for RangedCrossbowAttackGoal {
                 CrossbowState::ReadyToAttack => {
                     if has_line_of_sight {
                         Self::shoot(mob, target.as_ref()).await;
+                        // `CrossbowAttackMob.onCrossbowAttackPerformed`
+                        // (`Piglin.java:310-313`, `Pillager`): `noActionTime = 0`.
+                        mob.get_mob_entity()
+                            .no_action_time
+                            .store(0, Ordering::Relaxed);
                         self.state = CrossbowState::Uncharged;
                         self.attack_delay = 0;
                     }
