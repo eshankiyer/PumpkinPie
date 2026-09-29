@@ -6,16 +6,15 @@ use pumpkin_data::block_properties::{
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::{Block, BlockStateId, world::WorldEvent};
+use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockId, BlockStateId, world::WorldEvent};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::GameMode;
-use pumpkin_util::math::{
-    boundingbox::{BoundingBox, EntityDimensions},
-    position::BlockPos,
-};
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -26,7 +25,11 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::entity::NBTStorage;
+use crate::entity::item::ItemEntity;
 use crate::entity::{Entity, ominous_item_spawner::OminousItemSpawnerEntity};
+use crate::plugin::api::events::entity::item_spawn::ItemSpawnEvent;
+use crate::world::game_event::{GameEventContext, emit_game_event};
+use crate::world::natural_spawner::spawn_dimensions;
 use crate::world::{BlockFlags, World};
 
 // TrialSpawnerConfig.java:92-97 (Builder defaults)
@@ -141,6 +144,54 @@ impl TrialSpawnerConfig {
             key.clone_into(&mut config.items_to_drop_when_ominous);
         }
         config
+    }
+
+    // TrialSpawnerConfig.DIRECT_CODEC (TrialSpawnerConfig.java:30-55) encoded inline, the
+    // way `Holder.direct` configs (`FullConfig.overrideEntity`) are stored.
+    fn to_nbt(&self) -> NbtCompound {
+        let mut nbt = NbtCompound::new();
+        nbt.put_int("spawn_range", self.spawn_range);
+        nbt.put_float("total_mobs", self.total_mobs);
+        nbt.put_float("simultaneous_mobs", self.simultaneous_mobs);
+        nbt.put_float(
+            "total_mobs_added_per_player",
+            self.total_mobs_added_per_player,
+        );
+        nbt.put_float(
+            "simultaneous_mobs_added_per_player",
+            self.simultaneous_mobs_added_per_player,
+        );
+        nbt.put_int(
+            "ticks_between_spawn",
+            i32::try_from(self.ticks_between_spawn).unwrap_or(i32::MAX),
+        );
+        let potentials = self
+            .spawn_potentials
+            .iter()
+            .map(|(_, weight, data)| {
+                let mut entry = NbtCompound::new();
+                entry.put_compound("data", data.clone());
+                entry.put_int("weight", *weight);
+                NbtTag::Compound(entry)
+            })
+            .collect();
+        nbt.put_list("spawn_potentials", potentials);
+        let tables = self
+            .loot_tables_to_eject
+            .iter()
+            .map(|(table, weight)| {
+                let mut entry = NbtCompound::new();
+                entry.put_string("data", table.clone());
+                entry.put_int("weight", *weight);
+                NbtTag::Compound(entry)
+            })
+            .collect();
+        nbt.put_list("loot_tables_to_eject", tables);
+        nbt.put_string(
+            "items_to_drop_when_ominous",
+            self.items_to_drop_when_ominous.clone(),
+        );
+        nbt
     }
 
     // TrialSpawnerConfig.java:50-52; TrialSpawnerStateData.java:273-294.
@@ -419,11 +470,12 @@ impl TrialSpawnerBlockEntity {
         self.cooldown_ends_at.store(0, Ordering::Relaxed);
     }
 
+    // TrialSpawnerStateData.java:82-86. `ejectingLootTable` is deliberately left alone:
+    // only the EJECTING_REWARD state clears it (TrialSpawnerState.java:129).
     async fn reset(&self) {
         self.current_mobs.lock().await.clear();
         *self.next_spawn_entity.lock().unwrap() = None;
         *self.next_spawn_data.lock().unwrap() = None;
-        *self.ejecting_loot_table.lock().unwrap() = None;
         self.reset_statistics().await;
     }
 
@@ -450,8 +502,12 @@ impl TrialSpawnerBlockEntity {
     pub async fn set_entity_id(&self, world: &Arc<World>, entity_type: &'static EntityType) {
         self.reset().await;
         let normal = Self::with_spawning(&self.active_config(false), entity_type);
-        *self.normal_config.lock().unwrap() = normal;
         let ominous = Self::with_spawning(&self.active_config(true), entity_type);
+        // `FullConfig.overrideEntity` builds `Holder.direct` configs, which `store` writes
+        // inline; without refreshing the saved compounds the override was lost on reload.
+        *self.normal_config_nbt.lock().await = Some(NbtTag::Compound(normal.to_nbt()));
+        *self.ominous_config_nbt.lock().await = Some(NbtTag::Compound(ominous.to_nbt()));
+        *self.normal_config.lock().unwrap() = normal;
         *self.ominous_config.lock().unwrap() = ominous;
 
         // TrialSpawner.java:343 (`setState(level, TrialSpawnerState.INACTIVE)`)
@@ -547,6 +603,11 @@ impl TrialSpawnerBlockEntity {
         for id in mobs {
             if let Some(entity) = world.get_entity_by_uuid(id) {
                 // TrialSpawnerStateData.java:180-189 and Mob.java:923-938
+                world.sync_world_event(
+                    WorldEvent::ParticlesTrialSpawnerSpawnMobAt,
+                    entity.get_entity().block_pos.load(),
+                    0,
+                );
                 if let Some(mob) = entity.get_mob() {
                     mob.drop_preserved_equipment().await;
                 }
@@ -597,37 +658,71 @@ impl TrialSpawnerBlockEntity {
             && level_data.game_rules.spawn_mobs
     }
 
-    // TrialSpawnerStateData.java:120-177; the existing world raycast supplies the
-    // visual-block line-of-sight check used by PlayerDetector.
-    async fn try_detect_players(&self, world: &Arc<World>, mut is_ominous: bool) {
+    // TrialSpawnerStateData.java:121: the scan runs when `(pos.asLong() + gameTime) % 20 == 0`.
+    fn detection_tick_due(position: BlockPos, game_time: i64) -> bool {
+        position.as_long().wrapping_add(game_time) % 20 == 0
+    }
+
+    // PlayerDetector.NO_CREATIVE_PLAYERS (PlayerDetector.java:24-30) selects players whose
+    // block position is `closerThan` the spawner block; Vec3i.closerThan compares the
+    // squared block distance strictly (Vec3i.java:193-195).
+    fn is_within_player_range(&self, player_block: BlockPos) -> bool {
+        let dx = player_block.0.x - self.position.0.x;
+        let dy = player_block.0.y - self.position.0.y;
+        let dz = player_block.0.z - self.position.0.z;
+        f64::from(dx * dx + dy * dy + dz * dz)
+            < self.required_player_range * self.required_player_range
+    }
+
+    // TrialSpawnerStateData.java:123: an ominous spawner in COOLDOWN never rescans.
+    const fn scans_for_players(state: TrialSpawnerState, is_ominous: bool) -> bool {
+        !matches!(state, TrialSpawnerState::Cooldown) || !is_ominous
+    }
+
+    // TrialSpawnerStateData.java:143: while in COOLDOWN, scanned players are only
+    // registered when the spawner turned ominous during this scan.
+    const fn registers_players(state: TrialSpawnerState, became_ominous: bool) -> bool {
+        !matches!(state, TrialSpawnerState::Cooldown) || became_ominous
+    }
+
+    // TrialSpawnerStateData.java:120-158; the collision-shape raycast approximates the
+    // `ClipContext.Block.VISUAL` line-of-sight check used by PlayerDetector (see
+    // `blocks_visual_line_of_sight` for what is and is not modelled).
+    #[allow(clippy::too_many_lines)]
+    async fn try_detect_players(
+        &self,
+        world: &Arc<World>,
+        state: TrialSpawnerState,
+        mut is_ominous: bool,
+    ) {
         let game_time = world.get_world_age().await;
-        if (self.position.0.x as i64
-            + self.position.0.y as i64
-            + self.position.0.z as i64
-            + game_time)
-            % 20
-            != 0
+        if !Self::detection_tick_due(self.position, game_time)
+            || !Self::scans_for_players(state, is_ominous)
         {
             return;
         }
-        let nearby = world.get_nearby_players(self.position.to_f64(), self.required_player_range);
+        let nearby = world.get_nearby_players(
+            self.position.to_centered_f64(),
+            self.required_player_range + 1.0,
+        );
         let mut eligible = Vec::new();
         let mut visible = Vec::new();
         for player in nearby {
             if matches!(
                 player.gamemode.load(),
                 GameMode::Spectator | GameMode::Creative
-            ) {
+            ) || !self.is_within_player_range(player.living_entity.entity.block_pos.load())
+            {
                 continue;
             }
             if world
-                .raycast(
+                .raycast_collision(
                     self.position.to_centered_f64(),
                     player.eye_position(),
-                    async |block_pos, world| !world.get_block_state(block_pos).is_air(),
+                    async |block_pos, world| blocks_visual_line_of_sight(world, block_pos),
                 )
                 .await
-                .is_none()
+                .is_none_or(|(hit, _)| hit == self.position)
             {
                 visible.push(player.clone());
             }
@@ -654,6 +749,9 @@ impl TrialSpawnerBlockEntity {
                 is_ominous = true;
                 became_ominous = true;
             }
+        }
+        if !Self::registers_players(state, became_ominous) {
+            return;
         }
 
         let searching_for_first_player = self.detected_players.lock().await.is_empty();
@@ -683,66 +781,92 @@ impl TrialSpawnerBlockEntity {
         }
     }
 
-    #[allow(clippy::unused_async)]
-    async fn has_mob_to_spawn(&self, config: &TrialSpawnerConfig) -> bool {
-        if self.next_spawn_entity.lock().unwrap().is_some() {
-            return true;
-        }
-        !config.spawn_potentials.is_empty()
+    // TrialSpawnerStateData.java:95-98. `getOrCreateNextSpawnData` runs first, so the next
+    // mob is rolled (and synced to clients as the display entity) as soon as the spawner
+    // looks for mobs to spawn.
+    fn has_mob_to_spawn(&self, world: &Arc<World>, config: &TrialSpawnerConfig) -> bool {
+        self.get_or_create_next_spawn_data(world, config).is_some()
+            || !config.spawn_potentials.is_empty()
     }
 
-    #[allow(clippy::unused_async)]
-    async fn get_or_create_next_spawn_data(
+    // TrialSpawnerStateData.java:226-236: rolls the next spawn data when none is stored and
+    // calls `markUpdated` so clients receive `spawn_data`.
+    fn get_or_create_next_spawn_data(
         &self,
+        world: &Arc<World>,
         config: &TrialSpawnerConfig,
     ) -> Option<(&'static EntityType, NbtCompound)> {
-        let mut next = self.next_spawn_entity.lock().unwrap();
-        let mut data = self.next_spawn_data.lock().unwrap();
-        if next.is_none() {
-            let (entity, spawn_data) = config.pick_random_spawn_data()?;
-            *next = Some(entity);
-            *data = Some(spawn_data);
+        let (result, created) = {
+            let mut next = self.next_spawn_entity.lock().unwrap();
+            let mut data = self.next_spawn_data.lock().unwrap();
+            let created = next.is_none();
+            if created {
+                let (entity, spawn_data) = config.pick_random_spawn_data()?;
+                *next = Some(entity);
+                *data = Some(spawn_data);
+            }
+            let entity = (*next)?;
+            let spawn_data = data.clone().unwrap_or_else(|| {
+                let mut entity_data = NbtCompound::new();
+                entity_data.put_string("id", format!("minecraft:{}", entity.resource_name));
+                let mut spawn_data = NbtCompound::new();
+                spawn_data.put_compound("entity", entity_data);
+                spawn_data
+            });
+            ((entity, spawn_data), created)
+        };
+        if created {
+            self.mark_updated(world);
         }
-        let entity = (*next)?;
-        let spawn_data = data.clone().unwrap_or_else(|| {
-            let mut entity_data = NbtCompound::new();
-            entity_data.put_string("id", format!("minecraft:{}", entity.resource_name));
-            let mut spawn_data = NbtCompound::new();
-            spawn_data.put_compound("entity", entity_data);
-            spawn_data
-        });
-        Some((entity, spawn_data))
+        Some(result)
     }
 
-    // TrialSpawner.java:161-234, simplified: no custom spawn rules / equipment /
-    // line-of-sight clip check (only collision + spawn placement rules kept)
-    async fn spawn_mob(&self, world: &Arc<World>, config: &TrialSpawnerConfig) -> Option<Uuid> {
-        let (entity_type, spawn_data) = self.get_or_create_next_spawn_data(config).await?;
+    // TrialSpawner.java:288-291 and PlayerDetector.java:55-58: clip from the spawn position
+    // to the spawner centre; the line is clear when nothing but the spawner block is hit.
+    // `ClipContext.Block.VISUAL` uses `getVisualShape`, which defaults to the collision
+    // shape (hence `raycast_collision`); see `blocks_visual_line_of_sight` for the overrides.
+    async fn in_line_of_sight(&self, world: &Arc<World>, dest: Vector3<f64>) -> bool {
+        world
+            .raycast_collision(
+                dest,
+                self.position.to_centered_f64(),
+                async |block_pos, world| blocks_visual_line_of_sight(world, block_pos),
+            )
+            .await
+            .is_none_or(|(hit, _)| hit == self.position)
+    }
+
+    // TrialSpawner.java:161-234, simplified: no `Pos` override, spawn-placement rules,
+    // `checkSpawnObstruction`, `finalizeSpawn` or equipment (all need spawn-reason plumbing
+    // that lives in entity/); collision, line of sight and custom spawn rules are kept.
+    async fn spawn_mob(
+        &self,
+        world: &Arc<World>,
+        config: &TrialSpawnerConfig,
+        is_ominous: bool,
+    ) -> Option<Uuid> {
+        let (entity_type, spawn_data) = self.get_or_create_next_spawn_data(world, config)?;
         let pos = self.position.0;
         let spawn_range = f64::from(config.spawn_range);
-        let spawn_pos = pumpkin_util::math::vector3::Vector3::new(
+        let spawn_pos = Vector3::new(
             pos.x as f64 + (rand::random::<f64>() - rand::random::<f64>()) * spawn_range + 0.5,
             (pos.y + rand::random_range(0..3) - 1) as f64,
             pos.z as f64 + (rand::random::<f64>() - rand::random::<f64>()) * spawn_range + 0.5,
         );
+        // TrialSpawner.java:182 tests `getSpawnAABB`, which applies the spawn dimension scale.
         if !world.is_space_empty(BoundingBox::new_from_pos(
             spawn_pos.x,
             spawn_pos.y,
             spawn_pos.z,
-            &EntityDimensions {
-                width: entity_type.dimension[0],
-                height: entity_type.dimension[1],
-                eye_height: entity_type.eye_height,
-                fixed: false,
-            },
+            &spawn_dimensions(entity_type),
         )) {
             return None;
         }
-        if !custom_spawn_rules_allow(
-            world,
-            &BlockPos::floored(spawn_pos.x, spawn_pos.y, spawn_pos.z),
-            &spawn_data,
-        ) {
+        if !self.in_line_of_sight(world, spawn_pos).await {
+            return None;
+        }
+        let spawn_block_pos = BlockPos::floored(spawn_pos.x, spawn_pos.y, spawn_pos.z);
+        if !custom_spawn_rules_allow(world, &spawn_block_pos, &spawn_data) {
             return None;
         }
         let uuid = uuid::Uuid::new_v4();
@@ -755,12 +879,30 @@ impl TrialSpawnerBlockEntity {
             }
             entity.read_nbt_non_mut(entity_nbt).await;
         }
-        world.spawn_entity(entity).await;
+        // TrialSpawner.java:203 `snapTo` runs after the NBT is read and randomises the yaw.
+        entity
+            .get_entity()
+            .set_rotation(rand::random::<f32>() * 360.0, 0.0);
+        // TrialSpawner.java:220: trial spawner mobs never despawn.
+        if let Some(mob) = entity.get_mob() {
+            mob.set_persistence_required();
+        }
+        world.spawn_entity(entity.clone()).await;
+        // TrialSpawner.java:228-230: FlameParticle.encode() is the ordinal, OMINOUS = 1.
+        let flame = i32::from(is_ominous);
+        world.sync_world_event(WorldEvent::ParticlesTrialSpawnerSpawn, self.position, flame);
         world.sync_world_event(
             WorldEvent::ParticlesTrialSpawnerSpawnMobAt,
-            BlockPos::floored(spawn_pos.x, spawn_pos.y, spawn_pos.z),
-            0,
+            spawn_block_pos,
+            flame,
         );
+        emit_game_event(
+            world,
+            GameEvent::EntityPlace,
+            spawn_block_pos.to_centered_f64(),
+            GameEventContext::of_entity(entity),
+        )
+        .await;
         {
             let mut next = self.next_spawn_entity.lock().unwrap();
             let mut next_data = self.next_spawn_data.lock().unwrap();
@@ -795,10 +937,45 @@ impl TrialSpawnerBlockEntity {
     }
 
     // Eject one item from the loot table picked for this reward cycle.
-    // TrialSpawner.java:237-251
+    // TrialSpawner.java:236-247
     async fn eject_reward(&self, world: &Arc<World>, table: &str) {
-        if let Some(item) = spawner_ejection_item(table) {
-            world.drop_stack(&self.position, item).await;
+        // An empty roll ejects nothing and sends no event (TrialSpawner.java:240).
+        let Some(item) = spawner_ejection_item(table) else {
+            return;
+        };
+        // `DefaultDispenseItemBehavior.spawnItem(level, item, 2, UP, atBottomCenterOf(pos)
+        // .relative(UP, 1.2))` (DefaultDispenseItemBehavior.java:30-49): the stack starts
+        // 0.125 below that point and is thrown upwards, rather than dropped inside the block.
+        let pos = self.position.0;
+        let spawn_pos = Vector3::new(
+            f64::from(pos.x) + 0.5,
+            f64::from(pos.y) + 1.2 - 0.125,
+            f64::from(pos.z) + 0.5,
+        );
+        let spread = 0.017_227_5 * 2.0;
+        let velocity = Vector3::new(
+            triangle(0.0, spread),
+            triangle(0.2, spread),
+            triangle(0.0, spread),
+        );
+        let entity = Entity::new(world.clone(), spawn_pos, &EntityType::ITEM);
+        // Not vanilla: `World::drop_stack`, which this replaced, fired the cancellable plugin
+        // `ItemSpawnEvent`, so keep firing it for rewards.
+        let mut item_event = ItemSpawnEvent::new(
+            entity.entity_id,
+            spawn_pos,
+            item.item.registry_key.to_string(),
+        );
+        if let Some(server) = world.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut item_event).await;
+        }
+        if !item_event.cancelled {
+            // `spawnItem` never calls `setDefaultPickUpDelay`, so the stack is pickable at once.
+            world
+                .spawn_entity(Arc::new(ItemEntity::new_with_velocity(
+                    entity, item, velocity, 0,
+                )))
+                .await;
         }
         world.sync_world_event(WorldEvent::AnimationTrialSpawnerEjectItem, self.position, 0);
     }
@@ -810,7 +987,7 @@ impl TrialSpawnerBlockEntity {
         if !TrialSpawnerLikeProperties::handles_block_id(block.id) {
             return;
         }
-        let mut props = TrialSpawnerLikeProperties::from_state_id(state_id, block);
+        let props = TrialSpawnerLikeProperties::from_state_id(state_id, block);
         let is_ominous = props.ominous;
         let game_time = world.get_world_age().await;
 
@@ -833,11 +1010,23 @@ impl TrialSpawnerBlockEntity {
             .await;
 
         if next_state != props.trial_spawner_state {
-            props.trial_spawner_state = next_state;
-            let new_state_id = props.to_state_id(block);
-            world
-                .set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+            // TrialSpawnerBlockEntity.setState (TrialSpawnerBlockEntity.java:81-84) applies the
+            // state to the block's *current* state. The state machine may have flipped
+            // `ominous` since `props` was read (apply_ominous / remove_ominous), and writing the
+            // stale copy back would undo that.
+            let state_id = world.get_block_state_id(&self.position);
+            let block = Block::from_state_id(state_id);
+            if TrialSpawnerLikeProperties::handles_block_id(block.id) {
+                let mut current = TrialSpawnerLikeProperties::from_state_id(state_id, block);
+                current.trial_spawner_state = next_state;
+                world
+                    .set_block_state(
+                        &self.position,
+                        current.to_state_id(block),
+                        BlockFlags::NOTIFY_ALL,
+                    )
+                    .await;
+            }
         }
     }
 
@@ -851,16 +1040,25 @@ impl TrialSpawnerBlockEntity {
         game_time: i64,
     ) -> TrialSpawnerState {
         match current {
-            TrialSpawnerState::Inactive => TrialSpawnerState::WaitingForPlayers,
+            // TrialSpawnerState.java:69: the spawner only wakes once a display entity can be
+            // created, i.e. once the next spawn data names a mob. Waking unconditionally made an
+            // unconfigured spawner flip between INACTIVE and WAITING_FOR_PLAYERS every tick.
+            TrialSpawnerState::Inactive => {
+                if self.get_or_create_next_spawn_data(world, config).is_some() {
+                    TrialSpawnerState::WaitingForPlayers
+                } else {
+                    TrialSpawnerState::Inactive
+                }
+            }
             TrialSpawnerState::WaitingForPlayers => {
                 if !Self::can_spawn_in_level(world) {
                     self.reset_statistics().await;
                     return TrialSpawnerState::WaitingForPlayers;
                 }
-                if !self.has_mob_to_spawn(config).await {
+                if !self.has_mob_to_spawn(world, config) {
                     return TrialSpawnerState::Inactive;
                 }
-                self.try_detect_players(world, is_ominous).await;
+                self.try_detect_players(world, current, is_ominous).await;
                 if self.detected_players.lock().await.is_empty() {
                     TrialSpawnerState::WaitingForPlayers
                 } else {
@@ -876,9 +1074,6 @@ impl TrialSpawnerBlockEntity {
                 let cooldown_started_at =
                     self.cooldown_ends_at.load(Ordering::Relaxed) - self.target_cooldown_length;
                 if game_time >= cooldown_started_at + DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB {
-                    // TrialSpawnerState.java:132-137 selects the configured weighted table
-                    // once per reward cycle; TrialSpawnerConfig.java:47-49 supplies that list.
-                    *self.ejecting_loot_table.lock().unwrap() = config.pick_random_loot_table();
                     world.play_block_sound(
                         Sound::BlockTrialSpawnerOpenShutter,
                         SoundCategory::Blocks,
@@ -904,7 +1099,15 @@ impl TrialSpawnerBlockEntity {
                     );
                     TrialSpawnerState::Cooldown
                 } else {
-                    let table = self.ejecting_loot_table.lock().unwrap().clone();
+                    // TrialSpawnerState.java:132-134 rolls the configured weighted table
+                    // (TrialSpawnerConfig.java:47-49) on the first ejection of a reward cycle.
+                    let table = {
+                        let mut ejecting = self.ejecting_loot_table.lock().unwrap();
+                        if ejecting.is_none() {
+                            *ejecting = config.pick_random_loot_table();
+                        }
+                        ejecting.clone()
+                    };
                     if let Some(table) = table.as_deref() {
                         self.eject_reward(world, table).await;
                     }
@@ -916,7 +1119,7 @@ impl TrialSpawnerBlockEntity {
                 }
             }
             TrialSpawnerState::Cooldown => {
-                self.try_detect_players(world, is_ominous).await;
+                self.try_detect_players(world, current, is_ominous).await;
                 if !self.detected_players.lock().await.is_empty() {
                     self.total_mobs_spawned.store(0, Ordering::Relaxed);
                     self.next_mob_spawns_at.store(0, Ordering::Relaxed);
@@ -946,11 +1149,12 @@ impl TrialSpawnerBlockEntity {
             self.reset_statistics().await;
             return TrialSpawnerState::WaitingForPlayers;
         }
-        if !self.has_mob_to_spawn(config).await {
+        if !self.has_mob_to_spawn(world, config) {
             return TrialSpawnerState::Inactive;
         }
         let additional_players = self.count_additional_players().await;
-        self.try_detect_players(world, is_ominous).await;
+        self.try_detect_players(world, TrialSpawnerState::Active, is_ominous)
+            .await;
         if is_ominous {
             self.spawn_ominous_item_spawner(world, config, game_time)
                 .await;
@@ -968,7 +1172,7 @@ impl TrialSpawnerBlockEntity {
         } else if game_time >= self.next_mob_spawns_at.load(Ordering::Relaxed)
             && self.current_mobs.lock().await.len()
                 < config.calculate_target_simultaneous_mobs(additional_players) as usize
-            && let Some(uuid) = self.spawn_mob(world, config).await
+            && let Some(uuid) = self.spawn_mob(world, config, is_ominous).await
         {
             self.current_mobs.lock().await.insert(uuid);
             self.total_mobs_spawned.fetch_add(1, Ordering::Relaxed);
@@ -1005,7 +1209,7 @@ impl TrialSpawnerBlockEntity {
         }
         let target_pos = target_entity.pos.load();
         let target_box = target_entity.bounding_box.load();
-        let spawn_pos = pumpkin_util::math::vector3::Vector3::new(
+        let spawn_pos = Vector3::new(
             target_pos.x,
             target_box.max.y + 2.0 + f64::from(rand::random_range(0..4u8)),
             target_pos.z,
@@ -1021,6 +1225,45 @@ impl TrialSpawnerBlockEntity {
         self.cooldown_ends_at
             .store(game_time + OMINOUS_ITEM_SPAWNER_INTERVAL, Ordering::Relaxed);
     }
+}
+
+// `RandomSource.triangle(min, max)`: `min + max * (nextDouble - nextDouble)`.
+fn triangle(min: f64, max: f64) -> f64 {
+    (rand::random::<f64>() - rand::random::<f64>()).mul_add(max, min)
+}
+
+// Blocks whose `getVisualShape` is `Shapes.empty()`, which `ClipContext.Block.VISUAL` clips
+// straight through: `TransparentBlock` (glass, stained and tinted glass, and the copper grates
+// via `WaterloggedTransparentBlock`; TransparentBlock.java:25-27), `IronBarsBlock` (iron and
+// copper bars, glass panes; IronBarsBlock.java:81-83) and powder snow
+// (PowderSnowBlock.java:135-137).
+fn has_empty_visual_shape(block: &Block) -> bool {
+    block.has_tag(&tag::Block::C_GLASS_BLOCKS)
+        || block.has_tag(&tag::Block::C_GLASS_PANES)
+        || block.has_tag(&tag::Block::MINECRAFT_BARS)
+        || matches!(
+            block.id,
+            BlockId::POWDER_SNOW
+                | BlockId::COPPER_GRATE
+                | BlockId::EXPOSED_COPPER_GRATE
+                | BlockId::WEATHERED_COPPER_GRATE
+                | BlockId::OXIDIZED_COPPER_GRATE
+                | BlockId::WAXED_COPPER_GRATE
+                | BlockId::WAXED_EXPOSED_COPPER_GRATE
+                | BlockId::WAXED_WEATHERED_COPPER_GRATE
+                | BlockId::WAXED_OXIDIZED_COPPER_GRATE
+        )
+}
+
+// Hit filter for the trial spawner line-of-sight rays (TrialSpawner.inLineOfSight and
+// PlayerDetector.inLineOfSight clip with `ClipContext.Block.VISUAL`). Blocks with an empty
+// visual shape never stop the ray. Not modelled: the visual shapes that differ from the
+// collision shape while being non-empty (soul sand and mud are full blocks, snow layers use
+// their layer shape, fences use their outline; SoulSandBlock/MudBlock/SnowLayerBlock/
+// FenceBlock.getVisualShape); the ray still tests those against the collision shape.
+fn blocks_visual_line_of_sight(world: &World, pos: &BlockPos) -> bool {
+    let state = world.get_block_state(pos);
+    !state.is_air() && !has_empty_visual_shape(Block::from_state_id(state.id))
 }
 
 fn custom_spawn_rules_allow(world: &World, pos: &BlockPos, spawn_data: &NbtCompound) -> bool {
@@ -1274,43 +1517,52 @@ fn ominous_spawner_item(table: &str) -> Option<pumpkin_data::item_stack::ItemSta
 }
 
 // Hand-ported (no generic loot-table registry entry exists for the
-// "spawners/trial_chamber/*" namespace, only "chests/*" -- see report):
-// data/minecraft/loot_table/spawners/trial_chamber/consumables.json (table 1)
-// data/minecraft/loot_table/spawners/trial_chamber/key.json (table 2)
+// "spawners/*" namespace, only "chests/*"), keyed by the full table id so the ominous
+// variants are not mistaken for the normal ones:
+// data/minecraft/loot_table/spawners/trial_chamber/{consumables,key}.json and
+// data/minecraft/loot_table/spawners/ominous/trial_chamber/{consumables,key}.json.
 fn spawner_ejection_item(table: &str) -> Option<pumpkin_data::item_stack::ItemStack> {
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
 
-    if table.ends_with("/consumables") {
-        let entries: [(i32, fn() -> ItemStack); 5] = [
-            (3, || {
-                let mut s = ItemStack::new(1, &Item::COOKED_CHICKEN);
-                s.item_count = 1;
-                s
-            }),
-            (3, || {
-                ItemStack::new(1u8 + rand::random_range(0..3u8), &Item::BREAD)
-            }),
-            (2, || {
-                ItemStack::new(1u8 + rand::random_range(0..3u8), &Item::BAKED_POTATO)
-            }),
-            (1, || potion_item(&Item::POTION, "minecraft:regeneration")),
-            (1, || potion_item(&Item::POTION, "minecraft:swiftness")),
-        ];
-        let total: i32 = entries.iter().map(|(w, _)| *w).sum();
-        let mut roll = rand::random_range(0..total);
-        for (weight, make) in entries {
-            if roll < weight {
-                return Some(make());
-            }
-            roll -= weight;
-        }
-        None
-    } else if table.ends_with("/key") {
-        Some(ItemStack::new(1, &Item::TRIAL_KEY))
-    } else {
-        None
+    // `set_count` with a `uniform` provider of whole numbers.
+    fn uniform_stack(item: &'static Item, min: u8, max: u8) -> ItemStack {
+        ItemStack::new(rand::random_range(min..=max), item)
     }
+
+    let entries: [(i32, fn() -> ItemStack); 5] =
+        match table.strip_prefix("minecraft:").unwrap_or(table) {
+            "spawners/trial_chamber/consumables" => [
+                (3, || ItemStack::new(1, &Item::COOKED_CHICKEN)),
+                (3, || uniform_stack(&Item::BREAD, 1, 3)),
+                (2, || uniform_stack(&Item::BAKED_POTATO, 1, 3)),
+                (1, || potion_item(&Item::POTION, "regeneration")),
+                (1, || potion_item(&Item::POTION, "swiftness")),
+            ],
+            "spawners/ominous/trial_chamber/consumables" => [
+                (3, || uniform_stack(&Item::COOKED_BEEF, 1, 2)),
+                (3, || uniform_stack(&Item::BAKED_POTATO, 2, 4)),
+                (2, || uniform_stack(&Item::GOLDEN_CARROT, 1, 2)),
+                (1, || potion_item(&Item::POTION, "regeneration")),
+                (1, || potion_item(&Item::POTION, "strength")),
+            ],
+            "spawners/trial_chamber/key" => {
+                return Some(ItemStack::new(1, &Item::TRIAL_KEY));
+            }
+            "spawners/ominous/trial_chamber/key" => {
+                return Some(ItemStack::new(1, &Item::OMINOUS_TRIAL_KEY));
+            }
+            _ => return None,
+        };
+    let total: i32 = entries.iter().map(|(weight, _)| *weight).sum();
+    let mut roll = rand::random_range(0..total);
+    for (weight, make) in entries {
+        if roll < weight {
+            return Some(make());
+        }
+        roll -= weight;
+    }
+    None
 }
 
 fn parse_uuid_list(list: &[NbtTag]) -> HashSet<Uuid> {
@@ -1441,6 +1693,164 @@ mod tests {
     #[test]
     fn built_in_config_rejects_unknown_key() {
         assert!(built_in_config("minecraft:not_a_real_config/normal").is_none());
+    }
+
+    // TrialSpawnerStateData.java:121 throttles on `pos.asLong() + gameTime`, whose packed
+    // layout (x << 38 | z << 12 | y) is not the coordinate sum.
+    #[test]
+    fn player_scan_throttle_uses_packed_block_position() {
+        let due = TrialSpawnerBlockEntity::detection_tick_due;
+        assert!(due(BlockPos::new(0, 0, 0), 0));
+        assert!(!due(BlockPos::new(0, 0, 0), 1));
+        assert!(due(BlockPos::new(0, 3, 0), 17));
+        // x = 1 packs to 1 << 38, which is 4 (mod 20).
+        assert!(due(BlockPos::new(1, 0, 0), 16));
+        assert!(!due(BlockPos::new(1, 0, 0), 19));
+        // z = 1 packs to 1 << 12, which is 16 (mod 20).
+        assert!(due(BlockPos::new(0, 0, 1), 4));
+        // x = -1 packs to -(1 << 38); Java's `%` keeps the dividend's sign, as Rust's does.
+        assert!(due(BlockPos::new(-1, 0, 0), 4));
+        assert!(!due(BlockPos::new(-1, 0, 0), 0));
+    }
+
+    // TrialSpawnerStateData.java:123 and :143.
+    #[test]
+    fn cooldown_only_registers_players_when_turning_ominous() {
+        use TrialSpawnerState::{Active, Cooldown, WaitingForPlayers};
+        type Entity = TrialSpawnerBlockEntity;
+        assert!(!Entity::scans_for_players(Cooldown, true));
+        assert!(Entity::scans_for_players(Cooldown, false));
+        assert!(Entity::scans_for_players(Active, true));
+        assert!(!Entity::registers_players(Cooldown, false));
+        assert!(Entity::registers_players(Cooldown, true));
+        assert!(Entity::registers_players(WaitingForPlayers, false));
+        assert!(Entity::registers_players(Active, false));
+    }
+
+    // PlayerDetector.NO_CREATIVE_PLAYERS compares block positions with the strict
+    // `Vec3i.closerThan`.
+    #[test]
+    fn player_range_is_a_strict_block_distance() {
+        let spawner = TrialSpawnerBlockEntity::new(BlockPos::new(0, 0, 0));
+        assert!(spawner.is_within_player_range(BlockPos::new(13, 0, 0)));
+        assert!(!spawner.is_within_player_range(BlockPos::new(14, 0, 0)));
+        assert!(!spawner.is_within_player_range(BlockPos::new(10, 10, 0)));
+        assert!(spawner.is_within_player_range(BlockPos::new(-8, 8, 8)));
+    }
+
+    #[test]
+    fn overridden_config_round_trips_through_inline_nbt() {
+        // `FullConfig.overrideEntity` results are stored inline, so `to_nbt` must reload to
+        // the same spawn entity.
+        let overridden = TrialSpawnerBlockEntity::with_spawning(
+            &TrialSpawnerConfig::default(),
+            &EntityType::HUSK,
+        );
+        let restored = TrialSpawnerConfig::from_nbt(Some(&NbtTag::Compound(overridden.to_nbt())));
+        assert_eq!(restored.spawn_potentials.len(), 1);
+        assert_eq!(restored.spawn_potentials[0].0.id, EntityType::HUSK.id);
+        assert_eq!(restored.spawn_potentials[0].1, 1);
+        assert_eq!(
+            restored.loot_tables_to_eject,
+            overridden.loot_tables_to_eject
+        );
+        assert_eq!(restored.ticks_between_spawn, overridden.ticks_between_spawn);
+    }
+
+    #[test]
+    fn built_in_ominous_config_round_trips_through_inline_nbt() {
+        let config = built_in_config("minecraft:trial_chamber/melee/zombie/ominous")
+            .expect("known key must resolve");
+        let restored = TrialSpawnerConfig::from_nbt(Some(&NbtTag::Compound(config.to_nbt())));
+        assert!((restored.total_mobs - config.total_mobs).abs() < f32::EPSILON);
+        assert!(
+            (restored.simultaneous_mobs_added_per_player
+                - config.simultaneous_mobs_added_per_player)
+                .abs()
+                < f32::EPSILON
+        );
+        assert_eq!(restored.loot_tables_to_eject, config.loot_tables_to_eject);
+        assert!(
+            restored.spawn_potentials[0]
+                .2
+                .get_compound("equipment")
+                .is_some()
+        );
+    }
+
+    // spawners/ominous/trial_chamber/key.json rewards `ominous_trial_key`; the ominous
+    // tables were previously matched by their `/key` and `/consumables` suffixes.
+    #[test]
+    fn ejection_tables_are_matched_by_full_id() {
+        use pumpkin_data::item::Item;
+        let normal = spawner_ejection_item("minecraft:spawners/trial_chamber/key")
+            .expect("normal key table");
+        assert_eq!(normal.item.id, Item::TRIAL_KEY.id);
+        let ominous = spawner_ejection_item("minecraft:spawners/ominous/trial_chamber/key")
+            .expect("ominous key table");
+        assert_eq!(ominous.item.id, Item::OMINOUS_TRIAL_KEY.id);
+        assert!(spawner_ejection_item("minecraft:custom/key").is_none());
+        assert!(spawner_ejection_item("minecraft:custom/consumables").is_none());
+    }
+
+    #[test]
+    fn ominous_consumables_use_the_ominous_pool() {
+        use pumpkin_data::item::Item;
+        let allowed = [
+            Item::COOKED_BEEF.id,
+            Item::BAKED_POTATO.id,
+            Item::GOLDEN_CARROT.id,
+            Item::POTION.id,
+        ];
+        for _ in 0..200 {
+            let stack =
+                spawner_ejection_item("minecraft:spawners/ominous/trial_chamber/consumables")
+                    .expect("ominous consumables table");
+            assert!(allowed.contains(&stack.item.id));
+            if stack.item.id == Item::POTION.id {
+                assert!(!stack.patch.is_empty(), "set_potion must be applied");
+            }
+        }
+    }
+
+    // `Potion::from_name` takes the bare registry path; a namespaced name silently produced
+    // an empty potion.
+    #[test]
+    fn potion_item_applies_the_named_potion() {
+        use pumpkin_data::item::Item;
+        assert_eq!(potion_item(&Item::POTION, "regeneration").patch.len(), 1);
+    }
+
+    // `ClipContext.Block.VISUAL` clips through `Shapes.empty()` visual shapes (TransparentBlock,
+    // IronBarsBlock, PowderSnowBlock) but stops at blocks that keep the default collision shape.
+    #[test]
+    fn visual_line_of_sight_passes_through_empty_visual_shapes() {
+        for block in [
+            &Block::GLASS,
+            &Block::WHITE_STAINED_GLASS,
+            &Block::TINTED_GLASS,
+            &Block::GLASS_PANE,
+            &Block::BLACK_STAINED_GLASS_PANE,
+            &Block::IRON_BARS,
+            &Block::COPPER_BARS,
+            &Block::WAXED_OXIDIZED_COPPER_BARS,
+            &Block::COPPER_GRATE,
+            &Block::WAXED_WEATHERED_COPPER_GRATE,
+            &Block::POWDER_SNOW,
+        ] {
+            assert!(has_empty_visual_shape(block), "{}", block.name);
+        }
+        for block in [
+            &Block::STONE,
+            &Block::ICE,
+            &Block::SLIME_BLOCK,
+            &Block::OAK_FENCE,
+            &Block::POWDER_SNOW_CAULDRON,
+            &Block::COPPER_BLOCK,
+            &Block::COPPER_TRAPDOOR,
+        ] {
+            assert!(!has_empty_visual_shape(block), "{}", block.name);
+        }
     }
 
     #[test]
