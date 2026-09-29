@@ -972,6 +972,11 @@ impl Mob for EnderDragonEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `EnderDragon.canRide` (`EnderDragon.java:847-849`) refuses every vehicle.
+    fn mob_can_ride(&self, _vehicle: &dyn EntityBase) -> bool {
+        false
+    }
+
     fn is_pickable(&self) -> bool {
         false
     }

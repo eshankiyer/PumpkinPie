@@ -122,6 +122,11 @@ impl Mob for WitherEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `WitherBoss.canRide` (`WitherBoss.java:548-550`) refuses every vehicle.
+    fn mob_can_ride(&self, _vehicle: &dyn EntityBase) -> bool {
+        false
+    }
+
     /// Vanilla `WitherBoss.checkDespawn` only removes the wither in Peaceful;
     /// otherwise it resets `noActionTime` instead of applying distance despawn.
     fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
