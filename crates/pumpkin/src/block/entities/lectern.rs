@@ -165,10 +165,8 @@ impl LecternBlockEntity {
     /// at most one page use full progress, while multi-page books scale by page.
     pub async fn comparator_output(&self) -> u8 {
         let book = self.book.lock().await;
-        if !Self::stack_has_book(&book) {
-            return 0;
-        }
-
+        // No early return for a bookless entity: vanilla still yields 14 for it, and only the
+        // block's `HAS_BOOK` gate (`LecternBlock.java:203-208`) makes an empty lectern read 0.
         let page = self.page.load(Ordering::Relaxed) as f32;
         let page_count = Self::page_count_of(&book);
         let page_progress = if page_count > 1 {
@@ -176,7 +174,7 @@ impl LecternBlockEntity {
         } else {
             1.0
         };
-        (page_progress * 14.0).floor() as u8 + 1
+        (page_progress * 14.0).floor() as u8 + u8::from(Self::stack_has_book(&book))
     }
 }
 
@@ -251,6 +249,19 @@ impl Inventory for LecternBlockEntity {
     /// gets in via `LecternBlock.tryPlaceBook`. Without this a hopper facing a lectern could
     /// insert (or overwrite) whatever item it is holding into slot 0.
     fn can_insert_through_face<'a>(
+        &'a self,
+        _slot: usize,
+        _stack: &'a ItemStack,
+        _direction: pumpkin_data::BlockDirection,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
+    /// `LecternBlockEntity` is not itself a `Container` (only its private `bookAccess` is, and
+    /// that is handed to the menu alone), so a hopper below a lectern cannot pull the book out
+    /// (`LecternBlockEntity.java:33-107`). Taking it must go through the menu so `has_book`
+    /// is cleared.
+    fn can_extract_through_face<'a>(
         &'a self,
         _slot: usize,
         _stack: &'a ItemStack,
@@ -337,6 +348,7 @@ mod tests {
 
         futures::executor::block_on(entity.set_stack(0, ItemStack::new(1, &Item::STONE)));
         assert!(!entity.has_book());
-        assert_eq!(futures::executor::block_on(entity.comparator_output()), 0);
+        // Vanilla yields 14 for a bookless entity; the block gates on `HAS_BOOK` first.
+        assert_eq!(futures::executor::block_on(entity.comparator_output()), 14);
     }
 }

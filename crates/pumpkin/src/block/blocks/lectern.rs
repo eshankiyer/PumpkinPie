@@ -391,7 +391,10 @@ impl BlockBehaviour for LecternBlock {
                     block_entity.as_any().downcast_ref::<LecternBlockEntity>()
             {
                 let book = lectern_entity.remove_stack(0).await;
-                if !book.is_empty() {
+                // `preRemoveSideEffects` only drops when the state has `HAS_BOOK`.
+                let has_book_state =
+                    LecternLikeProperties::from_state_id(args.state.id, args.block).has_book;
+                if has_book_state && !book.is_empty() {
                     // `LecternBlockEntity.preRemoveSideEffects`
                     // (`LecternBlockEntity.java:227-236`): the dropped book is offset a
                     // quarter-block toward the lectern's facing direction and sits a full
