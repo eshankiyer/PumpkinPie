@@ -969,6 +969,16 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         true
     }
 
+    /// The passenger-side half of `Entity.startRiding`'s admission (`Entity.canRide`,
+    /// `Entity.java:2459-2461`) that is not the sneak or boarding-cooldown state; `Warden`,
+    /// `WitherBoss` and `EnderDragon` override it to refuse every vehicle
+    /// (`Warden.java:169-172`, `WitherBoss.java:548-550`, `EnderDragon.java:847-849`).
+    /// Callers that pick an entity up without a player's action (a minecart running into it)
+    /// must consult it; forced mounts such as `/ride` do not.
+    fn can_ride(&self, _vehicle: &dyn EntityBase) -> bool {
+        true
+    }
+
     fn move_entity<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
@@ -981,6 +991,14 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn is_pushable(&self) -> bool {
         false
+    }
+
+    /// Whether this entity's own `push_entities` scan runs. Vanilla's `pushEntities` never asks
+    /// the pusher whether it is pushable (`LivingEntity.java:3221-3245`), only each target
+    /// (`EntitySelector.pushableBy`), so an entity whose `is_pushable` carries an extra term
+    /// (`Warden.isPushable`, while emerging) overrides this to keep pushing.
+    fn can_push_others(&self) -> bool {
+        self.is_pushable()
     }
 
     /// Whether a piston may move this entity. Marker armor stands override this to match
@@ -1099,7 +1117,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             let self_entity = self.get_entity();
             let entity_bb = self_entity.bounding_box.load();
 
-            if !self.is_pushable() {
+            if !self.can_push_others() {
                 return false;
             }
 
@@ -1155,6 +1173,10 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                                 && !other.is_passenger().await
                                 && other.is_pushable()
                                 && other.get_entity().riding_cooldown.load(Relaxed) == 0
+                                // `startRiding` fails for an entity whose `canRide` is false
+                                // (`NewMinecartBehavior.pickupEntities`, `:525`), and the
+                                // minecart then tries the next entity.
+                                && other.can_ride(dyn_self.as_ref())
                                 && (!has_teams
                                     || team_allows_push(
                                         &world,

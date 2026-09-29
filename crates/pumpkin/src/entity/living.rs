@@ -5118,7 +5118,12 @@ impl LivingEntity {
         if move_dist <= self.next_step.load() {
             return;
         }
-        self.next_step.store(move_dist.floor() + 1.0);
+        // `Entity.nextStep` (`Entity.java:1259-1261`), which `Warden` shortens to `+ 0.55`.
+        self.next_step.store(
+            caller
+                .get_mob()
+                .map_or_else(|| move_dist.floor() + 1.0, |mob| mob.get_next_step(move_dist)),
+        );
 
         // `Entity.walkingStepSound` reads the supporting block's sound type
         // (`Entity.java:1457-1460`).
@@ -5193,28 +5198,39 @@ impl LivingEntity {
                 pitch,
             );
         } else if on_ground && !supporting_state.is_air() {
-            let (sound, volume, pitch) =
-                caller.get_mob().and_then(Mob::get_step_sound).map_or_else(
-                    || {
-                        let (sound, _, sound_volume, sound_pitch) =
-                            crate::block::block_sound_type(supporting_block);
-                        (sound, 0.15 * sound_volume, sound_pitch)
-                    },
-                    |sound| (sound, 0.15, 1.0),
-                );
+            let mob = caller.get_mob();
+            let (sound, volume, pitch) = Self::ground_step_sound(mob, supporting_block);
             // `vibrationAndSoundEffectsFromBlock` only calls `walkingStepSound` ->
             // `playStepSound` when `onGround() || climbable || (crouching && no vertical
             // movement) || onRails()` (Entity.java:993-994); this checks only the common
             // `onGround()` case, so a skeleton mid-air (falling, not swimming) no longer
             // plays its step sound, but climbing/crouching/on-rails still won't.
+            // `Entity.playSound` uses `getSoundSource` (`Entity.java:1486-1490`), which is
+            // `HOSTILE` for `Monster` (`Monster.java:37-39`).
             self.entity.world.load().play_sound_fine(
                 sound,
-                SoundCategory::Neutral,
+                mob.map_or(SoundCategory::Neutral, Mob::get_sound_source),
                 &self.entity.pos.load(),
                 volume,
                 pitch,
             );
         }
+    }
+
+    /// The `(sound, volume, pitch)` of `Entity.playStepSound` (`Entity.java:1457-1460`), or of the
+    /// mob's own `playStepSound` override (`Mob::get_step_sound` at `Mob::get_step_sound_volume`).
+    fn ground_step_sound(
+        mob: Option<&dyn Mob>,
+        supporting_block: &pumpkin_data::Block,
+    ) -> (Sound, f32, f32) {
+        mob.and_then(Mob::get_step_sound).map_or_else(
+            || {
+                let (sound, _, sound_volume, sound_pitch) =
+                    crate::block::block_sound_type(supporting_block);
+                (sound, 0.15 * sound_volume, sound_pitch)
+            },
+            |sound| (sound, mob.map_or(0.15, Mob::get_step_sound_volume), 1.0),
+        )
     }
 
     fn hurt_sound(&self) -> Sound {
@@ -6090,13 +6106,22 @@ impl EntityBase for LivingEntity {
                         // `Player.blockUsingItem` asks the attacker for `getSecondsToDisableBlocking`,
                         // which reads `getWeaponItem`; retain the auto-spin override here
                         // (`Player.java:711-719`; `LivingEntity.java:3967-3971`).
-                        let weapon_item = attacker_living.weapon_item(attacker).await;
-                        let active_item = attacker_living.active_item(attacker).await;
-                        if weapon_item.are_equal(&active_item)
-                            && let Some(weapon) = weapon_item.get_data_component::<WeaponImpl>()
-                        {
-                            let cooldown_ticks =
-                                (weapon.disable_blocking_for_seconds * 20.0).round() as i32;
+                        // `Warden.getSecondsToDisableBlocking` (`Warden.java:174-177`) replaces
+                        // that lookup with a constant `5.0`.
+                        let mut seconds_to_disable = attacker
+                            .get_mob()
+                            .and_then(Mob::get_seconds_to_disable_blocking);
+                        if seconds_to_disable.is_none() {
+                            let weapon_item = attacker_living.weapon_item(attacker).await;
+                            let active_item = attacker_living.active_item(attacker).await;
+                            if weapon_item.are_equal(&active_item)
+                                && let Some(weapon) = weapon_item.get_data_component::<WeaponImpl>()
+                            {
+                                seconds_to_disable = Some(weapon.disable_blocking_for_seconds);
+                            }
+                        }
+                        if let Some(seconds) = seconds_to_disable {
+                            let cooldown_ticks = (seconds * 20.0).round() as i32;
                             if cooldown_ticks > 0 {
                                 let active_hand = *self.active_hand.lock().await;
                                 if let Some(hand) = active_hand {

@@ -88,6 +88,9 @@ pub struct Navigator {
     /// `RestrictSunGoal` while the mob is in daylight without head armor; while set, paths are
     /// truncated before their first sky-exposed node (see `Navigator::trim_avoiding_sun`).
     avoid_sun: bool,
+    /// The `PathFinder.distance` override of `Warden.createNavigation`
+    /// (`Warden.java:544-558`): the cost of a step ignores its vertical component.
+    horizontal_step_distance: bool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -125,6 +128,7 @@ impl Default for Navigator {
             wall_climber_target: None,
             wall_climber_direct: false,
             avoid_sun: false,
+            horizontal_step_distance: false,
         }
     }
 }
@@ -400,6 +404,23 @@ impl Navigator {
         self.avoid_sun = avoid_sun;
     }
 
+    /// Selects the `Warden.createNavigation` `PathFinder` (`Warden.java:544-558`), whose
+    /// `distance` override is `Node.distanceToXZ`.
+    pub const fn set_horizontal_step_distance(&mut self, horizontal: bool) {
+        self.horizontal_step_distance = horizontal;
+    }
+
+    /// `PathFinder.distance` (`PathFinder.java:149-151`): the cost of one step between adjacent
+    /// nodes, before the destination node's malus. The default is the 3D distance
+    /// (`Node.distanceTo`); the Warden navigation drops the vertical term.
+    fn step_distance(horizontal: bool, from: &Node, to: &Node) -> f32 {
+        if horizontal {
+            from.distance_xz(to)
+        } else {
+            from.distance(to)
+        }
+    }
+
     /// `GroundPathNavigation.trimPath` (`GroundPathNavigation.java:116-131`).
     ///
     /// Runs on ground navigators while `avoid_sun` is set. If the mob itself already stands in
@@ -498,6 +519,7 @@ impl Navigator {
             wall_climber_target: None,
             wall_climber_direct: false,
             avoid_sun: self.avoid_sun,
+            horizontal_step_distance: self.horizontal_step_distance,
         }
     }
 
@@ -693,6 +715,8 @@ impl Navigator {
         // Map to store closed nodes for path reconstruction
         let mut closed_set: FxHashMap<Vector3<i32>, Node> = FxHashMap::default();
 
+        let horizontal_step_distance = self.horizontal_step_distance;
+
         // Reuse the navigator's open_set and neighbors_buf
         self.open_set.clear();
         self.open_set.insert(start_node);
@@ -734,7 +758,7 @@ impl Navigator {
                 .await;
 
             for mut neighbor in self.neighbors_buf.drain(..) {
-                let step_cost = current.distance(&neighbor);
+                let step_cost = Self::step_distance(horizontal_step_distance, &current, &neighbor);
                 neighbor.walked_dist = current.walked_dist + step_cost;
                 let tentative_g = current.g + step_cost + neighbor.cost_malus;
 
@@ -1224,7 +1248,25 @@ impl Navigator {
 
 #[cfg(test)]
 mod tests {
-    use super::{Navigator, node::PathType};
+    use super::{
+        Navigator,
+        node::{Node, PathType},
+    };
+    use pumpkin_util::math::position::BlockPos;
+
+    #[test]
+    fn warden_navigation_ignores_the_vertical_part_of_a_step() {
+        // `PathFinder.distance` is `Node.distanceTo` (`PathFinder.java:149-151`); the Warden's
+        // anonymous `PathFinder` swaps in `Node.distanceToXZ` (`Warden.java:552-554`).
+        let from = Node::new(BlockPos::new(0, 0, 0));
+        let up_and_across = Node::new(BlockPos::new(3, 4, 0));
+
+        assert!((Navigator::step_distance(false, &from, &up_and_across) - 5.0).abs() < 1.0e-6);
+        assert!((Navigator::step_distance(true, &from, &up_and_across) - 3.0).abs() < 1.0e-6);
+
+        let straight_up = Node::new(BlockPos::new(0, 7, 0));
+        assert!(Navigator::step_distance(true, &from, &straight_up).abs() < 1.0e-6);
+    }
 
     #[test]
     fn inherited_pathfinding_malus_is_used_until_cleared() {

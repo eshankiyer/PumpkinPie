@@ -1718,6 +1718,47 @@ pub trait Mob: EntityBase + Send + Sync {
         }
     }
 
+    /// Volume of the [`Self::get_step_sound`] sound. `Entity.playStepSound` scales the supporting
+    /// block's volume by `0.15` (`Entity.java:1457-1460`), which is what mobs that override the
+    /// sound but not this volume keep; `Warden.playStepSound` (`Warden.java:219-222`) plays its
+    /// step at a fixed `10.0`.
+    fn get_step_sound_volume(&self) -> f32 {
+        0.15
+    }
+
+    /// Vanilla `Entity.nextStep` (`Entity.java:1259-1261`): the `moveDist` a step sound and its
+    /// `STEP` vibration wait for after one has just been emitted at `move_dist`. `Warden.nextStep`
+    /// (`Warden.java:179-182`) shortens the interval to `0.55`.
+    fn get_next_step(&self, move_dist: f32) -> f32 {
+        move_dist.floor() + 1.0
+    }
+
+    /// Vanilla `Entity.canRide` beyond the sneak and boarding-cooldown checks that the mounting
+    /// paths already make (`Entity.java:2459-2461`); `Warden.canRide` (`Warden.java:169-172`),
+    /// `WitherBoss.canRide` and `EnderDragon.canRide` refuse every vehicle. Only the non-forced
+    /// pickups (a minecart running into the mob)
+    /// consult it: `startRiding(..., force = true)` skips `canRide`, as does `/ride`.
+    fn mob_can_ride(&self, _vehicle: &dyn EntityBase) -> bool {
+        true
+    }
+
+    /// The mob-specific term of `isPushable` beyond `LivingEntity.isPushable` (alive, not
+    /// spectating, not on a climbable block). `Warden.isPushable` (`Warden.java:523-526`)
+    /// adds `!isDiggingOrEmerging()`. It only gates being shoved or picked up by another
+    /// entity: the mob's own `push_entities` scan is governed by
+    /// [`EntityBase::can_push_others`], since vanilla's `pushEntities` never asks the pusher.
+    fn mob_is_pushable(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `LivingEntity.getSecondsToDisableBlocking` (`LivingEntity.java:3967-3971`), for
+    /// the mobs that replace the weapon-component lookup with a constant. `Warden`
+    /// (`Warden.java:174-177`) returns `5.0`, so a shield that blocks its hit is disabled for
+    /// five seconds. `None` keeps the weapon lookup.
+    fn get_seconds_to_disable_blocking(&self) -> Option<f32> {
+        None
+    }
+
     /// Vanilla `LivingEntity.getVoicePitch` is consumed by `makeSound` for mob sounds
     /// (`LivingEntity.java:1431-1434, 2321-2325`).
     fn get_sound_pitch(&self) -> f32 {
@@ -3228,6 +3269,12 @@ impl<T: Mob + Send + 'static> EntityBase for T {
     /// pushable by anything - mobs never displaced each other, and nothing could shove them.
     /// `LivingEntity` carries its own override but mobs never reach it through this impl.
     fn is_pushable(&self) -> bool {
+        self.can_push_others() && Mob::mob_is_pushable(self)
+    }
+
+    /// The `LivingEntity.isPushable` half of [`Self::is_pushable`], without the mob-specific
+    /// term: an emerging warden is not pushable but still pushes (and gets touched) as usual.
+    fn can_push_others(&self) -> bool {
         let living = &self.get_mob_entity().living_entity;
         living.health.load() > 0.0
             && !living.dead.load(std::sync::atomic::Ordering::Relaxed)
@@ -3236,6 +3283,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
     fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
         Mob::check_despawn(self)
+    }
+
+    fn can_ride(&self, vehicle: &dyn EntityBase) -> bool {
+        Mob::mob_can_ride(self, vehicle)
     }
 
     fn on_lightning_strike<'a>(

@@ -50,10 +50,11 @@
 //   one check covers the knockback half as well as the damage half.
 //   `getDefaultDimensions` (Warden.java:516-521) IS implemented, as the WARDEN arm of
 //   `Entity::get_default_dimensions`, applied by `sync_warden_pose` below.
-//   `isPushable` (Warden.java:523-526) is NOT, and needs no code: mobs reach
-//   `EntityBase::is_pushable`, whose default is `false` for every mob in this codebase, so an
-//   emerging warden is already unpushable. Restoring mob pushability in general is a
-//   `mob/mod.rs` change, and the warden override only becomes meaningful after it.
+//   `isPushable` (Warden.java:523-526) IS implemented, as `Mob::mob_is_pushable`: an emerging
+//   warden is not shoved, and a minecart does not pick it up as a pushable neighbour. The
+//   pusher-side scan (`EntityBase::can_push_others`) deliberately ignores that term, because
+//   vanilla's `pushEntities` (LivingEntity.java:3221-3245) never asks the pusher; the emerging
+//   warden therefore still records touch anger through `doPush`.
 // - `doPush`-triggered touch anger (Warden.java lines 528-537) is wired through the existing
 //   `EntityBase::push` collision path below. The plain `touch_cooldown` field models the
 //   expiring Brain memory used by that override.
@@ -78,7 +79,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::entity::{EntityPose, EntityType};
+use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag;
@@ -97,8 +98,9 @@ use uuid::Uuid;
 /// Also carries the parts of `MobEffectUtil.addEffectToPlayersAround`
 /// (MobEffectUtil.java:51-72) that are expressible here: survival/adventure players only,
 /// inside `darkness_radius`, and skipped for a player who already holds Darkness with more
-/// than `displayEffectLimit - 1` = 199 ticks left. The `isAlliedTo(source)` test is dropped -
-/// the only caller is the sculk shrieker, which passes a null source. Vanilla's
+/// than `displayEffectLimit - 1` = 199 ticks left. This entry point is the sculk shrieker's,
+/// which passes a null source, so the `isAlliedTo(source)` test does not apply; the warden's
+/// own periodic call goes through [`apply_darkness_around_from`]. Vanilla's
 /// amplifier comparison is a no-op here because the applied amplifier is 0 and Pumpkin's
 /// amplifier field is unsigned.
 ///
@@ -110,6 +112,18 @@ pub async fn apply_darkness_around(
     position: pumpkin_util::math::vector3::Vector3<f64>,
     darkness_radius: f64,
 ) {
+    apply_darkness_around_from(world, position, darkness_radius, None).await;
+}
+
+/// `Warden.applyDarknessAround` with a non-null `source` (Warden.java:407-410), the way
+/// `Warden.customServerAiStep` calls it: `MobEffectUtil.addEffectToPlayersAround` also skips any
+/// player the source `isAlliedTo` (MobEffectUtil.java:66).
+async fn apply_darkness_around_from(
+    world: &Arc<World>,
+    position: pumpkin_util::math::vector3::Vector3<f64>,
+    darkness_radius: f64,
+    source: Option<&dyn Mob>,
+) {
     const DARKNESS_DURATION: i32 = 260;
     const DISPLAY_EFFECT_LIMIT: i32 = 200;
 
@@ -118,6 +132,11 @@ pub async fn apply_darkness_around(
             player.gamemode.load(),
             GameMode::Survival | GameMode::Adventure
         ) {
+            continue;
+        }
+        if let Some(source) = source
+            && TrackTargetGoal::is_allied(source, player.as_ref()).await
+        {
             continue;
         }
         if let Some(current) = player
@@ -154,10 +173,13 @@ pub mod warden_spawn_tracker;
 use crate::entity::mob::warden_anger::{self, AngerLevel, AngerManagement};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
-    ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+    ai::{
+        goal::{
+            active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
+            look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
+            track_target::TrackTargetGoal, wander_around::WanderAroundGoal,
+        },
+        pathfinder::node::PathType,
     },
     mob::{Mob, MobEntity},
 };
@@ -183,6 +205,14 @@ struct RoarState {
 /// a roaring warden keeps its normal box while an emerging one shrinks to 1.0 blocks tall.
 fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
     entity.pose.store(pose);
+
+    // `Warden.getAddEntityPacket` (`Warden.java:137-140`) sends `hasPose(EMERGING) ? 1 : 0` as the
+    // spawn packet's data field, which `create_spawn_packet` reads from `Entity::data`. A warden
+    // has no other use for that field.
+    entity.data.store(
+        i32::from(matches!(pose, EntityPose::Emerging)),
+        Ordering::Relaxed,
+    );
 
     // `Entity.refreshDimensions` (`Entity.java:660-676`), the half that matters here: apply
     // whatever `getDefaultDimensions` returns for the new pose and rebuild the bounding box
@@ -210,6 +240,24 @@ fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
 /// `WardenAi.EMERGE_DURATION` (WardenAi.java:49): `Mth.ceil(133.59999F)`.
 const EMERGE_DURATION: i32 = 134;
 
+/// `Warden.DARKNESS_INTERVAL` (Warden.java:89).
+const DARKNESS_INTERVAL: i32 = 120;
+
+/// The radius `Warden.customServerAiStep` passes to `applyDarknessAround` (Warden.java:293),
+/// which is `Warden.DARKNESS_RADIUS` (Warden.java:88).
+const DARKNESS_RADIUS: f64 = 20.0;
+
+/// The `(this.tickCount + this.getId()) % 120 == 0` gate of `Warden.customServerAiStep`
+/// (Warden.java:292). Java `int` addition wraps, so this does too.
+const fn darkness_pulse_due(tick_count: i32, entity_id: i32) -> bool {
+    tick_count.wrapping_add(entity_id) % DARKNESS_INTERVAL == 0
+}
+
+/// `Warden.nextStep` (Warden.java:179-182): `this.moveDist + 0.55F`.
+const fn warden_next_step(move_dist: f32) -> f32 {
+    move_dist + 0.55
+}
+
 pub struct WardenEntity {
     pub mob_entity: MobEntity,
     anger: AsyncMutex<AngerManagement>,
@@ -223,6 +271,9 @@ pub struct WardenEntity {
     roar_state: std::sync::Mutex<Option<RoarState>>,
     /// Ticks left in `Pose::EMERGING`; 0 when not emerging. See `start_emerging`.
     emerging_ticks: AtomicI32,
+    /// The `Warden.CLIENT_ANGER_LEVEL` entity datum (`Warden.java:85`, `getClientAngerLevel`):
+    /// the last value `sync_client_anger_level` published, `0` until then.
+    client_anger_level: AtomicI32,
 }
 
 impl WardenEntity {
@@ -238,6 +289,7 @@ impl WardenEntity {
             listener: std::sync::Mutex::new(None),
             roar_state: std::sync::Mutex::new(None),
             emerging_ticks: AtomicI32::new(0),
+            client_anger_level: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(warden);
         let mob_weak: Weak<dyn Mob> = {
@@ -270,6 +322,21 @@ impl WardenEntity {
             ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
         );
         drop(target_selector);
+
+        // The navigation setup of the `Warden` constructor (`Warden.java:128-134`) and of
+        // `Warden.createNavigation` (`Warden.java:544-558`). `FIRE` is `DamageFire` here and
+        // `FIRE_IN_NEIGHBOR` is `DangerFire`; `DAMAGING` is `DamageOther` (cactus, sweet berry
+        // bush) -- see `PathfindingContext::compute_path_type_from_state`.
+        let mut navigator = mob_arc.mob_entity.navigator.lock().unwrap();
+        navigator.set_can_float(true);
+        navigator.set_horizontal_step_distance(true);
+        navigator.set_pathfinding_malus(PathType::UnpassableRail, 0.0);
+        navigator.set_pathfinding_malus(PathType::DamageOther, 8.0);
+        navigator.set_pathfinding_malus(PathType::PowderSnow, 8.0);
+        navigator.set_pathfinding_malus(PathType::Lava, 8.0);
+        navigator.set_pathfinding_malus(PathType::DamageFire, 0.0);
+        navigator.set_pathfinding_malus(PathType::DangerFire, 0.0);
+        drop(navigator);
 
         let self_uuid = mob_arc.mob_entity.living_entity.entity.entity_uuid;
         let listener = Arc::new(WardenVibrationListener {
@@ -524,6 +591,24 @@ impl WardenEntity {
         AngerLevel::by_anger(self.active_anger().await)
     }
 
+    /// `Warden.syncClientAngerLevel` (Warden.java:242-244) publishes `getActiveAnger` as the
+    /// `CLIENT_ANGER_LEVEL` datum, which the client reads back through `getClientAngerLevel` to
+    /// pace the heartbeat sound and glow (`Warden.getHeartBeatDelay`, Warden.java:318-321).
+    /// `SynchedEntityData.set` only marks a datum dirty when the value changes, so an unchanged
+    /// level sends nothing.
+    async fn sync_client_anger_level(&self) {
+        let anger = self.active_anger().await;
+        if self.client_anger_level.swap(anger, Ordering::Relaxed) != anger {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    tracked_data::warden::CLIENT_ANGER_LEVEL,
+                    VarInt(anger),
+                )],
+                None,
+            );
+        }
+    }
+
     /// `Warden.setAttackTarget`; also resets the sonic-boom cooldown like vanilla does
     /// (`SonicBoom.setCooldown(this, 200)` — vanilla's `TIME_TO_USE_MELEE_UNTIL_SONIC_BOOM`).
     async fn set_attack_target(&self, target: Arc<dyn EntityBase>) {
@@ -573,19 +658,23 @@ impl WardenEntity {
         }
         self.vibration_cooldown
             .store(warden_anger::VIBRATION_COOLDOWN_TICKS, Ordering::Relaxed);
-        let pos = self.mob_entity.living_entity.entity.pos.load();
-        self.mob_entity
-            .living_entity
-            .entity
-            .world
-            .load()
-            .play_sound_fine(
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        // `level.broadcastEntityEvent(Warden.this, (byte)61)` (Warden.java:616) drives the
+        // client's tendril animation (`Warden.handleEntityEvent`, `getTendrilAnimation`).
+        world.send_entity_status(entity, EntityStatus::TendrilsShiver, None);
+        // `Warden.this.playSound(...)` is `Entity.playSound`, a no-op for a silent entity
+        // (`Entity.java:1486-1490`), unlike the unconditional entity event above.
+        if !entity.is_silent() {
+            world.play_sound_fine(
                 Sound::EntityWardenTendrilClicks,
                 SoundCategory::Hostile,
-                &pos,
+                &entity.pos.load(),
                 5.0,
-                1.0,
+                self.get_sound_pitch(),
             );
+        }
+        drop(world);
 
         if let Some(source) = source_entity {
             self.increase_anger_at(&source, warden_anger::DEFAULT_ANGER, false)
@@ -594,12 +683,6 @@ impl WardenEntity {
                 self.set_disturbance(&source).await;
             }
         }
-    }
-
-    /// `Warden.doHurtTarget` cooldown reset (called on a successful melee attack).
-    fn on_successful_melee_attack(&self) {
-        self.sonic_boom_cooldown
-            .store(warden_anger::SONIC_BOOM_COOLDOWN_TICKS, Ordering::Relaxed);
     }
 
     /// `SonicBoom` behavior: a ranged attack used once the current target is too far for
@@ -723,9 +806,38 @@ impl Mob for WardenEntity {
         Box::pin(async move {
             self.register_listener_once().await;
 
+            // `Warden.customServerAiStep` (Warden.java:292-294) pulses Darkness at nearby players.
+            // It sits outside the brain's activity ladder, so it runs while emerging too.
+            let entity = &self.mob_entity.living_entity.entity;
+            if darkness_pulse_due(
+                self.mob_entity.tick_count.load(Ordering::Relaxed),
+                entity.entity_id,
+            ) {
+                apply_darkness_around_from(
+                    &entity.world.load_full(),
+                    entity.pos.load(),
+                    DARKNESS_RADIUS,
+                    Some(self),
+                )
+                .await;
+            }
+
             // `WardenAi` runs only the EMERGE activity while emerging: no anger, no
             // attacking. The selectors and navigation are frozen for the same 134 ticks by
             // `suppress_ai_goals` above, which is what routes the tick here and nowhere else.
+            // `syncClientAngerLevel` (Warden.java:296-299) is not gated on the activity ladder.
+            if self
+                .mob_entity
+                .living_entity
+                .entity
+                .age
+                .load(Ordering::Relaxed)
+                % warden_anger::ANGERMANAGEMENT_TICK_DELAY
+                == 0
+            {
+                self.sync_client_anger_level().await;
+            }
+
             if self.tick_emerging() {
                 return;
             }
@@ -758,6 +870,9 @@ impl Mob for WardenEntity {
                             .is_some_and(|e| self.can_target_entity(e.as_ref()))
                 };
                 self.anger.lock().await.tick(valid);
+                // The republish happens above (before the emerging early return); the decay
+                // here only runs when not emerging (pre-existing gap).
+                self.sync_client_anger_level().await;
             }
 
             self.try_sonic_boom().await;
@@ -801,10 +916,69 @@ impl Mob for WardenEntity {
         })
     }
 
-    fn on_successful_attack<'a>(&'a self, _target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
+    /// `Warden.doHurtTarget` (Warden.java:224-230): the attack animation event, the impact sound
+    /// and the 40-tick sonic-boom cooldown (`SonicBoom.setCooldown(this, 40)`) all precede
+    /// `super.doHurtTarget`, so they happen whether or not the hit lands. Then the default
+    /// melee, including its `on_successful_attack` call.
+    fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
-            self.on_successful_melee_attack();
+            let entity = &self.mob_entity.living_entity.entity;
+            let world = entity.world.load();
+            world.send_entity_status(entity, EntityStatus::StartAttacking, None);
+            if !entity.is_silent() {
+                world.play_sound_fine(
+                    Sound::EntityWardenAttackImpact,
+                    SoundCategory::Hostile,
+                    &entity.pos.load(),
+                    10.0,
+                    self.get_sound_pitch(),
+                );
+            }
+            drop(world);
+            self.sonic_boom_cooldown
+                .store(warden_anger::SONIC_BOOM_COOLDOWN_TICKS, Ordering::Relaxed);
+
+            let damaged = self.mob_entity.try_attack(target).await;
+            if damaged {
+                self.on_successful_attack(target).await;
+            }
+            damaged
         })
+    }
+
+    /// `Monster.getSoundSource` (`Monster.java:37-39`).
+    fn get_sound_source(&self) -> SoundCategory {
+        SoundCategory::Hostile
+    }
+
+    /// `Warden.playStepSound` (`Warden.java:219-222`): the warden step at volume `10.0` in place
+    /// of the supporting block's sound.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityWardenStep)
+    }
+
+    fn get_step_sound_volume(&self) -> f32 {
+        10.0
+    }
+
+    fn get_next_step(&self, move_dist: f32) -> f32 {
+        warden_next_step(move_dist)
+    }
+
+    /// `Warden.isPushable` (`Warden.java:523-526`): not while digging or emerging. Digging has
+    /// no port (see the module doc comment), so emerging is the only term.
+    fn mob_is_pushable(&self) -> bool {
+        !self.is_emerging()
+    }
+
+    /// `Warden.canRide` (`Warden.java:169-172`).
+    fn mob_can_ride(&self, _vehicle: &dyn EntityBase) -> bool {
+        false
+    }
+
+    /// `Warden.getSecondsToDisableBlocking` (`Warden.java:174-177`).
+    fn get_seconds_to_disable_blocking(&self) -> Option<f32> {
+        Some(5.0)
     }
 }
 
@@ -839,9 +1013,12 @@ impl GameEventListener for WardenVibrationListener {
             if !warden_can_listen(event) {
                 return false;
             }
+            // `Warden.VibrationUser.canReceiveVibration` (Warden.java:595-602) also refuses while
+            // `isDiggingOrEmerging`, so a warden coming out of the ground hears nothing.
             if warden.mob_entity.is_no_ai()
                 || warden.mob_entity.living_entity.dead.load(Ordering::Relaxed)
                 || warden.vibration_cooldown.load(Ordering::Relaxed) > 0
+                || warden.is_emerging()
             {
                 return false;
             }
@@ -914,10 +1091,31 @@ const fn warden_can_listen(event: &GameEvent) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::warden_can_listen;
+    use super::{darkness_pulse_due, warden_can_listen, warden_next_step};
     use crate::entity::Entity;
     use pumpkin_data::entity::{EntityPose, EntityType};
     use pumpkin_data::game_event::GameEvent;
+
+    /// `(this.tickCount + this.getId()) % 120 == 0` (Warden.java:292): the pulse is staggered by
+    /// entity id, so two wardens do not both pulse on the same tick.
+    #[test]
+    fn darkness_pulses_every_120_ticks_offset_by_entity_id() {
+        assert!(darkness_pulse_due(0, 0));
+        assert!(darkness_pulse_due(120, 0));
+        assert!(!darkness_pulse_due(119, 0));
+        assert!(darkness_pulse_due(113, 7));
+        assert!(!darkness_pulse_due(120, 7));
+        // Java `int` addition wraps rather than trapping.
+        assert!(!darkness_pulse_due(i32::MAX, 1));
+    }
+
+    /// `Warden.nextStep` (Warden.java:179-182) is `moveDist + 0.55F`, not `Entity.nextStep`'s
+    /// `(int) moveDist + 1`, so a warden steps roughly every 0.9 blocks instead of every 1.7.
+    #[test]
+    fn warden_steps_every_055_of_move_distance() {
+        assert!((warden_next_step(0.0) - 0.55).abs() < 1.0e-6);
+        assert!((warden_next_step(3.2) - 3.75).abs() < 1.0e-6);
+    }
 
     /// `Warden.getDefaultDimensions` (Warden.java:516-521): `EntityDimensions.fixed(width, 1.0F)`
     /// while digging or emerging, the type's own size otherwise. `sync_warden_pose` is what
