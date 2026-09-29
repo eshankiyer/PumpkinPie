@@ -551,7 +551,16 @@ pub(crate) async fn try_place_filled_bucket(
         return Some(target_pos);
     }
 
-    if state.id == Block::AIR.default_state.id || state.is_liquid() {
+    // `BucketItem.emptyContents` (`BucketItem.java:114,140-146`): `canBeReplaced(fluid)` is
+    // `replaceable || !solid` (`BlockBehaviour.java:268-270`); a replaceable non-liquid block
+    // (grass, flowers, snow layers, torches...) is destroyed with drops before the fluid goes in.
+    let may_replace = state.replaceable() || !state.is_solid();
+    if state.is_air() || may_replace {
+        if may_replace && !state.is_air() && !state.is_liquid() {
+            world
+                .break_block(&target_pos, None, BlockFlags::NOTIFY_NEIGHBORS)
+                .await;
+        }
         world
             .set_block_state(
                 &target_pos,
@@ -673,6 +682,40 @@ impl ItemBehaviour for EmptyBucketItem {
             else {
                 return;
             };
+
+            // `BucketItem.use` (`BucketItem.java:57`) gates the pickup path too, on
+            // `Level.mayInteract` (spawn protection) and `Player.mayUseItemAt`.
+            if let Some(server) = world.server.upgrade()
+                && player
+                    .is_under_spawn_protection(&server, &world, &block_pos)
+                    .await
+            {
+                return;
+            }
+            if !world
+                .worldborder
+                .lock()
+                .await
+                .contains_block(block_pos.0.x, block_pos.0.z)
+            {
+                return;
+            }
+            let held_stack = player.inventory().held_item().await;
+            let held_stack = if held_stack.item.id == Item::BUCKET.id {
+                held_stack
+            } else {
+                player.inventory().off_hand_item().await
+            };
+            if !player
+                .may_use_item_at(
+                    &block_pos.offset(direction.to_offset()),
+                    direction,
+                    &held_stack,
+                )
+                .await
+            {
+                return;
+            }
 
             let Some((item, acted_pos)) = try_pickup_bucket_item(
                 &world,
@@ -848,6 +891,21 @@ impl ItemBehaviour for FilledBucketItem {
             // `BucketItem.use` checks `Player.mayUseItemAt` for the adjacent placement
             // position (`BucketItem.java:54-60`).
             let placement_pos = pos.offset(direction.to_offset());
+            if let Some(server) = world.server.upgrade()
+                && player
+                    .is_under_spawn_protection(&server, &world, &pos)
+                    .await
+            {
+                return;
+            }
+            if !world
+                .worldborder
+                .lock()
+                .await
+                .contains_block(pos.0.x, pos.0.z)
+            {
+                return;
+            }
             let held_stack = player.inventory().held_item().await;
             let permission_stack = if held_stack.item.id == item.id {
                 held_stack

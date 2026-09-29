@@ -2,7 +2,6 @@ use pumpkin_data::Block;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
-use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::boundingbox::BoundingBox;
@@ -18,7 +17,8 @@ pub struct PowderSnowBlock;
 
 const FALLING_COLLISION_SHAPE: BoundingBox =
     BoundingBox::new_array([0.0, 0.0, 0.0], [1.0, 0.9, 1.0]);
-const WALK_ON_EPSILON: f64 = 1.0e-7;
+// `EntityCollisionContext.isAbove` compares against `1.0E-5F` (a float literal).
+const WALK_ON_EPSILON: f32 = 1.0e-5;
 
 pub(crate) async fn can_entity_walk_on_powder_snow(entity: &dyn EntityBase) -> bool {
     let base = entity.get_entity();
@@ -43,11 +43,13 @@ pub(crate) async fn can_entity_walk_on_powder_snow(entity: &dyn EntityBase) -> b
 fn is_entity_above_block(entity: &crate::entity::Entity, position: &BlockPos) -> bool {
     let bb = entity.bounding_box.load();
     let block_top = f64::from(position.0.y) + 1.0;
-    bb.min.y >= block_top - WALK_ON_EPSILON
+    // `EntityCollisionContext.isAbove`: `entityBottom > pos.y + shape.maxY - 1.0E-5F`.
+    bb.min.y > block_top - f64::from(WALK_ON_EPSILON)
 }
 
 fn is_entity_descending(entity: &crate::entity::Entity) -> bool {
-    entity.velocity.load().y < 0.0
+    // `Entity.isDescending` is `isShiftKeyDown` (`Entity.java:2693-2695`), not the vertical velocity.
+    entity.is_sneaking()
 }
 
 pub(crate) async fn collision_shape_for_entity(
@@ -89,16 +91,13 @@ pub(crate) async fn inside_collision_shape_for_entity(
 impl BlockBehaviour for PowderSnowBlock {
     fn on_landed_upon<'a>(&'a self, args: OnLandedUponArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if let Some(living) = args.entity.get_living_entity()
-                && args.fall_distance >= 4.0
-            {
-                let sound = if args.fall_distance < 7.0 {
-                    Sound::EntityGenericSmallFall
-                } else {
-                    Sound::EntityGenericBigFall
-                };
-
-                living.entity.play_sound(sound);
+            if args.entity.get_living_entity().is_some() && args.fall_distance >= 4.0 {
+                // `LivingEntity.getFallSounds` picks the entity's own small/big pair; the trait
+                // hook splits at `> 4`, so feed it a value on the right side of vanilla's 7.
+                let sound = args
+                    .entity
+                    .get_fall_sound(if args.fall_distance < 7.0 { 0 } else { 5 });
+                args.entity.get_entity().play_sound(sound);
             }
         })
     }
