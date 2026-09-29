@@ -85,7 +85,7 @@ pub struct SculkShriekerBlockEntity {
     /// Mirrors the block state's `shrieking` and `can_summon` while a shriek is in flight.
     ///
     /// `preRemoveSideEffects` (lines 133-138) reads the state being removed, but this
-    /// codebase calls `on_block_replaced` *after* the new state is written, so by then the
+    /// codebase calls `pre_remove_side_effects` *after* the new state is written, so by then the
     /// shrieker's own properties are gone. These two flags preserve exactly what that hook
     /// and `canRespond` need.
     shrieking_flag: AtomicBool,
@@ -157,6 +157,22 @@ impl BlockEntity for SculkShriekerBlockEntity {
     }
 
     /// `preRemoveSideEffects` (lines 133-138): a shrieker broken mid-shriek still responds.
+    fn pre_remove_side_effects<'a>(
+        self: Arc<Self>,
+        world: Arc<World>,
+        _position: BlockPos,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+    where
+        Self: 'a,
+    {
+        Box::pin(async move {
+            if self.shrieking_flag.load(Ordering::Acquire) {
+                self.try_respond(&world).await;
+            }
+        })
+    }
+
+    /// `LevelChunk.removeGameEventListener` runs on every removal (`LevelChunk.java:470-481`).
     fn on_block_replaced<'a>(
         self: Arc<Self>,
         world: Arc<World>,
@@ -166,9 +182,6 @@ impl BlockEntity for SculkShriekerBlockEntity {
         Self: 'a,
     {
         Box::pin(async move {
-            if self.shrieking_flag.load(Ordering::Acquire) {
-                self.try_respond(&world).await;
-            }
             world.unregister_game_event_listener_at(&position).await;
         })
     }

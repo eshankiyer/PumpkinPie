@@ -135,6 +135,21 @@ impl BlockEntity for JukeboxBlockEntity {
         })
     }
 
+    /// `JukeboxBlockEntity.preRemoveSideEffects` pops out the disc (`JukeboxBlockEntity.java:153-155`);
+    /// it is skipped together with the other content drops when the update flags ask for it.
+    fn pre_remove_side_effects<'a>(
+        self: Arc<Self>,
+        world: Arc<World>,
+        _position: BlockPos,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+    where
+        Self: 'a,
+    {
+        Box::pin(async move {
+            self.pop_out_the_item(&world).await;
+        })
+    }
+
     fn on_block_replaced<'a>(
         self: Arc<Self>,
         world: Arc<World>,
@@ -144,11 +159,8 @@ impl BlockEntity for JukeboxBlockEntity {
         Self: 'a,
     {
         Box::pin(async move {
-            // Vanilla `preRemoveSideEffects` runs before the jukebox block entity is removed,
-            // while `setRemoved` always emits the stop event and level event
-            // (`JukeboxBlockEntity.java:126-155`). Pumpkin invokes this callback at its entity
-            // removal point, so perform both actions before the entity is discarded.
-            self.pop_out_the_item(&world).await;
+            // `JukeboxBlockEntity.setRemoved` always emits the stop event and level event
+            // (`JukeboxBlockEntity.java:126-130`), whatever the update flags.
             emit_game_event(
                 &world,
                 GameEvent::JukeboxStopPlay,

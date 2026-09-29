@@ -48,6 +48,10 @@ impl CommandExecutor for Executor {
                 .ok_or(CommandError::InvalidRequirement)?;
             let pos = BlockPosArgumentConsumer::find_loaded_arg(args, ARG_BLOCK_POS, &world)?;
 
+            // `SetBlockCommand.setBlock` places with `2 | (strict ? 816 : 256)`
+            // (`SetBlockCommand.java:125`): both include the skip-block-entity-side-effects bit,
+            // so a replaced container's contents are discarded rather than dropped. Only
+            // `destroy` drops them, through the break before the placement.
             let success = match mode {
                 Mode::Destroy => {
                     world
@@ -58,7 +62,9 @@ impl CommandExecutor for Executor {
                         .set_block_state(
                             &pos,
                             block_state_id,
-                            BlockFlags::FORCE_STATE | BlockFlags::NOTIFY_NEIGHBORS,
+                            BlockFlags::FORCE_STATE
+                                | BlockFlags::NOTIFY_NEIGHBORS
+                                | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
                         )
                         .await;
                     true
@@ -68,7 +74,9 @@ impl CommandExecutor for Executor {
                         .set_block_state(
                             &pos,
                             block_state_id,
-                            BlockFlags::FORCE_STATE | BlockFlags::NOTIFY_NEIGHBORS,
+                            BlockFlags::FORCE_STATE
+                                | BlockFlags::NOTIFY_NEIGHBORS
+                                | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
                         )
                         .await;
                     true
@@ -80,7 +88,9 @@ impl CommandExecutor for Executor {
                             .set_block_state(
                                 &pos,
                                 block_state_id,
-                                BlockFlags::FORCE_STATE | BlockFlags::NOTIFY_NEIGHBORS,
+                                BlockFlags::FORCE_STATE
+                                    | BlockFlags::NOTIFY_NEIGHBORS
+                                    | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
                             )
                             .await;
                         true
@@ -93,7 +103,8 @@ impl CommandExecutor for Executor {
                         .set_block_state(
                             &pos,
                             block_state_id,
-                            BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
+                            BlockFlags::SKIP_BLOCK_ADDED_CALLBACK
+                                | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
                         )
                         .await;
                     true

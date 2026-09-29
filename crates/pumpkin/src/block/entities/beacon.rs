@@ -281,6 +281,9 @@ impl BlockEntity for BeaconBlockEntity {
         self.position
     }
 
+    /// `BeaconBlockEntity.setRemoved` plays the deactivation sound (`BeaconBlockEntity.java:228-231`);
+    /// it runs on every removal. Dropping the payment slot stays in the default
+    /// `pre_remove_side_effects`, which honours the skip flag.
     fn on_block_replaced<'a>(
         self: Arc<Self>,
         world: Arc<World>,
@@ -300,10 +303,6 @@ impl BlockEntity for BeaconBlockEntity {
                 SoundCategory::Blocks,
                 &sound_position,
             );
-
-            if let Some(inventory) = self.clone().get_inventory() {
-                world.scatter_inventory(&position, &inventory).await;
-            }
         })
     }
 

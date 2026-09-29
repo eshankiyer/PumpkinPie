@@ -82,6 +82,8 @@ struct ClonedBlock {
     dest_pos: BlockPos,
     state_id: BlockStateId,
     block_entity_nbt: Option<NbtCompound>,
+    /// `BlockEntity.components()`, copied with the entity (`CloneCommands.java:218-221`).
+    block_entity_components: Option<NbtCompound>,
 }
 
 impl CommandExecutor for CloneExecutor {
@@ -195,12 +197,16 @@ impl CommandExecutor for CloneExecutor {
                                 } else {
                                     None
                                 };
+                            let block_entity_components = block_entity_nbt
+                                .as_ref()
+                                .and_then(|_| world.get_block_entity_components(&src_pos));
 
                             blocks_to_clone.push(ClonedBlock {
                                 src_pos,
                                 dest_pos,
                                 state_id,
                                 block_entity_nbt,
+                                block_entity_components,
                             });
                         }
                     }
@@ -209,8 +215,15 @@ impl CommandExecutor for CloneExecutor {
 
             let mut count = 0;
             for block in &blocks_to_clone {
+                // The destination is pre-cleared with the skip-all-side-effects flags in
+                // vanilla (`CloneCommands.java:238-262`), so an overwritten container's
+                // contents are discarded rather than dropped.
                 world
-                    .set_block_state(&block.dest_pos, block.state_id, BlockFlags::NOTIFY_ALL)
+                    .set_block_state(
+                        &block.dest_pos,
+                        block.state_id,
+                        BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
+                    )
                     .await;
 
                 if let Some(nbt) = &block.block_entity_nbt {
@@ -220,6 +233,12 @@ impl CommandExecutor for CloneExecutor {
                     new_nbt.put_int("z", block.dest_pos.0.z);
 
                     if let Some(be) = crate::block::entities::block_entity_from_nbt(&new_nbt) {
+                        // `newBlockEntity.setComponents(...)` (`CloneCommands.java:273`); set
+                        // before the entity is registered so its packed tag carries them.
+                        world.set_block_entity_components(
+                            &block.dest_pos,
+                            block.block_entity_components.clone().unwrap_or_default(),
+                        );
                         world.add_block_entity(be);
                     }
                 }
@@ -243,11 +262,15 @@ impl CommandExecutor for CloneExecutor {
             if self.clone_mode == CloneMode::Move {
                 for block in &blocks_to_clone {
                     if !is_dest_pos(&block.src_pos) {
+                        // Vanilla clears the moved source through a barrier pass with the
+                        // skip-all-side-effects flags (`CloneCommands.java:238-247`), so
+                        // nothing drops; the copy above already carries the contents.
                         world
                             .set_block_state(
                                 &block.src_pos,
                                 BlockStateId::AIR,
-                                BlockFlags::NOTIFY_ALL,
+                                BlockFlags::NOTIFY_ALL
+                                    | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
                             )
                             .await;
                     }

@@ -15,7 +15,7 @@
 use crate::block::entities::beehive::{
     BeeReleaseStatus, BeehiveBlockEntity, MAX_HONEY_LEVELS, is_smokey_pos,
 };
-use crate::block::entities::collect_components_from_block_entity;
+use crate::block::entities::collect_components;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
@@ -79,7 +79,7 @@ impl BlockBehaviour for BeehiveBlock {
             } else {
                 &Item::BEEHIVE
             };
-            let mut components = collect_components_from_block_entity(block_entity.as_ref()).await;
+            let mut components = collect_components(args.world, block_entity.as_ref()).await;
             components.push((
                 DataComponent::BlockState,
                 Some(Box::new(BlockStateImpl {

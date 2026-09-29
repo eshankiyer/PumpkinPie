@@ -263,6 +263,8 @@ pub fn write_chunk_data(
         write.write_var_int(&VarInt(valid_entities.len() as i32))?;
         for (pos, nbt) in valid_entities {
             let mut entity_nbt = nbt.clone();
+            // `BlockEntity.getUpdateTag` never carries the generic `components` map.
+            entity_nbt.child_tags.remove("components");
             entity_nbt.put("x", pumpkin_nbt::tag::NbtTag::Int(pos.0.x));
             entity_nbt.put("y", pumpkin_nbt::tag::NbtTag::Int(pos.0.y));
             entity_nbt.put("z", pumpkin_nbt::tag::NbtTag::Int(pos.0.z));

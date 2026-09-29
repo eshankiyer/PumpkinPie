@@ -33,7 +33,10 @@ bitflags! {
         /// Prevents redstone wire from re-calculating its shape/power immediately
         /// Used during massive redstone updates to reduce calculation lag
         const SKIP_REDSTONE_WIRE_STATE_REPLACEMENT  = 0b000_0010_0000;
-        /// If set, the `on_replaced` callback for block entities (containers) is skipped
+        /// If set, the block entity's pre-removal side effects (dropping a container's contents,
+        /// popping out a jukebox disc, ...) are skipped; the block entity itself is still removed.
+        /// This is vanilla's `Block.UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS` (256), read by
+        /// `LevelChunk.setBlockState` around `BlockEntity.preRemoveSideEffects`.
         /// Useful if you are moving a Block Entity and don't want it to drop its contents yet
         const SKIP_BLOCK_ENTITY_REPLACED_CALLBACK   = 0b000_0100_0000;
         /// Prevents the `on_added` logic from firing for the new block state

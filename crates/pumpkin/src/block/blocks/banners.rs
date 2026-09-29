@@ -17,6 +17,9 @@ use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
 
 use crate::block::entities::banner::BannerBlockEntity;
+use crate::block::entities::custom_name_component;
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use std::sync::Arc;
 
 /// `BannerBlock` and `WallBannerBlock`, both of which extend `AbstractBannerBlock`
@@ -54,33 +57,19 @@ fn wall_support_direction(block: &Block, state_id: BlockStateId) -> BlockDirecti
 
 impl BlockBehaviour for BannerBlock {
     /// Vanilla `AbstractBannerBlock.getCloneItemStack` (`AbstractBannerBlock.java:34-37`) calls
-    /// `BannerBlockEntity.getItem` (`BannerBlockEntity.java:74-81`) retains the banner's
-    /// patterns and custom name (`BannerBlockEntity.java:49-56, 96-105`) in the returned item.
+    /// `BannerBlockEntity.getItem` (`BannerBlockEntity.java:74-81`), which applies
+    /// `collectComponents` (`BannerBlockEntity.java:96-100`) in every pick mode: the item carries
+    /// `BANNER_PATTERNS` and `CUSTOM_NAME`.
     fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
         let item = Item::from_id(args.block.item_id)?;
         let entity = args.world.get_block_entity(args.position)?;
         let banner = entity.as_any().downcast_ref::<BannerBlockEntity>()?;
-        let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
-        if let Some(patterns) = banner.get_patterns() {
-            nbt.put_list("patterns", patterns);
-        }
-        if let Ok(name) = banner.custom_name.try_lock()
-            && let Some(name) = name.as_ref()
-        {
-            nbt.put_string("CustomName", name.clone());
-        }
-        if nbt.is_empty() {
-            Some(ItemStack::new(1, item))
-        } else {
-            Some(ItemStack::new_with_component(
-                1,
-                item,
-                vec![(
-                    DataComponent::BlockEntityData,
-                    Some(Box::new(BlockEntityDataImpl { nbt }).to_dyn()),
-                )],
-            ))
-        }
+        let custom_name = banner
+            .custom_name
+            .try_lock()
+            .ok()
+            .and_then(|name| name.clone());
+        Some(banner_item_stack(item, banner.get_patterns(), custom_name))
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
@@ -159,6 +148,33 @@ impl BlockBehaviour for BannerBlock {
     }
 }
 
+/// The item `BannerBlockEntity.getItem` builds. `BannerPatternsImpl` has no payload yet, so the
+/// layers travel as a raw `patterns` list in `BLOCK_ENTITY_DATA`; the name is the `CUSTOM_NAME`
+/// component, which placement reads instead of a raw `CustomName` (`BannerBlockEntity.java:89-93`).
+fn banner_item_stack(
+    item: &'static Item,
+    patterns: Option<Vec<NbtTag>>,
+    custom_name: Option<String>,
+) -> ItemStack {
+    let mut components = Vec::new();
+    if let Some(patterns) = patterns {
+        let mut nbt = NbtCompound::new();
+        nbt.put_list("patterns", patterns);
+        components.push((
+            DataComponent::BlockEntityData,
+            Some(Box::new(BlockEntityDataImpl { nbt }).to_dyn()),
+        ));
+    }
+    if let Some(name) = custom_name {
+        components.push(custom_name_component(name));
+    }
+    if components.is_empty() {
+        ItemStack::new(1, item)
+    } else {
+        ItemStack::new_with_component(1, item, components)
+    }
+}
+
 /// `AbstractBannerBlock` has no `canSurvive` of its own; the two subclasses each define one.
 fn can_survive(
     world: &dyn BlockAccessor,
@@ -177,11 +193,18 @@ fn can_survive(
 
 #[cfg(test)]
 mod test {
-    use super::{is_wall_banner, wall_support_direction};
+    use super::{banner_item_stack, is_wall_banner, wall_support_direction};
+    use crate::block::entities::apply_components_from_item_stack;
+    use crate::block::entities::banner::BannerBlockEntity;
     use pumpkin_data::block_properties::{
         BlockProperties, HorizontalFacing, WallTorchLikeProperties,
     };
+    use pumpkin_data::data_component_impl::{BlockEntityDataImpl, CustomNameImpl};
+    use pumpkin_data::item::Item;
     use pumpkin_data::{Block, BlockDirection};
+    use pumpkin_nbt::tag::NbtTag;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::text::TextComponent;
 
     #[test]
     fn standing_and_wall_banners_are_told_apart() {
@@ -217,5 +240,53 @@ mod test {
     fn wall_banner_has_four_states_not_sixteen() {
         assert_eq!(Block::WHITE_WALL_BANNER.states.len(), 4);
         assert_eq!(Block::WHITE_BANNER.states.len(), 16);
+    }
+
+    /// `AbstractBannerBlock.getCloneItemStack` returns `BannerBlockEntity.getItem` in every pick
+    /// mode, so a plain middle-click item carries `CUSTOM_NAME` as a component and placing it must
+    /// keep the name (`BannerBlockEntity.java:89-100`).
+    #[tokio::test]
+    async fn picked_banner_keeps_its_name_and_patterns_when_placed() {
+        let layers = vec![NbtTag::String("stripe".into())];
+        let stack = banner_item_stack(
+            &Item::WHITE_BANNER,
+            Some(layers.clone()),
+            Some("\"Flag\"".to_string()),
+        );
+
+        let name = stack
+            .get_data_component::<CustomNameImpl>()
+            .expect("the picked banner should carry CUSTOM_NAME");
+        assert_eq!(name.name.clone().get_text(), "Flag");
+        let data = stack
+            .get_data_component::<BlockEntityDataImpl>()
+            .expect("the picked banner should carry its layers");
+        assert!(!data.nbt.has("CustomName"));
+
+        let placed = apply_components_from_item_stack(
+            &BannerBlockEntity::new(BlockPos::new(0, 64, 0)),
+            &stack,
+        )
+        .expect("placing the picked banner should rebuild the entity");
+        let placed = placed
+            .as_any()
+            .downcast_ref::<BannerBlockEntity>()
+            .expect("component application should preserve the banner type");
+        let stored = placed
+            .custom_name
+            .lock()
+            .await
+            .clone()
+            .expect("the placed banner should keep its name");
+        let stored = serde_json::from_str::<TextComponent>(&stored)
+            .expect("the stored name should be a text component");
+        assert_eq!(stored.get_text(), "Flag");
+        assert_eq!(placed.get_patterns(), Some(layers));
+    }
+
+    #[test]
+    fn plain_banner_pick_has_no_components() {
+        let stack = banner_item_stack(&Item::WHITE_BANNER, None, None);
+        assert!(stack.patch.is_empty());
     }
 }

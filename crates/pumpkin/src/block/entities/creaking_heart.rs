@@ -136,7 +136,8 @@ impl BlockEntity for CreakingHeartBlockEntity {
         Some(nbt)
     }
 
-    fn on_block_replaced<'a>(
+    /// `CreakingHeartBlockEntity.preRemoveSideEffects` (`CreakingHeartBlockEntity.java:309-312`).
+    fn pre_remove_side_effects<'a>(
         self: Arc<Self>,
         world: Arc<World>,
         _position: BlockPos,

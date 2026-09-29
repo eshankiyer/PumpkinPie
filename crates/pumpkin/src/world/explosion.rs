@@ -676,6 +676,13 @@ impl Explosion {
                     // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) both
                     // read the block entity, so capture it before the explosion removes it.
                     let block_entity = world.get_block_entity(pos);
+                    let block_entity_components = match &block_entity {
+                        Some(block_entity) => {
+                            crate::block::entities::collect_components(world, block_entity.as_ref())
+                                .await
+                        }
+                        None => Vec::new(),
+                    };
                     world
                         .set_block_state(pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
                         .await;
@@ -698,6 +705,7 @@ impl Explosion {
                             is_raining: Some(is_raining),
                             is_thundering: Some(is_thundering),
                             block_entity,
+                            block_entity_components,
                             ..Default::default()
                         };
                         drop_loot(world, block, pos, false, params).await;

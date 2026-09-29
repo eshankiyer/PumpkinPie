@@ -3,10 +3,13 @@ use std::sync::Arc;
 
 use pumpkin_data::Block;
 use pumpkin_data::block_properties::HorizontalFacing;
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{CustomNameImpl, DataComponentImpl};
 use pumpkin_data::entity::EntityType;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::text::TextComponent;
 use pumpkin_world::world::BlockFlags;
 
 use crate::entity::Entity;
@@ -58,11 +61,29 @@ impl CopperGolemStatueBlockEntity {
         Self { position }
     }
 
-    /// `CopperGolemStatueBlockEntity.createStatue`: vanilla additionally persists the
-    /// golem's custom name into the block entity's `CUSTOM_NAME` component. Deferred here --
-    /// `CopperGolemEntity` has no custom-name field wired up yet, so there is nothing to
-    /// carry over. Kept as a named call site so that wiring shows up as a one-line change.
+    /// `CopperGolemStatueBlockEntity.createStatue` (`CopperGolemStatueBlockEntity.java:22-25`)
+    /// additionally stores the golem's custom name as the statue's `CUSTOM_NAME` component.
+    /// The caller (`CopperGolemEntity` turning into a statue) still calls this without the
+    /// golem's name; [`Self::store_custom_name`] is the component write it will need.
     pub const fn create_statue(&self) {}
+
+    /// Stores `custom_name` as the statue's `CUSTOM_NAME` component next to whatever other
+    /// components it holds; `None` clears it (`CopperGolemStatueBlockEntity.java:22-25`).
+    pub fn store_custom_name(&self, world: &World, custom_name: Option<TextComponent>) {
+        let mut components = world
+            .get_block_entity_components(&self.position)
+            .unwrap_or_default();
+        components
+            .child_tags
+            .remove(DataComponent::CustomName.to_name());
+        if let Some(name) = custom_name {
+            components.put(
+                DataComponent::CustomName.to_name(),
+                CustomNameImpl { name }.write_data(),
+            );
+        }
+        world.set_block_entity_components(&self.position, components);
+    }
 
     /// `CopperGolemStatueBlockEntity.removeStatue` + `initCopperGolem`: spawns a fresh
     /// (`UNAFFECTED`) copper golem at this position, facing the direction the statue block
@@ -90,6 +111,19 @@ impl CopperGolemStatueBlockEntity {
         );
 
         let entity = Entity::new(world.clone(), center, &EntityType::COPPER_GOLEM);
+        // `copperGolem.setCustomName(this.components().get(CUSTOM_NAME))`
+        // (`CopperGolemStatueBlockEntity.java:30-33`).
+        let custom_name = world
+            .get_block_entity_components(&pos)
+            .and_then(|components| {
+                components
+                    .get(DataComponent::CustomName.to_name())
+                    .and_then(CustomNameImpl::read_data)
+            })
+            .map(|component| component.name);
+        if let Some(name) = custom_name {
+            entity.custom_name.store(Arc::new(Some(name)));
+        }
         let yaw = horizontal_facing_to_yaw(facing);
         entity.yaw.store(yaw);
         entity.head_yaw.store(yaw);

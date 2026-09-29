@@ -384,6 +384,11 @@ pub struct World {
     pub custom_data: std::sync::Mutex<NbtCompound>,
     /// Persistent custom data for block entities at specific positions
     pub custom_block_entity_data: DashMap<BlockPos, NbtCompound>,
+    /// The generic `components` map of block entities (`BlockEntity.components`,
+    /// `BlockEntity.java:49`), kept in its serialized form: the item components that
+    /// `applyComponents` did not consume as implicit ones, plus whatever a loaded chunk carried
+    /// under `components`. It is written back next to the entity's own fields.
+    block_entity_components: DashMap<BlockPos, NbtCompound>,
 }
 
 #[derive(Clone, Copy)]
@@ -550,6 +555,7 @@ impl World {
             village_siege: custom_spawners::VillageSiegeState::new(),
             custom_data: std::sync::Mutex::new(custom_data),
             custom_block_entity_data: DashMap::new(),
+            block_entity_components: DashMap::new(),
         }
     }
 
@@ -736,6 +742,12 @@ impl World {
                 && !custom_data.is_empty()
             {
                 nbt.put_compound("PumpkinCustomData", custom_data.clone());
+            }
+            // `BlockEntity.saveWithoutMetadata` stores `components` after `saveAdditional`
+            // (`BlockEntity.java:136-139`).
+            if let Some(components) = self.get_block_entity_components(&block_entity.get_position())
+            {
+                nbt.put_compound("components", components);
             }
             self.add_block_entity_nbt(block_entity.get_position(), &nbt);
         }
@@ -1597,9 +1609,20 @@ impl World {
 
         let active_chunks = self.active_chunks.load();
         let mut block_entities: Vec<Arc<dyn BlockEntity>> = Vec::new();
-        for chunk_pos in active_chunks.iter() {
-            if let Some(chunk_block_entities) = self.block_entities.get(chunk_pos) {
-                block_entities.extend(chunk_block_entities.values().cloned());
+        {
+            // `LevelChunk.isTicking` only ticks inside the world border (`LevelChunk.java:411-418`).
+            let worldborder = self.worldborder.lock().await;
+            for chunk_pos in active_chunks.iter() {
+                if let Some(chunk_block_entities) = self.block_entities.get(chunk_pos) {
+                    block_entities.extend(
+                        chunk_block_entities
+                            .iter()
+                            .filter(|(position, _)| {
+                                worldborder.contains_block(position.0.x, position.0.z)
+                            })
+                            .map(|(_, block_entity)| block_entity.clone()),
+                    );
+                }
             }
         }
         let block_entity_count = block_entities.len();
@@ -1613,8 +1636,20 @@ impl World {
                 let w_clone = world_for_be.clone();
                 tasks.spawn(async move {
                     for be in batch {
+                        // `BoundTickingBlockEntity.tick` skips a removed entity and one whose
+                        // type no longer accepts the block at its position
+                        // (`LevelChunk.java:738-751`). The snapshot above can outlive both.
+                        if !w_clone.is_block_entity_registered(&be)
+                            || !be.is_valid_block_state(
+                                w_clone.get_block_state_id(&be.get_position()),
+                            )
+                        {
+                            continue;
+                        }
                         be.tick(&w_clone).await;
-                        if be.is_dirty() {
+                        // The entity may have been removed while it ticked; writing its packed
+                        // tag back would resurrect it.
+                        if be.is_dirty() && w_clone.is_block_entity_registered(&be) {
                             w_clone.update_block_entity(&be);
                             let position = be.get_position();
                             let changed_block = w_clone.get_block(&position);
@@ -5782,6 +5817,9 @@ impl World {
             self.save_block_entities(chunk_pos).await;
             self.block_entities.remove(chunk_pos);
         }
+        // Their `components` were just written into the packed tags above.
+        self.block_entity_components
+            .retain(|position, _| !chunks_set.contains(&position.chunk_position()));
     }
 
     pub(crate) async fn set_block_breaking(
@@ -6025,17 +6063,32 @@ impl World {
             && old_block.default_state.block_entity_type != u16::MAX
             && !keeps_copper_chest_entity
             && !keeps_copper_golem_statue_entity
-            && let Some(entity) = self.get_block_entity(position)
         {
+            if let Some(entity) = self.get_block_entity(position) {
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
+                // `sideEffects = (flags & 256) == 0` gates only `preRemoveSideEffects`
+                // (`LevelChunk.java:305-316`); the removal below always runs.
+                if !flags.contains(BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK) {
+                    entity
+                        .clone()
+                        .pre_remove_side_effects(self.clone(), *position)
+                        .await;
+                    if !is_current_mutation() {
+                        clear_mutation_version();
+                        return None;
+                    }
+                }
+                entity.on_block_replaced(self.clone(), *position).await;
+            }
             if !is_current_mutation() {
                 clear_mutation_version();
                 return None;
             }
-            entity.on_block_replaced(self.clone(), *position).await;
-            if !is_current_mutation() {
-                clear_mutation_version();
-                return None;
-            }
+            // `LevelChunk.removeBlockEntity` runs even when no live entity was found, so a
+            // stale packed tag of the old block cannot outlive it.
             self.remove_block_entity(position);
         }
 
@@ -6558,6 +6611,14 @@ impl World {
                 BlockStateId::AIR
             };
 
+            // `CopyComponentsFunction` reads `BlockEntity.collectComponents` while the block is
+            // still there; removing it clears the stored `components` map.
+            let block_entity_components = match &block_entity {
+                Some(block_entity) => {
+                    crate::block::entities::collect_components(self, block_entity.as_ref()).await
+                }
+                None => Vec::new(),
+            };
             self.set_block_state(position, new_state_id, flags).await;
 
             // Level.java destroyBlock, line 298: emitted once the block is actually gone.
@@ -6661,6 +6722,7 @@ impl World {
                     is_raining: Some(is_raining),
                     is_thundering: Some(is_thundering),
                     block_entity,
+                    block_entity_components,
                     ..Default::default()
                 };
                 block::drop_loot(self, broken_block, position, true, params).await;
@@ -7275,6 +7337,15 @@ impl World {
             self.custom_block_entity_data
                 .insert(*block_pos, custom_data.clone());
         }
+        // `BlockEntity.loadWithComponents` reads `components` after `loadAdditional`
+        // (`BlockEntity.java:98-101`); a tag without one leaves the map empty.
+        self.block_entity_components.remove(block_pos);
+        if let Some(components) = nbt.get_compound("components")
+            && !components.is_empty()
+        {
+            self.block_entity_components
+                .insert(*block_pos, components.clone());
+        }
         self.block_entities
             .entry(chunk_pos)
             .or_default()
@@ -7398,6 +7469,13 @@ impl World {
         let Some(entity) = self.get_block_entity(block_pos) else {
             return false;
         };
+        // `BlockEntity.applyComponents` replaces the stored map with the item components the
+        // entity did not consume as implicit ones, even when that leaves it empty
+        // (`BlockEntity.java:298-300`).
+        self.set_block_entity_components(
+            block_pos,
+            crate::block::entities::leftover_components(entity.as_ref(), item_stack),
+        );
         let Some(entity) = crate::block::entities::apply_components_from_item_stack_with_permission(
             entity.as_ref(),
             item_stack,
@@ -7425,6 +7503,23 @@ impl World {
             });
     }
 
+    /// Whether `block_entity` is still the entity registered at its position. Vanilla tracks
+    /// this as `!BlockEntity.isRemoved()`: `LevelChunk.setBlockEntity` clears the flag on the
+    /// entity it registers and sets it on a different previous entry, and `removeBlockEntity`
+    /// sets it on the removed one (`LevelChunk.java:443-446, 470-481`).
+    #[must_use]
+    pub fn is_block_entity_registered(&self, block_entity: &Arc<dyn BlockEntity>) -> bool {
+        let position = block_entity.get_position();
+        self.block_entities
+            .get(&position.chunk_position())
+            .and_then(|chunk_block_entities| {
+                chunk_block_entities
+                    .get(&position)
+                    .map(|registered| Arc::ptr_eq(registered, block_entity))
+            })
+            .unwrap_or(false)
+    }
+
     pub fn remove_block_entity(&self, block_pos: &BlockPos) {
         let chunk_pos = block_pos.chunk_position();
         let removed =
@@ -7433,14 +7528,64 @@ impl World {
                 .is_some_and(|mut chunk_block_entities| {
                     chunk_block_entities.remove(block_pos).is_some()
                 });
+        // Vanilla never keeps the packed tag of a removed entity (`ProtoChunk.removeBlockEntity`
+        // drops it, `LevelChunk` consumes its pending tags when they are loaded). Here the
+        // packed tag doubles as the chunk's saved copy, so it has to go with the entity or a
+        // block of the same type placed later would wake the old contents in
+        // `get_block_entity`.
+        let dropped_packed_tag = self
+            .level
+            .read_chunk_sync(&chunk_pos, |chunk| {
+                chunk
+                    .pending_block_entities
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(block_pos)
+                    .is_some()
+            })
+            .unwrap_or(false);
+        let dropped_components = self.block_entity_components.remove(block_pos).is_some();
         if removed {
             self.custom_block_entity_data.remove(block_pos);
             // Drop the chunk's map once its last block entity is gone.
             self.block_entities
                 .remove_if(&chunk_pos, |_, entities| entities.is_empty());
+        }
+        if removed || dropped_packed_tag || dropped_components {
             self.level.read_chunk_sync(&chunk_pos, |chunk| {
                 chunk.mark_dirty(true);
             });
+        }
+    }
+
+    /// The `components` map of the block entity at `block_pos` (`BlockEntity.components()`,
+    /// `BlockEntity.java:316-318`), in its serialized form: component id to component value.
+    #[must_use]
+    pub fn get_block_entity_components(&self, block_pos: &BlockPos) -> Option<NbtCompound> {
+        self.block_entity_components
+            .get(block_pos)
+            .map(|components| components.value().clone())
+    }
+
+    /// `BlockEntity.setComponents` (`BlockEntity.java:320-322`). An empty map clears the entry.
+    pub fn set_block_entity_components(&self, block_pos: &BlockPos, components: NbtCompound) {
+        let changed = if components.is_empty() {
+            self.block_entity_components.remove(block_pos).is_some()
+        } else {
+            let unchanged = self
+                .block_entity_components
+                .get(block_pos)
+                .is_some_and(|stored| *stored.value() == components);
+            if !unchanged {
+                self.block_entity_components.insert(*block_pos, components);
+            }
+            !unchanged
+        };
+        if changed {
+            self.level
+                .read_chunk_sync(&block_pos.chunk_position(), |chunk| {
+                    chunk.mark_dirty(true);
+                });
         }
     }
 

@@ -115,7 +115,9 @@ impl BlockEntity for ShulkerBoxBlockEntity {
         })
     }
 
-    fn on_block_replaced<'a>(
+    /// `ShulkerBoxBlockEntity.preRemoveSideEffects` is empty (`ShulkerBoxBlockEntity.java:163-164`):
+    /// the contents travel with the dropped item instead of being scattered.
+    fn pre_remove_side_effects<'a>(
         self: Arc<Self>,
         _world: Arc<World>,
         _position: BlockPos,

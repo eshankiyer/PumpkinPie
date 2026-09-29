@@ -52,6 +52,12 @@ fn not_in_filter(filter: &BlockPredicate, old_block: &Block) -> bool {
     }
 }
 
+/// `FillCommand.fillBlocks` places with `2 | (strict ? 816 : 256)` (`FillCommand.java:181`); both
+/// carry the skip-block-entity-side-effects bit, so a replaced container's contents are
+/// discarded rather than dropped. `destroy` drops them through the break before the placement.
+const FILL_PLACE_FLAGS: BlockFlags =
+    BlockFlags::FORCE_STATE.union(BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK);
+
 enum FillerResult {
     DidNotPlaceBlock = 0,
     PlacedBlock = 1,
@@ -130,11 +136,7 @@ impl Filler for DestroyFiller {
             .await;
         context
             .world
-            .set_block_state(
-                &block_position,
-                context.block_state_id,
-                BlockFlags::FORCE_STATE,
-            )
+            .set_block_state(&block_position, context.block_state_id, FILL_PLACE_FLAGS)
             .await;
         FillerResult::PlacedBlock
     }
@@ -151,16 +153,12 @@ impl Filler for HollowFiller {
         if context.is_edge(block_position) {
             context
                 .world
-                .set_block_state(
-                    &block_position,
-                    context.block_state_id,
-                    BlockFlags::FORCE_STATE,
-                )
+                .set_block_state(&block_position, context.block_state_id, FILL_PLACE_FLAGS)
                 .await;
         } else {
             context
                 .world
-                .set_block_state(&block_position, BlockStateId::AIR, BlockFlags::FORCE_STATE)
+                .set_block_state(&block_position, BlockStateId::AIR, FILL_PLACE_FLAGS)
                 .await;
         }
         FillerResult::PlacedBlock
@@ -179,11 +177,7 @@ impl Filler for KeepFiller {
             }
             context
                 .world
-                .set_block_state(
-                    &block_position,
-                    context.block_state_id,
-                    BlockFlags::FORCE_STATE,
-                )
+                .set_block_state(&block_position, context.block_state_id, FILL_PLACE_FLAGS)
                 .await;
             FillerResult::PlacedBlock
         } else {
@@ -205,11 +199,7 @@ impl Filler for OutlineFiller {
         }
         context
             .world
-            .set_block_state(
-                &block_position,
-                context.block_state_id,
-                BlockFlags::FORCE_STATE,
-            )
+            .set_block_state(&block_position, context.block_state_id, FILL_PLACE_FLAGS)
             .await;
         FillerResult::PlacedBlock
     }
@@ -225,11 +215,7 @@ impl Filler for ReplaceFiller {
         }
         context
             .world
-            .set_block_state(
-                &block_position,
-                context.block_state_id,
-                BlockFlags::FORCE_STATE,
-            )
+            .set_block_state(&block_position, context.block_state_id, FILL_PLACE_FLAGS)
             .await;
         FillerResult::PlacedBlock
     }
@@ -248,7 +234,8 @@ impl Filler for StrictFiller {
             .set_block_state(
                 &block_position,
                 context.block_state_id,
-                BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
+                BlockFlags::SKIP_BLOCK_ADDED_CALLBACK
+                    | BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK,
             )
             .await;
         FillerResult::PlacedBlockWithoutUpdate

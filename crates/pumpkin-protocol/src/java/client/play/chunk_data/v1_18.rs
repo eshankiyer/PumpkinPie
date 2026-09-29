@@ -253,6 +253,8 @@ pub fn write_chunk_data(
         client_nbt.child_tags.remove("z");
         client_nbt.child_tags.remove("LootTable");
         client_nbt.child_tags.remove("LootTableSeed");
+        // `BlockEntity.getUpdateTag` never carries the generic `components` map.
+        client_nbt.child_tags.remove("components");
         client_nbt.child_tags.remove("PumpkinCustomData");
         client_nbt.child_tags.remove("BukkitValues");
         write_compound_nbt(&mut write, client_nbt, *version)?;

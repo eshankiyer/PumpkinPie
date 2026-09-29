@@ -1,9 +1,10 @@
 use std::pin::Pin;
 use std::{any::Any, sync::Arc};
 
+use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
     BeesImpl, BlockEntityDataImpl, ContainerImpl, ContainerLootImpl, CustomNameImpl,
-    DataComponentImpl, NoteBlockSoundImpl, PotDecorationsImpl, ProfileImpl,
+    DataComponentImpl, NoteBlockSoundImpl, PotDecorationsImpl, ProfileImpl, read_data,
 };
 use pumpkin_data::{Block, BlockStateId, block_properties::BLOCK_ENTITY_TYPES};
 use pumpkin_nbt::compound::NbtCompound;
@@ -155,7 +156,13 @@ pub trait BlockEntity: Any + Send + Sync {
         None
     }
     fn set_block_state(&mut self, _block_state: BlockStateId) {}
-    fn on_block_replaced<'a>(
+
+    /// Mirrors `BlockEntity.preRemoveSideEffects` (`BlockEntity.java:233-237`): the base
+    /// implementation drops every slot of a container block entity. `LevelChunk.setBlockState`
+    /// runs it before the entity is removed, and only while the update flags lack
+    /// `UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS` (`LevelChunk.java:305-316`), which
+    /// `BlockFlags::SKIP_BLOCK_ENTITY_REPLACED_CALLBACK` models.
+    fn pre_remove_side_effects<'a>(
         self: Arc<Self>,
         world: Arc<World>,
         position: BlockPos,
@@ -165,10 +172,24 @@ pub trait BlockEntity: Any + Send + Sync {
     {
         Box::pin(async move {
             if let Some(inventory) = self.get_inventory() {
-                // Assuming scatter_inventory is an async method on World
                 world.scatter_inventory(&position, &inventory).await;
             }
         })
+    }
+
+    /// Runs whenever the block entity is removed from its chunk, whatever the update flags
+    /// (`LevelChunk.removeBlockEntity`, `LevelChunk.java:470-481`): the `setRemoved` overrides
+    /// (beacon deactivation, jukebox stop event) and game event listener removal. Dropping
+    /// contents belongs to [`Self::pre_remove_side_effects`].
+    fn on_block_replaced<'a>(
+        self: Arc<Self>,
+        _world: Arc<World>,
+        _position: BlockPos,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+    where
+        Self: 'a,
+    {
+        Box::pin(async {})
     }
     fn is_dirty(&self) -> bool {
         false
@@ -454,7 +475,15 @@ pub(crate) fn apply_components_from_item_stack_with_permission(
     .flatten();
     let container_loot = stack.get_data_component::<ContainerLootImpl>();
     let custom_name = stack.get_data_component::<CustomNameImpl>();
-    if block_entity_data.is_none() && container_loot.is_none() && custom_name.is_none() {
+    // `BaseContainerBlockEntity.applyImplicitComponents` copies CONTAINER into the entity's
+    // slots (`BaseContainerBlockEntity.java:149-154`).
+    let container = container_kind(entity.resource_location())
+        .and_then(|_| stack.get_data_component::<ContainerImpl>());
+    if block_entity_data.is_none()
+        && container_loot.is_none()
+        && custom_name.is_none()
+        && container.is_none()
+    {
         return None;
     }
 
@@ -477,6 +506,34 @@ pub(crate) fn apply_components_from_item_stack_with_permission(
         nbt.put_string("LootTable", data.loot_table.clone());
         if data.seed != 0 {
             nbt.put_long("LootTableSeed", data.seed);
+        }
+    }
+    if let Some(container) = container {
+        // `ItemContainerContents.copyInto` fills the entity's own slots only, so a slot the
+        // entity does not have is dropped when it reads `Items` back.
+        let items = container
+            .items
+            .iter()
+            .map(|(slot, item)| {
+                let mut item_nbt = NbtCompound::new();
+                item_nbt.put_byte("Slot", *slot as i8);
+                item.write_item_stack(&mut item_nbt);
+                NbtTag::Compound(item_nbt)
+            })
+            .collect();
+        nbt.put_list("Items", items);
+    }
+    if matches!(
+        entity.resource_location(),
+        banner::BannerBlockEntity::ID | beacon::BeaconBlockEntity::ID
+    ) {
+        // Banner and beacon take their name from CUSTOM_NAME alone
+        // (`BannerBlockEntity.java:89-93`; `BeaconBlockEntity.java:369-374`).
+        nbt.child_tags.remove("CustomName");
+        if let Some(name) = custom_name
+            && let Ok(name) = serde_json::to_string(&name.name)
+        {
+            nbt.put_string("CustomName", name);
         }
     }
     let rebuilt = block_entity_from_nbt_at(&nbt, position)?;
@@ -516,6 +573,201 @@ fn can_apply_custom_block_entity_data(
                 | "minecraft:mob_spawner"
                 | "minecraft:trial_spawner"
         )
+}
+
+/// The component types a block entity class reads in its `applyImplicitComponents` override.
+/// Vanilla records them through the getter it hands the entity (`BlockEntity.java:285-297`);
+/// `BLOCK_ENTITY_DATA` and `BLOCK_STATE` are always implicit (`BlockEntity.java:282-283`).
+fn implicit_components(resource_location: &str) -> &'static [DataComponent] {
+    match resource_location {
+        // `BannerBlockEntity.java:89-93`.
+        banner::BannerBlockEntity::ID => {
+            &[DataComponent::BannerPatterns, DataComponent::CustomName]
+        }
+        // `BaseContainerBlockEntity.java:149-154` plus, for the randomizable classes,
+        // `RandomizableContainerBlockEntity.java:98-105`. These classes also read CUSTOM_NAME and
+        // LOCK, but the Pumpkin entities have no name or lock field to hold them, so both are
+        // left out here and stay in the stored `components` map, where `collect_components`
+        // exports them again (a renamed chest item still drops renamed).
+        chest::ChestBlockEntity::ID
+        | trapped_chest::TrappedChestBlockEntity::ID
+        | barrel::BarrelBlockEntity::ID
+        | shulker_box::ShulkerBoxBlockEntity::ID
+        | dispenser::DispenserBlockEntity::ID
+        | dropper::DropperBlockEntity::ID
+        | hopper::HopperBlockEntity::ID
+        | crafter::CrafterBlockEntity::ID => {
+            &[DataComponent::Container, DataComponent::ContainerLoot]
+        }
+        // `BeaconBlockEntity.java:369-374`.
+        beacon::BeaconBlockEntity::ID => &[DataComponent::CustomName, DataComponent::Lock],
+        // `BeehiveBlockEntity.java:310-315`.
+        beehive::BeehiveBlockEntity::ID => &[DataComponent::Bees],
+        // `CampfireBlockEntity.java:207-210`; `ChiseledBookShelfBlockEntity.java:123-127`;
+        // `ShelfBlockEntity.java:104-107`; the non-randomizable `BaseContainerBlockEntity`
+        // classes (`BaseContainerBlockEntity.java:149-154`) read CONTAINER alone here.
+        campfire::CampfireBlockEntity::ID
+        | chiseled_bookshelf::ChiseledBookshelfBlockEntity::ID
+        | shelf::ShelfBlockEntity::ID
+        | furnace::FurnaceBlockEntity::ID
+        | blasting_furnace::BlastingFurnaceBlockEntity::ID
+        | smoker::SmokerBlockEntity::ID
+        | brewing_stand::BrewingStandBlockEntity::ID => &[DataComponent::Container],
+        // `CommandBlockEntity.java:161-164`; `EnchantingTableBlockEntity.java:123-126`.
+        command_block::CommandBlockEntity::ID
+        | enchanting_table::EnchantingTableBlockEntity::ID => &[DataComponent::CustomName],
+        // `DecoratedPotBlockEntity.java:119-123`.
+        decorated_pot::DecoratedPotBlockEntity::ID => {
+            &[DataComponent::PotDecorations, DataComponent::Container]
+        }
+        // `SkullBlockEntity.java:82-87`.
+        skull::SkullBlockEntity::ID => &[
+            DataComponent::Profile,
+            DataComponent::NoteBlockSound,
+            DataComponent::CustomName,
+        ],
+        _ => &[],
+    }
+}
+
+/// `BlockEntity.applyComponents` (`BlockEntity.java:298-300`): the item components the entity did
+/// not consume as implicit ones become the entity's own `components` map, serialized like
+/// `DataComponentMap.CODEC`. Removal markers, and components without a serialized value (the
+/// payload-less ones), have no entry in such a map.
+pub(crate) fn leftover_components(entity: &dyn BlockEntity, stack: &ItemStack) -> NbtCompound {
+    let implicit = implicit_components(entity.resource_location());
+    let mut components = NbtCompound::new();
+    for (component, data) in &stack.patch {
+        let Some(data) = data else {
+            continue;
+        };
+        if matches!(
+            component,
+            DataComponent::BlockEntityData | DataComponent::BlockState
+        ) || implicit.contains(component)
+        {
+            continue;
+        }
+        let value = data.write_data();
+        if !matches!(value, NbtTag::End) {
+            components.put(component.to_name(), value);
+        }
+    }
+    components
+}
+
+/// Reads a stored `components` map back into typed components. Entries this build cannot decode
+/// stay in the stored map; they are only left out of the result.
+pub(crate) fn components_from_nbt(
+    components: &NbtCompound,
+) -> Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)> {
+    let mut decoded: Vec<_> = components
+        .child_tags
+        .iter()
+        .filter_map(|(name, value)| {
+            let component = DataComponent::try_from_name(name)?;
+            Some((component, Some(read_data(component, value)?)))
+        })
+        .collect();
+    decoded.sort_by_key(|(component, _)| component.to_id());
+    decoded
+}
+
+/// `BlockEntity.collectComponents` (`BlockEntity.java:309-314`): the stored `components` map, then
+/// the implicit components, which replace a stored component of the same type.
+pub(crate) async fn collect_components(
+    world: &World,
+    entity: &dyn BlockEntity,
+) -> Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)> {
+    let implicit = collect_components_from_block_entity(entity).await;
+    let mut components = world
+        .get_block_entity_components(&entity.get_position())
+        .map(|stored| components_from_nbt(&stored))
+        .unwrap_or_default();
+    components.retain(|(component, _)| implicit.iter().all(|(other, _)| other != component));
+    components.extend(implicit);
+    components
+}
+
+/// The container classes whose `Items` travel as the `CONTAINER` component. `Randomizable` marks
+/// the `RandomizableContainerBlockEntity` subclasses, which also carry `CONTAINER_LOOT`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ContainerKind {
+    Base,
+    Randomizable,
+}
+
+/// `BaseContainerBlockEntity` and `RandomizableContainerBlockEntity` subclasses; the shelf-like
+/// and single-item containers have their own handling.
+fn container_kind(resource_location: &str) -> Option<ContainerKind> {
+    match resource_location {
+        chest::ChestBlockEntity::ID
+        | trapped_chest::TrappedChestBlockEntity::ID
+        | barrel::BarrelBlockEntity::ID
+        | shulker_box::ShulkerBoxBlockEntity::ID
+        | dispenser::DispenserBlockEntity::ID
+        | dropper::DropperBlockEntity::ID
+        | hopper::HopperBlockEntity::ID
+        | crafter::CrafterBlockEntity::ID => Some(ContainerKind::Randomizable),
+        furnace::FurnaceBlockEntity::ID
+        | blasting_furnace::BlastingFurnaceBlockEntity::ID
+        | smoker::SmokerBlockEntity::ID
+        | brewing_stand::BrewingStandBlockEntity::ID => Some(ContainerKind::Base),
+        _ => None,
+    }
+}
+
+/// The `CUSTOM_NAME` component for a name a block entity keeps as text or JSON.
+pub(crate) fn custom_name_component(
+    name: String,
+) -> (DataComponent, Option<Box<dyn DataComponentImpl>>) {
+    let name = serde_json::from_str::<pumpkin_util::text::TextComponent>(&name)
+        .unwrap_or_else(|_| pumpkin_util::text::TextComponent::text(name));
+    (
+        DataComponent::CustomName,
+        Some(Box::new(CustomNameImpl { name }).to_dyn()),
+    )
+}
+
+/// `BaseContainerBlockEntity.collectImplicitComponents` and, for the randomizable classes,
+/// `RandomizableContainerBlockEntity.collectImplicitComponents`
+/// (`BaseContainerBlockEntity.java:157-165`; `RandomizableContainerBlockEntity.java:107-113`),
+/// read from the entity's saved `Items` and loot table so every container shares one path.
+async fn collect_container_components(
+    entity: &dyn BlockEntity,
+    kind: ContainerKind,
+) -> Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)> {
+    let mut nbt = NbtCompound::new();
+    entity.write_nbt(&mut nbt).await;
+    let items = nbt
+        .get_list("Items")
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|tag| {
+            let item = tag.extract_compound()?;
+            let slot = item.get_byte("Slot")? as u8;
+            Some((slot, ItemStack::read_item_stack(item)?))
+        })
+        .collect();
+    let mut components = vec![(
+        DataComponent::Container,
+        Some(Box::new(ContainerImpl { items }).to_dyn()),
+    )];
+    if kind == ContainerKind::Randomizable
+        && let Some(loot_table) = nbt.get_string("LootTable")
+    {
+        components.push((
+            DataComponent::ContainerLoot,
+            Some(
+                Box::new(ContainerLootImpl {
+                    loot_table: loot_table.to_string(),
+                    seed: nbt.get_long("LootTableSeed").unwrap_or(0),
+                })
+                .to_dyn(),
+            ),
+        ));
+    }
+    components
 }
 
 /// Collects the component used by the beehive creative-break item round trip. This is the live
@@ -647,6 +899,57 @@ pub(crate) async fn collect_components_from_block_entity(
         return components;
     }
 
+    if let Some(banner) = entity.as_any().downcast_ref::<banner::BannerBlockEntity>() {
+        // `BannerBlockEntity.collectImplicitComponents` exports BANNER_PATTERNS and CUSTOM_NAME
+        // (`BannerBlockEntity.java:96-100`). `BannerPatternsImpl` has no payload yet, so the
+        // layers stay in the raw tag (see `block_entity_data_component`) and only the name is
+        // exported.
+        let name = banner.custom_name.lock().await.clone();
+        return name.map(custom_name_component).into_iter().collect();
+    }
+
+    if let Some(beacon) = entity.as_any().downcast_ref::<beacon::BeaconBlockEntity>() {
+        // `BeaconBlockEntity.collectImplicitComponents` exports CUSTOM_NAME and a non-default
+        // LOCK (`BeaconBlockEntity.java:376-382`); the lock stays in the raw tag.
+        let name = beacon.custom_name.lock().await.clone();
+        return name.map(custom_name_component).into_iter().collect();
+    }
+
+    if let Some(command_block) = entity
+        .as_any()
+        .downcast_ref::<command_block::CommandBlockEntity>()
+    {
+        // `CommandBlockEntity.collectImplicitComponents` exports CUSTOM_NAME
+        // (`CommandBlockEntity.java:167-171`).
+        let name = command_block
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        return name
+            .map(|name| {
+                (
+                    DataComponent::CustomName,
+                    Some(Box::new(CustomNameImpl { name }).to_dyn()),
+                )
+            })
+            .into_iter()
+            .collect();
+    }
+
+    // `ChiseledBookShelfBlockEntity.java:129-133` and `ShelfBlockEntity.java:110-114` export
+    // CONTAINER; the plain containers add their own (`BaseContainerBlockEntity.java:157-165`).
+    if entity
+        .as_any()
+        .is::<chiseled_bookshelf::ChiseledBookshelfBlockEntity>()
+        || entity.as_any().is::<shelf::ShelfBlockEntity>()
+    {
+        return collect_container_components(entity, ContainerKind::Base).await;
+    }
+    if let Some(kind) = container_kind(entity.resource_location()) {
+        return collect_container_components(entity, kind).await;
+    }
+
     let Some(hive) = entity
         .as_any()
         .downcast_ref::<beehive::BeehiveBlockEntity>()
@@ -698,6 +1001,39 @@ pub(crate) async fn block_entity_data_component(
         nbt.child_tags.remove("Items");
         nbt.child_tags.remove("LootTable");
         nbt.child_tags.remove("LootTableSeed");
+    } else if let Some(kind) = container_kind(entity.resource_location()) {
+        // The same removals for the other containers. CustomName and lock have no field on
+        // these entities yet, so there is nothing of them to remove.
+        nbt.child_tags.remove("Items");
+        if kind == ContainerKind::Randomizable {
+            nbt.child_tags.remove("LootTable");
+            nbt.child_tags.remove("LootTableSeed");
+        }
+    } else if entity
+        .as_any()
+        .is::<chiseled_bookshelf::ChiseledBookshelfBlockEntity>()
+        || entity.as_any().is::<shelf::ShelfBlockEntity>()
+    {
+        // `ChiseledBookShelfBlockEntity.java:135-137`; `ShelfBlockEntity.java:116-118`.
+        nbt.child_tags.remove("Items");
+    } else if entity
+        .as_any()
+        .is::<decorated_pot::DecoratedPotBlockEntity>()
+    {
+        // `DecoratedPotBlockEntity.java:126-129`.
+        nbt.child_tags.remove("sherds");
+        nbt.child_tags.remove("item");
+    } else if entity.as_any().is::<banner::BannerBlockEntity>()
+        || entity.as_any().is::<beacon::BeaconBlockEntity>()
+    {
+        // `BannerBlockEntity.java:103-106` and `BeaconBlockEntity.java:385-388` also discard
+        // `patterns` and `lock`; those are not exported as components yet, so they stay.
+        nbt.child_tags.remove("CustomName");
+    } else if entity.as_any().is::<command_block::CommandBlockEntity>() {
+        // `CommandBlockEntity.java:173-177`.
+        nbt.child_tags.remove("CustomName");
+        nbt.child_tags.remove("conditionMet");
+        nbt.child_tags.remove("powered");
     }
 
     (!nbt.is_empty()).then_some((
@@ -1433,5 +1769,270 @@ mod test {
                 .and_then(|profile| profile.get_string("name")),
             Some("Steve")
         );
+    }
+
+    #[test]
+    fn leftover_components_skip_implicit_and_reserved_types() {
+        // `BlockEntity.applyComponents` stores only the added components the entity did not
+        // query, and never BLOCK_ENTITY_DATA or BLOCK_STATE (`BlockEntity.java:280-304`).
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::CHEST,
+            vec![
+                (
+                    DataComponent::CustomName,
+                    Some(
+                        CustomNameImpl {
+                            name: TextComponent::text("named"),
+                        }
+                        .to_dyn(),
+                    ),
+                ),
+                (
+                    DataComponent::ItemName,
+                    Some(
+                        pumpkin_data::data_component_impl::ItemNameImpl {
+                            name: "Boxy".into(),
+                        }
+                        .to_dyn(),
+                    ),
+                ),
+                (
+                    DataComponent::BlockEntityData,
+                    Some(
+                        BlockEntityDataImpl {
+                            nbt: NbtCompound::new(),
+                        }
+                        .to_dyn(),
+                    ),
+                ),
+                (DataComponent::Container, None),
+            ],
+        );
+
+        // CUSTOM_NAME is implicit for an enchanting table (it has a name field) and ITEM_NAME is
+        // not; the removal marker and the block entity data are skipped.
+        let table =
+            super::enchanting_table::EnchantingTableBlockEntity::new(BlockPos::new(0, 64, 0));
+        let leftover = super::leftover_components(&table, &stack);
+        assert_eq!(leftover.child_tags.len(), 1);
+        assert!(leftover.get_compound("minecraft:item_name").is_some());
+
+        // A chest has no name field, so its CUSTOM_NAME stays in the stored map (and is
+        // exported again by `collect_components`); CONTAINER is consumed by its slots.
+        let chest = ChestBlockEntity::new(BlockPos::new(0, 64, 0));
+        let leftover = super::leftover_components(&chest, &stack);
+        assert_eq!(leftover.child_tags.len(), 2);
+        assert!(leftover.has("minecraft:custom_name"));
+        assert!(leftover.has("minecraft:item_name"));
+
+        // A class without an `applyImplicitComponents` override keeps CUSTOM_NAME as well.
+        let bell = super::bell::BellBlockEntity::new(BlockPos::new(0, 64, 0));
+        let leftover = super::leftover_components(&bell, &stack);
+        assert!(leftover.has("minecraft:custom_name"));
+        assert!(leftover.has("minecraft:item_name"));
+        assert!(!leftover.has("minecraft:block_entity_data"));
+    }
+
+    #[test]
+    fn leftover_components_are_empty_when_everything_is_implicit() {
+        // A profiled head and a filled shulker box consume every component they carry.
+        let skull = SkullBlockEntity::new(BlockPos::new(0, 64, 0));
+        let head = ItemStack::new_with_component(
+            1,
+            &Item::PLAYER_HEAD,
+            vec![(
+                DataComponent::Profile,
+                Some(Box::new(ProfileImpl {
+                    name: Some("Steve".to_string()),
+                    ..Default::default()
+                })),
+            )],
+        );
+        assert!(super::leftover_components(&skull, &head).is_empty());
+
+        let shulker = super::shulker_box::ShulkerBoxBlockEntity::new(BlockPos::new(0, 64, 0));
+        let filled = ItemStack::new_with_component(
+            1,
+            &Item::SHULKER_BOX,
+            vec![(
+                DataComponent::Container,
+                Some(Box::new(ContainerImpl {
+                    items: vec![(0, ItemStack::new(1, &Item::DIAMOND))],
+                })),
+            )],
+        );
+        assert!(super::leftover_components(&shulker, &filled).is_empty());
+    }
+
+    #[test]
+    fn stored_components_decode_back_into_typed_components() {
+        let bell = super::bell::BellBlockEntity::new(BlockPos::new(0, 64, 0));
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::BELL,
+            vec![(
+                DataComponent::CustomName,
+                Some(Box::new(CustomNameImpl {
+                    name: TextComponent::text("named"),
+                })),
+            )],
+        );
+        let mut stored = super::leftover_components(&bell, &stack);
+        // An entry this build cannot decode stays in the map and is left out of the result.
+        stored.put_string("minecraft:not_a_component", "kept".to_string());
+
+        let decoded = super::components_from_nbt(&stored);
+
+        assert_eq!(decoded.len(), 1);
+        assert!(decoded[0].0 == DataComponent::CustomName);
+        assert!(stored.has("minecraft:not_a_component"));
+    }
+
+    #[tokio::test]
+    async fn chest_container_component_round_trips_without_raw_items() {
+        // `BaseContainerBlockEntity` carries a chest's contents in CONTAINER and removes
+        // `Items` from the custom tag (`BaseContainerBlockEntity.java:149-172`); slots the
+        // chest does not have are dropped when the component is applied.
+        let position = BlockPos::new(3, 64, -2);
+        let chest = ChestBlockEntity::new(position);
+        chest.set_stack(3, ItemStack::new(5, &Item::DIAMOND)).await;
+
+        let components = collect_components_from_block_entity(&chest).await;
+        let container = components
+            .iter()
+            .find(|(id, _)| *id == DataComponent::Container)
+            .and_then(|(_, component)| component.as_ref())
+            .and_then(|component| component.as_any().downcast_ref::<ContainerImpl>())
+            .expect("chest container component");
+        assert_eq!(container.items.len(), 1);
+        assert_eq!(container.items[0].0, 3);
+        assert!(
+            !components
+                .iter()
+                .any(|(id, _)| *id == DataComponent::ContainerLoot)
+        );
+
+        let mut items = container.items.clone();
+        items.push((200, ItemStack::new(1, &Item::DIRT)));
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::CHEST,
+            vec![(
+                DataComponent::Container,
+                Some(ContainerImpl { items }.to_dyn()),
+            )],
+        );
+        let placed = apply_components_from_item_stack(&ChestBlockEntity::new(position), &stack)
+            .expect("chest container should rebuild the placed entity");
+        let inventory = placed.get_inventory().expect("placed chest inventory");
+        let placed_item = inventory.get_stack(3).await;
+        assert_eq!(placed_item.get_item().id, Item::DIAMOND.id);
+        assert_eq!(placed_item.item_count, 5);
+
+        let block_entity_data = block_entity_data_component(&chest).await;
+        assert!(
+            block_entity_data.is_none(),
+            "Items is exported as CONTAINER, so nothing else remains"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_loot_table_is_exported_as_container_loot() {
+        // `RandomizableContainerBlockEntity.collectImplicitComponents` exports the deferred
+        // loot table with its seed (`RandomizableContainerBlockEntity.java:107-113`), and
+        // `removeComponentsFromTag` drops both keys from the custom tag.
+        let position = BlockPos::new(3, 64, -2);
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", "minecraft:chest".to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        nbt.put_string("LootTable", "minecraft:chests/simple_dungeon".to_string());
+        nbt.put_long("LootTableSeed", 7);
+        let chest = block_entity_from_nbt(&nbt).expect("chest from nbt");
+
+        let components = collect_components_from_block_entity(chest.as_ref()).await;
+        let loot = components
+            .iter()
+            .find(|(id, _)| *id == DataComponent::ContainerLoot)
+            .and_then(|(_, component)| component.as_ref())
+            .and_then(|component| component.as_any().downcast_ref::<ContainerLootImpl>())
+            .expect("container loot component");
+        assert_eq!(loot.loot_table, "minecraft:chests/simple_dungeon");
+        assert_eq!(loot.seed, 7);
+        assert!(block_entity_data_component(chest.as_ref()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn banner_and_beacon_custom_names_round_trip_out_of_the_raw_tag() {
+        // `BannerBlockEntity` and `BeaconBlockEntity` carry CUSTOM_NAME as a component and
+        // discard `CustomName` from the custom tag (`BannerBlockEntity.java:96-106`;
+        // `BeaconBlockEntity.java:376-389`).
+        let position = BlockPos::new(3, 64, -2);
+        let banner = super::banner::BannerBlockEntity::new(position);
+        *banner.custom_name.lock().await = Some("\"Flag\"".to_string());
+        let beacon = super::beacon::BeaconBlockEntity::new(position);
+        *beacon.custom_name.lock().await = Some("\"Light\"".to_string());
+
+        for entity in [&banner as &dyn BlockEntity, &beacon] {
+            let components = collect_components_from_block_entity(entity).await;
+            assert_eq!(components.len(), 1);
+            assert!(components[0].0 == DataComponent::CustomName);
+            let raw = block_entity_data_component(entity).await;
+            let has_name = raw.is_some_and(|(_, data)| {
+                data.is_some_and(|data| match data.write_data() {
+                    NbtTag::Compound(nbt) => nbt.has("CustomName"),
+                    _ => false,
+                })
+            });
+            assert!(!has_name);
+        }
+
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::WHITE_BANNER,
+            vec![(
+                DataComponent::CustomName,
+                Some(Box::new(CustomNameImpl {
+                    name: TextComponent::text("Placed"),
+                })),
+            )],
+        );
+        let placed = apply_components_from_item_stack(&banner, &stack)
+            .expect("custom name should rebuild the banner");
+        let placed = placed
+            .as_any()
+            .downcast_ref::<super::banner::BannerBlockEntity>()
+            .expect("component application should preserve the banner type");
+        assert_eq!(
+            placed.custom_name.lock().await.as_deref(),
+            Some("{\"text\":\"Placed\"}")
+        );
+    }
+
+    #[tokio::test]
+    async fn decorated_pot_components_are_removed_from_the_raw_tag() {
+        // `DecoratedPotBlockEntity.removeComponentsFromTag` discards `sherds` and `item`
+        // (`DecoratedPotBlockEntity.java:125-128`), which POT_DECORATIONS and CONTAINER carry.
+        let pot = DecoratedPotBlockEntity::new(BlockPos::new(3, 64, -2));
+        *pot.sherds.lock().await = Some(vec![NbtTag::String("minecraft:brick".into()); 4]);
+        *pot.item.lock().await = Some(ItemStack::new(2, &Item::DIAMOND));
+
+        assert!(block_entity_data_component(&pot).await.is_none());
+    }
+
+    #[test]
+    fn created_block_entities_report_their_own_type_index() {
+        // The tick loop skips an entity whose type does not accept the block at its position
+        // (`LevelChunk.java:747`), so every creatable entity must map to the index the block
+        // states use for its type.
+        for (index, name) in super::BLOCK_ENTITY_TYPES.iter().enumerate() {
+            let created = super::create_block_entity(index as u16, BlockPos::new(0, 64, 0));
+            let Some(created) = created else {
+                panic!("block entity type {name} cannot be created");
+            };
+            assert_eq!(created.get_id() as usize, index, "{name}");
+        }
     }
 }

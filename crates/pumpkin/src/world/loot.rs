@@ -52,22 +52,9 @@ pub struct LootContextParameters {
     /// `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) and
     /// `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`).
     pub block_entity: Option<Arc<dyn BlockEntity>>,
-}
-
-fn container_from_block_entity(entity: &dyn BlockEntity) -> Option<ContainerImpl> {
-    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:129-135`) copies the block entity's
-    // dynamic contents into the replacement shulker box item.
-    let nbt = entity.chunk_data_nbt()?;
-    let items = nbt
-        .get_list("Items")?
-        .iter()
-        .filter_map(|tag| {
-            let item = tag.extract_compound()?;
-            let slot = item.get_byte("Slot")? as u8;
-            Some((slot, ItemStack::read_item_stack(item)?))
-        })
-        .collect();
-    Some(ContainerImpl { items })
+    /// `BlockEntity.collectComponents` of `block_entity`, gathered by the caller while the entity
+    /// still exists (`CopyComponentsFunction.BlockEntitySource`, `CopyComponentsFunction.java:106-108`).
+    pub block_entity_components: Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)>,
 }
 
 /// Vanilla `LootTable.createStackSplitter` (`LootTable.java:66-82`): a roll whose count is at
@@ -662,53 +649,25 @@ impl LootFunctionExt for LootFunction {
                 }
             }
             LootFunctionTypes::CopyComponents { source, include } => {
-                if *source != "block_entity" {
+                if *source == "block_entity" {
+                    // `CopyComponentsFunction.run` applies the collected components that pass the
+                    // include filter to the stack, replacing a component of the same type
+                    // (`CopyComponentsFunction.java:77-96`; `ItemStack.applyComponents`).
+                    for stack in stacks {
+                        for (component, data) in &params.block_entity_components {
+                            if !include.contains(&component.to_name()) {
+                                continue;
+                            }
+                            stack.patch.retain(|(id, _)| id != component);
+                            stack.patch.push((*component, data.clone()));
+                        }
+                    }
+                } else {
                     tracing::warn!(
                         "CopyComponents not supported from source: {} for {:?}",
                         source,
                         include
                     );
-                } else if include.contains(&"minecraft:container") {
-                    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) preserves
-                    // the stored inventory in the dropped shulker box.
-                    if let Some(block_entity) = params.block_entity.as_deref()
-                        && let Some(container) = container_from_block_entity(block_entity)
-                    {
-                        for stack in stacks {
-                            if let Some(existing) = stack.get_data_component_mut::<ContainerImpl>()
-                            {
-                                existing.items.clone_from(&container.items);
-                            } else {
-                                stack.patch.push((
-                                    DataComponent::Container,
-                                    Some(Box::new(container.clone()).to_dyn()),
-                                ));
-                            }
-                        }
-                    }
-                } else if include.contains(&"minecraft:pot_decorations") {
-                    // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) copies
-                    // `pot_decorations` from the block entity into the uncracked pot item.
-                    if let Some(block_entity) = params.block_entity.as_ref()
-                        && let Some(pot) = block_entity
-                            .as_any()
-                            .downcast_ref::<DecoratedPotBlockEntity>()
-                        && let Some(decorations) = pot.decorations()
-                    {
-                        for stack in stacks {
-                            stack.patch.push((
-                                DataComponent::PotDecorations,
-                                Some(
-                                    Box::new(
-                                        pumpkin_data::data_component_impl::PotDecorationsImpl {
-                                            decorations: decorations.clone(),
-                                        },
-                                    )
-                                    .to_dyn(),
-                                ),
-                            ));
-                        }
-                    }
                 }
             }
             LootFunctionTypes::CopyState {
@@ -1853,12 +1812,23 @@ mod tests {
             conditions: None,
         };
         let mut stacks = vec![ItemStack::new(1, &Item::DECORATED_POT)];
+        let block_entity_components = futures::executor::block_on(
+            crate::block::entities::collect_components_from_block_entity(pot.as_ref()),
+        );
         function.apply(
             &mut stacks,
             &LootContextParameters {
                 block_entity: Some(pot),
+                block_entity_components,
                 ..Default::default()
             },
+        );
+        // Only the included component is copied; the pot's CONTAINER is not in the filter.
+        assert!(
+            stacks[0]
+                .patch
+                .iter()
+                .all(|(id, _)| *id != pumpkin_data::data_component::DataComponent::Container)
         );
 
         let decorations = stacks[0]
@@ -2138,8 +2108,11 @@ mod tests {
             .await;
 
         let mut stacks = vec![ItemStack::new(1, &Item::SHULKER_BOX)];
+        let block_entity_components =
+            crate::block::entities::collect_components_from_block_entity(entity.as_ref()).await;
         let params = LootContextParameters {
             block_entity: Some(entity),
+            block_entity_components,
             ..Default::default()
         };
         let function = LootFunction {

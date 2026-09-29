@@ -34,16 +34,21 @@ impl JavaClient {
             // fields are exported by the existing component collector
             // (`SkullBlockEntity.java:90-103`).
             if let Some(block_entity) = world.get_block_entity(&pick_item.pos) {
-                let components = crate::block::entities::collect_components_from_block_entity(
-                    block_entity.as_ref(),
-                )
-                .await;
+                let components =
+                    crate::block::entities::collect_components(&world, block_entity.as_ref()).await;
+                // `ItemStack.applyComponents` replaces a component the clone stack already
+                // carries (banner, chiseled bookshelf, pot) instead of adding a second entry.
+                stack
+                    .patch
+                    .retain(|(id, _)| components.iter().all(|(other, _)| other != id));
                 stack.patch.extend(components);
                 // Preserve the custom portion of `saveCustomOnly` after removing fields already
                 // represented by implicit components (`ServerGamePacketListenerImpl.java:715-724`).
                 if let Some(component) =
                     crate::block::entities::block_entity_data_component(block_entity.as_ref()).await
                 {
+                    // `BlockItem.setBlockEntityData` replaces any data the clone stack carried.
+                    stack.patch.retain(|(id, _)| *id != component.0);
                     stack.patch.push(component);
                 }
             }
