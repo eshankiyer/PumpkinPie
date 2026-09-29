@@ -6,6 +6,8 @@ use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::potion::Effect;
+use pumpkin_data::tracked_data;
+use pumpkin_protocol::java::client::play::Metadata;
 use rand::RngExt;
 
 /// Vanilla `Axolotl.TOTAL_PLAYDEAD_TIME`.
@@ -125,6 +127,10 @@ impl Goal for AxolotlPlayDeadGoal {
                 .living_entity
                 .not_targetable_as_enemy
                 .store(true, Relaxed);
+            // Vanilla `Axolotl.customServerAiStep` -> `setPlayingDead(true)`: `DATA_PLAYING_DEAD`
+            // drives the client's play-dead pose.
+            mob.get_entity()
+                .send_meta_data(&[Metadata::new(tracked_data::axolotl::PLAYING_DEAD, true)], None);
 
             // Vanilla `PlayDead.start`: `addEffect(new MobEffectInstance(REGENERATION, 200, 0))`.
             mob_entity
@@ -149,6 +155,10 @@ impl Goal for AxolotlPlayDeadGoal {
                 .living_entity
                 .not_targetable_as_enemy
                 .store(false, Relaxed);
+            mob.get_entity().send_meta_data(
+                &[Metadata::new(tracked_data::axolotl::PLAYING_DEAD, false)],
+                None,
+            );
         })
     }
 

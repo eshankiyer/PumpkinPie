@@ -7,6 +7,7 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::potion::Effect;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -255,12 +256,59 @@ impl Mob for AxolotlEntity {
         })
     }
 
+    /// `Axolotl.getAmbientSound` (`Axolotl.java:512-515`) with the `playAmbientSound` gate
+    /// (`Axolotl.java:152-157`): silent while playing dead. `AxolotlPlayDeadGoal` marks the
+    /// play-dead window with `not_targetable_as_enemy`, the mirror of `canBeSeenAsEnemy`.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        let living = &self.mob_entity.living_entity;
+        if living.not_targetable_as_enemy.load(Relaxed) {
+            return None;
+        }
+        Some(if living.entity.touching_water.load(Relaxed) {
+            Sound::EntityAxolotlIdleWater
+        } else {
+            Sound::EntityAxolotlIdleAir
+        })
+    }
+
+    /// `Axolotl.isPushedByFluid` (`Axolotl.java:318-321`).
+    fn mob_is_pushed_by_fluids(&self) -> bool {
+        false
+    }
+
+    /// `Axolotl.travelInWater` (`Axolotl.java:537-542`): `moveRelative(getSpeed(), input)`, move,
+    /// then a flat 0.9 drag, replacing the generic water friction, gravity and jump-out logic.
+    /// Outside water the generic travel path applies.
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            let entity = &living.entity;
+            if !entity.touching_water.load(Relaxed) {
+                return false;
+            }
+            entity.update_velocity_from_input(living.movement_input.load(), living.speed.load());
+            entity.move_entity(caller, entity.velocity.load()).await;
+            entity.velocity.store(entity.velocity.load() * 0.9);
+            true
+        })
+    }
+
     /// Vanilla `Axolotl.onStopAttacking`: when a hit kills the target and the target's last
     /// damage source was a player within 20 blocks of this axolotl, that player gets a combat
     /// support buff. Simplification: vanilla checks `body.getBoundingBox().inflate(20.0)`
     /// (an AABB); this uses a plain 20-block spherical distance check instead.
     fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            // `Mob.doHurtTarget` -> `Axolotl.playAttackSound` (`Axolotl.java:397-400`).
+            let entity = self.get_entity();
+            entity.world.load().play_sound_fine(
+                Sound::EntityAxolotlAttack,
+                self.get_sound_source(),
+                &entity.pos.load(),
+                1.0,
+                1.0,
+            );
+
             let Some(target_living) = target.get_living_entity() else {
                 return;
             };
