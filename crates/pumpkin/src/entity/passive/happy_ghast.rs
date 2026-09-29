@@ -12,11 +12,14 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockState};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_protocol::java::server::play::SPlayerInput;
 use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::chunk::ChunkHeightmapType;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -34,6 +37,7 @@ use crate::entity::{
     passive::animal::Animal,
     player::Player,
 };
+use crate::world::World;
 
 /// What tempts a happy ghast: the snowball.
 ///
@@ -43,7 +47,51 @@ use crate::entity::{
 /// matching `ItemTags.HAPPY_GHAST_FOOD` (the baby feed/growth tag) exactly.
 pub const HAPPY_GHAST_FOOD: &[&Item] = &[&Item::SNOWBALL];
 
-const HEAL_INTERVAL_TICKS: i32 = 600;
+/// `HappyGhast.FAST_HEALING_TICKS` / `SLOW_HEALING_TICKS` (`HappyGhast.java:62-63`).
+const FAST_HEALING_TICKS: i32 = 20;
+const SLOW_HEALING_TICKS: i32 = 600;
+
+/// `HappyGhast.RESTRICTION_RADIUS_BUFFER` (`HappyGhast.java:61`).
+const RESTRICTION_RADIUS_BUFFER: i32 = 16;
+
+/// The `tickCount % (isFastHealing ? 20 : 600) == 0` gate of `HappyGhast.continuousHeal`
+/// (`HappyGhast.java:464`). It keys off the entity's own tick counter, not a private countdown.
+const fn heals_on_tick(tick_count: i32, is_fast_healing: bool) -> bool {
+    let interval = if is_fast_healing {
+        FAST_HEALING_TICKS
+    } else {
+        SLOW_HEALING_TICKS
+    };
+    tick_count % interval == 0
+}
+
+/// The re-anchor condition of `HappyGhast.checkRestriction` (`HappyGhast.java:455`):
+/// `!hasHome() || !home.closerThan(pos, radius + 16) || radius != homeRadius`. `closerThan`
+/// (`Vec3i.java:193-195`) compares the squared distance against the squared (double) limit.
+fn needs_rehome(has_home: bool, dist_sq: f64, radius: i32, home_radius: i32) -> bool {
+    let limit = f64::from(radius + RESTRICTION_RADIUS_BUFFER);
+    !has_home || dist_sq >= limit * limit || radius != home_radius
+}
+
+/// `Level.precipitationAt(pos) != Biome.Precipitation.NONE` (`Level.java:954-969`,
+/// `Biome.java:105-111`). `World::is_raining_at` answers only the RAIN case, but the fast-heal
+/// check also counts snow, so this repeats the same gates and only asks the biome whether it has
+/// precipitation at all.
+async fn is_precipitating_at(world: &World, pos: &BlockPos) -> bool {
+    if !world.is_raining().await || !world.can_see_sky(pos) {
+        return false;
+    }
+    // `get_heightmap_height` is the Y of the topmost matching block, whereas vanilla's
+    // `getHeightmapPos` is one above it (see `World::is_raining_at_unchecked`).
+    if world.get_heightmap_height(ChunkHeightmapType::MotionBlocking, pos.0.x, pos.0.z) + 1
+        > pos.0.y
+    {
+        return false;
+    }
+    world
+        .get_biome(pos)
+        .is_some_and(|biome| biome.weather.has_precipitation())
+}
 
 /// `HappyGhast.checkFallDamage` (`HappyGhast.java:167-168`) is an empty override, so a
 /// happy ghast never converts a fall into damage.
@@ -79,7 +127,6 @@ fn happy_ghast_detection_box_contains(box_: &BoundingBox, position: Vector3<f64>
 pub struct HappyGhastEntity {
     pub mob_entity: MobEntity,
     pub ageable_data: AgeableData,
-    heal_ticks: AtomicI32,
     pub server_still_timeout: AtomicI32,
     pub leash_holder_time: AtomicI32,
     pub is_leash_holder: AtomicBool,
@@ -100,7 +147,6 @@ impl HappyGhastEntity {
         let happy_ghast = Self {
             mob_entity,
             ageable_data: AgeableData::default(),
-            heal_ticks: AtomicI32::new(0),
             server_still_timeout: AtomicI32::new(0),
             leash_holder_time: AtomicI32::new(0),
             is_leash_holder: AtomicBool::new(false),
@@ -324,26 +370,33 @@ impl HappyGhastEntity {
         true
     }
 
-    fn continuous_heal(&self) {
+    /// `HappyGhast.continuousHeal` (`HappyGhast.java:461-468`): one health point every 600 ticks,
+    /// every 20 while in the clouds or under rain or snow.
+    async fn continuous_heal(&self) {
         let living = &self.mob_entity.living_entity;
-        if living.dead.load(Relaxed) {
+        let entity = &living.entity;
+        let health = living.health.load();
+        // `isAlive() && deathTime == 0 && getMaxHealth() != getHealth()`. Health above the maximum
+        // is clamped down when the attribute changes (`LivingEntity.java:1133-1138`), so only the
+        // below-maximum case is live.
+        if living.dead.load(Relaxed)
+            || health <= 0.0
+            || living.death_time.load(Relaxed) != 0
+            || health >= living.get_max_health()
+        {
             return;
         }
 
-        if living.health.load() >= living.get_max_health() {
-            self.heal_ticks.store(0, Relaxed);
-            return;
-        }
-
-        let ticks = self.heal_ticks.fetch_add(1, Relaxed) + 1;
-        if ticks >= HEAL_INTERVAL_TICKS {
-            self.heal_ticks.store(0, Relaxed);
+        let is_fast_healing = entity.is_in_clouds()
+            || is_precipitating_at(&entity.world.load_full(), &entity.block_pos.load()).await;
+        if heals_on_tick(self.mob_entity.tick_count.load(Relaxed), is_fast_healing) {
             living.heal(1.0);
         }
     }
 
-    // HappyGhast.java:452-459. Only called from `mob_tick` while not a vehicle
-    // (`this.isVehicle()` there).
+    /// `HappyGhast.checkRestriction` (`HappyGhast.java:452-459`). Only called from `mob_tick`
+    /// while not a vehicle (`this.isVehicle()` there). The home is kept until the ghast drifts
+    /// `radius + 16` blocks from it or the radius changes.
     async fn check_restriction(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         if entity.leashed_to.lock().await.is_some() {
@@ -354,10 +407,22 @@ impl HappyGhastEntity {
         let has_body_armor = self.is_wearing_body_armor().await;
 
         let radius = restriction_radius(is_baby, has_body_armor);
-        self.mob_entity
-            .position_target
-            .store(entity.block_pos.load());
-        self.mob_entity.position_target_range.store(radius, Relaxed);
+        let home_radius = self.mob_entity.position_target_range.load(Relaxed);
+        let home = self.mob_entity.position_target.load();
+        let pos = entity.block_pos.load();
+        let dx = f64::from(home.0.x) - f64::from(pos.0.x);
+        let dy = f64::from(home.0.y) - f64::from(pos.0.y);
+        let dz = f64::from(home.0.z) - f64::from(pos.0.z);
+        // `hasHome()` is `homeRadius != -1` (`Mob.java:1225-1227`).
+        if needs_rehome(
+            home_radius != -1,
+            dx.mul_add(dx, dy.mul_add(dy, dz * dz)),
+            radius,
+            home_radius,
+        ) {
+            self.mob_entity.position_target.store(pos);
+            self.mob_entity.position_target_range.store(radius, Relaxed);
+        }
     }
 
     /// `HappyGhast.scanPlayerAboveGhast` (`HappyGhast.java:547-568`) detects a non-spectator
@@ -641,6 +706,17 @@ impl Mob for HappyGhastEntity {
         })
     }
 
+    /// `HappyGhast.playStepSound` (`HappyGhast.java:200-202`) is empty, so touching down and
+    /// moving on the ground makes no footstep (the `STEP` game event is emitted separately).
+    fn ground_step_sounds(
+        &self,
+        _supporting_block: &Block,
+        _supporting_state: &BlockState,
+        _above_block: &Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        Some(Vec::new())
+    }
+
     fn get_ambient_sound(&self) -> Option<Sound> {
         Some(if self.is_baby() {
             Sound::EntityGhastlingAmbient
@@ -720,6 +796,13 @@ impl Mob for HappyGhastEntity {
         })
     }
 
+    /// `HappyGhast.aiStep` calls `continuousHeal` after `super.aiStep()` (`HappyGhast.java:438-443`),
+    /// and `Mob.isNoAi` gates only `customServerAiStep`, so a `NoAI` ghast still heals. `mob_tick`
+    /// is skipped for `NoAI` mobs, hence `post_tick`, which `Mob::tick` runs every tick.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(self.continuous_heal())
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             if !self.mob_entity.living_entity.entity.is_alive() {
@@ -792,8 +875,6 @@ impl Mob for HappyGhastEntity {
             self.get_entity()
                 .set_requires_precise_position(self.is_on_still_timeout());
 
-            self.continuous_heal();
-
             let is_vehicle = !self
                 .mob_entity
                 .living_entity
@@ -813,7 +894,7 @@ impl Mob for HappyGhastEntity {
 mod test {
     use super::{
         BoundingBox, HappyGhastEntity, happy_ghast_detection_box_contains, happy_ghast_fall_damage,
-        happy_ghast_voice_pitch, restriction_radius,
+        happy_ghast_voice_pitch, heals_on_tick, needs_rehome, restriction_radius,
     };
     use pumpkin_util::math::vector3::Vector3;
 
@@ -836,6 +917,33 @@ mod test {
     fn brain_ticks_only_for_babies() {
         assert!(HappyGhastEntity::should_tick_brain_for_age(-1));
         assert!(!HappyGhastEntity::should_tick_brain_for_age(0));
+    }
+
+    // `HappyGhast.continuousHeal` heals on `tickCount % (isFastHealing ? 20 : 600) == 0`
+    // (`HappyGhast.java:464`).
+    #[test]
+    fn heal_interval_is_twenty_ticks_fast_and_six_hundred_slow() {
+        assert!(heals_on_tick(600, false));
+        assert!(!heals_on_tick(20, false));
+        assert!(!heals_on_tick(599, false));
+        assert!(heals_on_tick(20, true));
+        assert!(heals_on_tick(600, true));
+        assert!(!heals_on_tick(30, true));
+    }
+
+    // `HappyGhast.checkRestriction` re-anchors only without a home, at `radius + 16` blocks or
+    // more from it, or when the radius changed (`HappyGhast.java:455`).
+    #[test]
+    fn home_is_kept_until_drift_or_radius_change() {
+        // Adult, unarmored: radius 64, so the limit is 80 blocks (6400 squared).
+        assert!(needs_rehome(false, 0.0, 64, -1));
+        assert!(!needs_rehome(true, 0.0, 64, 64));
+        assert!(!needs_rehome(true, 6399.0, 64, 64));
+        assert!(needs_rehome(true, 6400.0, 64, 64));
+        assert!(needs_rehome(true, 0.0, 32, 64));
+        // Baby: radius 32, limit 48 blocks (2304 squared).
+        assert!(!needs_rehome(true, 2303.0, 32, 32));
+        assert!(needs_rehome(true, 2304.0, 32, 32));
     }
 
     // `HappyGhast.scanPlayerAboveGhast` uses `AABB.contains` (`HappyGhast.java:547-568`;

@@ -1688,6 +1688,34 @@ fn water_swim_volume(velocity: Vector3<f64>, volume_modifier: f32) -> f32 {
         .min(1.0)
 }
 
+/// `EnvironmentAttributes.CLOUD_HEIGHT` of the overworld dimension types
+/// (`DimensionTypes.java:38`; also the attribute default, `EnvironmentAttributes.java:52-54`).
+const OVERWORLD_CLOUD_HEIGHT: f32 = 192.33;
+
+/// The cloud bottom `Entity.isInClouds` measures against (`Entity.java:1617-1621`), or `None`
+/// when the dimension's `CLOUD_COLOR` is fully transparent there.
+///
+/// Only the overworld dimension types set `visual/cloud_color` (`#ccffffff`,
+/// `DimensionTypes.java:37`); every other dimension keeps the attribute default of alpha 0
+/// (`EnvironmentAttributes.java:49-51`). The rain, thunder and night modifiers on `CLOUD_COLOR`
+/// (`WeatherAttributes.java:16,27`, `Timelines.java:138-143`) only rescale RGB, so the alpha
+/// stays non-zero. The generated `Dimension::cloud_color` does not carry the attribute block,
+/// hence the direct match.
+fn cloud_bottom_in(dimension: &Dimension) -> Option<f32> {
+    (dimension == &Dimension::OVERWORLD || dimension == &Dimension::OVERWORLD_CAVES)
+        .then_some(OVERWORLD_CLOUD_HEIGHT)
+}
+
+/// The vertical test of `Entity.isInClouds` (`Entity.java:1621-1627`): the top of the bounding
+/// box reaches the cloud bottom and the feet are at or below the cloud top, four blocks higher.
+fn in_cloud_layer(y: f64, bb_height: f32, cloud_bottom: f32) -> bool {
+    if y + f64::from(bb_height) < f64::from(cloud_bottom) {
+        return false;
+    }
+    let cloud_top = cloud_bottom + 4.0;
+    y <= f64::from(cloud_top)
+}
+
 // Vanilla `Entity.getDimensionChangingDelay`, `VehicleEntity.getDimensionChangingDelay`, and the
 // projectile override select 300, 10, or 2 ticks
 // (`Entity.java:2630-2633`; `VehicleEntity.java:115-117`; `Projectile.java:386-389`).
@@ -2282,6 +2310,13 @@ impl Entity {
     #[must_use]
     pub fn is_in_liquid(&self) -> bool {
         self.touching_water.load(Ordering::SeqCst) || self.touching_lava.load(Ordering::SeqCst)
+    }
+
+    /// Vanilla `Entity.isInClouds` (`Entity.java:1616-1628`).
+    #[must_use]
+    pub fn is_in_clouds(&self) -> bool {
+        cloud_bottom_in(&self.world.load().dimension)
+            .is_some_and(|bottom| in_cloud_layer(self.pos.load().y, self.height(), bottom))
     }
 
     pub fn from_uuid(
@@ -6997,6 +7032,28 @@ mod water_swim_sound_tests {
             water_swim_volume(Vector3::new(1.0, 0.0, 0.0), 0.4),
             (0.2f64.sqrt() as f32) * 0.4
         );
+    }
+}
+
+#[cfg(test)]
+mod cloud_layer_tests {
+    use super::{Dimension, cloud_bottom_in, in_cloud_layer};
+
+    #[test]
+    fn only_the_overworld_dimension_types_have_clouds() {
+        assert_eq!(cloud_bottom_in(&Dimension::OVERWORLD), Some(192.33));
+        assert_eq!(cloud_bottom_in(&Dimension::OVERWORLD_CAVES), Some(192.33));
+        assert_eq!(cloud_bottom_in(&Dimension::THE_NETHER), None);
+        assert_eq!(cloud_bottom_in(&Dimension::THE_END), None);
+    }
+
+    #[test]
+    fn cloud_layer_spans_the_bottom_to_four_blocks_above_it() {
+        // A 4-tall ghast: the head must reach the cloud bottom and the feet stay below the top.
+        assert!(!in_cloud_layer(150.0, 4.0, 192.33));
+        assert!(in_cloud_layer(190.0, 4.0, 192.33));
+        assert!(in_cloud_layer(196.0, 4.0, 192.33));
+        assert!(!in_cloud_layer(200.0, 4.0, 192.33));
     }
 }
 
