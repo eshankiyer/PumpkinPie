@@ -382,6 +382,30 @@ impl Mob for ShulkerEntity {
         0.0
     }
 
+    /// `Shulker.getSoundSource` (`Shulker.java:110-113`).
+    fn get_sound_source(&self) -> SoundCategory {
+        SoundCategory::Hostile
+    }
+
+    /// `Shulker.getAmbientSound` plus the `playAmbientSound` override that stays silent while
+    /// the lid is closed (`Shulker.java:115-125`).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        if self.is_closed() {
+            None
+        } else {
+            Some(Sound::EntityShulkerAmbient)
+        }
+    }
+
+    /// `Shulker.getHurtSound` (`Shulker.java:132-135`).
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(if self.is_closed() {
+            Sound::EntityShulkerHurtClosed
+        } else {
+            Sound::EntityShulkerHurt
+        })
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;
