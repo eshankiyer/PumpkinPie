@@ -360,8 +360,11 @@ macro_rules! impl_chest_helper_methods {
                         )
                     }
                     pumpkin_data::block_properties::ChestType::Right => {
+                        // ChestBlockEntity.playSound (ChestBlockEntity.java:110-114) shifts toward
+                        // the partner half: getConnectedDirection is facing.getCounterClockWise()
+                        // for RIGHT (ChestBlock.java:200-203), not the facing itself.
                         let direction = pumpkin_data::HorizontalFacingExt::to_block_direction(
-                            &properties.facing,
+                            &properties.facing.rotate_counter_clockwise(),
                         )
                         .to_offset();
                         pumpkin_util::math::vector3::Vector3::new(
