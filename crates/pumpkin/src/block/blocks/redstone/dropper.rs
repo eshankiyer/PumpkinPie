@@ -194,6 +194,11 @@ impl BlockBehaviour for DropperBlock {
                         )
                         .await
                         {
+                            crate::block::blocks::chiseled_bookshelf::ChiseledBookshelfBlock::refresh_after_inventory_transfer(
+                                args.world,
+                                &target_pos,
+                            )
+                            .await;
                             dropper.set_stack(slot_index, item).await;
                             return;
                         }

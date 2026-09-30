@@ -405,6 +405,11 @@ impl CreakingEntity {
         self.play_sound(Sound::EntityCreakingTwitch);
     }
 
+    /// `Entity.makeSound`.
+    pub fn make_sound(&self, sound: Sound) {
+        self.play_sound(sound);
+    }
+
     fn play_sound(&self, sound: Sound) {
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load();

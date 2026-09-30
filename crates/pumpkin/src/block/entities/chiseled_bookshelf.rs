@@ -18,8 +18,12 @@ use tracing::warn;
 
 use crate::{
     block::entities::BlockEntity,
-    world::{BlockFlags, World},
+    world::{
+        BlockFlags, World,
+        game_event::{GameEventContext, emit_game_event},
+    },
 };
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_world::inventory::InventoryFuture;
 use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 
@@ -27,6 +31,9 @@ pub struct ChiseledBookshelfBlockEntity {
     pub position: BlockPos,
     pub items: tokio::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub last_interacted_slot: AtomicI8,
+    /// Slot changed through the raw `Inventory` methods (hopper, dropper) whose
+    /// `updateState` has not run yet; `-1` when none. Consumed by `update_state`.
+    pub pending_slot: AtomicI8,
     pub dirty: AtomicBool,
 }
 
@@ -49,6 +56,7 @@ impl BlockEntity for ChiseledBookshelfBlockEntity {
             position,
             items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             last_interacted_slot: AtomicI8::new(-1),
+            pending_slot: AtomicI8::new(-1),
             dirty: AtomicBool::new(false),
         };
         pumpkin_world::inventory::sync_read_items_from_nbt(nbt, bookshelf.items.get_mut());
@@ -102,44 +110,65 @@ impl ChiseledBookshelfBlockEntity {
             position,
             items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             last_interacted_slot: AtomicI8::new(-1),
+            pending_slot: AtomicI8::new(-1),
             dirty: AtomicBool::new(false),
         }
     }
 
-    pub async fn update_state(
-        &self,
-        mut properties: ChiseledBookshelfLikeProperties,
-        world: Arc<World>,
-        slot: usize,
-    ) {
+    /// Vanilla `ChiseledBookShelfBlockEntity.updateState` (`ChiseledBookShelfBlockEntity.java:35-51`):
+    /// remembers the slot, recomputes all six `slot_N_occupied` properties from the items, sets the
+    /// block with flags 3 and emits `BLOCK_CHANGE`.
+    pub async fn update_state(&self, world: &Arc<World>, slot: usize) {
         if (0..Self::INVENTORY_SIZE).contains(&slot) {
             self.last_interacted_slot
                 .store(slot as i8, Ordering::Relaxed);
+            self.pending_slot.store(-1, Ordering::Relaxed);
             self.mark_dirty();
 
-            let occupied = !self.get_stack(slot).await.is_empty();
-            match slot {
-                0 => properties.slot_0_occupied = occupied,
-                1 => properties.slot_1_occupied = occupied,
-                2 => properties.slot_2_occupied = occupied,
-                3 => properties.slot_3_occupied = occupied,
-                4 => properties.slot_4_occupied = occupied,
-                5 => properties.slot_5_occupied = occupied,
-                _ => {}
+            let (block, state_id) = world.get_block_and_state_id(&self.position);
+            if block != &Block::CHISELED_BOOKSHELF {
+                return;
             }
+            let mut properties = ChiseledBookshelfLikeProperties::from_state_id(state_id, block);
+            let occupied: [bool; Self::INVENTORY_SIZE] = {
+                let items = self.items.read().await;
+                from_fn(|slot| !items[slot].is_empty())
+            };
+            properties.slot_0_occupied = occupied[0];
+            properties.slot_1_occupied = occupied[1];
+            properties.slot_2_occupied = occupied[2];
+            properties.slot_3_occupied = occupied[3];
+            properties.slot_4_occupied = occupied[4];
+            properties.slot_5_occupied = occupied[5];
 
+            let new_state = properties.to_state_id(&Block::CHISELED_BOOKSHELF);
             world
-                .set_block_state(
-                    &self.position,
-                    properties.to_state_id(&Block::CHISELED_BOOKSHELF),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
+                .set_block_state(&self.position, new_state, BlockFlags::NOTIFY_ALL)
                 .await;
+            emit_game_event(
+                world,
+                GameEvent::BlockChange,
+                self.position.to_centered_f64(),
+                GameEventContext {
+                    source_entity: None,
+                    affected_block_state: Some(new_state),
+                },
+            )
+            .await;
         } else {
             warn!(
                 "Invalid interacted slot: {} for chiseled bookshelf at position {:?}",
                 slot, self.position
             );
+        }
+    }
+
+    /// Runs the `updateState` that vanilla's `removeItem`/`setItem` perform for a slot the raw
+    /// `Inventory` methods changed (a hopper transfer); no-op when nothing is pending.
+    pub async fn refresh_pending(&self, world: &Arc<World>) {
+        let slot = self.pending_slot.load(Ordering::Relaxed);
+        if slot >= 0 {
+            self.update_state(world, slot as usize).await;
         }
     }
 }
@@ -167,6 +196,9 @@ impl Inventory for ChiseledBookshelfBlockEntity {
         Box::pin(async move {
             let mut items = self.items.write().await;
             let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
+            if !removed.is_empty() {
+                self.pending_slot.store(slot as i8, Ordering::Relaxed);
+            }
             self.mark_dirty();
             removed
         })
@@ -180,6 +212,9 @@ impl Inventory for ChiseledBookshelfBlockEntity {
             } else {
                 ItemStack::EMPTY.clone()
             };
+            if !res.is_empty() {
+                self.pending_slot.store(slot as i8, Ordering::Relaxed);
+            }
             self.mark_dirty();
             res
         })
@@ -187,8 +222,19 @@ impl Inventory for ChiseledBookshelfBlockEntity {
 
     fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
         Box::pin(async move {
+            // Vanilla `setItem` (`ChiseledBookShelfBlockEntity.java:89-97`): only books are stored;
+            // an empty stack removes the slot's book; anything else is ignored.
+            let accepted = !stack.is_empty() && self.is_valid_slot_for(slot, &stack);
             let mut items = self.items.write().await;
-            items[slot] = stack;
+            if accepted {
+                items[slot] = stack;
+                self.pending_slot.store(slot as i8, Ordering::Relaxed);
+            } else if stack.is_empty() {
+                let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
+                if !removed.is_empty() {
+                    self.pending_slot.store(slot as i8, Ordering::Relaxed);
+                }
+            }
             self.mark_dirty();
         })
     }

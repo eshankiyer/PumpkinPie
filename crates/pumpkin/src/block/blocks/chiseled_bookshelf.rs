@@ -96,7 +96,6 @@ impl BlockBehaviour for ChiseledBookshelfBlock {
                             args.player,
                             args.position,
                             block_entity,
-                            properties,
                             slot,
                         )
                         .await;
@@ -138,7 +137,6 @@ impl BlockBehaviour for ChiseledBookshelfBlock {
                         args.player,
                         args.position,
                         block_entity,
-                        properties,
                         slot,
                         args.item_stack,
                     )
@@ -186,12 +184,25 @@ impl BlockBehaviour for ChiseledBookshelfBlock {
 }
 
 impl ChiseledBookshelfBlock {
+    /// Runs the `updateState` vanilla's `removeItem`/`setItem` perform after a hopper changed a
+    /// slot through the raw container (`ChiseledBookShelfBlockEntity.java:78-97`).
+    pub(crate) async fn refresh_after_inventory_transfer(world: &Arc<World>, position: &BlockPos) {
+        let Some(block_entity) = world.get_block_entity(position) else {
+            return;
+        };
+        if let Some(bookshelf) = block_entity
+            .as_any()
+            .downcast_ref::<ChiseledBookshelfBlockEntity>()
+        {
+            bookshelf.refresh_pending(world).await;
+        }
+    }
+
     async fn try_add_book(
         world: &Arc<World>,
         player: &Player,
         position: &BlockPos,
         entity: &ChiseledBookshelfBlockEntity,
-        properties: ChiseledBookshelfLikeProperties,
         slot: i8,
         item: &mut ItemStack,
     ) {
@@ -214,9 +225,7 @@ impl ChiseledBookshelfBlock {
                 item.split_unless_creative(player.gamemode.load(), 1),
             )
             .await;
-        entity
-            .update_state(properties, world.clone(), slot as usize)
-            .await;
+        entity.update_state(world, slot as usize).await;
 
         world.play_sound(sound, SoundCategory::Blocks, &position.to_centered_f64());
     }
@@ -226,7 +235,6 @@ impl ChiseledBookshelfBlock {
         player: &Player,
         position: &BlockPos,
         entity: &ChiseledBookshelfBlockEntity,
-        properties: ChiseledBookshelfLikeProperties,
         slot: i8,
     ) {
         let mut stack = entity.remove_stack_specific(slot as usize, 1).await;
@@ -245,9 +253,7 @@ impl ChiseledBookshelfBlock {
             // Drop the item on the ground if the player cannot hold it because of a full inventory
             player.drop_item(stack).await;
         }
-        entity
-            .update_state(properties, world.clone(), slot as usize)
-            .await;
+        entity.update_state(world, slot as usize).await;
 
         world.play_sound(sound, SoundCategory::Blocks, &position.to_centered_f64());
     }

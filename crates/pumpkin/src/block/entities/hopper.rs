@@ -335,6 +335,10 @@ impl HopperBlockEntity {
                             world, pos_up,
                         )
                         .await;
+                        crate::block::blocks::chiseled_bookshelf::ChiseledBookshelfBlock::refresh_after_inventory_transfer(
+                            world, pos_up,
+                        )
+                        .await;
                         // A hopper pulls through the raw container, so it never runs the result
                         // slot's take hook: vanilla banks the furnace's experience until a player
                         // takes the output or breaks the block. Popping orbs at the hopper turned
@@ -473,6 +477,10 @@ impl HopperBlockEntity {
                     {
                         self.remove_stack_specific(i, 1).await;
                         crate::block::blocks::jukebox::JukeboxBlock::refresh_after_inventory_transfer(
+                            world, &target_pos,
+                        )
+                        .await;
+                        crate::block::blocks::chiseled_bookshelf::ChiseledBookshelfBlock::refresh_after_inventory_transfer(
                             world, &target_pos,
                         )
                         .await;
