@@ -137,8 +137,8 @@ pub(crate) fn block_sound_type(block: &Block) -> (Sound, Sound, f32, f32) {
         name if name.ends_with("_leaves") => {
             (Sound::BlockGrassStep, Sound::BlockGrassFall, 1.0, 1.0)
         }
-        "dirt" | "coarse_dirt" | "podzol" | "mycelium" | "rooted_dirt" | "dirt_path"
-        | "farmland" | "clay" => (Sound::BlockGravelStep, Sound::BlockGravelFall, 1.0, 1.0),
+        "mycelium" | "dirt_path" => (Sound::BlockGrassStep, Sound::BlockGrassFall, 1.0, 1.0),
+        "dirt" | "coarse_dirt" | "podzol" | "rooted_dirt" | "farmland" | "clay" => (Sound::BlockGravelStep, Sound::BlockGravelFall, 1.0, 1.0),
         "moss_block" => (Sound::BlockMossStep, Sound::BlockMossFall, 1.0, 1.0),
         "mud" => (Sound::BlockMudStep, Sound::BlockMudFall, 1.0, 1.0),
         "netherrack" => (
@@ -208,11 +208,52 @@ pub(crate) fn block_sound_type(block: &Block) -> (Sound, Sound, f32, f32) {
         name if name == "iron_block" || name.ends_with("_iron_bars") => {
             (Sound::BlockIronStep, Sound::BlockIronFall, 1.0, 1.0)
         }
-        name if name.ends_with("_block") && (name.contains("gold") || name.contains("diamond")) => {
+        "gold_block" | "diamond_block" => {
             (Sound::BlockMetalStep, Sound::BlockMetalFall, 1.0, 1.0)
         }
         _ => (Sound::BlockStoneStep, Sound::BlockStoneFall, 1.0, 1.0),
     }
+}
+
+/// Returns the `SoundType.placeSound` (`BlockItem.java:93-94`) and the `SoundType` volume/pitch
+/// for a block. Every `SoundType` family registers matching step and place events
+/// (`SoundType.java:10-46`), so the place sound is derived from `block_sound_type`'s step sound to
+/// keep one name->family table for step, fall and place.
+#[must_use]
+pub(crate) fn block_place_sound_type(block: &Block) -> (Sound, f32, f32) {
+    let (step, _, volume, pitch) = block_sound_type(block);
+    let place = match step {
+        Sound::BlockAnvilStep => Sound::BlockAnvilPlace,
+        Sound::BlockSlimeBlockStep => Sound::BlockSlimeBlockPlace,
+        Sound::BlockHoneyBlockStep => Sound::BlockHoneyBlockPlace,
+        Sound::BlockPowderSnowStep => Sound::BlockPowderSnowPlace,
+        Sound::BlockSnowStep => Sound::BlockSnowPlace,
+        Sound::BlockSandStep => Sound::BlockSandPlace,
+        Sound::BlockSuspiciousSandStep => Sound::BlockSuspiciousSandPlace,
+        Sound::BlockGravelStep => Sound::BlockGravelPlace,
+        Sound::BlockSuspiciousGravelStep => Sound::BlockSuspiciousGravelPlace,
+        Sound::BlockGlassStep => Sound::BlockGlassPlace,
+        Sound::BlockGrassStep => Sound::BlockGrassPlace,
+        Sound::BlockMossStep => Sound::BlockMossPlace,
+        Sound::BlockMudStep => Sound::BlockMudPlace,
+        Sound::BlockNetherrackStep => Sound::BlockNetherrackPlace,
+        Sound::BlockDeepslateStep => Sound::BlockDeepslatePlace,
+        Sound::BlockCopperStep => Sound::BlockCopperPlace,
+        Sound::BlockTuffStep => Sound::BlockTuffPlace,
+        Sound::BlockResinStep => Sound::BlockResinPlace,
+        Sound::BlockSulfurStep => Sound::BlockSulfurPlace,
+        Sound::BlockCinnabarStep => Sound::BlockCinnabarPlace,
+        Sound::BlockBambooStep => Sound::BlockBambooPlace,
+        Sound::BlockBambooWoodStep => Sound::BlockBambooWoodPlace,
+        Sound::BlockCherryWoodStep => Sound::BlockCherryWoodPlace,
+        Sound::BlockNetherWoodStep => Sound::BlockNetherWoodPlace,
+        Sound::BlockWoodStep => Sound::BlockWoodPlace,
+        Sound::BlockWoolStep => Sound::BlockWoolPlace,
+        Sound::BlockIronStep => Sound::BlockIronPlace,
+        Sound::BlockMetalStep => Sound::BlockMetalPlace,
+        _ => Sound::BlockStonePlace,
+    };
+    (place, volume, pitch)
 }
 
 /// Returns whether a block participates in comparator output notification.

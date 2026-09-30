@@ -514,35 +514,17 @@ pub enum BlockPlacingError {
 
 fn block_item_place_sound(block: &Block) -> (Sound, f32, f32) {
     // BlockItem gets the sound and its volume/pitch from the placed state's SoundType
-    // (`BlockItem.java:86-87`; `SoundType.java:1-11, 47-54`). The generated block data does not
-    // retain SoundType, so use exact generated sound names first and the shared families used by
-    // the vanilla block definitions (`Blocks.java:96-99, 627-638, 1038-1050`).
-    let direct_name = format!("block.{}.place", block.name);
-    let family_name = match block.name {
-        "anvil" => "block.anvil.place",
-        name if name.ends_with("_wool") || name.ends_with("_carpet") => "block.wool.place",
-        "glass" | "glass_pane" => "block.glass.place",
-        "iron_block" => "block.iron.place",
-        "gold_block" => "block.metal.place",
-        name if name.starts_with("copper") => "block.copper.place",
-        name if name.starts_with("deepslate") => "block.deepslate.place",
-        name if name.ends_with("_planks")
-            || name.ends_with("_log")
-            || name.ends_with("_wood")
-            || name.ends_with("_hyphae")
-            || name.ends_with("_stem") =>
-        {
-            "block.wood.place"
-        }
-        _ => "block.stone.place",
-    };
-    let sound = Sound::from_name(&direct_name)
-        .or_else(|| Sound::from_name(family_name))
-        .unwrap_or(Sound::BlockStonePlace);
+    // (`BlockItem.java:86-87,93-94`). The generated block data does not retain SoundType, so the
+    // exact generated `block.<name>.place` event is tried first (it is the block's own SoundType),
+    // then the shared name->SoundType table used for step/fall sounds supplies the family.
+    let exact = Sound::from_name(&format!("block.{}.place", block.name));
+    let (family_sound, family_volume, family_pitch) = crate::block::block_place_sound_type(block);
+    let sound = exact.unwrap_or(family_sound);
+    // SoundType.METAL (gold and diamond blocks) has pitch 1.5 (`SoundType.java:31`); iron_block
+    // uses SoundType.IRON with pitch 1.0 (`SoundType.java:814`).
     let (volume, pitch) = match block.name {
-        "anvil" => (0.3, 1.0),
-        "iron_block" | "gold_block" => (1.0, 1.5),
-        _ => (1.0, 1.0),
+        "gold_block" | "diamond_block" => (1.0, 1.5),
+        _ => (family_volume, family_pitch),
     };
     (sound, f32::midpoint(volume, 1.0), pitch * 0.8)
 }
@@ -1762,5 +1744,12 @@ mod test {
         assert_eq!(planks_sound, Sound::BlockWoodPlace);
         assert_eq!(planks_volume, 1.0);
         assert_eq!(planks_pitch, 0.8);
+
+        // Dirt uses the gravel SoundType and leaves the grass one, not the stone fallback.
+        assert_eq!(block_item_place_sound(&Block::DIRT).0, Sound::BlockGravelPlace);
+        assert_eq!(
+            block_item_place_sound(&Block::OAK_LEAVES).0,
+            Sound::BlockGrassPlace
+        );
     }
 }
