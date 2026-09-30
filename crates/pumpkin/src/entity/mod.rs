@@ -449,10 +449,11 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         })
     }
 
-    /// Sound played after this entity takes fall damage. Entities with a custom fall sound
-    /// override this; the generic living-entity sound remains the default.
-    fn get_fall_sound(&self, fall_distance: i32) -> Sound {
-        if fall_distance > 4 {
+    /// Sound played on fall damage; the argument is the computed damage, not the distance
+    /// (`LivingEntity.getFallDamageSound`, `LivingEntity.java:1676-1678`). Entities with a custom
+    /// fall sound override this; the generic living-entity sound remains the default.
+    fn get_fall_sound(&self, fall_damage: i32) -> Sound {
+        if fall_damage > 4 {
             Sound::EntityGenericBigFall
         } else {
             Sound::EntityGenericSmallFall
@@ -993,6 +994,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.blocksBuilding` (`LivingEntity.java:291` sets it true; `ArmorStand`
+    /// clears it for markers, `ArmorStand.java:611-619`). Read by `EntityGetter.isUnobstructed`.
+    fn blocks_building(&self) -> bool {
+        true
+    }
+
     /// Whether this entity's own `push_entities` scan runs. Vanilla's `pushEntities` never asks
     /// the pusher whether it is pushable (`LivingEntity.java:3221-3245`), only each target
     /// (`EntitySelector.pushableBy`), so an entity whose `is_pushable` carries an extra term
@@ -1257,6 +1264,8 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 let other_entities = world.get_entities_at_box(&entity_bb);
                 for other in other_entities {
                     if other.get_entity().entity_id != self_entity.entity_id
+                        // Vanilla `EntitySelector.pushableBy` (`EntitySelector.java:29-51`).
+                        && other.is_pushable()
                         && (!has_teams
                             || team_allows_push(
                                 &world,

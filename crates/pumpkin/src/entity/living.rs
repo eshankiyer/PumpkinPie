@@ -1931,7 +1931,7 @@ impl LivingEntity {
             self.apply_effect_attribute_modifiers(&effect).await;
 
             // Apply invisible effect
-            if effect.effect_type == &StatusEffect::INVISIBILITY {
+            if effect.effect_type == &StatusEffect::INVISIBILITY && !self.is_armor_stand() {
                 self.entity.set_invisible(true).await;
             }
 
@@ -2055,6 +2055,14 @@ impl LivingEntity {
     /// does not have vanilla's deferred `effectsDirty` metadata pass. Glowing deliberately stays
     /// under `Entity::set_glowing`: teams and other entity state can also make an entity glow.
     pub async fn update_effect_visibility(&self) {
+        // Vanilla `ArmorStand.updateInvisibilityStatus` (`ArmorStand.java:445-448`) only
+        // reapplies the stand's own flag and skips the effect-particle sync.
+        if self.is_armor_stand() {
+            self.entity
+                .set_invisible(self.entity.persistent_invisible.load(Relaxed))
+                .await;
+            return;
+        }
         let has_invisibility = self
             .active_effects
             .lock()
@@ -2064,6 +2072,10 @@ impl LivingEntity {
             .set_invisible(has_invisibility || self.entity.persistent_invisible.load(Relaxed))
             .await;
         self.sync_effect_particles().await;
+    }
+
+    fn is_armor_stand(&self) -> bool {
+        self.entity.entity_type == &EntityType::ARMOR_STAND
     }
 
     async fn sync_effect_particles(&self) {
@@ -2134,7 +2146,7 @@ impl LivingEntity {
         }
         self.apply_effect_attribute_modifiers(&effect).await;
 
-        if effect.effect_type == &StatusEffect::INVISIBILITY {
+        if effect.effect_type == &StatusEffect::INVISIBILITY && !self.is_armor_stand() {
             self.entity.set_invisible(true).await;
         }
         if effect.effect_type == &StatusEffect::GLOWING {
@@ -2189,7 +2201,7 @@ impl LivingEntity {
         }
 
         // If invisible effect removed, disable invisibility
-        if effect_type == &StatusEffect::INVISIBILITY {
+        if effect_type == &StatusEffect::INVISIBILITY && !self.is_armor_stand() {
             self.entity.set_invisible(false).await;
         }
 
@@ -3307,13 +3319,13 @@ impl LivingEntity {
 
         let damage = caller.calculate_fall_damage(f64::from(fall_distance), damage_per_distance);
         if damage > 0 {
-            #[allow(clippy::cast_precision_loss)]
-            let check_damage = self.damage(caller, damage as f32, DamageType::FALL).await; // Fall
-            if check_damage {
-                self.entity
-                    .play_sound(caller.get_fall_sound(fall_distance as i32));
-                // `LivingEntity.playBlockFallSound` follows entity fall damage and applies the
-                // block sound type's volume/pitch (`LivingEntity.java:1804-1806,1858-1867`).
+            // Vanilla plays the entity fall sound (chosen from the computed damage) and the block
+            // fall sound before hurting, independent of whether the hurt succeeds
+            // (`LivingEntity.java:1802-1806`).
+            self.entity.play_sound(caller.get_fall_sound(damage));
+            // `LivingEntity.playBlockFallSound` applies the block sound type's volume/pitch
+            // (`LivingEntity.java:1858-1867`).
+            if !self.entity.is_silent() {
                 let (_, supporting_block, supporting_state) =
                     self.entity.get_block_with_y_offset(0.2);
                 if !supporting_state.is_air() {
@@ -3328,6 +3340,8 @@ impl LivingEntity {
                     );
                 }
             }
+            #[allow(clippy::cast_precision_loss)]
+            self.damage(caller, damage as f32, DamageType::FALL).await; // Fall
         }
     }
 
@@ -5695,7 +5709,9 @@ impl NBTStorage for LivingEntity {
             for effect in loaded_effects {
                 self.restore_effect_attribute_modifiers(&effect);
                 if effect.effect_type == &StatusEffect::INVISIBILITY {
-                    self.entity.set_invisible(true).await;
+                    if !self.is_armor_stand() {
+                        self.entity.set_invisible(true).await;
+                    }
                 } else if effect.effect_type == &StatusEffect::GLOWING {
                     self.entity.set_glowing(true).await;
                 }
@@ -6862,7 +6878,13 @@ impl EntityBase for LivingEntity {
                 self.tick_frost().await;
                 self.tick_auto_spin_attack(caller, previous_bounding_box)
                     .await;
-                self.push_entities(caller).await;
+                // Armor stands override `pushEntities` (`ArmorStand.java:177-184`); only they
+                // dispatch dynamically, since `Mob`/`Player` `is_pushable` must not gate the pusher.
+                if self.entity.entity_type == &EntityType::ARMOR_STAND {
+                    caller.push_entities(caller).await;
+                } else {
+                    self.push_entities(caller).await;
+                }
                 // The shared movement emission path emits sounds and STEP/SWIM events after
                 // movement crosses the next threshold (`Entity.java:867-901`).
                 self.tick_swim_sound(caller).await;

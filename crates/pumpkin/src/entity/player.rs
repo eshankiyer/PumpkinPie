@@ -8137,8 +8137,8 @@ impl EntityBase for Player {
     }
 
     /// Vanilla `Player.getFallSounds` (`Player.java:1504-1506`).
-    fn get_fall_sound(&self, fall_distance: i32) -> Sound {
-        if fall_distance > 4 {
+    fn get_fall_sound(&self, fall_damage: i32) -> Sound {
+        if fall_damage > 4 {
             Sound::EntityPlayerBigFall
         } else {
             Sound::EntityPlayerSmallFall

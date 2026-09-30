@@ -1,13 +1,13 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicI32, AtomicI64, AtomicU8, Ordering},
 };
 
+use crate::entity::decoration::display::Vector3fSerializer;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
 };
 use crate::world::game_event::{GameEventContext, emit_game_event};
-use crossbeam::atomic::AtomicCell;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{
@@ -18,8 +18,10 @@ use pumpkin_data::{
     item::Item,
     particle::Particle,
     sound::{Sound, SoundCategory},
+    tracked_data::{self, TrackedData},
 };
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::{
     boundingbox::EntityDimensions, euler_angle::EulerAngle, vector3::Vector3,
 };
@@ -61,7 +63,6 @@ impl From<PackedRotation> for NbtTag {
 }
 
 impl From<NbtTag> for PackedRotation {
-    #[expect(clippy::unnecessary_fallible_conversions)]
     fn from(tag: NbtTag) -> Self {
         if let NbtTag::Compound(compound) = tag {
             fn get_rotation(
@@ -71,7 +72,7 @@ impl From<NbtTag> for PackedRotation {
             ) -> EulerAngle {
                 compound
                     .get(key)
-                    .and_then(|tag| tag.clone().try_into().ok())
+                    .and_then(EulerAngle::try_from_nbt)
                     .unwrap_or(default)
             }
 
@@ -98,7 +99,7 @@ pub struct ArmorStandEntity {
     last_hit_time: AtomicI64,
     disabled_slots: AtomicI32,
 
-    rotation: AtomicCell<PackedRotation>,
+    rotation: Mutex<PackedRotation>,
 }
 
 /// Vanilla `ArmorStand.pushEntities` (`ArmorStand.java:178-184`) selects only the plain,
@@ -117,7 +118,7 @@ impl ArmorStandEntity {
             armor_stand_flags: AtomicU8::new(0),
             last_hit_time: AtomicI64::new(0),
             disabled_slots: AtomicI32::new(0),
-            rotation: AtomicCell::new(packed_rotation),
+            rotation: Mutex::new(packed_rotation),
         }
     }
 
@@ -163,6 +164,30 @@ impl ArmorStandEntity {
             self.armor_stand_flags
                 .fetch_and(!(bit_field as u8), Ordering::Relaxed);
         }
+        self.send_client_flags();
+    }
+
+    /// Vanilla writes every flag change to `DATA_CLIENT_FLAGS` (`ArmorStand.java:482-522`),
+    /// which is what tells clients about small/arms/base plate/marker.
+    fn send_client_flags(&self) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::armor_stand::DATA_CLIENT_FLAGS,
+                self.armor_stand_flags.load(Ordering::Relaxed),
+            )],
+            None,
+        );
+    }
+
+    /// Publishes one pose part; `Rotations.STREAM_CODEC` is three floats x, y, z.
+    fn send_pose_part(&self, data: TrackedData, angle: EulerAngle) {
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                data,
+                Vector3fSerializer(angle.pitch, angle.yaw, angle.roll),
+            )],
+            None,
+        );
     }
 
     fn refresh_dimensions(&self) {
@@ -221,11 +246,113 @@ impl ArmorStandEntity {
     }
 
     pub fn pack_rotation(&self) -> PackedRotation {
-        self.rotation.load()
+        *self
+            .rotation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn unpack_rotation(&self, packed: &PackedRotation) {
-        self.rotation.store(packed.to_owned());
+        self.set_armor_stand_pose(packed);
+    }
+
+    /// Vanilla `ArmorStand.getArmorStandPose` (`ArmorStand.java:683-687`).
+    pub fn get_armor_stand_pose(&self) -> PackedRotation {
+        self.pack_rotation()
+    }
+
+    /// Vanilla `ArmorStand.setArmorStandPose` (`ArmorStand.java:674-681`): stores and
+    /// publishes all six parts.
+    pub fn set_armor_stand_pose(&self, pose: &PackedRotation) {
+        *self
+            .rotation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = *pose;
+        self.send_pose(pose);
+    }
+
+    fn send_pose(&self, pose: &PackedRotation) {
+        self.send_pose_part(tracked_data::armor_stand::DATA_HEAD_POSE, pose.head);
+        self.send_pose_part(tracked_data::armor_stand::DATA_BODY_POSE, pose.body);
+        self.send_pose_part(tracked_data::armor_stand::DATA_LEFT_ARM_POSE, pose.left_arm);
+        self.send_pose_part(
+            tracked_data::armor_stand::DATA_RIGHT_ARM_POSE,
+            pose.right_arm,
+        );
+        self.send_pose_part(tracked_data::armor_stand::DATA_LEFT_LEG_POSE, pose.left_leg);
+        self.send_pose_part(
+            tracked_data::armor_stand::DATA_RIGHT_LEG_POSE,
+            pose.right_leg,
+        );
+    }
+
+    /// Atomically replaces one pose part (no load/store pair) and publishes only that part.
+    fn update_pose_part(
+        &self,
+        data: TrackedData,
+        angle: EulerAngle,
+        apply: fn(&mut PackedRotation, EulerAngle),
+    ) {
+        // Vanilla `Rotations` normalizes on construction (`Rotations.java:34-38`).
+        let angle = EulerAngle::new(angle.pitch, angle.yaw, angle.roll);
+        apply(
+            &mut self
+                .rotation
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            angle,
+        );
+        self.send_pose_part(data, angle);
+    }
+
+    /// Vanilla `ArmorStand.setHeadPose` (`ArmorStand.java:524-526`).
+    pub fn set_head_pose(&self, angle: EulerAngle) {
+        self.update_pose_part(tracked_data::armor_stand::DATA_HEAD_POSE, angle, |p, a| {
+            p.head = a;
+        });
+    }
+
+    /// Vanilla `ArmorStand.setBodyPose`.
+    pub fn set_body_pose(&self, angle: EulerAngle) {
+        self.update_pose_part(tracked_data::armor_stand::DATA_BODY_POSE, angle, |p, a| {
+            p.body = a;
+        });
+    }
+
+    /// Vanilla `ArmorStand.setLeftArmPose`.
+    pub fn set_left_arm_pose(&self, angle: EulerAngle) {
+        self.update_pose_part(
+            tracked_data::armor_stand::DATA_LEFT_ARM_POSE,
+            angle,
+            |p, a| p.left_arm = a,
+        );
+    }
+
+    /// Vanilla `ArmorStand.setRightArmPose`.
+    pub fn set_right_arm_pose(&self, angle: EulerAngle) {
+        self.update_pose_part(
+            tracked_data::armor_stand::DATA_RIGHT_ARM_POSE,
+            angle,
+            |p, a| p.right_arm = a,
+        );
+    }
+
+    /// Vanilla `ArmorStand.setLeftLegPose`.
+    pub fn set_left_leg_pose(&self, angle: EulerAngle) {
+        self.update_pose_part(
+            tracked_data::armor_stand::DATA_LEFT_LEG_POSE,
+            angle,
+            |p, a| p.left_leg = a,
+        );
+    }
+
+    /// Vanilla `ArmorStand.setRightLegPose`.
+    pub fn set_right_leg_pose(&self, angle: EulerAngle) {
+        self.update_pose_part(
+            tracked_data::armor_stand::DATA_RIGHT_LEG_POSE,
+            angle,
+            |p, a| p.right_leg = a,
+        );
     }
 
     async fn break_and_drop_items(&self) {
@@ -340,11 +467,9 @@ impl NBTStorage for ArmorStandEntity {
                 self.disabled_slots.store(disabled_slots, Ordering::Relaxed);
             }
 
-            if let Some(no_base_plate) = nbt.get_bool("NoBasePlate") {
-                if !no_base_plate {
-                    flags |= ArmorStandFlags::HideBasePlate as u8;
-                }
-            } else {
+            // Vanilla `setNoBasePlate(input.getBooleanOr("NoBasePlate", false))`
+            // (`ArmorStand.java:162`): the flag is set only when the tag is true.
+            if nbt.get_bool("NoBasePlate").unwrap_or(false) {
                 flags |= ArmorStandFlags::HideBasePlate as u8;
             }
 
@@ -358,8 +483,12 @@ impl NBTStorage for ArmorStandEntity {
             self.refresh_dimensions();
 
             if let Some(pose_tag) = nbt.get("Pose") {
+                // Stored only; `init_data_tracker` publishes it (no broadcast before spawn).
                 let packed: PackedRotation = pose_tag.clone().into();
-                self.unpack_rotation(&packed);
+                *self
+                    .rotation
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = packed;
             }
         })
     }
@@ -376,6 +505,21 @@ impl EntityBase for ArmorStandEntity {
 
     fn is_pickable(&self) -> bool {
         self.get_entity().is_alive() && !self.is_marker()
+    }
+
+    /// Vanilla `ArmorStand.defineSynchedData` (`ArmorStand.java:124-133`) plus the setters used
+    /// by `readAdditionalSaveData` (`:155-166`): clients need the flags and every pose part.
+    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.send_client_flags();
+            self.send_pose(&self.pack_rotation());
+        })
+    }
+
+    /// Vanilla `ArmorStand.onSyncedDataUpdated` (`ArmorStand.java:611-619`) sets
+    /// `blocksBuilding = !isMarker()`.
+    fn blocks_building(&self) -> bool {
+        !self.is_marker()
     }
 
     /// Vanilla `ArmorStand.pushEntities` (`ArmorStand.java:178-184`) pushes only nearby
@@ -460,7 +604,7 @@ impl EntityBase for ArmorStandEntity {
 
     /// Vanilla `ArmorStand.getFallSounds` (`ArmorStand.java:587-590`). Both fall distances use
     /// the armor-stand fall sound; the generic `LivingEntity` fallback is distance-dependent.
-    fn get_fall_sound(&self, _fall_distance: i32) -> Sound {
+    fn get_fall_sound(&self, _fall_damage: i32) -> Sound {
         Sound::EntityArmorStandFall
     }
 

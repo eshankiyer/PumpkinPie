@@ -585,7 +585,7 @@ impl BlockRegistry {
         }
 
         if entity.get_living_entity().is_some() {
-            return true;
+            return entity.blocks_building();
         }
 
         let entity_type = base_entity.entity_type;
