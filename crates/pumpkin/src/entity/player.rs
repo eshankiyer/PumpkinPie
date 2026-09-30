@@ -8860,6 +8860,15 @@ impl InventoryPlayer for Player {
         })
     }
 
+    fn map_scale_and_lock(&self, map_id: i32) -> PlayerFuture<'_, Option<(i8, bool)>> {
+        Box::pin(async move {
+            let server = self.world().server.upgrade()?;
+            let map = server.map_manager.get_map(map_id)?;
+            let map = map.lock().await;
+            Some((map.scale, map.locked))
+        })
+    }
+
     fn play_sound(&self, sound: Sound) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
             self.world()

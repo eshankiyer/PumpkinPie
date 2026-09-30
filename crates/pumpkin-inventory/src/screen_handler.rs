@@ -314,6 +314,13 @@ pub trait InventoryPlayer: Send + Sync {
         amount: i32,
     ) -> PlayerFuture<'_, ()>;
 
+    /// `(scale, locked)` of the saved map data for `map_id` (`MapItem.getSavedData`), used by
+    /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:113-116`). `None`
+    /// means no saved data. The default keeps non-world-backed test players inert.
+    fn map_scale_and_lock(&self, _map_id: i32) -> PlayerFuture<'_, Option<(i8, bool)>> {
+        Box::pin(async { None })
+    }
+
     /// Applies item post-processing after a crafted result has been taken.
     ///
     /// `ItemStack.onCraftedBySystem` (`ItemStack.java:727-729`) is a server-side

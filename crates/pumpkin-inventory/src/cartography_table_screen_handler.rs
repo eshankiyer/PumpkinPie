@@ -79,48 +79,54 @@ impl CartographyTableScreenHandler {
         handler
     }
 
-    /// `CartographyTableMenu.slotsChanged`/`setupResultSlot` (`CartographyTableMenu.java:97-141`)
-    /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:111-139`) puts a
-    /// marked result in the output for scaling/locking, or two copies for map duplication.
-    async fn update_result(&self) {
+    /// `CartographyTableMenu.slotsChanged` (`CartographyTableMenu.java:97-109`) and
+    /// `setupResultSlot` (`CartographyTableMenu.java:111-139`). A stale result is cleared when an
+    /// input is gone; with both inputs present the result is only recomputed when the saved map
+    /// data can be found (`mapData != null`), otherwise the existing result is left untouched.
+    async fn update_result(&self, player: &dyn InventoryPlayer) {
         let map = self.input_inventory.get_stack(0).await;
         let additional = self.input_inventory.get_stack(1).await;
-        let result = if map.get_data_component::<MapIdImpl>().is_some() {
-            if additional.item == &Item::PAPER {
-                let mut result = map.copy_with_count(1);
-                result.patch.push((
-                    pumpkin_data::data_component::DataComponent::MapPostProcessing,
-                    Some(
-                        MapPostProcessingImpl {
-                            processing: MapPostProcessing::Scale,
-                        }
-                        .to_dyn(),
-                    ),
-                ));
-                result
-            } else if additional.item == &Item::GLASS_PANE {
-                let mut result = map.copy_with_count(1);
-                result.patch.push((
-                    pumpkin_data::data_component::DataComponent::MapPostProcessing,
-                    Some(
-                        MapPostProcessingImpl {
-                            processing: MapPostProcessing::Lock,
-                        }
-                        .to_dyn(),
-                    ),
-                ));
-                result
-            } else if additional.item == &Item::MAP {
-                // `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:125-133`)
-                // copies the map with a count of two.
-                map.copy_with_count(2)
-            } else {
-                ItemStack::EMPTY.clone()
+        let current = self.output_inventory.get_stack(0).await;
+        if map.is_empty() || additional.is_empty() {
+            if !current.is_empty() {
+                self.output_inventory
+                    .set_stack(0, ItemStack::EMPTY.clone())
+                    .await;
             }
-        } else {
-            ItemStack::EMPTY.clone()
+            return;
+        }
+        let Some(map_id) = map.get_data_component::<MapIdImpl>().map(|id| id.id) else {
+            return;
         };
+        let Some((scale, locked)) = player.map_scale_and_lock(map_id).await else {
+            return;
+        };
+        let result = craft_result(&map, &additional, scale, locked)
+            .unwrap_or_else(|| ItemStack::EMPTY.clone());
         self.output_inventory.set_stack(0, result).await;
+    }
+}
+
+/// The recipe selection of `CartographyTableMenu.setupResultSlot`
+/// (`CartographyTableMenu.java:116-133`) once the map's saved data is known. `None` is the
+/// `removeItemNoUpdate(2)` branch (`:125-129`).
+fn craft_result(map: &ItemStack, additional: &ItemStack, scale: i8, locked: bool) -> Option<ItemStack> {
+    let marked = |processing| {
+        let mut result = map.copy_with_count(1);
+        result.patch.push((
+            pumpkin_data::data_component::DataComponent::MapPostProcessing,
+            Some(MapPostProcessingImpl { processing }.to_dyn()),
+        ));
+        result
+    };
+    if additional.item == &Item::PAPER && !locked && scale < 4 {
+        Some(marked(MapPostProcessing::Scale))
+    } else if additional.item == &Item::GLASS_PANE && !locked {
+        Some(marked(MapPostProcessing::Lock))
+    } else if additional.item == &Item::MAP {
+        Some(map.copy_with_count(2))
+    } else {
+        None
     }
 }
 
@@ -234,7 +240,7 @@ impl ScreenHandler for CartographyTableScreenHandler {
                 self.output_inventory.remove_stack(0).await;
                 self.internal_on_slot_click(slot_index, button, action_type, player)
                     .await;
-                self.update_result().await;
+                self.update_result(player).await;
                 return;
             }
             self.internal_on_slot_click(slot_index, button, action_type, player)
@@ -242,7 +248,7 @@ impl ScreenHandler for CartographyTableScreenHandler {
             // Vanilla invokes `slotsChanged` from both input containers' `setChanged`
             // callbacks (`CartographyTableMenu.java:27-39, 97-109`). The existing screen
             // handler has no inventory listener, so refresh after every live click instead.
-            self.update_result().await;
+            self.update_result(player).await;
         })
     }
 
@@ -337,7 +343,7 @@ impl ScreenHandler for CartographyTableScreenHandler {
                     }
                 }
             }
-            self.update_result().await;
+            self.update_result(player).await;
             stack
         })
     }
@@ -345,44 +351,26 @@ impl ScreenHandler for CartographyTableScreenHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::CartographyTableScreenHandler;
-    use crate::entity_equipment::EntityEquipment;
-    use crate::player::player_inventory::PlayerInventory;
+    use super::craft_result;
     use pumpkin_data::data_component::DataComponent;
     use pumpkin_data::data_component_impl::{
         DataComponentImpl, MapIdImpl, MapPostProcessing, MapPostProcessingImpl,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
-    use pumpkin_world::inventory::Inventory;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
-
-    fn handler() -> CartographyTableScreenHandler {
-        let player_inventory = Arc::new(PlayerInventory::new(
-            Arc::new(Mutex::new(EntityEquipment::new())),
-            Arc::new(crate::build_equipment_slots()),
-        ));
-        CartographyTableScreenHandler::new(0, &player_inventory)
+    fn map_stack() -> ItemStack {
+        let mut map = ItemStack::new(1, &Item::FILLED_MAP);
+        map.patch
+            .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
+        map
     }
 
     /// `CartographyTableMenu.setupResultSlot` copies a map with count two when the second input
     /// is another map (`CartographyTableMenu.java:125-133`).
-    #[tokio::test]
-    async fn map_copy_refreshes_the_result() {
-        let handler = handler();
-        let mut map = ItemStack::new(1, &Item::FILLED_MAP);
-        map.patch
-            .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
-        handler.input_inventory.set_stack(0, map).await;
-        handler
-            .input_inventory
-            .set_stack(1, ItemStack::new(1, &Item::MAP))
-            .await;
-
-        handler.update_result().await;
-
-        let result = handler.output_inventory.get_stack(0).await;
+    #[test]
+    fn map_copy_yields_two() {
+        let result = craft_result(&map_stack(), &ItemStack::new(1, &Item::MAP), 0, false)
+            .expect("copy result");
         assert_eq!(result.item.id, Item::FILLED_MAP.id);
         assert_eq!(result.item_count, 2);
         assert_eq!(
@@ -393,26 +381,36 @@ mod tests {
 
     /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:116-123`) marks
     /// paper and glass-pane results for `MapItem.onCraftedPostProcess`.
-    #[tokio::test]
-    async fn map_transform_refreshes_the_result_with_post_processing() {
-        let handler = handler();
-        let mut map = ItemStack::new(1, &Item::FILLED_MAP);
-        map.patch
-            .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
-        handler.input_inventory.set_stack(0, map).await;
-        handler
-            .input_inventory
-            .set_stack(1, ItemStack::new(1, &Item::PAPER))
-            .await;
-
-        handler.update_result().await;
-
-        let result = handler.output_inventory.get_stack(0).await;
+    #[test]
+    fn map_transform_carries_post_processing() {
+        let result = craft_result(&map_stack(), &ItemStack::new(1, &Item::PAPER), 0, false)
+            .expect("scale result");
         assert_eq!(
             result
                 .get_data_component::<MapPostProcessingImpl>()
                 .map(|value| value.processing),
             Some(MapPostProcessing::Scale)
         );
+        let result = craft_result(&map_stack(), &ItemStack::new(1, &Item::GLASS_PANE), 0, false)
+            .expect("lock result");
+        assert_eq!(
+            result
+                .get_data_component::<MapPostProcessingImpl>()
+                .map(|value| value.processing),
+            Some(MapPostProcessing::Lock)
+        );
+    }
+
+    /// Paper needs `!locked && scale < 4`, glass pane needs `!locked`
+    /// (`CartographyTableMenu.java:116,120`); failing either clears the result (`:125-129`).
+    #[test]
+    fn saved_data_gates_paper_and_pane() {
+        let paper = ItemStack::new(1, &Item::PAPER);
+        let pane = ItemStack::new(1, &Item::GLASS_PANE);
+        assert!(craft_result(&map_stack(), &paper, 4, false).is_none());
+        assert!(craft_result(&map_stack(), &paper, 3, false).is_some());
+        assert!(craft_result(&map_stack(), &paper, 0, true).is_none());
+        assert!(craft_result(&map_stack(), &pane, 0, true).is_none());
+        assert!(craft_result(&map_stack(), &pane, 4, false).is_some());
     }
 }
