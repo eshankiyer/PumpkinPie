@@ -10,7 +10,7 @@
 use crate::entity_equipment::EntityEquipment;
 use crate::screen_handler::InventoryPlayer;
 
-use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::data_component_impl::{CustomNameImpl, EquipmentSlot};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_protocol::java::client::play::CSetPlayerInventory;
@@ -191,13 +191,21 @@ impl PlayerInventory {
     /// Returns the number of items that couldn't fit.
     async fn add_stack_to_slot(&self, slot: usize, stack: ItemStack) -> usize {
         if slot >= Self::MAIN_SIZE {
+            // `Inventory.addResource(slot, stack)` (`Inventory.java:203-221`): an equipment slot
+            // (the off-hand, via `getSlotWithRemainingSpace`) grows in place up to its max size.
             if let Some(slot_type) = self.equipment_slots.get(&slot) {
                 let mut equipment = self.entity_equipment.lock().await;
-                let current = equipment.get(slot_type);
+                let mut current = equipment.get(slot_type);
                 if current.is_empty() {
-                    equipment.put(slot_type, stack);
-                    return 0;
+                    current = stack.copy_with_count(0);
                 }
+                let room = current.get_max_stack_size().saturating_sub(current.item_count);
+                let to_add = stack.item_count.min(room);
+                if to_add > 0 {
+                    current.increment(to_add);
+                    equipment.put(slot_type, current);
+                }
+                return (stack.item_count - to_add) as usize;
             }
             return stack.item_count as usize;
         }
@@ -210,7 +218,9 @@ impl PlayerInventory {
             *self_stack = stack.copy_with_count(0);
         }
 
-        let count_left = self_stack.get_max_stack_size() - self_stack.item_count;
+        let count_left = self_stack
+            .get_max_stack_size()
+            .saturating_sub(self_stack.item_count);
         let count_min = stack_count.min(count_left);
 
         if count_min != 0 {
@@ -245,7 +255,9 @@ impl PlayerInventory {
     /// Finds a slot with the same item type that has room for more items.
     ///
     /// Checks selected slot, off-hand, then other slots.
-    async fn get_occupied_slot_with_room_for_stack(&self, stack: &ItemStack) -> i16 {
+    ///
+    /// Vanilla: `Inventory.getSlotWithRemainingSpace` (`Inventory.java:223-238`).
+    pub async fn get_occupied_slot_with_room_for_stack(&self, stack: &ItemStack) -> i16 {
         let selected = self.get_selected_slot() as usize;
         let inv = self.main_inventory.read().await;
         if Self::can_stack_add_more(&inv[selected], stack) {
@@ -286,7 +298,37 @@ impl PlayerInventory {
     /// # Returns
     /// `true` if any items were inserted, `false` otherwise.
     pub async fn insert_stack(&self, slot: i16, stack: &mut ItemStack) -> bool {
+        self.add(slot, stack, false).await
+    }
+
+    /// Vanilla `Inventory.add(slot, stack)` (`Inventory.java:250-301`).
+    ///
+    /// With `has_infinite_materials` (`Player.hasInfiniteMaterials`, i.e. creative) a stack
+    /// that could not be (fully) inserted is consumed entirely and the call still succeeds.
+    ///
+    /// # Arguments
+    /// - `slot` - The slot index, or -1 for any slot
+    /// - `stack` - The stack to insert (modified in place)
+    /// - `has_infinite_materials` - Whether the receiving player has infinite materials
+    pub async fn add(&self, slot: i16, stack: &mut ItemStack, has_infinite_materials: bool) -> bool {
         if stack.is_empty() {
+            return false;
+        }
+
+        if stack.is_damaged() {
+            let slot = if slot == -1 {
+                self.get_empty_slot().await
+            } else {
+                slot
+            };
+            if slot >= 0 {
+                self.set_stack(slot as usize, stack.copy_and_clear()).await;
+                return true;
+            }
+            if has_infinite_materials {
+                stack.set_count(0);
+                return true;
+            }
             return false;
         }
 
@@ -305,7 +347,55 @@ impl PlayerInventory {
             }
         }
 
+        if stack.item_count == i && has_infinite_materials {
+            stack.set_count(0);
+            return true;
+        }
         stack.item_count < i
+    }
+
+    /// Vanilla `Inventory.isUsableForCrafting` (`Inventory.java:144-146`).
+    ///
+    /// Recipe-book placement must not consume items that are damaged, enchanted,
+    /// or have a custom name.
+    #[must_use]
+    pub fn is_usable_for_crafting(stack: &ItemStack) -> bool {
+        !stack.is_damaged()
+            && !stack.has_enchantments()
+            && stack.get_data_component::<CustomNameImpl>().is_none()
+    }
+
+    /// Vanilla `Inventory.findSlotMatchingCraftingIngredient` (`Inventory.java:148-160`)
+    /// over an explicit slice of main-inventory stacks.
+    #[must_use]
+    pub fn find_slot_matching_crafting_ingredient_in(
+        items: &[ItemStack],
+        item: &Item,
+        existing: &ItemStack,
+    ) -> Option<usize> {
+        items.iter().position(|stack| {
+            !stack.is_empty()
+                && stack.item.id == item.id
+                && Self::is_usable_for_crafting(stack)
+                && (existing.is_empty() || ItemStack::is_same_item_same_components(existing, stack))
+        })
+    }
+
+    /// Vanilla `Inventory.findSlotMatchingCraftingIngredient` (`Inventory.java:148-160`).
+    pub async fn find_slot_matching_crafting_ingredient(
+        &self,
+        item: &Item,
+        existing: &ItemStack,
+    ) -> Option<usize> {
+        let inv = self.main_inventory.read().await;
+        Self::find_slot_matching_crafting_ingredient_in(&*inv, item, existing)
+    }
+
+    /// The number of empty stacks among the 36 non-equipment slots
+    /// (`ServerPlaceRecipe.getAmountOfFreeSlotsInInventory`, `ServerPlaceRecipe.java:230-238`).
+    pub async fn free_main_slot_count(&self) -> usize {
+        let inv = self.main_inventory.read().await;
+        inv.iter().filter(|stack| stack.is_empty()).count()
     }
 
     /// Finds the first slot containing a matching stack.
@@ -564,5 +654,52 @@ mod tests {
         Inventory::mark_dirty(&inventory);
 
         assert_eq!(inventory.times_changed.load(Ordering::Relaxed), 2);
+    }
+
+    fn test_inventory() -> PlayerInventory {
+        PlayerInventory::new(
+            Arc::new(Mutex::new(EntityEquipment::new())),
+            Arc::new(build_equipment_slots()),
+        )
+    }
+
+    // `Inventory.addResource(slot, stack)` grows a non-empty off-hand in place.
+    #[tokio::test]
+    async fn insert_stacks_onto_non_empty_off_hand() {
+        let inventory = test_inventory();
+        inventory
+            .set_stack_in_hand(Hand::Left, ItemStack::new(32, &Item::TORCH))
+            .await;
+        // Selected slot is empty, so the off-hand is the slot with remaining space.
+        let mut torches = ItemStack::new(16, &Item::TORCH);
+        assert!(inventory.insert_stack_anywhere(&mut torches).await);
+        assert!(torches.is_empty());
+        assert_eq!(inventory.off_hand_item().await.item_count, 48);
+
+        inventory
+            .set_stack_in_hand(Hand::Left, ItemStack::new(60, &Item::TORCH))
+            .await;
+        let mut torches = ItemStack::new(16, &Item::TORCH);
+        assert!(inventory.insert_stack_anywhere(&mut torches).await);
+        assert!(torches.is_empty());
+        assert_eq!(inventory.off_hand_item().await.item_count, 64);
+        assert_eq!(inventory.get_stack(0).await.item_count, 12);
+    }
+
+    // `Inventory.add` consumes the whole stack for a player with infinite materials.
+    #[tokio::test]
+    async fn add_consumes_stack_with_infinite_materials() {
+        let inventory = test_inventory();
+        {
+            let mut inv = inventory.main_inventory.write().await;
+            for stack in inv.iter_mut() {
+                *stack = ItemStack::new(64, &Item::DIRT);
+            }
+        }
+        let mut full = ItemStack::new(10, &Item::TORCH);
+        assert!(!inventory.add(-1, &mut full, false).await);
+        assert_eq!(full.item_count, 10);
+        assert!(inventory.add(-1, &mut full, true).await);
+        assert!(full.is_empty());
     }
 }

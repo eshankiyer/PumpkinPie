@@ -804,20 +804,20 @@ impl EntityBase for ItemEntity {
 
             let inserted = {
                 let mut stack = self.item_stack.lock().await;
-                player.inventory.insert_stack_anywhere(&mut stack).await
+                // `Inventory.add` consumes the whole stack for infinite-materials players.
+                player
+                    .inventory
+                    .add(-1, &mut stack, player.is_creative())
+                    .await
             };
 
-            if inserted || player.is_creative() {
+            if inserted {
                 let (count_after, is_empty) = {
                     let stack = self.item_stack.lock().await;
                     (stack.item_count, stack.is_empty())
                 };
 
-                let amount_picked_up = if player.is_creative() {
-                    count_before
-                } else {
-                    count_before - count_after
-                };
+                let amount_picked_up = count_before - count_after;
 
                 if amount_picked_up > 0 {
                     player

@@ -775,16 +775,26 @@ impl EntityBase for TridentEntity {
                 return;
             }
 
-            if !returning_to_owner {
-                match self.pickup.load() {
-                    ArrowPickup::Disallowed => return,
-                    ArrowPickup::CreativeOnly if !player.is_creative() => return,
-                    _ => {}
-                }
-            }
-
+            // `ThrownTrident.tryPickup` (`ThrownTrident.java:173-175`) on top of
+            // `AbstractArrow.tryPickup` (`AbstractArrow.java:658-664`).
             let mut stack = self.item_stack.lock().await.clone();
-            if player.is_creative() || player.inventory.insert_stack_anywhere(&mut stack).await {
+            let mut picked_up = match self.pickup.load() {
+                ArrowPickup::Disallowed => false,
+                ArrowPickup::Allowed => {
+                    player
+                        .inventory
+                        .add(-1, &mut stack, player.is_creative())
+                        .await
+                }
+                ArrowPickup::CreativeOnly => player.is_creative(),
+            };
+            if !picked_up && returning_to_owner {
+                picked_up = player
+                    .inventory
+                    .add(-1, &mut stack, player.is_creative())
+                    .await;
+            }
+            if picked_up {
                 player.living_entity.pickup(&self.entity, 1);
                 self.get_entity().remove().await;
             }

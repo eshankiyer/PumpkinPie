@@ -10,7 +10,8 @@ impl JavaClient {
         packet: SPlaceRecipe,
     ) {
         use crate::net::java::recipe_helper::{
-            GenericIngredient, compute_biggest_craftable, take_n_ingredient,
+            AvailableItems, GenericIngredient, clamp_to_max_stack_size, move_item_to_grid,
+            test_clear_grid,
         };
         use crate::server::recipe::DynamicRecipe;
         use pumpkin_data::recipes::{CraftingRecipeTypes, RECIPES_COOKING, RECIPES_CRAFTING};
@@ -194,63 +195,43 @@ impl JavaClient {
             }
         }
 
-        // Check if this exact recipe is already placed (determines stacking vs fresh fill).
-        let recipe_matches = {
-            let mut ok = true;
-            for (idx, ing) in ingredient_slots.iter().enumerate() {
-                let stack = crafting_inv.get_stack(idx).await;
-                match ing {
-                    None => {
-                        if !stack.is_empty() {
-                            ok = false;
-                            break;
-                        }
-                    }
-                    Some(ingredient) => {
-                        if stack.is_empty() || !ingredient.match_item(stack.item) {
-                            ok = false;
-                            break;
-                        }
-                    }
-                }
-            }
-            ok
-        };
-
-        // Read minimum count from occupied slots before clearing (needed for stacking).
-        let current_min = if recipe_matches && !use_max {
-            let mut min = u8::MAX;
-            for (idx, ing) in ingredient_slots.iter().enumerate() {
-                if ing.is_some() {
-                    let stack = crafting_inv.get_stack(idx).await;
-                    if !stack.is_empty() {
-                        min = min.min(stack.item_count);
-                    }
-                }
-            }
-            if min == u8::MAX { 0 } else { min }
-        } else {
-            0
-        };
-
-        // Always clear the grid first, returning items to inventory.
-        for i in 0..grid_size {
-            let stack = crafting_inv.remove_stack(i).await;
-            if !stack.is_empty() {
-                player.inventory.offer(stack, false, player.as_ref()).await;
-            }
+        // Current grid contents (vanilla reads the `inputGridSlots` directly).
+        let mut grid_stacks = Vec::with_capacity(grid_size);
+        for idx in 0..grid_size {
+            grid_stacks.push(crafting_inv.get_stack(idx).await);
         }
 
-        // Determine how many of each ingredient to place per slot.
+        // `ServerPlaceRecipe.placeRecipe` (`ServerPlaceRecipe.java:36-42`): unless the player can
+        // drop items (creative), a grid that cannot be handed back to the inventory changes nothing.
+        if !player.is_creative() && !test_clear_grid(&player.inventory, &grid_stacks).await {
+            return;
+        }
+
+        // `inventory.fillStackedContents` + `menu.fillCraftSlotsStackedContents`.
+        let mut available = AvailableItems::default();
+        for stack in player.inventory.main_inventory.read().await.iter() {
+            available.account_simple_stack(stack);
+        }
+        for stack in &grid_stacks {
+            available.account_simple_stack(stack);
+        }
+
         let active_ingredients: Vec<GenericIngredient<'_>> =
             ingredient_slots.iter().flatten().copied().collect();
-        let biggest_craftable =
-            compute_biggest_craftable(&active_ingredients, &player.inventory).await;
 
-        // Vanilla ServerPlaceRecipe.tryPlaceRecipe: if the player can't craft the recipe
-        // at all, the grid (already cleared above) stays empty and the client is told to
-        // render the recipe as a ghost overlay instead.
-        if biggest_craftable == 0 {
+        // Vanilla `ServerPlaceRecipe.tryPlaceRecipe`: if the player can't craft the recipe
+        // at all, the grid is cleared and the client is told to render the recipe as a ghost
+        // overlay instead.
+        if available.plan(&active_ingredients, 1).is_none() {
+            for (i, stack) in grid_stacks.iter().enumerate() {
+                if !stack.is_empty() {
+                    crafting_inv.remove_stack(i).await;
+                    player
+                        .inventory
+                        .offer(stack.clone(), false, player.as_ref())
+                        .await;
+                }
+            }
             if let Some(source) = ghost_source {
                 self.enqueue_client_packet(
                     &pumpkin_protocol::java::client::play::CPlaceGhostRecipe::new(
@@ -273,20 +254,85 @@ impl JavaClient {
             return;
         }
 
+        // Check if this exact recipe is already placed (determines stacking vs fresh fill).
+        let recipe_matches = ingredient_slots.iter().zip(&grid_stacks).all(|(ing, stack)| {
+            ing.as_ref().map_or_else(
+                || stack.is_empty(),
+                |ingredient| !stack.is_empty() && ingredient.match_item(stack.item),
+            )
+        });
+
+        let biggest_craftable = available.biggest_craftable(&active_ingredients);
+
+        // `ServerPlaceRecipe.placeRecipe` (`:96-101`): a placed recipe whose stacks cannot grow
+        // any further is left untouched.
+        if recipe_matches
+            && grid_stacks.iter().any(|stack| {
+                !stack.is_empty()
+                    && biggest_craftable.min(stack.get_max_stack_size()) < stack.item_count.saturating_add(1)
+            })
+        {
+            return;
+        }
+
+        // `ServerPlaceRecipe.calculateAmountToCraft` (`:145-168`).
         let amount_to_craft = if use_max {
             biggest_craftable
         } else if recipe_matches {
-            current_min.saturating_add(1)
+            grid_stacks
+                .iter()
+                .filter(|stack| !stack.is_empty())
+                .map(|stack| stack.item_count)
+                .min()
+                .map_or(1, |min| min.saturating_add(1))
         } else {
             1
         };
 
-        // Fill each grid slot with exactly `amount_to_craft` matching items.
+        let Some(mut items_used) = available.plan(&active_ingredients, amount_to_craft) else {
+            return;
+        };
+        let adjusted_amount = clamp_to_max_stack_size(amount_to_craft, &items_used);
+        if adjusted_amount != amount_to_craft {
+            let Some(items) = available.plan(&active_ingredients, adjusted_amount) else {
+                return;
+            };
+            items_used = items;
+        }
+
+        // `clearGrid`: hand the grid back to the inventory (`placeItemBackInInventory`).
+        for (i, stack) in grid_stacks.iter().enumerate() {
+            if !stack.is_empty() {
+                crafting_inv.remove_stack(i).await;
+                player
+                    .inventory
+                    .offer(stack.clone(), false, player.as_ref())
+                    .await;
+            }
+        }
+
+        // Fill each grid slot with `adjusted_amount` of the item chosen for its ingredient.
+        let mut ingredient_index = 0usize;
         for (idx, ing) in ingredient_slots.iter().enumerate() {
-            let Some(ingredient) = ing else { continue };
-            let taken = take_n_ingredient(&player.inventory, ingredient, amount_to_craft).await;
-            if !taken.is_empty() {
-                crafting_inv.set_stack(idx, taken).await;
+            if ing.is_none() {
+                continue;
+            }
+            let item = items_used[ingredient_index];
+            ingredient_index += 1;
+            let mut remaining = adjusted_amount;
+            while remaining > 0 {
+                let Some(left) = move_item_to_grid(
+                    &player.inventory,
+                    crafting_inv.as_ref(),
+                    idx,
+                    item,
+                    remaining,
+                )
+                .await
+                else {
+                    break;
+                };
+                remaining = left;
             }
         }
 

@@ -100,7 +100,7 @@ impl BlockBehaviour for FlowerPotBlock {
                 .insert_stack_anywhere(&mut plant)
                 .await
             {
-                args.player.drop_item(plant).await;
+                args.player.drop_item_not_thrown(plant).await;
             }
 
             args.world

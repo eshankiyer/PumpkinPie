@@ -5601,34 +5601,27 @@ impl Player {
             // `destroyVanishingCursedItems` *before* `inventory.dropAll()`, so cursed items
             // are erased rather than dropped. Gated on `keepInventory` exactly as vanilla is.
             self.destroy_vanishing_cursed_items().await;
-            let mut main_inv = self.inventory().main_inventory.write().await;
-            for item in main_inv.iter_mut() {
-                if !item.is_empty() {
-                    let stack = std::mem::replace(item, ItemStack::EMPTY.clone());
-                    self.world().drop_stack(&block_pos, stack).await;
+            // `Inventory.dropAll` (`Inventory.java:444-454`): every main slot is dropped and
+            // emptied first, then `EntityEquipment.dropAll` (`EntityEquipment.java:62-68`) drops
+            // and clears every equipment slot. Both go through `player.drop(stack, true, false)`
+            // (`LivingEntity.java:780-795`): random-direction burst from eye height - 0.3, pickup
+            // delay 40, no thrower and no drop statistics (`ServerPlayer.java:2016-2028`).
+            let mut dropped = Vec::new();
+            {
+                let mut main_inv = self.inventory().main_inventory.write().await;
+                for item in main_inv.iter_mut() {
+                    if !item.is_empty() {
+                        dropped.push(std::mem::replace(item, ItemStack::EMPTY.clone()));
+                    }
                 }
             }
-            drop(main_inv);
-
-            // `Inventory.dropAll` (`world/entity/player/Inventory.java:444-454`) drops the main
-            // items above, then unconditionally drops every equipped item via
-            // `this.equipment.dropAll(this.player)` (`EntityEquipment.dropAll`,
-            // `EntityEquipment.java:62-68`): every armour/off-hand slot, no chance roll and no
-            // damage randomization (unlike a mob's `dropCustomDeathLoot`), then clears the map.
-            // `player.drop(stack, true, false)` (`LivingEntity.java:780-795`, `randomly=true`
-            // branch of `createItemStackToDrop`, `LivingEntity.java:3436-3466`) spawns each item
-            // at eye height with a random horizontal direction, independent of look direction,
-            // and does not touch the drop/drop_count statistics. `World::drop_stack` (used for
-            // the main-inventory sweep just above, and already the established approximation for
-            // a mob's own death-equipment drop in `LivingEntity::drop_equipment`) spawns at the
-            // block position with a small jitter instead of the eye-height/random-direction
-            // vanilla formula; reused here for the same reason and to stay consistent with that
-            // precedent, not because it reproduces the exact vanilla velocity.
-            let mut equipment = self.inventory().entity_equipment.lock().await;
-            for stack in std::mem::take(&mut equipment.equipment).into_values() {
-                if !stack.is_empty() {
-                    self.world().drop_stack(&block_pos, stack).await;
-                }
+            dropped.extend(
+                std::mem::take(&mut self.inventory().entity_equipment.lock().await.equipment)
+                    .into_values()
+                    .filter(|stack| !stack.is_empty()),
+            );
+            for stack in dropped {
+                self.drop_item_with(stack, 40, None, true, false).await;
             }
         }
 
@@ -5957,53 +5950,80 @@ impl Player {
     }
 
     pub async fn drop_item(&self, item_stack: ItemStack) {
-        self.drop_item_with(item_stack, 40, None).await;
+        self.drop_item_with(item_stack, 40, None, false, true).await;
     }
 
     /// `GiveCommand`: an overflow drop is handed straight back to the player, with no pickup
     /// delay and reserved for them so nobody else can take it.
     pub async fn drop_item_for_self(&self, item_stack: ItemStack) {
-        self.drop_item_with(item_stack, 0, Some(self.gameprofile.id))
+        self.drop_item_with(item_stack, 0, Some(self.gameprofile.id), false, false)
             .await;
     }
 
+    /// `Player.drop(stack, false)`: a drop that was not thrown from the hand (no drop
+    /// statistics, no thrower), e.g. `FlowerPotBlock` overflow.
+    pub async fn drop_item_not_thrown(&self, item_stack: ItemStack) {
+        self.drop_item_with(item_stack, 40, None, false, false).await;
+    }
+
+    /// `LivingEntity.drop(stack, randomly, thrownFromHand)` (`LivingEntity.java:780-796`,
+    /// `createItemStackToDrop` `:3436-3466`) as overridden by `ServerPlayer.drop`
+    /// (`ServerPlayer.java:2016-2028`): the drop statistics and the thrower are only applied
+    /// when the stack was thrown from the hand.
     async fn drop_item_with(
         &self,
         item_stack: ItemStack,
         pickup_delay: u8,
         target: Option<uuid::Uuid>,
+        randomly: bool,
+        thrown_from_hand: bool,
     ) {
-        self.increment_stat(
-            statistics::StatisticCategory::Dropped,
-            item_stack.item.id as i32,
-            item_stack.item_count as i32,
-        )
-        .await;
-        self.increment_stat(
-            statistics::StatisticCategory::Custom,
-            statistics::CustomStatistic::Drop as i32,
-            1,
-        )
-        .await;
+        if item_stack.is_empty() {
+            return;
+        }
+        if thrown_from_hand {
+            self.increment_stat(
+                statistics::StatisticCategory::Dropped,
+                item_stack.item.id as i32,
+                item_stack.item_count as i32,
+            )
+            .await;
+            self.increment_stat(
+                statistics::StatisticCategory::Custom,
+                statistics::CustomStatistic::Drop as i32,
+                1,
+            )
+            .await;
+        }
         let item_pos = self.living_entity.entity.pos.load()
             + Vector3::new(0.0, self.living_entity.entity.get_eye_height() - 0.3, 0.0);
         let entity = Entity::new(self.world(), item_pos, &EntityType::ITEM);
 
-        let pitch = f64::from(self.living_entity.entity.pitch.load()).to_radians();
-        let yaw = f64::from(self.living_entity.entity.yaw.load()).to_radians();
-        let pitch_sin = pitch.sin();
-        let pitch_cos = pitch.cos();
-        let yaw_sin = yaw.sin();
-        let yaw_cos = yaw.cos();
-        let horizontal_offset = rand::random::<f64>() * TAU;
-        let l = 0.02 * rand::random::<f64>();
+        let velocity = if randomly {
+            let pow = rand::random::<f32>() * 0.5;
+            let dir = rand::random::<f32>() * std::f32::consts::TAU;
+            Vector3::new(
+                f64::from(-dir.sin() * pow),
+                f64::from(0.2f32),
+                f64::from(dir.cos() * pow),
+            )
+        } else {
+            let pitch = f64::from(self.living_entity.entity.pitch.load()).to_radians();
+            let yaw = f64::from(self.living_entity.entity.yaw.load()).to_radians();
+            let pitch_sin = pitch.sin();
+            let pitch_cos = pitch.cos();
+            let yaw_sin = yaw.sin();
+            let yaw_cos = yaw.cos();
+            let horizontal_offset = rand::random::<f64>() * TAU;
+            let l = 0.02 * rand::random::<f64>();
 
-        let velocity = Vector3::new(
-            (-yaw_sin * pitch_cos).mul_add(0.3, horizontal_offset.cos() * l),
-            (rand::random::<f64>() - rand::random::<f64>())
-                .mul_add(0.1, (-pitch_sin).mul_add(0.3, 0.1)),
-            (yaw_cos * pitch_cos).mul_add(0.3, horizontal_offset.sin() * l),
-        );
+            Vector3::new(
+                (-yaw_sin * pitch_cos).mul_add(0.3, horizontal_offset.cos() * l),
+                (rand::random::<f64>() - rand::random::<f64>())
+                    .mul_add(0.1, (-pitch_sin).mul_add(0.3, 0.1)),
+                (yaw_cos * pitch_cos).mul_add(0.3, horizontal_offset.sin() * l),
+            )
+        };
 
         // TODO: Merge stacks together
         let item_entity = Arc::new(ItemEntity::new_with_velocity(
@@ -6013,6 +6033,9 @@ impl Player {
             pickup_delay,
         ));
         item_entity.set_target(target);
+        if thrown_from_hand {
+            item_entity.set_thrower(self);
+        }
         self.world().spawn_entity(item_entity).await;
     }
 
@@ -8811,9 +8834,12 @@ impl InventoryPlayer for Player {
             && self.can_interact_with_block_at(&pos, 4.0)
     }
 
-    fn drop_item(&self, item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
+    fn drop_item(&self, item: ItemStack, retain_ownership: bool) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
-            self.drop_item(item).await;
+            // The flag is vanilla's `thrownFromHand` (`Player.drop(stack, thrownFromHand)`,
+            // `Player.java:582-584`): inventory overflow passes false, click-outside passes true.
+            self.drop_item_with(item, 40, None, false, retain_ownership)
+                .await;
         })
     }
 

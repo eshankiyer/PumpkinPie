@@ -967,7 +967,17 @@ impl EntityBase for ArrowEntity {
             // Try to insert an arrow into the player's inventory
             let item_stack = self.item_stack.read().await;
             let mut stack = Self::pickup_item_stack(&item_stack);
-            if player.is_creative() || player.inventory.insert_stack_anywhere(&mut stack).await {
+            // `AbstractArrow.tryPickup` (`AbstractArrow.java:658-664`): `ALLOWED` really adds the
+            // item (a creative player still consumes it), `CREATIVE_ONLY` only checks creative.
+            let picked_up = if matches!(self.pickup.load(), ArrowPickup::Allowed) {
+                player
+                    .inventory
+                    .add(-1, &mut stack, player.is_creative())
+                    .await
+            } else {
+                player.is_creative()
+            };
+            if picked_up {
                 player.living_entity.pickup(&self.entity, 1);
 
                 // Remove arrow entity after pickup

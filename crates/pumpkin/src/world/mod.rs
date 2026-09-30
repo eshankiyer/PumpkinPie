@@ -4730,6 +4730,7 @@ impl World {
         let last_death_location = player.get_last_death_location().await;
 
         let data_kept = u8::from(alive);
+        let was_spectator = player.gamemode.load() == GameMode::Spectator;
 
         // Copy spawn info from level_info to avoid holding lock across await
         let (spawn_x, spawn_y, spawn_z, spawn_yaw, spawn_pitch, keep_inventory) = {
@@ -4950,7 +4951,10 @@ impl World {
 
         player.hunger_manager.restart();
 
-        if !keep_inventory {
+        // `ServerPlayer.restoreFrom` (`ServerPlayer.java:1618-1623`) keeps the inventory and XP
+        // for `KEEP_INVENTORY || oldPlayer.isSpectator()`; a spectator's loot is never dropped
+        // on death (`ServerPlayer.java:921`), so it must not be wiped either.
+        if !keep_inventory && !was_spectator {
             player.set_experience(0, 0.0, 0).await;
             player.inventory.clear().await;
         }
