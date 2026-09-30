@@ -7,7 +7,7 @@ use crate::{
 };
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::{Block, BlockId};
+use pumpkin_data::BlockDirection;
 use pumpkin_protocol::java::client::play::CWorldEvent;
 use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::math::vector3::Vector3;
@@ -63,41 +63,110 @@ fn is_water_potion(stack: &ItemStack) -> bool {
         == Some(pumpkin_data::potion::Potion::WATER.id as i32)
 }
 
-/// Extinguishes fire (including soul fire) at the hit position and its four horizontal neighbors.
-async fn extinguish_fire(world: &Arc<crate::world::World>, hit_pos: Vector3<f64>) {
-    let air_state_id = Block::AIR.default_state.id;
+/// `AbstractThrownPotion.dowseFire` (`AbstractThrownPotion.java:109-121`): destroys fire without
+/// drops, extinguishes a lit candle or candle cake, or douses a lit campfire.
+async fn dowse_fire(
+    world: &Arc<crate::world::World>,
+    pos: &BlockPos,
+    owner: Option<&Arc<dyn EntityBase>>,
+) {
+    use crate::world::game_event::{GameEventContext, emit_game_event};
+    use pumpkin_data::block_properties::{
+        BlockProperties, CampfireLikeProperties, CandleLikeProperties, RedstoneOreLikeProperties,
+    };
+    use pumpkin_data::game_event::GameEvent;
+    use pumpkin_data::sound::{Sound, SoundCategory};
+    use pumpkin_data::tag::{self, Taggable};
+    use pumpkin_data::world::WorldEvent;
 
-    let neighbors = [
-        hit_pos,
-        Vector3::new(hit_pos.x + 1.0, hit_pos.y, hit_pos.z),
-        Vector3::new(hit_pos.x - 1.0, hit_pos.y, hit_pos.z),
-        Vector3::new(hit_pos.x, hit_pos.y, hit_pos.z + 1.0),
-        Vector3::new(hit_pos.x, hit_pos.y, hit_pos.z - 1.0),
-    ];
-
-    for p in neighbors {
-        let pos = BlockPos(Vector3::new(
-            p.x.floor() as i32,
-            p.y.floor() as i32,
-            p.z.floor() as i32,
-        ));
-        let state_id = world.get_block_state_id(&pos);
-        let raw_block_id = state_id.to_block_id();
-        if raw_block_id == BlockId::FIRE || raw_block_id == BlockId::SOUL_FIRE {
-            world
-                .set_block_state(&pos, air_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+    let (block, state_id) = world.get_block_and_state_id(pos);
+    if block.has_tag(&tag::Block::MINECRAFT_FIRE) {
+        world
+            .break_block(pos, None, BlockFlags::SKIP_DROPS)
+            .await;
+    } else if block.has_tag(&tag::Block::MINECRAFT_CANDLES)
+        || block.has_tag(&tag::Block::MINECRAFT_CANDLE_CAKES)
+    {
+        // `AbstractCandleBlock.isLit` + `extinguish(null, ...)` (`AbstractCandleBlock.java:83-96`).
+        let new_state = if block.has_tag(&tag::Block::MINECRAFT_CANDLES) {
+            let mut props = CandleLikeProperties::from_state_id(state_id, block);
+            if !props.lit {
+                return;
+            }
+            props.lit = false;
+            props.to_state_id(block)
+        } else {
+            let mut props = RedstoneOreLikeProperties::from_state_id(state_id, block);
+            if !props.lit {
+                return;
+            }
+            props.lit = false;
+            props.to_state_id(block)
+        };
+        world
+            .set_block_state(pos, new_state, BlockFlags::NOTIFY_ALL)
+            .await;
+        world.play_sound(
+            Sound::BlockCandleExtinguish,
+            SoundCategory::Blocks,
+            &pos.to_centered_f64(),
+        );
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            pos.to_centered_f64(),
+            GameEventContext::none(),
+        )
+        .await;
+    } else if block.has_tag(&tag::Block::MINECRAFT_CAMPFIRES) {
+        // `CampfireBlock.isLitCampfire` then `dowse(owner, ...)`; the particles are client side.
+        let mut props = CampfireLikeProperties::from_state_id(state_id, block);
+        if !props.lit {
+            return;
         }
+        world.sync_world_event(WorldEvent::SoundExtinguishFire, *pos, 0);
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            pos.to_centered_f64(),
+            owner.map_or_else(GameEventContext::none, |owner| {
+                GameEventContext::of_entity(owner.clone())
+            }),
+        )
+        .await;
+        props.lit = false;
+        world
+            .set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
+            .await;
     }
 }
 
+/// `AbstractThrownPotion.onHitBlock` (`AbstractThrownPotion.java:48-66`): a water potion that
+/// hits a block dowses the position in front of the hit face, the hit block itself and the four
+/// horizontal neighbours of the front position. Entity hits do nothing here.
 pub(crate) async fn extinguish_fire_if_water_potion(
     world: &Arc<crate::world::World>,
-    hit_pos: Vector3<f64>,
+    hit: &crate::entity::projectile::ProjectileHit,
     stack: &ItemStack,
+    owner: Option<&Arc<dyn EntityBase>>,
 ) {
-    if is_water_potion(stack) {
-        extinguish_fire(world, hit_pos).await;
+    let crate::entity::projectile::ProjectileHit::Block { pos, face, .. } = hit else {
+        return;
+    };
+    if !is_water_potion(stack) {
+        return;
+    }
+
+    let effect_pos = pos.offset(face.to_offset());
+    dowse_fire(world, &effect_pos, owner).await;
+    dowse_fire(world, &effect_pos.offset(face.opposite().to_offset()), owner).await;
+    for direction in [
+        BlockDirection::North,
+        BlockDirection::South,
+        BlockDirection::West,
+        BlockDirection::East,
+    ] {
+        dowse_fire(world, &effect_pos.offset(direction.to_offset()), owner).await;
     }
 }
 
@@ -231,13 +300,12 @@ impl EntityBase for SplashPotionEntity {
             let world = self.get_entity().world.load();
             let hit_pos = hit.hit_pos();
 
-            // Only extinguish fire for plain water potions
             let stack = self.item_stack.read().await.clone();
-            extinguish_fire_if_water_potion(&world, hit_pos, &stack).await;
             let owner = self
                 .thrown
                 .owner_id
                 .and_then(|id| world.get_entity_by_id(id));
+            extinguish_fire_if_water_potion(&world, &hit, &stack, owner.as_ref()).await;
             apply_water_potion_entity_effects(self, owner.as_deref(), &stack).await;
 
             let effects = crate::item::potion::PotionContents::read_potion_effects(&stack);

@@ -110,9 +110,7 @@ impl EntityBase for LingeringPotionEntity {
             let world = self.get_entity().world.load();
             let hit_pos = hit.hit_pos();
 
-            // Only extinguish fire for plain water potions
             let stack = self.item_stack.read().await.clone();
-            extinguish_fire_if_water_potion(&world, hit_pos, &stack).await;
             // `AbstractThrownPotion.onHit` (`AbstractThrownPotion.java:70-85`) runs the water
             // branch for the lingering potion too, so a lingering water bottle also burns
             // endermen, douses burning mobs and rehydrates axolotls.
@@ -120,6 +118,7 @@ impl EntityBase for LingeringPotionEntity {
                 .thrown
                 .owner_id
                 .and_then(|id| world.get_entity_by_id(id));
+            extinguish_fire_if_water_potion(&world, &hit, &stack, owner.as_ref()).await;
             crate::entity::projectile::splash_potion::apply_water_potion_entity_effects(
                 self,
                 owner.as_deref(),

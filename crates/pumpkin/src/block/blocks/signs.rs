@@ -17,7 +17,6 @@ use pumpkin_data::tag::Taggable;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::{TextComponent, TextContent};
 use pumpkin_world::world::BlockAccessor;
 use uuid::Uuid;
@@ -947,15 +946,36 @@ fn is_facing_front_text(
             };
         }
     }
-    let bounding_box = Vector3::new(0.5, 0.5, 0.5);
+    // `getSignHitboxCenterPosition`: only plain wall signs override the (0.5, 0.5, 0.5) default.
+    let (center_x, center_z) = if block.name.ends_with("_wall_sign") {
+        wall_sign_hitbox_center_xz(rotation)
+    } else {
+        (0.5, 0.5)
+    };
 
-    let d = player.eye_position().x - (f64::from(location.0.x) + bounding_box.x);
-    let d1 = player.eye_position().z - (f64::from(location.0.z) + bounding_box.z);
+    let d = player.eye_position().x - (f64::from(location.0.x) + center_x);
+    let d1 = player.eye_position().z - (f64::from(location.0.z) + center_z);
 
     let f = (d1.atan2(d).to_degrees() as f32) - 90.0;
 
     let diff = (f - rotation + 180.0).rem_euclid(360.0) - 180.0;
     diff.abs() <= 90.0
+}
+
+/// `WallSignBlock.getSignHitboxCenterPosition` (`WallSignBlock.java:95-98`): the centre of the
+/// facing shape `boxZ(16, 4.5, 12.5, 14, 16)` rotated per facing, so the sign hugs the wall
+/// behind it. Keyed by the facing yaw used in `is_facing_front_text` (north 180, west 90,
+/// east -90, south 0); returns the (x, z) centre.
+fn wall_sign_hitbox_center_xz(facing_yaw: f32) -> (f64, f64) {
+    if facing_yaw > 135.0 {
+        (0.5, 0.9375)
+    } else if facing_yaw > 45.0 {
+        (0.9375, 0.5)
+    } else if facing_yaw < -45.0 {
+        (0.0625, 0.5)
+    } else {
+        (0.5, 0.0625)
+    }
 }
 
 fn get_yaw_from_rotation_16(rotation: u8) -> f32 {
@@ -997,9 +1017,17 @@ fn has_editable_text(text: &crate::block::entities::sign::Text) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        SignBlock, click_command, should_open_text_editor, wall_hanging_attachment_directions,
+        SignBlock, click_command, wall_sign_hitbox_center_xz, should_open_text_editor, wall_hanging_attachment_directions,
     };
     use pumpkin_data::{Block, BlockDirection};
+
+    #[test]
+    fn wall_sign_center_hugs_the_wall() {
+        assert_eq!(wall_sign_hitbox_center_xz(180.0), (0.5, 0.9375));
+        assert_eq!(wall_sign_hitbox_center_xz(0.0), (0.5, 0.0625));
+        assert_eq!(wall_sign_hitbox_center_xz(90.0), (0.9375, 0.5));
+        assert_eq!(wall_sign_hitbox_center_xz(-90.0), (0.0625, 0.5));
+    }
 
     #[test]
     fn click_command_reads_root_run_command_events() {

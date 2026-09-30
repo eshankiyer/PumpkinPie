@@ -58,6 +58,12 @@ pub struct TurtleEntity {
 }
 
 impl TurtleEntity {
+    /// Vanilla `Turtle.setHomePos`; must be called before spawn, since
+    /// `mob_init_data_tracker` only defaults the home when none is set.
+    pub fn set_home_pos(&self, pos: BlockPos) {
+        self.home_pos.store(Some(pos));
+    }
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let mut navigator = mob_entity.navigator.lock().unwrap();
