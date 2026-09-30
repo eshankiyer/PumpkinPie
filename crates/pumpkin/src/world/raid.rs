@@ -1067,6 +1067,15 @@ impl RaidManager {
             .any(|raid| !raid.has_first_wave_spawned() || raid.is_between_waves())
     }
 
+    /// `raid != null && raid.isActive() && !raid.isOver()` for `ServerLevel.getRaidAt(pos)`
+    /// (`Villager.customServerAiStep`, `Villager.java:263-268`).
+    #[must_use]
+    pub fn is_active_raid_at(&self, pos: BlockPos) -> bool {
+        self.find_active_raid_near(pos)
+            .and_then(|id| self.raids.get(&id))
+            .is_some_and(|raid| !raid.is_over())
+    }
+
     fn find_active_raid_near(&self, pos: BlockPos) -> Option<i32> {
         self.raids
             .iter()

@@ -48,6 +48,70 @@ pub fn villager_type_by_biome(biome: &Biome) -> VillagerType {
     }
 }
 
+/// Registry path of a `VillagerType` (`VillagerType.java` keys), the string half of
+/// `VillagerData.CODEC`'s `type` field.
+#[must_use]
+pub const fn villager_type_name(r#type: VillagerType) -> &'static str {
+    match r#type {
+        VillagerType::Desert => "desert",
+        VillagerType::Jungle => "jungle",
+        VillagerType::Plains => "plains",
+        VillagerType::Savanna => "savanna",
+        VillagerType::Snow => "snow",
+        VillagerType::Swamp => "swamp",
+        VillagerType::Taiga => "taiga",
+    }
+}
+
+/// Inverse of [`villager_type_name`]; accepts an optional `minecraft:` namespace, like a
+/// vanilla `holderByNameCodec` lookup of a default-namespace id.
+#[must_use]
+pub fn villager_type_from_name(name: &str) -> Option<VillagerType> {
+    match name.strip_prefix("minecraft:").unwrap_or(name) {
+        "desert" => Some(VillagerType::Desert),
+        "jungle" => Some(VillagerType::Jungle),
+        "plains" => Some(VillagerType::Plains),
+        "savanna" => Some(VillagerType::Savanna),
+        "snow" => Some(VillagerType::Snow),
+        "swamp" => Some(VillagerType::Swamp),
+        "taiga" => Some(VillagerType::Taiga),
+        _ => None,
+    }
+}
+
+/// Registry path of a `VillagerProfession`, the string half of `VillagerData.CODEC`'s
+/// `profession` field.
+#[must_use]
+pub const fn villager_profession_name(profession: VillagerProfession) -> &'static str {
+    match profession {
+        VillagerProfession::None => "none",
+        VillagerProfession::Armorer => "armorer",
+        VillagerProfession::Butcher => "butcher",
+        VillagerProfession::Cartographer => "cartographer",
+        VillagerProfession::Cleric => "cleric",
+        VillagerProfession::Farmer => "farmer",
+        VillagerProfession::Fisherman => "fisherman",
+        VillagerProfession::Fletcher => "fletcher",
+        VillagerProfession::Leatherworker => "leatherworker",
+        VillagerProfession::Librarian => "librarian",
+        VillagerProfession::Mason => "mason",
+        VillagerProfession::Nitwit => "nitwit",
+        VillagerProfession::Shepherd => "shepherd",
+        VillagerProfession::Toolsmith => "toolsmith",
+        VillagerProfession::Weaponsmith => "weaponsmith",
+    }
+}
+
+/// Inverse of [`villager_profession_name`]; accepts an optional `minecraft:` namespace.
+#[must_use]
+pub fn villager_profession_from_name(name: &str) -> Option<VillagerProfession> {
+    (0..)
+        .map_while(VillagerProfession::from_i32)
+        .find(|profession| {
+            villager_profession_name(*profession) == name.strip_prefix("minecraft:").unwrap_or(name)
+        })
+}
+
 #[must_use]
 pub const fn get_food_points(item: &Item) -> i32 {
     match item.id {
@@ -229,6 +293,50 @@ impl VillagerData {
         }
     }
 
+    /// `VillagerData.CODEC` encode (`VillagerData.java:20-33`): lowercase `type` and
+    /// `profession` registry-name strings plus an int `level`.
+    #[must_use]
+    pub fn to_nbt(&self) -> pumpkin_nbt::compound::NbtCompound {
+        let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
+        nbt.put_string(
+            "type",
+            format!("minecraft:{}", villager_type_name(self.type_enum())),
+        );
+        nbt.put_string(
+            "profession",
+            format!(
+                "minecraft:{}",
+                villager_profession_name(self.profession_enum())
+            ),
+        );
+        nbt.put_int("level", self.level.0);
+        nbt
+    }
+
+    /// `VillagerData.CODEC` decode. A missing `type`/`profession`/`level` takes the codec
+    /// default (plains / none / 1); an unknown registry name fails the whole codec, so
+    /// `None` is returned. The capitalised int-id keys older Pumpkin saves wrote are read
+    /// as a fallback.
+    #[must_use]
+    pub fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound) -> Option<Self> {
+        let r#type = match nbt.get_string("type") {
+            Some(name) => villager_type_from_name(name)?,
+            None => nbt
+                .get_int("Type")
+                .and_then(VillagerType::from_i32)
+                .unwrap_or(VillagerType::Plains),
+        };
+        let profession = match nbt.get_string("profession") {
+            Some(name) => villager_profession_from_name(name)?,
+            None => nbt
+                .get_int("Profession")
+                .and_then(VillagerProfession::from_i32)
+                .unwrap_or(VillagerProfession::None),
+        };
+        let level = nbt.get_int("level").or_else(|| nbt.get_int("Level"));
+        Some(Self::new(r#type, profession, level.unwrap_or(1)))
+    }
+
     /// `VillagerData.getMinXpPerLevel` (`VillagerData.java:70-72`).
     #[must_use]
     pub const fn get_min_xp_per_level(level: i32) -> i32 {
@@ -302,5 +410,65 @@ mod villager_type_tests {
             villager_type_by_biome(&Biome::NETHER_WASTES),
             VillagerType::Plains
         );
+    }
+}
+
+#[cfg(test)]
+mod villager_data_nbt_tests {
+    use super::{
+        VillagerData, VillagerProfession, VillagerType, villager_profession_from_name,
+        villager_profession_name,
+    };
+
+    #[test]
+    fn profession_names_round_trip() {
+        for id in 0.. {
+            let Some(profession) = VillagerProfession::from_i32(id) else {
+                break;
+            };
+            assert_eq!(
+                villager_profession_from_name(villager_profession_name(profession)),
+                Some(profession)
+            );
+        }
+        assert_eq!(villager_profession_from_name("bogus"), None);
+    }
+
+    #[test]
+    fn codec_uses_lowercase_registry_strings() {
+        let data = VillagerData::new(VillagerType::Snow, VillagerProfession::Cleric, 3);
+        let nbt = data.to_nbt();
+        assert_eq!(nbt.get_string("type"), Some("minecraft:snow"));
+        assert_eq!(nbt.get_string("profession"), Some("minecraft:cleric"));
+        assert_eq!(nbt.get_int("level"), Some(3));
+        assert_eq!(VillagerData::from_nbt(&nbt), Some(data));
+    }
+
+    #[test]
+    fn codec_defaults_and_legacy_keys() {
+        let empty = pumpkin_nbt::compound::NbtCompound::new();
+        assert_eq!(
+            VillagerData::from_nbt(&empty),
+            Some(VillagerData::new(
+                VillagerType::Plains,
+                VillagerProfession::None,
+                1
+            ))
+        );
+        let mut legacy = pumpkin_nbt::compound::NbtCompound::new();
+        legacy.put_int("Type", VillagerType::Taiga as i32);
+        legacy.put_int("Profession", VillagerProfession::Farmer as i32);
+        legacy.put_int("Level", 2);
+        assert_eq!(
+            VillagerData::from_nbt(&legacy),
+            Some(VillagerData::new(
+                VillagerType::Taiga,
+                VillagerProfession::Farmer,
+                2
+            ))
+        );
+        let mut bad = pumpkin_nbt::compound::NbtCompound::new();
+        bad.put_string("type", "minecraft:nowhere".to_string());
+        assert_eq!(VillagerData::from_nbt(&bad), None);
     }
 }

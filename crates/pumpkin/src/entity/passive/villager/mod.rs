@@ -13,7 +13,6 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{
     BedPart, BlockProperties, ComposterLikeProperties, WhiteBedLikeProperties as BedProperties,
 };
-use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityType};
 use pumpkin_data::item::{Item, JavaToBedrockItemMapping};
@@ -1404,6 +1403,37 @@ impl VillagerEntity {
         }
     }
 
+    /// `Villager.stopTrading` (`Villager.java:342-345`) over `AbstractVillager.stopTrading`
+    /// (`AbstractVillager.java:194-196`): forget the trading player and reset the special
+    /// prices. Vanilla does not close the player's screen.
+    async fn stop_trading(&self) {
+        self.trading_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        self.is_trading.store(false, Ordering::Relaxed);
+        self.reset_special_prices().await;
+    }
+
+    /// `Villager.releaseAllPois` (`Villager.java:606-611`): release every claimed POI ticket
+    /// unconditionally, murderer or not (fall damage, starvation, conversion, etc.), so a
+    /// dead villager never permanently locks a job-site/bed/bell that no other villager can
+    /// ever claim. Positions are taken into an owned `Vec` before the first `.await` so no
+    /// `std::sync::MutexGuard` (non-`Send`) is held across it.
+    async fn release_all_pois(&self, world: &Arc<World>) {
+        let claimed_pois: Vec<BlockPos> = [
+            self.job_site.lock().unwrap().take(),
+            self.home_pos.lock().unwrap().take(),
+            self.meeting_point.lock().unwrap().take(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        for pos in claimed_pois {
+            world.release_poi(pos).await;
+        }
+    }
+
     pub fn set_unhappy(&self) {
         let entity = self.get_entity();
         self.unhappy_counter.store(40, Ordering::Relaxed);
@@ -1483,8 +1513,7 @@ impl VillagerEntity {
     }
 
     /// Vanilla `Villager::spawnGolemIfNeeded` (`Villager.java:834-848`), called from
-    /// `Villager::gossip` after a successful exchange. `on_damage` also retains the existing
-    /// crisis-trigger approximation; removing that separate trigger is a follow-up.
+    /// `Villager::gossip` after a successful exchange.
     pub async fn spawn_golem_if_needed(
         &self,
         world: &Arc<World>,
@@ -1622,54 +1651,6 @@ impl VillagerEntity {
         // `Villager::gossip` unconditionally follows a successful transfer with this call.
         self.spawn_golem_if_needed(world, timestamp, 5).await;
     }
-
-    /// Vanilla `Villager::restock` (`Villager.java:365-375`): recompute demand for every
-    /// offer and reset its use counter. Does not resend the updated offers to a currently
-    /// trading player -- vanilla's `resendOffersToTradingPlayer` (`Villager.java:377-385`)
-    /// has no Rust equivalent since `VillagerEntity` doesn't track a persistent
-    /// "currently trading player" handle; a player with the trade screen already open will
-    /// see the new prices next time they reopen it. Documented deviation, not silently
-    /// dropped.
-    pub async fn restock(&self, world_age: i64) {
-        let mut offers = self.offers.lock().await;
-        for offer in offers.iter_mut() {
-            offer.update_demand();
-            offer.uses = 0;
-        }
-        drop(offers);
-        self.last_restock_time.store(world_age, Ordering::Relaxed);
-        self.restocks_today.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Vanilla `Villager::shouldRestock`/`needsToRestock` (`Villager.java:387-419`),
-    /// approximated: a villager may restock up to twice per in-game day, at least
-    /// 12000 ticks (half a day) apart, whenever any offer has been used at least once.
-    /// Vanilla's exact `isNewDay` check against a `Timelines.OVERWORLD_DAY` clock was not
-    /// read for this pass (flagged in the design doc); this derives the day boundary from
-    /// `world_age / 24000`, which is the same 24000-tick day length already used elsewhere
-    /// in this file (gossip decay), and resets the daily restock counter on a day rollover.
-    pub async fn maybe_restock(&self, world_age: i64) {
-        let last_restock = self.last_restock_time.load(Ordering::Relaxed);
-        if is_new_restock_day(last_restock, world_age) {
-            self.restocks_today.store(0, Ordering::Relaxed);
-        }
-
-        if !restock_is_due(
-            last_restock,
-            self.restocks_today.load(Ordering::Relaxed),
-            world_age,
-        ) {
-            return;
-        }
-
-        let needs_restock = {
-            let offers = self.offers.lock().await;
-            offers.iter().any(|o| o.uses > 0)
-        };
-        if needs_restock {
-            self.restock(world_age).await;
-        }
-    }
 }
 
 /// Vanilla `Villager::golemSpawnConditionsMet` (`Villager.java:896-899`), extracted as a
@@ -1684,26 +1665,6 @@ const fn golem_spawn_conditions_met(
         return false;
     }
     golem_detected_until == 0 || world_age >= golem_detected_until
-}
-
-/// Vanilla `Villager::shouldRestock`'s half-day check: the restock counter resets once more than
-/// 12000 ticks have passed since the last restock, not on a 24000-tick calendar boundary. Vanilla
-/// additionally resets on a day rollover reported by `Timelines.OVERWORLD_DAY`, which has no
-/// counterpart here; the half-day window fires first in every ordinary case.
-#[must_use]
-const fn is_new_restock_day(last_restock: i64, world_age: i64) -> bool {
-    last_restock != 0 && world_age > last_restock + 12000
-}
-
-/// Vanilla `Villager::shouldRestock` (`Villager.java:387-419`) gate (minus the `needsRestock`
-/// per-offer check, which needs the offers list and stays in `maybe_restock`), extracted as a
-/// pure function for unit testing.
-#[must_use]
-const fn restock_is_due(last_restock: i64, restocks_today: i32, world_age: i64) -> bool {
-    // `allowedToRestock`: the first restock after a counter reset has no cooldown at all, and the
-    // second needs only 2400 ticks. Requiring half a day for the first one meant a villager whose
-    // trades were used up stayed sold out until the next in-game morning.
-    restocks_today == 0 || (restocks_today < 2 && world_age > last_restock + 2400)
 }
 
 impl VillagerEntity {
@@ -1936,12 +1897,15 @@ impl ScreenHandlerFactory for VillagerEntity {
         })
     }
 
+    /// `Villager.startTrading` passes `getDisplayName()` (`Villager.java:326-329`), which
+    /// prefers the custom name over the profession name.
     fn get_display_name(&self) -> TextComponent {
-        let profession = self
-            .villager_data
-            .try_lock()
-            .map_or(VillagerProfession::None, |data| data.profession_enum());
-        TextComponent::translate(profession.translation_key(), [])
+        self.get_entity()
+            .custom_name
+            .load()
+            .as_ref()
+            .clone()
+            .unwrap_or_else(|| EntityBase::get_type_name(self))
     }
 }
 
@@ -2163,11 +2127,11 @@ impl NBTStorage for VillagerEntity {
         Box::pin(async move {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             let data = self.villager_data.lock().await;
-            let mut villager_data_nbt = NbtCompound::new();
-            villager_data_nbt.put_int("Type", data.r#type.0);
-            villager_data_nbt.put_int("Profession", data.profession.0);
-            villager_data_nbt.put_int("Level", data.level.0);
-            nbt.put_compound("VillagerData", villager_data_nbt);
+            // `Villager.addAdditionalSaveData` (Villager.java:475-480): `VillagerData.CODEC`
+            // compound plus the finalized flag. Pumpkin fixes the type at construction, so
+            // the data is always finalized.
+            nbt.put_compound("VillagerData", data.to_nbt());
+            nbt.put_bool("VillagerDataFinalized", true);
 
             self.write_ageable_nbt(nbt);
             nbt.put_int("FoodLevel", self.food_level.load(Ordering::Relaxed));
@@ -2238,17 +2202,13 @@ impl NBTStorage for VillagerEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(villager_data_nbt) = nbt.get_compound("VillagerData") {
-                let mut data = self.villager_data.lock().await;
-                if let Some(t) = villager_data_nbt.get_int("Type") {
-                    data.r#type = VarInt(t);
-                }
-                if let Some(p) = villager_data_nbt.get_int("Profession") {
-                    data.profession = VarInt(p);
-                }
-                if let Some(l) = villager_data_nbt.get_int("Level") {
-                    data.level = VarInt(l);
-                }
+            // `input.read("VillagerData", VillagerData.CODEC)` (Villager.java:490): a
+            // compound the codec rejects leaves the current data untouched.
+            if let Some(parsed) = nbt
+                .get_compound("VillagerData")
+                .and_then(VillagerData::from_nbt)
+            {
+                *self.villager_data.lock().await = parsed;
             }
 
             self.read_ageable_nbt(nbt);
@@ -2556,6 +2516,65 @@ impl Mob for VillagerEntity {
         &self.mob_entity
     }
 
+    /// `Villager.applyImplicitComponent` (`Villager.java:913-919`): a `VILLAGER_VARIANT`
+    /// component sets the villager type, keeping profession and level.
+    fn mob_set_variant_name(&self, name: &str) {
+        let Some(r#type) = data::villager_type_from_name(name) else {
+            return;
+        };
+        let Ok(mut villager_data) = self.villager_data.try_lock() else {
+            return;
+        };
+        *villager_data = villager_data.with_type(r#type);
+        let data = *villager_data;
+        drop(villager_data);
+        let bedrock_metadata = Self::bedrock_metadata(data, self.xp.load(Ordering::Relaxed));
+        self.get_entity().send_meta_data(
+            &[Metadata::new(tracked_data::villager::VILLAGER_DATA, data)],
+            Some(&bedrock_metadata),
+        );
+    }
+
+    /// `Villager.getTypeName` (`Villager.java:702-705`): the profession's name.
+    fn mob_type_name(&self) -> Option<TextComponent> {
+        let profession = self
+            .villager_data
+            .try_lock()
+            .map_or(VillagerProfession::None, |data| data.profession_enum());
+        Some(TextComponent::translate(profession.translation_key(), []))
+    }
+
+    /// `Villager.thunderHit` (`Villager.java:755-770`): outside Peaceful the villager becomes
+    /// a witch (no equipment kept, POIs released) instead of taking lightning damage.
+    fn mob_on_lightning_strike<'a>(
+        &'a self,
+        caller: &'a dyn EntityBase,
+        lightning: &'a crate::entity::lightning::LightningBoltEntity,
+    ) -> crate::entity::EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            let world = self.get_entity().world.load_full();
+            if world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+                && !self.get_entity().is_removed()
+            {
+                let witch = crate::entity::mob::zombification::prepare_conversion(
+                    &self.mob_entity,
+                    &EntityType::WITCH,
+                    crate::entity::mob::witch::WitchEntity::new,
+                )
+                .await;
+                witch.set_persistence_required();
+                self.release_all_pois(&world).await;
+                crate::entity::mob::zombification::complete_conversion(&self.mob_entity, witch)
+                    .await;
+                return;
+            }
+            self.mob_entity
+                .living_entity
+                .on_lightning_strike(caller, lightning)
+                .await;
+        })
+    }
+
     fn mob_bedrock_identifier(&self) -> Option<&'static str> {
         Some("minecraft:villager_v2")
     }
@@ -2684,53 +2703,35 @@ impl Mob for VillagerEntity {
     /// `Villager::setLastHurtByMob` -> `onReputationEventFrom(VILLAGER_HURT, ...)`
     /// (Villager.java:585-593, 861-862): the hurt villager itself records
     /// `MINOR_NEGATIVE` gossip against its attacker.
-    fn on_damage<'a>(
+    /// `Villager.setLastHurtByMob` (`Villager.java:584-594`): the hurter is remembered as
+    /// `VILLAGER_HURT` (`MINOR_NEGATIVE`, 25) gossip, and a still-living villager hurt by a
+    /// player shows angry particles. Vanilla never spawns a golem from a hit.
+    fn on_hurt_by_mob<'a>(
         &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
+        hurt_by: &'a dyn EntityBase,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            let world = self.get_entity().world.load();
-            let mut attacker_uuid = source.map(|source| source.get_entity().entity_uuid);
-            if attacker_uuid.is_none() {
-                let attacker_id = self
-                    .mob_entity
-                    .living_entity
-                    .last_attacker_id
-                    .load(Ordering::Relaxed);
-                if attacker_id != 0 {
-                    attacker_uuid = world
-                        .get_entity_by_id(attacker_id)
-                        .map(|attacker| attacker.get_entity().entity_uuid);
-                }
-            }
-            let Some(attacker_uuid) = attacker_uuid else {
-                return;
-            };
-            self.gossips
-                .lock()
-                .await
-                .add(attacker_uuid, GossipType::MinorNegative, 25);
-            world.send_entity_status(
-                self.get_entity(),
-                pumpkin_data::entity::EntityStatus::VillagerAngry,
-                Some(ActorEventType::VillagerAngry),
+            self.gossips.lock().await.add(
+                hurt_by.get_entity().entity_uuid,
+                GossipType::MinorNegative,
+                25,
             );
-
-            // Golem summoning trigger deviation: see `spawn_golem_if_needed`'s doc comment.
-            // Vanilla only reaches `spawnGolemIfNeeded` via panicking-villager gossip
-            // exchange, which Pumpkin has no infrastructure for; being attacked is used here
-            // as the closest existing "villager in a crisis" event.
-            let world_age = world.get_world_age().await;
-            self.spawn_golem_if_needed(&world, world_age, 5).await;
+            if self.mob_entity.living_entity.health.load() > 0.0 && hurt_by.get_player().is_some()
+            {
+                self.get_entity().world.load().send_entity_status(
+                    self.get_entity(),
+                    pumpkin_data::entity::EntityStatus::VillagerAngry,
+                    Some(ActorEventType::VillagerAngry),
+                );
+            }
         })
     }
 
     /// `Villager::tellWitnessesThatIWasMurdered` -> `onReputationEventFrom(VILLAGER_KILLED, ...)`
     /// (Villager.java:615-624, 863-864): every witnessing villager (vanilla uses the brain's
-    /// `NEAREST_VISIBLE_LIVING_ENTITIES` memory; approximated here with a 16-block box, the
-    /// default `FOLLOW_RANGE` vanilla's sensor inflates by -- `Mob.java:167` -- since Pumpkin
-    /// has no brain/sensor system) records `MAJOR_NEGATIVE` gossip against the murderer.
+    /// `NEAREST_VISIBLE_LIVING_ENTITIES` memory; approximated here with the living villagers
+    /// within the 16-block default `FOLLOW_RANGE` that have line of sight, since Pumpkin has
+    /// no brain/sensor system) records `MAJOR_NEGATIVE` gossip against the murderer.
     fn on_mob_death<'a>(
         &'a self,
         cause: Option<&'a dyn EntityBase>,
@@ -2738,23 +2739,7 @@ impl Mob for VillagerEntity {
         Box::pin(async move {
             let world = self.get_entity().world.load();
 
-            // `Villager::die` -> `releaseAllPois` (Villager.java:596-605): release every
-            // claimed POI ticket unconditionally, murderer or not (fall damage, starvation,
-            // etc. all reach this too), so a dead villager never permanently locks a
-            // job-site/bed/bell that no other villager can ever claim. Positions are taken
-            // into an owned `Vec` before the first `.await` so no `std::sync::MutexGuard`
-            // (non-`Send`) is held across it.
-            let claimed_pois: Vec<BlockPos> = [
-                self.job_site.lock().unwrap().take(),
-                self.home_pos.lock().unwrap().take(),
-                self.meeting_point.lock().unwrap().take(),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-            for pos in claimed_pois {
-                world.release_poi(pos).await;
-            }
+            self.release_all_pois(&world).await;
 
             let Some(murderer) = cause else {
                 return;
@@ -2768,7 +2753,25 @@ impl Mob for VillagerEntity {
             for entity in world.get_all_at_box(&aabb) {
                 if entity.get_entity().entity_id == self.get_entity().entity_id
                     || entity.get_entity().entity_type != &EntityType::VILLAGER
+                    || !entity.get_entity().is_alive()
                 {
+                    continue;
+                }
+                // `Sensor.isEntityTargetable` -> `TargetingConditions.forNonCombat()`
+                // ranged to the follow range: within 16 blocks (sphere) and in line of sight
+                // (invisibility scaling of the range is not modeled).
+                if pos.squared_distance_to_vec(&entity.get_entity().pos.load()) > 16.0 * 16.0 {
+                    continue;
+                }
+                let visible = world
+                    .raycast(
+                        self.get_eye_pos(),
+                        entity.get_entity().get_eye_pos(),
+                        async |block_pos, world| world.get_block_state(block_pos).is_solid(),
+                    )
+                    .await
+                    .is_none();
+                if !visible {
                     continue;
                 }
                 if let Some(villager) = entity.cast_any().downcast_ref::<Self>() {
@@ -2867,6 +2870,28 @@ impl Mob for VillagerEntity {
                     .await;
             }
 
+            // `Villager.customServerAiStep` (`Villager.java:263-268`): sweat particles while an
+            // active raid is nearby.
+            if !self.mob_entity.is_no_ai()
+                && rand::random::<u32>().is_multiple_of(100)
+                && world
+                    .is_raid_active_at(self.get_entity().block_pos.load())
+                    .await
+            {
+                world.send_entity_status(
+                    self.get_entity(),
+                    pumpkin_data::entity::EntityStatus::VillagerSweat,
+                    None,
+                );
+            }
+
+            // `Villager.java:270-272`: losing the profession ends any open trade.
+            if self.villager_data.lock().await.profession_enum() == VillagerProfession::None
+                && self.is_trading.load(Ordering::Relaxed)
+            {
+                self.stop_trading().await;
+            }
+
             let (game_time, day_time, day) = {
                 let time = world.level_time.lock().await;
                 (time.world_age, time.query_daytime(), time.query_day())
@@ -2949,8 +2974,6 @@ impl Mob for VillagerEntity {
                     }
                 }
             }
-
-            self.maybe_restock(world_age).await;
 
             // 1. Bed / Sleeping logic (for all villagers: babies, nitwits, adults)
             let is_sleeping = self.get_entity().pose.load() == EntityPose::Sleeping;
@@ -3374,9 +3397,7 @@ impl Mob for VillagerEntity {
 
 #[cfg(test)]
 mod villager_tick_logic_tests {
-    use super::{
-        golem_spawn_conditions_met, gossip_cooldown_ready, is_new_restock_day, restock_is_due,
-    };
+    use super::{golem_spawn_conditions_met, gossip_cooldown_ready};
 
     #[test]
     fn golem_conditions_require_recent_sleep() {
@@ -3390,22 +3411,6 @@ mod villager_tick_logic_tests {
         assert!(!golem_spawn_conditions_met(100, 1000, 500));
         assert!(golem_spawn_conditions_met(100, 1000, 1000));
         assert!(golem_spawn_conditions_met(100, 1000, 1500));
-    }
-
-    #[test]
-    fn the_restock_counter_resets_after_half_a_day() {
-        assert!(!is_new_restock_day(0, 100));
-        assert!(!is_new_restock_day(100, 100 + 12000));
-        assert!(is_new_restock_day(100, 100 + 12001));
-    }
-
-    #[test]
-    fn restock_due_gates_on_count_and_cooldown() {
-        // The first restock of a cycle is free, the second waits 2400 ticks, and there is no third.
-        assert!(restock_is_due(100, 0, 100));
-        assert!(!restock_is_due(100, 1, 100 + 2400));
-        assert!(restock_is_due(100, 1, 100 + 2401));
-        assert!(!restock_is_due(100, 2, 100 + 24000));
     }
 
     #[test]

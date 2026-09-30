@@ -271,6 +271,15 @@ async fn pusher_team_state(
     )
 }
 
+/// `EntityType.getDescription` fallback of `Entity.getTypeName`: `entity.minecraft.<type>`.
+pub(crate) fn default_type_name(entity: &Entity) -> TextComponent {
+    TextComponent::translate_cross(
+        format!("entity.minecraft.{}", entity.entity_type.resource_name),
+        format!("entity.minecraft.{}", entity.entity_type.resource_name),
+        [],
+    )
+}
+
 pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     /// Called every tick for this entity.
     ///
@@ -1357,6 +1366,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         None
     }
 
+    /// Vanilla `Entity.getTypeName` (`Entity.java:2946-2954`): the name shown when the entity
+    /// has no custom name. Overridden by e.g. the villager, whose type name is its profession.
+    fn get_type_name(&self) -> TextComponent {
+        default_type_name(self.get_entity())
+    }
+
     /// Should return the name of the entity without click or hover events.
     fn get_name(&self) -> TextComponent {
         let entity = self.get_entity();
@@ -1365,24 +1380,19 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             .load()
             .as_ref()
             .clone()
-            .unwrap_or(TextComponent::translate_cross(
-                format!("entity.minecraft.{}", entity.entity_type.resource_name),
-                format!("entity.minecraft.{}", entity.entity_type.resource_name),
-                [],
-            ))
+            .unwrap_or_else(|| self.get_type_name())
     }
 
     fn get_display_name(&self) -> EntityBaseFuture<'_, TextComponent> {
         Box::pin(async move {
             // TODO: team color
             let entity = self.get_entity();
-            let mut name = entity.custom_name.load().as_ref().clone().unwrap_or(
-                TextComponent::translate_cross(
-                    format!("entity.minecraft.{}", entity.entity_type.resource_name),
-                    format!("entity.minecraft.{}", entity.entity_type.resource_name),
-                    [],
-                ),
-            );
+            let mut name = entity
+                .custom_name
+                .load()
+                .as_ref()
+                .clone()
+                .unwrap_or_else(|| self.get_type_name());
             let name_clone = name.clone();
             // `Entity.getStringUUID` supplies both the hover UUID and insertion text
             // (`Entity.java:3255-3257`).

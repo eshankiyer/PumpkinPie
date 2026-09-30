@@ -2399,6 +2399,14 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async {})
     }
 
+    /// Vanilla `LivingEntity.setLastHurtByMob(hurtBy)` as reached from
+    /// `resolveMobResponsibleForDamage` (`LivingEntity.java:1354-1360`): called after an
+    /// accepted hit whose causing entity is a `LivingEntity`, unless the damage type is tagged
+    /// `no_anger` or is a wind charge hitting a `no_anger_from_wind_charge` victim.
+    fn on_hurt_by_mob<'a>(&'a self, _hurt_by: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     /// Called on the killed mob once its death is confirmed, with `cause` as the
     /// killer entity (mirrors `LivingEntity::on_death`'s `cause` parameter). Used by
     /// villagers to notify nearby witnesses of a murder.
@@ -2998,6 +3006,12 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn mob_set_variant_name(&self, _name: &str) {}
 
+    /// Vanilla `Entity.getTypeName` override point (e.g. `Villager.getTypeName` returns the
+    /// profession's name). `None` keeps the `entity.minecraft.<type>` default.
+    fn mob_type_name(&self) -> Option<pumpkin_util::text::TextComponent> {
+        None
+    }
+
     /// Species-specific gate used by the generic animal breeding goal.
     fn can_breed(&self) -> bool {
         true
@@ -3283,6 +3297,11 @@ pub(crate) fn tick_mob_ai<'a>(
 }
 
 impl<T: Mob + Send + 'static> EntityBase for T {
+    fn get_type_name(&self) -> pumpkin_util::text::TextComponent {
+        Mob::mob_type_name(self)
+            .unwrap_or_else(|| crate::entity::default_type_name(self.get_entity()))
+    }
+
     fn notify_leash_holder(&self, entity: &dyn EntityBase) {
         Mob::notify_leash_holder(self, entity);
     }
@@ -3548,6 +3567,17 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 // without duplicating damage overrides across the species.
                 self.get_mob_entity().reset_love_ticks();
                 self.on_damage(damage_type, source).await;
+                // `resolveMobResponsibleForDamage` (`LivingEntity.java:1354-1360`).
+                if let Some(hurt_by) = cause.or(source)
+                    && hurt_by.get_living_entity().is_some()
+                    && !damage_type.has_tag(&pumpkin_data::tag::DamageType::MINECRAFT_NO_ANGER)
+                    && (damage_type != DamageType::WIND_CHARGE
+                        || !self.get_mob_entity().living_entity.entity.entity_type.has_tag(
+                            &pumpkin_data::tag::EntityType::MINECRAFT_NO_ANGER_FROM_WIND_CHARGE,
+                        ))
+                {
+                    self.on_hurt_by_mob(hurt_by).await;
+                }
                 if rescue_lethal {
                     self.mob_on_lethal_rescue().await;
                 }

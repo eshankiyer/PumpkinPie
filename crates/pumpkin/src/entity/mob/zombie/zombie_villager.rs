@@ -13,7 +13,6 @@ use pumpkin_data::tracked_data;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, effect::StatusEffect, tag::Taggable};
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
-use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::{MerchantOffer, Metadata};
 use pumpkin_util::math::position::BlockPos;
 use tokio::sync::Mutex;
@@ -378,11 +377,7 @@ impl NBTStorage for ZombieVillagerEntity {
             self.mob_entity.write_nbt(nbt).await;
 
             let data = *self.villager_data.lock().await;
-            let mut villager_data_nbt = NbtCompound::new();
-            villager_data_nbt.put_int("Type", data.r#type.0);
-            villager_data_nbt.put_int("Profession", data.profession.0);
-            villager_data_nbt.put_int("Level", data.level.0);
-            nbt.put_compound("VillagerData", villager_data_nbt);
+            nbt.put_compound("VillagerData", data.to_nbt());
             // `ZombieVillager.addAdditionalSaveData` (`ZombieVillager.java:97-105`) persists
             // the finalized flag and current villager XP alongside the villager data.
             nbt.put_bool("VillagerDataFinalized", self.get_villager_data_finalized());
@@ -423,17 +418,11 @@ impl NBTStorage for ZombieVillagerEntity {
         Box::pin(async move {
             self.mob_entity.read_nbt_non_mut(nbt).await;
 
-            if let Some(villager_data_nbt) = nbt.get_compound("VillagerData") {
-                let mut data = self.villager_data.lock().await;
-                if let Some(t) = villager_data_nbt.get_int("Type") {
-                    data.r#type = VarInt(t);
-                }
-                if let Some(p) = villager_data_nbt.get_int("Profession") {
-                    data.profession = VarInt(p);
-                }
-                if let Some(l) = villager_data_nbt.get_int("Level") {
-                    data.level = VarInt(l);
-                }
+            if let Some(parsed) = nbt
+                .get_compound("VillagerData")
+                .and_then(VillagerData::from_nbt)
+            {
+                *self.villager_data.lock().await = parsed;
                 self.villager_data_finalized.store(true, Ordering::Relaxed);
             }
             if nbt.get_bool("VillagerDataFinalized").unwrap_or(false) {
@@ -465,6 +454,29 @@ impl NBTStorage for ZombieVillagerEntity {
 impl Mob for ZombieVillagerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity.mob_entity
+    }
+
+    /// `ZombieVillager.applyImplicitComponent` (`ZombieVillager.java:384-392`): a
+    /// `VILLAGER_VARIANT` component sets the villager type and finalizes the data.
+    fn mob_set_variant_name(&self, name: &str) {
+        let Some(r#type) = crate::entity::passive::villager::data::villager_type_from_name(name)
+        else {
+            return;
+        };
+        let Ok(mut villager_data) = self.villager_data.try_lock() else {
+            return;
+        };
+        *villager_data = villager_data.with_type(r#type);
+        let data = *villager_data;
+        drop(villager_data);
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::zombie_villager::VILLAGER_DATA,
+                data,
+            )],
+            None,
+        );
+        self.set_villager_data_finalized(true);
     }
 
     /// `ZombieVillager.getAmbientSound` (`ZombieVillager.java:311-314`). The shared mob tick

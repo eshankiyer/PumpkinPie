@@ -2809,6 +2809,13 @@ impl World {
         self.raids.lock().await.is_pre_raid_at(position)
     }
 
+    /// `ServerLevel.getRaidAt` narrowed to "an active, not yet finished raid is here"
+    /// (`Villager.customServerAiStep`, `Villager.java:263-268`).
+    #[must_use]
+    pub async fn is_raid_active_at(&self, position: BlockPos) -> bool {
+        self.raids.lock().await.is_active_raid_at(position)
+    }
+
     pub async fn get_time_of_day(&self) -> i64 {
         self.level_time.lock().await.time_of_day
     }
