@@ -149,7 +149,12 @@ impl Mob for TadpoleEntity {
     /// (`Tadpole.java:231-236`).
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            if !self.get_entity().is_alive() || self.is_age_locked() {
+            if !self.get_entity().is_alive() {
+                return;
+            }
+            // `AbstractFish.aiStep` flop, run by `Tadpole.aiStep` through `super.aiStep()`.
+            super::fish_flop(self, Sound::EntityTadpoleFlop);
+            if self.is_age_locked() {
                 return;
             }
 

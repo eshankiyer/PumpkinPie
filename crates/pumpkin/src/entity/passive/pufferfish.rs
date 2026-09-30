@@ -287,6 +287,9 @@ impl Mob for PufferfishEntity {
                 return;
             }
 
+            // `AbstractFish.aiStep` flop.
+            super::fish_flop(self, Sound::EntityPufferFishFlop);
+
             let threat_present = self.threat_nearby();
             let (new_state, new_inflate, new_deflate, blow_up, blow_out) = advance_puff_state(
                 threat_present,

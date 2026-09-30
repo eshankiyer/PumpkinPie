@@ -1,9 +1,10 @@
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         follow_flock_leader::FollowFlockLeaderGoal, look_around::RandomLookAroundGoal,
@@ -62,5 +63,12 @@ impl NBTStorage for CodEntity {}
 impl Mob for CodEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `AbstractFish.aiStep` flop.
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            super::fish_flop(self, Sound::EntityCodFlop);
+        })
     }
 }

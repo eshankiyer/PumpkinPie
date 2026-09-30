@@ -11,7 +11,7 @@ use rand::RngExt;
 
 use crate::block::entities::sign::DyeColor;
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         follow_flock_leader::FollowFlockLeaderGoal, look_around::RandomLookAroundGoal,
@@ -325,6 +325,13 @@ impl NBTStorage for TropicalFishEntity {
 impl Mob for TropicalFishEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `AbstractFish.aiStep` flop.
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            super::fish_flop(self, Sound::EntityTropicalFishFlop);
+        })
     }
 
     /// `TropicalFish.getAmbientSound` (`TropicalFish.java:213-216`) is consumed by the live

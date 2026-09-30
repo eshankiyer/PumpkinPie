@@ -826,6 +826,11 @@ impl Mob for PandaEntity {
         })
     }
 
+    /// `Panda.playStepSound` (`Panda.java:671-674`): `PANDA_STEP` at 0.15 / 1.0, regardless of block.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPandaStep)
+    }
+
     /// `Panda.canBeLeashed`.
     fn can_be_leashed(&self) -> bool {
         false
