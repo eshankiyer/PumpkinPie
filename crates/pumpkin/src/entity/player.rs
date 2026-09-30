@@ -8834,6 +8834,14 @@ impl InventoryPlayer for Player {
             && self.can_interact_with_block_at(&pos, 4.0)
     }
 
+    fn is_alive_and_connected(&self) -> bool {
+        // `LivingEntity.isAlive` is `!isRemoved() && health > 0`; `hasDisconnected` is the
+        // closed connection.
+        self.living_entity.entity.is_alive()
+            && !self.living_entity.is_dead_or_dying()
+            && !self.client.closed()
+    }
+
     fn drop_item(&self, item: ItemStack, retain_ownership: bool) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
             // The flag is vanilla's `thrownFromHand` (`Player.drop(stack, thrownFromHand)`,

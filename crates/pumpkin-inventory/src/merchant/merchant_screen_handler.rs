@@ -373,12 +373,19 @@ impl ScreenHandler for MerchantScreenHandler {
             }
             self.default_on_closed(player).await;
             self.inventory.on_close().await;
-            // Vanilla drops items from merchant container on close
+            // `MerchantMenu.removed` (`MerchantMenu.java:154-168`): a dead or disconnected
+            // player's inputs are dropped in the world, otherwise they go back to the inventory.
+            let alive_and_connected = player.is_alive_and_connected();
             for i in 0..2 {
                 // Drop inputs only, output is virtual/ghost in some sense or just cleared
                 let stack = self.inventory.remove_stack(i).await;
-                if !stack.is_empty() {
+                if stack.is_empty() {
+                    continue;
+                }
+                if alive_and_connected {
                     offer_or_drop_stack(player, stack).await;
+                } else {
+                    player.drop_item(stack, false).await;
                 }
             }
             // Clear output slot

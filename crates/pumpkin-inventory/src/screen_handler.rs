@@ -227,6 +227,15 @@ pub trait InventoryPlayer: Send + Sync {
     /// - `retain_ownership` - If true, the player keeps ownership (for pickup delay)
     fn drop_item(&self, item: ItemStack, retain_ownership: bool) -> PlayerFuture<'_, ()>;
 
+    /// `player.isAlive() && !(player instanceof ServerPlayer sp && sp.hasDisconnected())`,
+    /// the test `MerchantMenu.removed` (`MerchantMenu.java:154`) uses to choose between
+    /// returning the trade items to the inventory and dropping them into the world.
+    ///
+    /// The default is `true` so that test doubles need not model liveness.
+    fn is_alive_and_connected(&self) -> bool {
+        true
+    }
+
     /// Gets the player's inventory.
     fn get_inventory(&self) -> Arc<PlayerInventory>;
 
