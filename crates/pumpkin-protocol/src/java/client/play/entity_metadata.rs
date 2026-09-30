@@ -295,6 +295,17 @@ impl MetadataSerializer for u32 {
     }
 }
 
+/// `EntityDataSerializers.LONG` is `ByteBufCodecs.VAR_LONG` (`EntityDataSerializers.java:55`).
+impl MetadataSerializer for i64 {
+    fn write_metadata(
+        &self,
+        writer: &mut impl std::io::Write,
+        _version: &JavaMinecraftVersion,
+    ) -> Result<(), WritingError> {
+        writer.write_var_long(&crate::codec::var_long::VarLong(*self))
+    }
+}
+
 impl MetadataSerializer for f32 {
     fn write_metadata(
         &self,

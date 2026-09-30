@@ -2753,6 +2753,23 @@ impl Entity {
     /// shrinks to this box while asleep, whatever its type is.
     pub const SLEEPING_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.2, 0.2, 0.2);
 
+    /// `Camel.getDefaultDimensions` (`Camel.java:165-169`) with the constants at `Camel.java:85-90`:
+    /// a sitting camel drops `1.43` from the type's height, a baby has its own standing and
+    /// sitting boxes, and an adult standing camel keeps the type size.
+    fn camel_dimensions(&self, base: EntityDimensions, pose: EntityPose) -> EntityDimensions {
+        let is_baby = self.age.load(Ordering::Relaxed) < 0;
+        match (pose == EntityPose::Sitting, is_baby) {
+            (true, true) => EntityDimensions::scalable(0.95, 0.425).with_eye_height(0.41),
+            (true, false) => EntityDimensions::scalable(
+                self.entity_type.dimension[0],
+                self.entity_type.dimension[1] - 1.43,
+            )
+            .with_eye_height(0.845),
+            (false, true) => EntityDimensions::scalable(0.95, 1.4).with_eye_height(1.38),
+            (false, false) => base,
+        }
+    }
+
     /// `Warden.getDefaultDimensions` (`Warden.java:516-521`): the fixed height a digging or
     /// emerging warden is squashed to.
     pub const WARDEN_EMERGING_HEIGHT: f32 = 1.0;
@@ -2790,6 +2807,10 @@ impl Entity {
         }
 
         let base = self.base_dimension.load();
+
+        if self.entity_type.id == EntityType::CAMEL.id {
+            return self.camel_dimensions(base, pose);
+        }
 
         if self.entity_type.id == EntityType::WARDEN.id
             && let Some(squashed) = Self::warden_pose_dimensions(base, pose)
@@ -5397,6 +5418,17 @@ impl Entity {
     }
 
     pub fn set_pose(&self, pose: EntityPose) {
+        self.apply_pose(pose, true);
+    }
+
+    /// Vanilla `Entity.setPose` (`Entity.java:3247-3249`) never refuses a pose for lack of room;
+    /// [`Self::set_pose`] does, as the player's own pose switching needs. A mob whose own pose
+    /// state machine has already decided (the camel's sit and stand) uses this instead.
+    pub fn set_pose_ignoring_space(&self, pose: EntityPose) {
+        self.apply_pose(pose, false);
+    }
+
+    fn apply_pose(&self, pose: EntityPose, require_space: bool) {
         let mut pose_event =
             crate::plugin::api::events::entity::entity_pose_change::EntityPoseChangeEvent::new(
                 self.entity_id,
@@ -5416,7 +5448,7 @@ impl Entity {
         let dimension = self.get_dimensions(pose);
         let position = self.pos.load();
         let aabb = BoundingBox::new_from_pos(position.x, position.y, position.z, &dimension);
-        if self.world.load().is_space_empty(aabb.contract_all(1.0E-7)) {
+        if !require_space || self.world.load().is_space_empty(aabb.contract_all(1.0E-7)) {
             self.pose.store(pose);
             self.bounding_box.store(aabb);
             self.entity_dimension.store(dimension);

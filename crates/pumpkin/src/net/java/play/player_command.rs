@@ -47,7 +47,9 @@ impl JavaClient {
                 // `ServerGamePacketListenerImpl.handlePlayerCommand` checks `canJump`, then
                 // calls `handleStartJump` (`ServerGamePacketListenerImpl.java:1721-1727`).
                 let vehicle = entity.vehicle.lock().await.clone();
+                let controls_vehicle = controls_vehicle(player, vehicle.as_ref()).await;
                 if let Some(vehicle) = vehicle
+                    && controls_vehicle
                     && let Some(mob) = vehicle.get_mob()
                     && jump_boost > 0
                     && mob.can_jump().await
@@ -118,4 +120,18 @@ impl JavaClient {
             }
         }
     }
+}
+
+/// `Player.getControlledVehicle`: only the vehicle's first passenger controls it.
+async fn controls_vehicle(player: &Arc<Player>, vehicle: Option<&Arc<dyn EntityBase>>) -> bool {
+    let Some(vehicle) = vehicle else {
+        return false;
+    };
+    vehicle
+        .get_entity()
+        .passengers
+        .lock()
+        .await
+        .first()
+        .is_some_and(|passenger| passenger.get_entity().entity_id == player.entity_id())
 }

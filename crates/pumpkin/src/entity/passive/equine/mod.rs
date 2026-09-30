@@ -110,6 +110,10 @@ pub(crate) async fn equip_saddle_item(
         // `AbstractHorse.getEquipSound` (`AbstractHorse.java:315-317`) returns the horse saddle
         // sound for the saddle slot, even when the item's equippable component has another sound.
         IdOr::Id(Sound::EntityHorseSaddle)
+    } else if mob_entity.living_entity.entity.entity_type.id == EntityType::CAMEL.id {
+        // `Camel.getEquipSound` (`Camel.java:634-641`) likewise returns `CAMEL_SADDLE` for the
+        // saddle slot.
+        IdOr::Id(Sound::EntityCamelSaddle)
     } else {
         equip_sound
     };
