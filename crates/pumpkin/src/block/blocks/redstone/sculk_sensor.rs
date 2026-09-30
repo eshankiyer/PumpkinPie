@@ -27,7 +27,6 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockDirection, BlockId, BlockStateId, HorizontalFacingExt};
-use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
@@ -499,6 +498,18 @@ impl SculkSensorBlock {
     }
 }
 
+/// `SculkSensorBlock.tick` (`SculkSensorBlock.java:84-95`): the COOLDOWN -> INACTIVE step
+/// plays `SCULK_CLICKING_STOP` at the block position unless the sensor is waterlogged.
+fn play_clicking_stop(world: &World, pos: &BlockPos) {
+    world.play_sound_fine(
+        Sound::BlockSculkSensorClickingStop,
+        SoundCategory::Blocks,
+        &pos.to_centered_f64(),
+        1.0,
+        rng().random::<f32>().mul_add(0.2, 0.8),
+    );
+}
+
 impl BlockBehaviour for SculkSensorBlock {
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
@@ -530,12 +541,16 @@ impl BlockBehaviour for SculkSensorBlock {
     /// a sensor with drops enabled pops 5 experience (`tryDropExperience(ConstantInt.of(5))`).
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if !matches!(
+            let tool = args.player.inventory().held_item().await;
+            if !crate::block::blocks::sculk::sculk_catalyst::should_drop_experience(
+                args.drop_experience,
+                args.world.level_info.load().game_rules.block_drops,
                 args.player.gamemode.load(),
-                GameMode::Creative | GameMode::Spectator
+                tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0,
             ) {
-                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
+                return;
             }
+            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
         })
     }
 
@@ -706,6 +721,9 @@ impl BlockBehaviour for SculkSensorBlock {
                             )
                             .await;
                         args.world.update_neighbors(args.position, None).await;
+                        if !props.waterlogged {
+                            play_clicking_stop(args.world, args.position);
+                        }
                     }
                     SculkSensorPhase::Inactive => {}
                 }
@@ -742,6 +760,9 @@ impl BlockBehaviour for SculkSensorBlock {
                             )
                             .await;
                         args.world.update_neighbors(args.position, None).await;
+                        if !props.waterlogged {
+                            play_clicking_stop(args.world, args.position);
+                        }
                     }
                     SculkSensorPhase::Inactive => {}
                 }

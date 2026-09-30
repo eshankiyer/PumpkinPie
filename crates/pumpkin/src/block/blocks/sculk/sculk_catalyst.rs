@@ -33,7 +33,8 @@ const LISTENER_RADIUS: i32 = 8;
 
 /// `SculkCatalystBlock.spawnAfterBreak` delegates to `tryDropExperience` only when the
 /// break supplied `dropExperience` (`SculkCatalystBlock.java:61-66`).
-const fn should_drop_experience(
+#[must_use]
+pub const fn should_drop_experience(
     drop_experience: bool,
     block_drops: bool,
     game_mode: pumpkin_util::GameMode,
