@@ -143,6 +143,18 @@ impl Mob for IllusionerEntity {
         &self.mob_entity
     }
 
+    /// `AbstractIllager.considersEntityAsAlly` (`AbstractIllager.java:32-38`).
+    fn considers_entity_as_ally(
+        &self,
+        other: &dyn crate::entity::EntityBase,
+        _world: &crate::world::World,
+        scoreboard: &crate::world::scoreboard::Scoreboard,
+    ) -> bool {
+        crate::entity::ai::goal::track_target::illager_considers_entity_as_ally(
+            self, other, scoreboard,
+        )
+    }
+
     /// Vanilla: `SpellcasterIllager.customServerAiStep`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {

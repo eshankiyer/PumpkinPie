@@ -170,6 +170,18 @@ impl Mob for VindicatorEntity {
         &self.mob_entity
     }
 
+    /// `AbstractIllager.considersEntityAsAlly` (`AbstractIllager.java:32-38`).
+    fn considers_entity_as_ally(
+        &self,
+        other: &dyn crate::entity::EntityBase,
+        _world: &crate::world::World,
+        scoreboard: &crate::world::scoreboard::Scoreboard,
+    ) -> bool {
+        crate::entity::ai::goal::track_target::illager_considers_entity_as_ally(
+            self, other, scoreboard,
+        )
+    }
+
     /// Vanilla: `Vindicator.setCustomName`'s one-way "Johnny" latch. Pumpkin has no per-mob
     /// custom-name-changed hook, so this lazily checks-and-latches every tick instead (up to one
     /// tick of latency versus vanilla's setter-time latch, unobservable to a player).

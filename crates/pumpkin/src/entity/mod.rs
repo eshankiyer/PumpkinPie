@@ -3457,7 +3457,8 @@ impl Entity {
             self.fire_ticks.store(next_fire_ticks, Ordering::Relaxed);
         }
 
-        suffocating
+        // Vanilla `Entity.isInWall` is false while `noPhysics` (`Entity.java:2241-2243`).
+        suffocating && !self.no_clip.load(Relaxed)
     }
 
     #[expect(clippy::too_many_lines)]

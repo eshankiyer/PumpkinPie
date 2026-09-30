@@ -9,6 +9,7 @@ use crate::entity::mob::Mob;
 use crate::world::World;
 use crate::world::scoreboard::entity_scoreboard_name;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::tag::Taggable;
 use rand::RngExt;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -35,6 +36,31 @@ fn team_name(
     let owner_uuid = entity.get_mob().and_then(Mob::get_owner_uuid)?;
     let owner = world.get_entity_by_uuid(owner_uuid)?;
     team_name(world, scoreboard, owner.as_ref(), visited)
+}
+
+/// `AbstractIllager.considersEntityAsAlly` (`AbstractIllager.java:32-38`): the base scoreboard
+/// team rule, or another `#illager_friends` entity while neither side is on a team.
+pub fn illager_considers_entity_as_ally(
+    this: &dyn EntityBase,
+    other: &dyn EntityBase,
+    scoreboard: &crate::world::scoreboard::Scoreboard,
+) -> bool {
+    let team_of = |entity: &dyn EntityBase| {
+        scoreboard
+            .get_team_for_scoreboard_name(&entity_scoreboard_name(entity))
+            .map(|team| team.name.clone())
+    };
+    let this_team = team_of(this);
+    let other_team = team_of(other);
+    if this_team.is_some() && this_team == other_team {
+        return true;
+    }
+    other
+        .get_entity()
+        .entity_type
+        .has_tag(&pumpkin_data::tag::EntityType::MINECRAFT_ILLAGER_FRIENDS)
+        && this_team.is_none()
+        && other_team.is_none()
 }
 
 fn owner_chain_contains(
@@ -92,26 +118,39 @@ impl TrackTargetGoal {
     }
 
     /// Vanilla `Entity.isAlliedTo`: scoreboard teams plus the owner alliance supplied by
-    /// `TamableAnimal.considersEntityAsAlly`.
+    /// `TamableAnimal.considersEntityAsAlly` and the per-species `considersEntityAsAlly`
+    /// overrides (`Mob::considers_entity_as_ally`).
     pub async fn is_allied(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
-        let world = mob.get_entity().world.load();
+        Self::entities_allied(mob, target).await
+    }
+
+    /// `Entity.isAlliedTo(other)` for any two entities.
+    pub async fn entities_allied(first: &dyn EntityBase, second: &dyn EntityBase) -> bool {
+        let world = first.get_entity().world.load();
         let scoreboard = world.scoreboard.lock().await;
-        let mob_team = team_name(&world, &scoreboard, mob, &mut HashSet::new());
-        let target_team = team_name(&world, &scoreboard, target, &mut HashSet::new());
-        let same_team = mob_team.is_some() && mob_team == target_team;
+        let first_team = team_name(&world, &scoreboard, first, &mut HashSet::new());
+        let second_team = team_name(&world, &scoreboard, second, &mut HashSet::new());
+        let same_team = first_team.is_some() && first_team == second_team;
+        let considered_ally = first
+            .get_mob()
+            .is_some_and(|mob| mob.considers_entity_as_ally(second, &world, &scoreboard))
+            || second
+                .get_mob()
+                .is_some_and(|mob| mob.considers_entity_as_ally(first, &world, &scoreboard));
         drop(scoreboard);
 
         same_team
+            || considered_ally
             || owner_chain_contains(
                 &world,
-                mob,
-                target.get_entity().entity_uuid,
+                first,
+                second.get_entity().entity_uuid,
                 &mut HashSet::new(),
             )
             || owner_chain_contains(
                 &world,
-                target,
-                mob.get_entity().entity_uuid,
+                second,
+                first.get_entity().entity_uuid,
                 &mut HashSet::new(),
             )
     }

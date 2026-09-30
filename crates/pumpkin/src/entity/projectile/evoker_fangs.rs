@@ -5,6 +5,7 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_util::math::vector3::Vector3;
 
+use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture};
 use crate::server::Server;
 use crate::world::World;
@@ -85,9 +86,12 @@ impl EvokerFangsEntity {
                 continue;
             }
 
-            // Scope reduction: vanilla also skips the target when `currentOwner.isAlliedTo`
-            // (shared raid/illager team), which Pumpkin has no team/alliance system to check
-            // here; only the direct owner is exempted.
+            // `EvokerFangs.dealDamageTo` (`EvokerFangs.java:111`): `currentOwner.isAlliedTo(entity)`.
+            if let Some(owner) = &owner
+                && TrackTargetGoal::entities_allied(owner.as_ref(), candidate.as_ref()).await
+            {
+                continue;
+            }
             let damage_type = if owner.is_some() {
                 DamageType::INDIRECT_MAGIC
             } else {

@@ -2983,6 +2983,23 @@ pub trait Mob: EntityBase + Send + Sync {
             .and_then(crate::entity::passive::tamable::TamableAnimal::get_owner)
     }
 
+    /// Vanilla `Entity.considersEntityAsAlly` overrides other than the scoreboard team and
+    /// tamable owner rules, which `TrackTargetGoal::is_allied` already covers (the illager
+    /// friends rule of `AbstractIllager` and the `Evoker` vex-owner rule).
+    fn considers_entity_as_ally(
+        &self,
+        _other: &dyn EntityBase,
+        _world: &World,
+        _scoreboard: &crate::world::scoreboard::Scoreboard,
+    ) -> bool {
+        false
+    }
+
+    /// Vanilla `Vex.tick` sets `noPhysics = true` around `super.tick()`.
+    fn no_physics_while_ticking(&self) -> bool {
+        false
+    }
+
     fn is_sitting(&self) -> bool {
         self.as_tamable()
             .is_some_and(crate::entity::passive::tamable::TamableAnimal::is_in_sitting_pose)
@@ -3494,7 +3511,16 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 }
             }
 
+            // Vanilla `Vex.tick` (`Vex.java:73-76`) holds `noPhysics` only for the duration of
+            // `super.tick()`.
+            let no_physics = self.no_physics_while_ticking();
+            if no_physics {
+                entity.no_clip.store(true, Relaxed);
+            }
             mob_entity.living_entity.tick(caller, server).await;
+            if no_physics {
+                entity.no_clip.store(false, Relaxed);
+            }
             self.tick_sun_burn().await;
             self.mob_try_pick_up_items().await;
             mob_entity.reset_schooling_if_isolated(self.get_random().random_range(0..200));

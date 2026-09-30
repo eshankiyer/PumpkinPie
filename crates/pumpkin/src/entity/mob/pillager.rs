@@ -177,6 +177,18 @@ impl Mob for PillagerEntity {
         &self.mob_entity
     }
 
+    /// `AbstractIllager.considersEntityAsAlly` (`AbstractIllager.java:32-38`).
+    fn considers_entity_as_ally(
+        &self,
+        other: &dyn crate::entity::EntityBase,
+        _world: &crate::world::World,
+        scoreboard: &crate::world::scoreboard::Scoreboard,
+    ) -> bool {
+        crate::entity::ai::goal::track_target::illager_considers_entity_as_ally(
+            self, other, scoreboard,
+        )
+    }
+
     /// Vanilla `Pillager.canUseNonMeleeWeapon` (`Pillager.java:97-101`) permits its crossbow
     /// attack behavior to select a crossbow as a non-melee weapon.
     fn can_use_non_melee_weapon(&self, item: &ItemStack) -> bool {

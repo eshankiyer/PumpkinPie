@@ -146,6 +146,34 @@ impl Mob for EvokerEntity {
         &self.mob_entity
     }
 
+    /// `Evoker.considersEntityAsAlly` (`Evoker.java:82-100`): itself, the illager rule, or a
+    /// vex whose owner is this evoker or an ally under the illager rule.
+    fn considers_entity_as_ally(
+        &self,
+        other: &dyn EntityBase,
+        world: &crate::world::World,
+        scoreboard: &crate::world::scoreboard::Scoreboard,
+    ) -> bool {
+        use crate::entity::ai::goal::track_target::illager_considers_entity_as_ally;
+
+        let other_entity = other.get_entity();
+        if other_entity.entity_id == self.mob_entity.living_entity.entity.entity_id {
+            return true;
+        }
+        if illager_considers_entity_as_ally(self, other, scoreboard) {
+            return true;
+        }
+        // A vex's root owner is its summoner, which is not itself ownable.
+        if let Some(vex) = other.cast_any().downcast_ref::<super::vex::VexEntity>()
+            && let Some(root_owner) = vex.owner_id().and_then(|id| world.get_entity_by_id(id))
+        {
+            return root_owner.get_entity().entity_id
+                == self.mob_entity.living_entity.entity.entity_id
+                || illager_considers_entity_as_ally(self, root_owner.as_ref(), scoreboard);
+        }
+        false
+    }
+
     /// Vanilla: `SpellcasterIllager.customServerAiStep`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {

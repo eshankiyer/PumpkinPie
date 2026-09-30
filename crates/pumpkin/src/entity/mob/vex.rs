@@ -220,11 +220,9 @@ impl Mob for VexEntity {
     /// Vanilla: `Vex#tick` -- while `hasLimitedLife`, deals 1 starvation damage every 20 ticks
     /// once the counter runs out, resetting it to keep ticking down.
     ///
-    /// Scope reduction: vanilla's `Vex.tick` also forces `noPhysics = true` around
-    /// `super.tick()` every tick so the vex can fly through blocks mid-charge/wander; Pumpkin's
-    /// entity/physics model has no such toggle anywhere (`no_physics` does not exist on `Entity`),
-    /// so this vex will still collide with blocks while flying. `setNoGravity(true)` (persistent,
-    /// unlike `noPhysics`) is ported below via `get_mob_gravity`.
+    /// `Vex.tick` holds `noPhysics` only while `super.tick()` runs (see
+    /// `no_physics_while_ticking`); `setNoGravity(true)` (persistent) is ported below via
+    /// `get_mob_gravity`.
     fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             if self.has_limited_life.load(Relaxed) {
@@ -237,6 +235,11 @@ impl Mob for VexEntity {
                 }
             }
         })
+    }
+
+    /// Vanilla: `Vex#tick`'s `noPhysics = true` around `super.tick()`.
+    fn no_physics_while_ticking(&self) -> bool {
+        true
     }
 
     /// Vanilla: `Vex#tick`'s persistent `setNoGravity(true)`.
