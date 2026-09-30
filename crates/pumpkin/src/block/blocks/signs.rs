@@ -17,6 +17,7 @@ use pumpkin_data::tag::Taggable;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_data::block_properties::Axis;
 use pumpkin_util::text::{TextComponent, TextContent};
 use pumpkin_world::world::BlockAccessor;
 use uuid::Uuid;
@@ -198,6 +199,53 @@ struct SignPlacement {
 }
 
 impl SignBlock {
+    /// Mirrors `shouldTryToChainAnotherHangingSign` of the ceiling and wall hanging sign blocks:
+    /// no runnable click command on the side facing the player, a hanging sign in hand, and
+    /// (ceiling) the bottom face or (wall) a face off the block's `facing` axis was clicked.
+    fn should_try_to_chain_hanging_sign(
+        args: &UseWithItemArgs<'_>,
+        sign_entity: &dyn SignTextAccess,
+    ) -> bool {
+        if !args.block.name.ends_with("hanging_sign")
+            || !args.item_stack.item.registry_key.ends_with("_hanging_sign")
+        {
+            return false;
+        }
+        let face_hit = if args.block.name.ends_with("_wall_hanging_sign") {
+            let state_id = args.world.get_block_state_id(args.position);
+            let Some(props) = args.block.properties(state_id) else {
+                return false;
+            };
+            let props = props.to_props();
+            let Some((_, facing)) = props.iter().find(|(k, _)| k == &"facing") else {
+                return false;
+            };
+            // `!isHittingEditableSide`: the hit face axis differs from the `facing` axis.
+            let facing_is_z = matches!(&facing[..], "north" | "south");
+            args.hit.face.to_axis() != if facing_is_z { Axis::Z } else { Axis::X }
+        } else {
+            *args.hit.face == BlockDirection::Down
+        };
+        if !face_hit {
+            return false;
+        }
+        // `canExecuteClickCommands` = waxed && `SignText.hasAnyClickCommands`.
+        let is_front = is_facing_front_text(args.world, args.position, args.block, args.player);
+        let text = if is_front {
+            sign_entity.front_text()
+        } else {
+            sign_entity.back_text()
+        };
+        let can_execute = sign_entity.sign_is_waxed()
+            && text
+                .messages
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|line| click_command(line).is_some());
+        !can_execute
+    }
+
     /// Mirrors `HangingSignItem.canPlace` delegating to `WallHangingSignBlock.canPlace`
     /// (`HangingSignItem.java:15-20`; `WallHangingSignBlock.java:103-115`). A neighboring wall
     /// hanging sign is valid support only when its facing axis matches this sign's axis.
@@ -748,6 +796,13 @@ impl BlockBehaviour for SignBlock {
             let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
                 return BlockActionResult::Pass;
             };
+
+            // `CeilingHangingSignBlock`/`WallHangingSignBlock.useItemOn` return PASS so a held
+            // hanging sign can chain onto another one
+            // (`CeilingHangingSignBlock.java:70-88`, `WallHangingSignBlock.java:60-82`).
+            if Self::should_try_to_chain_hanging_sign(&args, sign_entity) {
+                return BlockActionResult::Pass;
+            }
 
             if sign_entity.sign_is_waxed() {
                 return BlockActionResult::PassToDefaultBlockAction;
