@@ -2486,6 +2486,9 @@ impl LivingEntity {
                 && self.jumping_cooldown.load(SeqCst) == 0
             {
                 self.jump().await;
+                if let Some(mob) = caller.get_mob() {
+                    mob.after_jump_from_ground();
+                }
 
                 self.jumping_cooldown.store(10, SeqCst);
             }

@@ -11,6 +11,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::position::BlockPos;
 use rand::RngExt;
 
@@ -18,7 +19,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        breed::BreedGoal, follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
+        breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, sniffer_dig::SnifferDigGoal, swim::SwimGoal,
         tempt::TemptGoal, wander_around::WanderAroundGoal,
     },
@@ -29,6 +30,11 @@ use crate::entity::{
 use crate::world::World;
 
 const TEMPT_ITEMS: &[&Item] = &[&Item::TORCHFLOWER_SEEDS];
+
+/// `Sniffer.DIGGING_BB_HEIGHT_OFFSET` and the `withEyeHeight` of `DIGGING_DIMENSIONS`
+/// (`Sniffer.java:73-76`).
+const DIGGING_BB_HEIGHT_OFFSET: f32 = 0.4;
+const DIGGING_EYE_HEIGHT: f32 = 0.81;
 
 /// Vanilla `Sniffer.SNIFFER_BABY_START_AGE`: twice the default baby age, sniffers take twice as
 /// long to grow up.
@@ -130,17 +136,21 @@ impl SnifferEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+            // Vanilla's core activity runs `AnimalPanic(2.0)`; the dig goal sits below panic,
+            // breeding and tempting so that, as with `Sniffer.canDig()`/`Digging.canStillUse`,
+            // a panicking, in-love or tempted sniffer does not dig.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, SnifferDigGoal::new(1.0, Arc::downgrade(&mob_arc)));
+            goal_selector.add_goal(1, EscapeDangerGoal::new(2.0));
             goal_selector.add_goal(2, BreedGoal::with_mate_predicate(1.0, sniffer_can_mate));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(4, SnifferDigGoal::new(1.0, Arc::downgrade(&mob_arc)));
+            goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.0)));
+            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
-                6,
+                7,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
             );
-            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
         };
 
         mob_arc
@@ -250,6 +260,7 @@ impl SnifferEntity {
     /// keeps its idle pose while it digs.
     pub fn set_state(&self, state: SnifferState) {
         self.state.store(state.id(), Ordering::Relaxed);
+        self.refresh_dimensions();
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
                 pumpkin_data::tracked_data::sniffer::STATE,
@@ -257,6 +268,36 @@ impl SnifferEntity {
             )],
             None,
         );
+    }
+
+    /// `Sniffer.onSyncedDataUpdated` calls `refreshDimensions` on a state change, and
+    /// `getDefaultDimensions` (`Sniffer.java:122-125`) shrinks the box while digging:
+    /// `DIGGING_DIMENSIONS` is the type width by (height - 0.4) with eye height 0.81, scaled
+    /// by the age scale (0.5 for a baby). Otherwise the ordinary (baby-scaled) size is restored
+    /// from `base_dimension`, which digging never overwrites.
+    fn refresh_dimensions(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let dimensions = if self.get_state() == SnifferState::Digging {
+            let scale = if entity.age.load(Ordering::Relaxed) < 0 {
+                0.5
+            } else {
+                1.0
+            };
+            let [width, height] = entity.entity_type.dimension;
+            EntityDimensions {
+                width: width * scale,
+                height: (height - DIGGING_BB_HEIGHT_OFFSET) * scale,
+                eye_height: DIGGING_EYE_HEIGHT * scale,
+                fixed: false,
+            }
+        } else {
+            entity.base_dimension.load()
+        };
+        entity.entity_dimension.store(dimensions);
+        let pos = entity.pos.load();
+        entity
+            .bounding_box
+            .store(BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &dimensions));
     }
 
     /// Vanilla `Sniffer.transitionTo`. Only `IDLING`/`DIGGING` are driven anywhere today (by
@@ -333,6 +374,7 @@ impl NBTStorage for SnifferEntity {
             self.read_animal_nbt(nbt);
             if let Some(state_id) = nbt.get_int("State") {
                 self.state.store(state_id, Ordering::Relaxed);
+                self.refresh_dimensions();
             }
             self.read_explored_positions_nbt(nbt);
         })
@@ -352,6 +394,58 @@ impl super::animal::Animal for SnifferEntity {
 impl Mob for SnifferEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn on_mob_death<'a>(
+        &'a self,
+        _cause: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        // `Sniffer.die` leaves the digging pose before `super.die` (`Sniffer.java:355-359`).
+        Box::pin(async move { self.transition_to(SnifferState::Idling) })
+    }
+
+    fn after_jump_from_ground(&self) {
+        // `Sniffer.jumpFromGround` (`Sniffer.java:333-343`): a moving sniffer that is barely
+        // moving horizontally gets `moveRelative(0.1, (0, 0, 1))`, a forward hop over ledges.
+        // `Entity.getInputVector` rotates that input by yaw.
+        let speed_modifier = self
+            .mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_speed_modifier();
+        if speed_modifier <= 0.0 {
+            return;
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        let mut velocity = entity.velocity.load();
+        if velocity.x * velocity.x + velocity.z * velocity.z >= 0.01 {
+            return;
+        }
+        let yaw = f64::from(entity.yaw.load()).to_radians();
+        velocity.x -= yaw.sin() * 0.1;
+        velocity.z += yaw.cos() * 0.1;
+        entity.velocity.store(velocity);
+        entity
+            .velocity_dirty
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn get_step_sound(&self) -> Option<Sound> {
+        // `Sniffer.playStepSound` ignores the block: step sound at volume 0.15.
+        Some(Sound::EntitySnifferStep)
+    }
+
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        // `Sniffer.getAmbientSound` is silent while digging or searching.
+        match self.get_state() {
+            SnifferState::Digging | SnifferState::Searching => None,
+            _ => Some(Sound::EntitySnifferIdle),
+        }
+    }
+
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(Sound::EntitySnifferHurt)
     }
 
     fn on_pathfinding_start(&self, navigator: &mut Navigator) {

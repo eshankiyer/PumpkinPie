@@ -42,8 +42,8 @@ const DROP_AT_TICKS_REMAINING: i32 = 10;
 /// - Seed choice is a flat 50/50 between Torchflower Seeds and Pitcher Pod, matching the
 ///   two-entry `sniffer_digging` loot table pool, instead of going through the loot table
 ///   system.
-/// - No "in love"/breeding or panic/temptation state checks (those subsystems aren't fully
-///   wired for Sniffer in Pumpkin yet).
+/// - Panic and temptation do not gate the goal by a memory check; the panic and tempt goals
+///   are registered at a higher priority so they pre-empt and block it.
 pub struct SnifferDigGoal {
     move_to_target_pos_goal: MoveToTargetPosGoal<Self>,
     digging_ticks: i32,
@@ -68,13 +68,24 @@ impl SnifferDigGoal {
     }
 }
 
+impl SnifferDigGoal {
+    /// The entity-state half of `Sniffer.canDig()` (`Sniffer.java:269-277`): not a baby, not in
+    /// water, on the ground and not a passenger. Panic and tempting are excluded by goal
+    /// priority instead (panic and tempt goals sit above this one, see `SnifferEntity::new`),
+    /// because the selector is checked out while goals run and cannot be queried from here.
+    async fn can_dig_now(mob: &dyn Mob) -> bool {
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        entity.on_ground.load(Ordering::Relaxed)
+            && !entity.touching_water.load(Ordering::SeqCst)
+            && entity.age.load(Ordering::Relaxed) >= 0
+            && !entity.has_vehicle().await
+    }
+}
+
 impl Goal for SnifferDigGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async {
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            if !entity.on_ground.load(Ordering::Relaxed)
-                || entity.touching_water.load(Ordering::SeqCst)
-            {
+            if !Self::can_dig_now(mob).await {
                 return false;
             }
 
@@ -88,6 +99,24 @@ impl Goal for SnifferDigGoal {
 
     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async {
+            // `Digging.canStillUse` requires `canDig()` and `!isInLove` (`SnifferAi.java:157`).
+            // The ground and water halves are left to `can_start` so a sniffer stepping up a
+            // block on its way to the target is not cancelled mid-walk.
+            let entity = &mob.get_mob_entity().living_entity.entity;
+            if entity.age.load(Ordering::Relaxed) < 0
+                || entity.has_vehicle().await
+                || mob.get_mob_entity().is_in_love()
+            {
+                return false;
+            }
+            // Once the dig animation has started the full `canDig()` applies: a sniffer that
+            // is pushed into water or off the ground aborts (`resetSniffing`).
+            if self.digging_ticks > 0
+                && (!entity.on_ground.load(Ordering::Relaxed)
+                    || entity.touching_water.load(Ordering::SeqCst))
+            {
+                return false;
+            }
             self.digging_ticks > 0 || self.move_to_target_pos_goal.should_continue(mob).await
         })
     }

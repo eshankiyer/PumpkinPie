@@ -2416,6 +2416,11 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async {})
     }
 
+    /// Runs after `LivingEntity.jumpFromGround` for a mob that overrides it with extra
+    /// impulse (`Sniffer.jumpFromGround`, `Sniffer.java:333-343`). It runs even when the base
+    /// jump returned early for a negligible jump power, as the override's `super` call does.
+    fn after_jump_from_ground(&self) {}
+
     /// Vanilla `Entity.killedEntity` (`Entity.java:2886-2888`), called on the entity that
     /// caused a death (`DamageSource.getEntity`, i.e. `LivingEntity::on_death`'s `cause`) with
     /// the victim. Returning `false` means the victim was replaced rather than killed: the death
