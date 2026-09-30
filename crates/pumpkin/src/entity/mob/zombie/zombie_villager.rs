@@ -14,16 +14,23 @@ use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, effect::StatusEffect, tag::Taggable};
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_protocol::codec::var_int::VarInt;
-use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_protocol::java::client::play::{MerchantOffer, Metadata};
 use pumpkin_util::math::position::BlockPos;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::entity::mob::zombie::ZombieEntityBase;
+use crate::entity::ageable::AgeableMob;
+use crate::entity::mob::zombie::{
+    ZombieEntityBase, ZombieFamily, ignite_target_on_hit, zombie_killed_entity,
+};
 use crate::entity::mob::{Mob, MobEntity};
 use crate::entity::passive::villager::VillagerEntity;
 use crate::entity::passive::villager::data::{
     GossipType, VillagerData, VillagerProfession, villager_type_at,
+};
+use crate::entity::passive::villager::gossip::GossipContainer;
+use crate::entity::passive::villager::{
+    gossips_from_nbt, gossips_to_nbt, offers_from_nbt, offers_to_nbt,
 };
 use crate::entity::player::Player;
 use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture};
@@ -69,6 +76,11 @@ pub struct ZombieVillagerEntity {
     villager_data_finalized: AtomicBool,
     /// Vanilla `villagerXp` (`ZombieVillager.java:101-105, 364-370`).
     villager_xp: AtomicI32,
+    /// Vanilla `gossips` (`ZombieVillager.java:75`), nullable: the infecting villager's
+    /// reputation, handed back to the villager when the zombie villager is cured.
+    gossips: Mutex<Option<GossipContainer>>,
+    /// Vanilla `tradeOffers` (`ZombieVillager.java:76`), nullable, kept for the same reason.
+    trade_offers: Mutex<Option<Vec<MerchantOffer>>>,
     converting: AtomicBool,
     /// Ticks remaining until `finish_conversion`; meaningful only while `converting`.
     conversion_time: AtomicI32,
@@ -88,6 +100,8 @@ impl ZombieVillagerEntity {
             villager_data: Mutex::new(villager_data),
             villager_data_finalized: AtomicBool::new(false),
             villager_xp: AtomicI32::new(0),
+            gossips: Mutex::new(None),
+            trade_offers: Mutex::new(None),
             converting: AtomicBool::new(false),
             conversion_time: AtomicI32::new(-1),
             conversion_starter: Mutex::new(None),
@@ -111,7 +125,17 @@ impl ZombieVillagerEntity {
     }
 
     pub async fn set_villager_data(&self, data: VillagerData) {
-        *self.villager_data.lock().await = data;
+        let profession_changed = {
+            let mut current = self.villager_data.lock().await;
+            let changed = current.profession.0 != data.profession.0;
+            *current = data;
+            changed
+        };
+        // `ZombieVillager.setVillagerData` (`ZombieVillager.java:340-347`) drops the offers when
+        // the profession changes.
+        if profession_changed {
+            *self.trade_offers.lock().await = None;
+        }
         // `ZombieVillager.setVillagerData` updates `DATA_VILLAGER_DATA` immediately
         // (`ZombieVillager.java:340-347`).
         self.get_entity().send_meta_data(
@@ -145,6 +169,16 @@ impl ZombieVillagerEntity {
         // `ZombieVillager.setVillagerXp` replaces the persisted XP value
         // (`ZombieVillager.java:368-370`).
         self.villager_xp.store(xp, Ordering::Relaxed);
+    }
+
+    /// `ZombieVillager.setGossips` (`ZombieVillager.java:333-335`).
+    pub async fn set_gossips(&self, gossips: GossipContainer) {
+        *self.gossips.lock().await = Some(gossips);
+    }
+
+    /// `ZombieVillager.setTradeOffers` (`ZombieVillager.java:329-331`).
+    pub async fn set_trade_offers(&self, offers: Vec<MerchantOffer>) {
+        *self.trade_offers.lock().await = Some(offers);
     }
 
     /// `ZombieVillager.setVillagerConversionTime` (`ZombieVillager.java:274-277`) is a
@@ -220,10 +254,12 @@ impl ZombieVillagerEntity {
     /// velocity, rotation, ground state, age/baby, invulnerability, custom name and
     /// active effects, adds the post-cure Nausea, then discards the zombie villager.
     ///
+    /// The gossips and trade offers the infection path stored come back to the villager, and a
+    /// baby zombie villager cures into a baby villager (`ConversionType.convertCommon`). The age
+    /// is not copied: it is a tick counter here, not a breeding age.
+    ///
     /// Not ported: `dropPreservedEquipment` (no equipment kept -- `keepEquipment` is
-    /// `false` in vanilla's own call), gossip/trade-offer carryover (only ever populated
-    /// by the villager-to-zombie-villager infection path, out of scope here), and
-    /// `refreshBrain`.
+    /// `false` in vanilla's own call) and `refreshBrain`.
     ///
     /// The `ZOMBIE_VILLAGER_CURED` reputation event (`ZombieVillager.java:262`,
     /// `Villager::onReputationEventFrom` at `Villager.java:855-858`) *is* ported below --
@@ -249,9 +285,6 @@ impl ZombieVillagerEntity {
             old_entity.on_ground.load(Ordering::Relaxed),
             Ordering::Relaxed,
         );
-        new_entity
-            .age
-            .store(old_entity.age.load(Ordering::Relaxed), Ordering::Relaxed);
         new_entity.invulnerable.store(
             old_entity.invulnerable.load(Ordering::Relaxed),
             Ordering::Relaxed,
@@ -262,6 +295,20 @@ impl ZombieVillagerEntity {
                 old_entity.custom_name_visible.load(Ordering::Relaxed),
                 Ordering::Relaxed,
             );
+        }
+        // `if (from.isBaby()) to.setBaby(true)` (`ConversionType.java:79-81`).
+        if self.mob_entity.is_baby() {
+            villager.set_baby(true);
+        }
+        // `villager.setGossips(this.gossips)` / `villager.setOffers(this.tradeOffers.copy())`
+        // (`ZombieVillager.java:249-255`).
+        let gossips = self.gossips.lock().await.take();
+        if let Some(gossips) = gossips {
+            *villager.gossips.lock().await = gossips;
+        }
+        let offers = self.trade_offers.lock().await.clone();
+        if let Some(offers) = offers {
+            *villager.offers.lock().await = offers;
         }
 
         let effects: Vec<_> = self
@@ -319,6 +366,12 @@ impl ZombieVillagerEntity {
     }
 }
 
+impl ZombieFamily for ZombieVillagerEntity {
+    fn zombie_base(&self) -> &ZombieEntityBase {
+        &self.mob_entity
+    }
+}
+
 impl NBTStorage for ZombieVillagerEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
@@ -334,6 +387,13 @@ impl NBTStorage for ZombieVillagerEntity {
             // the finalized flag and current villager XP alongside the villager data.
             nbt.put_bool("VillagerDataFinalized", self.get_villager_data_finalized());
             nbt.put_int("Xp", self.get_villager_xp());
+            // `storeNullable("Offers")` / `storeNullable("Gossips")` (`ZombieVillager.java:99-100`).
+            if let Some(offers) = &*self.trade_offers.lock().await {
+                nbt.put_compound("Offers", offers_to_nbt(offers));
+            }
+            if let Some(gossips) = &*self.gossips.lock().await {
+                nbt.put("Gossips", gossips_to_nbt(gossips));
+            }
 
             nbt.put_int(
                 "ConversionTime",
@@ -380,6 +440,8 @@ impl NBTStorage for ZombieVillagerEntity {
                 self.villager_data_finalized.store(true, Ordering::Relaxed);
             }
             self.set_villager_xp(nbt.get_int("Xp").unwrap_or(0));
+            *self.trade_offers.lock().await = nbt.get_compound("Offers").and_then(offers_from_nbt);
+            *self.gossips.lock().await = nbt.get_list("Gossips").map(gossips_from_nbt);
 
             let conversion_time = nbt.get_int("ConversionTime").unwrap_or(-1);
             if conversion_time != -1 {
@@ -420,10 +482,26 @@ impl Mob for ZombieVillagerEntity {
     /// ambient and hurt sound emitters.
     fn get_sound_pitch(&self) -> f32 {
         zombie_villager_voice_pitch(
-            self.get_entity().age.load(Ordering::Relaxed) < 0,
+            self.mob_entity.is_baby(),
             rand::random::<f32>(),
             rand::random::<f32>(),
         )
+    }
+
+    /// `Zombie::getBaseExperienceReward` (`Zombie.java:178-185`).
+    fn get_base_experience_reward(&self) -> u32 {
+        self.mob_entity.base_experience_reward()
+    }
+
+    /// The ignite half of `Zombie::doHurtTarget` (`Zombie.java:338-349`); `ZombieVillager` does
+    /// not override `doHurtTarget`.
+    fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move { ignite_target_on_hit(&self.mob_entity.mob_entity, target).await })
+    }
+
+    /// `Zombie::killedEntity` (`Zombie.java:421-435`), inherited by `ZombieVillager`.
+    fn killed_entity<'a>(&'a self, victim: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move { zombie_killed_entity(&self.mob_entity, victim).await })
     }
 
     /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s

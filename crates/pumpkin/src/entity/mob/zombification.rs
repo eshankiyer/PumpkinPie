@@ -16,9 +16,11 @@ use std::sync::{
 };
 
 use pumpkin_data::{
+    data_component_impl::EquipmentSlot,
     dimension::Dimension,
     effect::StatusEffect,
     entity::EntityType,
+    item_stack::ItemStack,
     potion::Effect,
     sound::{Sound, SoundCategory},
 };
@@ -132,13 +134,9 @@ impl ZombificationTimer {
 /// path pass `nausea = false` -- `Tadpole.ageUp` (`Tadpole.java:238-247`) is one; the nausea
 /// belongs to zombification, not to `convertTo` itself.
 ///
-/// Simplifications, matching the copy set `ZombieEntity::finish_conversion` already uses for
-/// zombie -> drowned: position, velocity, rotation, ground flag, age, invulnerability, custom
-/// name and active effects carry over; equipment, leash and passengers do not. That is a real
-/// divergence for `PiglinBrute`, whose vanilla `ConversionParams.single(this, true, true)`
-/// keeps the golden axe -- here the converted zombified piglin arrives empty-handed. Pumpkin
-/// has no generic `Mob::convertTo`, and building equipment transfer here would duplicate work
-/// that belongs in one.
+/// The copy itself is [`prepare_conversion`] and the spawn/discard is [`complete_conversion`];
+/// callers that need to run `ConversionParams.AfterConversion` work between the two (the zombie
+/// family's `handleAttributes`, for one) use them directly.
 pub async fn convert_to<T>(
     old: &MobEntity,
     new_type: &'static EntityType,
@@ -147,29 +145,106 @@ pub async fn convert_to<T>(
 ) where
     T: EntityBase + Send + Sync + 'static,
 {
+    let converted = prepare_conversion(old, new_type, build).await;
+
+    if nausea && let Some(new_living) = converted.get_living_entity() {
+        new_living
+            .add_effect(Effect {
+                effect_type: &StatusEffect::NAUSEA,
+                duration: NAUSEA_DURATION_TICKS,
+                amplifier: 0,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            })
+            .await;
+    }
+
+    complete_conversion(old, converted).await;
+}
+
+/// The first half of `Mob.convertTo` (`Mob.java:1229-1255`).
+///
+/// Builds the replacement and copies what `ConversionType.SINGLE.convert`
+/// (`ConversionType.java:16-69`) and its `convertCommon` (`ConversionType.java:87-127`) carry
+/// over, without spawning it or discarding `old`.
+///
+/// Carried over: position, velocity, rotation and body rotation, ground flag, fall distance,
+/// invulnerability, custom name and its visibility, silent and no-gravity flags, scoreboard
+/// tags, absorption, active effects, the equipment stacks together with their drop chances
+/// (`ConversionParams.keepEquipment`), the persistence, left-handed and no-AI flags, and
+/// (through [`complete_conversion`]) `canPickUpLoot` (`preserveCanPickUpLoot`).
+///
+/// `EntityType.create(level, CONVERSION)` never runs `finalizeSpawn`, so the replacement must not
+/// re-roll spawn gear or the loot-pickup chance. `World::spawn_entity` runs
+/// `Mob::init_data_tracker`, whose `finalizeSpawn` work is exactly what the entity-level
+/// restored flag suppresses, so the flag is raised here. Anything else `finalizeSpawn` does that
+/// a conversion keeps (for zombies, `handleAttributes`) is the caller's to run before
+/// [`complete_conversion`].
+///
+/// Divergences: passengers and the vehicle (`ConversionType.java:20-38`), the leash holder,
+/// the sleeping position, the team, the portal cooldown, the `ANGRY_AT` brain memory and the
+/// `CUSTOM_DATA` component are not carried over -- Pumpkin has no start-riding transfer API,
+/// and none of the others is modeled on the mobs that convert. The age is not copied:
+/// vanilla copies it only when both mobs are `AgeableMob` (`ConversionType.java:82-86`), which
+/// none of the converting pairs here is, so the replacement starts at zero.
+pub async fn prepare_conversion<T>(
+    old: &MobEntity,
+    new_type: &'static EntityType,
+    build: impl FnOnce(Entity) -> Arc<T>,
+) -> Arc<T>
+where
+    T: EntityBase + Send + Sync + 'static,
+{
     let old_entity = &old.living_entity.entity;
     let world = old_entity.world.load().clone();
     let pos = old_entity.pos.load();
 
-    let converted = build(Entity::new(world.clone(), pos, new_type));
+    let converted = build(Entity::new(world, pos, new_type));
 
     {
         let new_entity = converted.get_entity();
         new_entity.velocity.store(old_entity.velocity.load());
         new_entity.yaw.store(old_entity.yaw.load());
         new_entity.pitch.store(old_entity.pitch.load());
+        new_entity.body_yaw.store(old_entity.body_yaw.load());
         new_entity
             .on_ground
             .store(old_entity.on_ground.load(Relaxed), Relaxed);
-        new_entity.age.store(old_entity.age.load(Relaxed), Relaxed);
         new_entity
             .invulnerable
             .store(old_entity.invulnerable.load(Relaxed), Relaxed);
+        // `setCustomNameVisible(from.isCustomNameVisible())` is unconditional
+        // (`ConversionType.java:101`); the flag goes in first because `set_custom_name` reads it.
+        new_entity
+            .custom_name_visible
+            .store(old_entity.custom_name_visible.load(Relaxed), Relaxed);
         if let Some(name) = &**old_entity.custom_name.load() {
             new_entity.set_custom_name(name.clone());
-            new_entity
-                .custom_name_visible
-                .store(old_entity.custom_name_visible.load(Relaxed), Relaxed);
+        }
+        new_entity
+            .persistence_required
+            .store(old_entity.persistence_required.load(Relaxed), Relaxed);
+        new_entity
+            .silent
+            .store(old_entity.silent.load(Relaxed), Relaxed);
+        if old_entity.has_no_gravity() {
+            new_entity.set_has_no_gravity(true);
+        }
+        let tags = old_entity.scoreboard_tags.lock().await.clone();
+        if !tags.is_empty() {
+            *new_entity.scoreboard_tags.lock().await = tags;
+        }
+    }
+
+    if let Some(new_mob) = converted.get_mob() {
+        let new_mob = new_mob.get_mob_entity();
+        if old.is_left_handed() {
+            new_mob.set_left_handed(true);
+        }
+        if old.is_no_ai() {
+            new_mob.set_no_ai(true);
         }
     }
 
@@ -182,25 +257,77 @@ pub async fn convert_to<T>(
         .cloned()
         .collect();
     if let Some(new_living) = converted.get_living_entity() {
+        new_living
+            .absorption
+            .store(old.living_entity.absorption.load());
+        new_living
+            .fall_distance
+            .store(old.living_entity.fall_distance.load());
         for effect in effects {
             new_living.add_effect(effect).await;
         }
-        if nausea {
-            new_living
-                .add_effect(Effect {
-                    effect_type: &StatusEffect::NAUSEA,
-                    duration: NAUSEA_DURATION_TICKS,
-                    amplifier: 0,
-                    ambient: false,
-                    show_particles: true,
-                    show_icon: true,
-                    blend: false,
-                })
-                .await;
+
+        // `ConversionType.java:40-47`: every non-empty stack moves across (`copyAndClear`) with
+        // its slot's drop chance.
+        let kept: Vec<(EquipmentSlot, ItemStack)> = {
+            let mut equipment = old.living_entity.entity_equipment.lock().await;
+            let kept = equipment
+                .equipment
+                .iter()
+                .filter(|(_, stack)| !stack.is_empty())
+                .map(|(slot, stack)| (slot.clone(), stack.clone()))
+                .collect();
+            equipment.clear();
+            kept
+        };
+        if !kept.is_empty() {
+            let old_chances = old
+                .living_entity
+                .equipment_drop_chances
+                .lock()
+                .await
+                .clone();
+            let mut new_equipment = new_living.entity_equipment.lock().await;
+            let mut new_chances = new_living.equipment_drop_chances.lock().await;
+            for (slot, stack) in kept {
+                if let Some(chance) = old_chances.get(&slot) {
+                    new_chances.insert(slot.clone(), *chance);
+                }
+                new_equipment.put(&slot, stack);
+            }
         }
     }
 
-    world.spawn_entity(converted as Arc<dyn EntityBase>).await;
+    // `Mob.finalizeSpawn` work is not part of a conversion; see the doc comment.
+    converted
+        .get_entity()
+        .restored_from_nbt
+        .store(true, Relaxed);
+    converted
+}
+
+/// The second half of `Mob.convertTo`: adds the replacement to the world and discards `old`
+/// (`Mob.java:1246-1252`).
+///
+/// `preserveCanPickUpLoot` (`ConversionType.java:91-93`) is applied after the spawn: the
+/// generic `Mob::init_data_tracker` re-rolls that flag for every mob it initializes, restored or
+/// not, because `CanPickUpLoot` is not persisted yet.
+pub async fn complete_conversion<T>(old: &MobEntity, converted: Arc<T>)
+where
+    T: EntityBase + Send + Sync + 'static,
+{
+    let old_entity = &old.living_entity.entity;
+    let world = old_entity.world.load().clone();
+    let can_pick_up_loot = old.can_pick_up_loot();
+
+    world
+        .spawn_entity(converted.clone() as Arc<dyn EntityBase>)
+        .await;
+    if let Some(new_mob) = converted.get_mob() {
+        new_mob
+            .get_mob_entity()
+            .set_can_pick_up_loot(can_pick_up_loot);
+    }
     old_entity.remove().await;
 }
 

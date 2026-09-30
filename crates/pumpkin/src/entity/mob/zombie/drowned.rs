@@ -9,6 +9,7 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 
@@ -20,7 +21,9 @@ use crate::entity::ai::goal::drowned_swim_up::DrownedSwimUpGoal;
 use crate::entity::ai::goal::drowned_util::is_bright_outside;
 use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
-use crate::entity::mob::zombie::ZombieEntityBase;
+use crate::entity::mob::zombie::{
+    ZombieEntityBase, ZombieFamily, ignite_target_on_hit, zombie_killed_entity,
+};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
@@ -215,19 +218,56 @@ impl DrownedEntity {
     }
 }
 
+impl ZombieFamily for DrownedEntity {
+    fn zombie_base(&self) -> &ZombieEntityBase {
+        &self.entity
+    }
+}
+
 impl NBTStorage for DrownedEntity {
-    /// `DrownedEntity` stores no extra NBT of its own; the override exists only to record that
-    /// this drowned came off disk, so `ZombieEntityBase` skips the fresh-spawn attribute roll.
-    fn read_nbt_non_mut<'a>(&'a self, _nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.entity.mark_restored_from_nbt();
-        })
+    /// `DrownedEntity` stores no extra NBT of its own beyond `Zombie`'s `IsBaby`, which
+    /// `ZombieEntityBase` writes.
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        self.entity.write_nbt(nbt)
+    }
+
+    /// Records that this drowned came off disk, so `ZombieEntityBase` skips the fresh-spawn
+    /// baby and attribute rolls, and restores `IsBaby`.
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        self.entity.read_nbt_non_mut(nbt)
     }
 }
 
 impl Mob for DrownedEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    /// `Drowned.getStepSound` (`Drowned.java:181-184`), played by `Zombie.playStepSound` at
+    /// volume `0.15F` and pitch `1.0F` -- the `Mob` defaults.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityDrownedStep)
+    }
+
+    /// `Zombie::getBaseExperienceReward` (`Zombie.java:178-185`).
+    fn get_base_experience_reward(&self) -> u32 {
+        self.entity.base_experience_reward()
+    }
+
+    /// `LivingEntity::getVoicePitch`, reading the drowned's own baby flag.
+    fn get_sound_pitch(&self) -> f32 {
+        self.entity.voice_pitch()
+    }
+
+    /// The ignite half of `Zombie::doHurtTarget` (`Zombie.java:338-349`); `Drowned` does not
+    /// override `doHurtTarget`.
+    fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move { ignite_target_on_hit(&self.entity.mob_entity, target).await })
+    }
+
+    /// `Zombie::killedEntity` (`Zombie.java:421-435`), inherited by `Drowned`.
+    fn killed_entity<'a>(&'a self, victim: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move { zombie_killed_entity(&self.entity, victim).await })
     }
 
     /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s

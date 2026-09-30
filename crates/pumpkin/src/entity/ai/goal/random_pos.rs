@@ -310,6 +310,33 @@ pub fn land_get_pos(mob: &dyn Mob, horizontal: i32, vertical: i32) -> Option<Vec
     })
 }
 
+/// The ten candidate positions of `LandRandomPos.getPos(mob, horizontal, vertical, weight)`
+/// (`LandRandomPos.java:15-22`), before `RandomPos.generateRandomPos` (`RandomPos.java:96-112`)
+/// keeps the one with the highest weight.
+///
+/// [`land_get_pos`] scores candidates with `getWalkTargetValue`, which is synchronous. A goal
+/// with its own weight, such as `MoveThroughVillageGoal`'s village-distance one, needs asynchronous
+/// world lookups, so it takes the candidates and scores them itself. Candidates rejected by the
+/// stability, restriction, water or malus checks are simply absent, as `null` suppliers are in
+/// vanilla.
+pub(crate) fn land_get_candidates(mob: &dyn Mob, horizontal: i32, vertical: i32) -> Vec<BlockPos> {
+    let restrict = mob_restricted(mob, f64::from(horizontal));
+    let mut rng = mob.get_random();
+    let mut candidates = Vec::with_capacity(RANDOM_POS_ATTEMPTS as usize);
+    for _ in 0..RANDOM_POS_ATTEMPTS {
+        let direction = generate_random_direction(&mut rng, horizontal, vertical);
+        let candidate =
+            generate_random_pos_toward_direction(mob, f64::from(horizontal), &mut rng, direction);
+        if !passes_common_checks(mob, restrict, candidate) {
+            continue;
+        }
+        if let Some(landing) = move_pos_up_out_of_solid(mob, candidate) {
+            candidates.push(landing);
+        }
+    }
+    candidates
+}
+
 /// `LandRandomPos.getPosTowards` (`LandRandomPos.java:25-29`), which routes through
 /// `getPosInDirection` with `minHorizontalDist = 0` and a fixed `PI/2` cone
 /// (`LandRandomPos.java:54`).

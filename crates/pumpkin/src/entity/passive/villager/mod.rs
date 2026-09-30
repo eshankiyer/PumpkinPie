@@ -2159,7 +2159,6 @@ impl VillagerEntity {
 }
 
 impl NBTStorage for VillagerEntity {
-    #[expect(clippy::too_many_lines)]
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.write_nbt(nbt).await;
@@ -2215,42 +2214,7 @@ impl NBTStorage for VillagerEntity {
             }
 
             // Save Offers
-            {
-                let offers = self.offers.lock().await;
-                let mut recipes = Vec::new();
-                for offer in offers.iter() {
-                    let mut recipe = NbtCompound::new();
-
-                    let mut buy = NbtCompound::new();
-                    offer.base_cost_a.0.write_item_stack(&mut buy);
-                    recipe.put_compound("buy", buy);
-
-                    if let Some(cost_b) = &offer.cost_b
-                        && !cost_b.0.is_empty()
-                    {
-                        let mut buy_b = NbtCompound::new();
-                        cost_b.0.write_item_stack(&mut buy_b);
-                        recipe.put_compound("buyB", buy_b);
-                    }
-
-                    let mut sell_item = NbtCompound::new();
-                    offer.output.0.write_item_stack(&mut sell_item);
-                    recipe.put_compound("sell", sell_item);
-
-                    recipe.put_int("uses", offer.uses);
-                    recipe.put_int("maxUses", offer.max_uses);
-                    recipe.put_bool("rewardExp", offer.reward_exp);
-                    recipe.put_int("xp", offer.xp);
-                    recipe.put_float("priceMultiplier", offer.price_multiplier);
-                    recipe.put_int("specialPrice", offer.special_price);
-                    recipe.put_int("demand", offer.demand);
-
-                    recipes.push(pumpkin_nbt::tag::NbtTag::Compound(recipe));
-                }
-                let mut offers_compound = NbtCompound::new();
-                offers_compound.put("Recipes", pumpkin_nbt::tag::NbtTag::List(recipes));
-                nbt.put_compound("Offers", offers_compound);
-            };
+            nbt.put_compound("Offers", offers_to_nbt(&self.offers.lock().await));
 
             // Inventory
             let inventory = self.inventory.lock().await;
@@ -2266,27 +2230,7 @@ impl NBTStorage for VillagerEntity {
             nbt.put("Inventory", pumpkin_nbt::tag::NbtTag::List(inventory_list));
 
             // Gossips
-            let gossips = self.gossips.lock().await;
-            let mut gossip_list = Vec::new();
-            for (uuid, types) in gossips.raw() {
-                for (gtype, value) in types {
-                    let mut gossip_nbt = NbtCompound::new();
-                    let uuid_val = uuid.as_u128();
-                    gossip_nbt.put(
-                        "Target",
-                        pumpkin_nbt::tag::NbtTag::IntArray(vec![
-                            (uuid_val >> 96) as i32,
-                            ((uuid_val >> 64) & 0xFFFF_FFFF) as i32,
-                            ((uuid_val >> 32) & 0xFFFF_FFFF) as i32,
-                            (uuid_val & 0xFFFF_FFFF) as i32,
-                        ]),
-                    );
-                    gossip_nbt.put_string("Type", gtype.name().to_owned());
-                    gossip_nbt.put_int("Value", *value);
-                    gossip_list.push(pumpkin_nbt::tag::NbtTag::Compound(gossip_nbt));
-                }
-            }
-            nbt.put("Gossips", pumpkin_nbt::tag::NbtTag::List(gossip_list));
+            nbt.put("Gossips", gossips_to_nbt(&*self.gossips.lock().await));
         })
     }
 
@@ -2374,52 +2318,8 @@ impl NBTStorage for VillagerEntity {
                 *self.meeting_point.lock().unwrap() = None;
             }
 
-            if let Some(offers_compound) = nbt.get_compound("Offers")
-                && let Some(recipes) = offers_compound.get_list("Recipes")
-            {
-                let mut offers = self.offers.lock().await;
-                offers.clear();
-                for tag in recipes {
-                    if let Some(recipe) = tag.extract_compound() {
-                        let buy = recipe
-                            .get_compound("buy")
-                            .and_then(ItemStack::read_item_stack);
-                        let buy_b = recipe
-                            .get_compound("buyB")
-                            .and_then(ItemStack::read_item_stack);
-                        let sell_item = recipe
-                            .get_compound("sell")
-                            .and_then(ItemStack::read_item_stack);
-
-                        if let (Some(buy), Some(sell_item)) = (buy, sell_item)
-                            && !buy.is_empty()
-                            && !sell_item.is_empty()
-                            && buy_b.as_ref().is_none_or(|stack| !stack.is_empty())
-                        {
-                            let uses = recipe.get_int("uses").unwrap_or(0);
-                            let max_uses = recipe.get_int("maxUses").unwrap_or(12);
-                            let reward_exp = recipe.get_bool("rewardExp").unwrap_or(true);
-                            let xp = recipe.get_int("xp").unwrap_or(2);
-                            let price_multiplier =
-                                recipe.get_float("priceMultiplier").unwrap_or(0.05);
-                            let special_price = recipe.get_int("specialPrice").unwrap_or(0);
-                            let demand = recipe.get_int("demand").unwrap_or(0);
-
-                            offers.push(pumpkin_protocol::java::client::play::MerchantOffer {
-                                base_cost_a: buy.into(),
-                                output: sell_item.into(),
-                                cost_b: buy_b.map(Into::into),
-                                reward_exp,
-                                uses,
-                                max_uses,
-                                xp,
-                                special_price,
-                                price_multiplier,
-                                demand,
-                            });
-                        }
-                    }
-                }
+            if let Some(offers) = nbt.get_compound("Offers").and_then(offers_from_nbt) {
+                *self.offers.lock().await = offers;
             }
 
             // Inventory
@@ -2437,36 +2337,140 @@ impl NBTStorage for VillagerEntity {
 
             // Gossips
             if let Some(gossip_list) = nbt.get_list("Gossips") {
-                let mut raw: HashMap<Uuid, HashMap<GossipType, i32>> = HashMap::new();
-                for tag in gossip_list {
-                    if let Some(gossip_nbt) = tag.extract_compound() {
-                        let uuid = gossip_nbt.get_int_array("Target").map(|uuid_array| {
-                            Uuid::from_u128(
-                                (uuid_array[0] as u128) << 96
-                                    | (uuid_array[1] as u128) << 64
-                                    | (uuid_array[2] as u128) << 32
-                                    | (uuid_array[3] as u128),
-                            )
-                        });
-                        let gossip_type = gossip_nbt
-                            .get_string("Type")
-                            .and_then(GossipType::from_name)
-                            .or_else(|| {
-                                gossip_nbt
-                                    .get_int("Type")
-                                    .and_then(GossipType::from_legacy_id)
-                            });
-                        if let (Some(uuid), Some(gossip_type), Some(val)) =
-                            (uuid, gossip_type, gossip_nbt.get_int("Value"))
-                        {
-                            raw.entry(uuid).or_default().insert(gossip_type, val);
-                        }
-                    }
-                }
-                *self.gossips.lock().await = GossipContainer::from_raw(raw);
+                *self.gossips.lock().await = gossips_from_nbt(gossip_list);
             }
         })
     }
+}
+
+/// The `Offers` compound (`MerchantOffers.CODEC`) of a villager, or of a zombie villager that
+/// carries the villager's offers (`ZombieVillager.java:97-105`).
+pub(crate) fn offers_to_nbt(
+    offers: &[pumpkin_protocol::java::client::play::MerchantOffer],
+) -> NbtCompound {
+    let mut recipes = Vec::new();
+    for offer in offers {
+        let mut recipe = NbtCompound::new();
+
+        let mut buy = NbtCompound::new();
+        offer.base_cost_a.0.write_item_stack(&mut buy);
+        recipe.put_compound("buy", buy);
+
+        if let Some(cost_b) = &offer.cost_b
+            && !cost_b.0.is_empty()
+        {
+            let mut buy_b = NbtCompound::new();
+            cost_b.0.write_item_stack(&mut buy_b);
+            recipe.put_compound("buyB", buy_b);
+        }
+
+        let mut sell_item = NbtCompound::new();
+        offer.output.0.write_item_stack(&mut sell_item);
+        recipe.put_compound("sell", sell_item);
+
+        recipe.put_int("uses", offer.uses);
+        recipe.put_int("maxUses", offer.max_uses);
+        recipe.put_bool("rewardExp", offer.reward_exp);
+        recipe.put_int("xp", offer.xp);
+        recipe.put_float("priceMultiplier", offer.price_multiplier);
+        recipe.put_int("specialPrice", offer.special_price);
+        recipe.put_int("demand", offer.demand);
+
+        recipes.push(pumpkin_nbt::tag::NbtTag::Compound(recipe));
+    }
+    let mut offers_compound = NbtCompound::new();
+    offers_compound.put("Recipes", pumpkin_nbt::tag::NbtTag::List(recipes));
+    offers_compound
+}
+
+/// Reads an `Offers` compound written by [`offers_to_nbt`]; `None` when it has no `Recipes` list.
+/// Recipes with an empty cost or result are dropped, as in vanilla's codec.
+pub(crate) fn offers_from_nbt(
+    offers_compound: &NbtCompound,
+) -> Option<Vec<pumpkin_protocol::java::client::play::MerchantOffer>> {
+    let recipes = offers_compound.get_list("Recipes")?;
+    let mut offers = Vec::new();
+    for tag in recipes {
+        if let Some(recipe) = tag.extract_compound() {
+            let buy = recipe
+                .get_compound("buy")
+                .and_then(ItemStack::read_item_stack);
+            let buy_b = recipe
+                .get_compound("buyB")
+                .and_then(ItemStack::read_item_stack);
+            let sell_item = recipe
+                .get_compound("sell")
+                .and_then(ItemStack::read_item_stack);
+
+            if let (Some(buy), Some(sell_item)) = (buy, sell_item)
+                && !buy.is_empty()
+                && !sell_item.is_empty()
+                && buy_b.as_ref().is_none_or(|stack| !stack.is_empty())
+            {
+                let uses = recipe.get_int("uses").unwrap_or(0);
+                let max_uses = recipe.get_int("maxUses").unwrap_or(12);
+                let reward_exp = recipe.get_bool("rewardExp").unwrap_or(true);
+                let xp = recipe.get_int("xp").unwrap_or(2);
+                let price_multiplier = recipe.get_float("priceMultiplier").unwrap_or(0.05);
+                let special_price = recipe.get_int("specialPrice").unwrap_or(0);
+                let demand = recipe.get_int("demand").unwrap_or(0);
+
+                offers.push(pumpkin_protocol::java::client::play::MerchantOffer {
+                    base_cost_a: buy.into(),
+                    output: sell_item.into(),
+                    cost_b: buy_b.map(Into::into),
+                    reward_exp,
+                    uses,
+                    max_uses,
+                    xp,
+                    special_price,
+                    price_multiplier,
+                    demand,
+                });
+            }
+        }
+    }
+    Some(offers)
+}
+
+/// The `Gossips` list (`GossipContainer.CODEC`) of a villager, or of a zombie villager that
+/// carries the villager's gossips.
+pub(crate) fn gossips_to_nbt(gossips: &GossipContainer) -> pumpkin_nbt::tag::NbtTag {
+    let mut gossip_list = Vec::new();
+    for (uuid, types) in gossips.raw() {
+        for (gtype, value) in types {
+            let mut gossip_nbt = NbtCompound::new();
+            gossip_nbt.put_uuid("Target", *uuid);
+            gossip_nbt.put_string("Type", gtype.name().to_owned());
+            gossip_nbt.put_int("Value", *value);
+            gossip_list.push(pumpkin_nbt::tag::NbtTag::Compound(gossip_nbt));
+        }
+    }
+    pumpkin_nbt::tag::NbtTag::List(gossip_list)
+}
+
+/// Reads a `Gossips` list written by [`gossips_to_nbt`], skipping malformed entries.
+pub(crate) fn gossips_from_nbt(gossip_list: &[pumpkin_nbt::tag::NbtTag]) -> GossipContainer {
+    let mut raw: HashMap<Uuid, HashMap<GossipType, i32>> = HashMap::new();
+    for tag in gossip_list {
+        if let Some(gossip_nbt) = tag.extract_compound() {
+            let uuid = gossip_nbt.get_uuid("Target");
+            let gossip_type = gossip_nbt
+                .get_string("Type")
+                .and_then(GossipType::from_name)
+                .or_else(|| {
+                    gossip_nbt
+                        .get_int("Type")
+                        .and_then(GossipType::from_legacy_id)
+                });
+            if let (Some(uuid), Some(gossip_type), Some(val)) =
+                (uuid, gossip_type, gossip_nbt.get_int("Value"))
+            {
+                raw.entry(uuid).or_default().insert(gossip_type, val);
+            }
+        }
+    }
+    GossipContainer::from_raw(raw)
 }
 
 /// Vanilla `ValidateNearbyPoi.MAX_DISTANCE` / `BlockPos::closerToCenterThan`
@@ -3588,5 +3592,63 @@ mod tests {
             assert!((5..=19).contains(&additional_price));
             assert!(!enchantments.enchantment.is_empty());
         }
+    }
+
+    #[test]
+    fn gossips_round_trip_through_nbt_even_with_negative_uuid_words() {
+        // Every 32-bit word of this UUID is negative as an `i32`, the case a sign-extending
+        // read corrupts.
+        let target = Uuid::from_u128(0x8000_0001_8000_0002_8000_0003_8000_0004);
+        let mut gossips = GossipContainer::new();
+        gossips.add(target, GossipType::MajorPositive, 20);
+        gossips.add(target, GossipType::MinorPositive, 25);
+
+        let tag = gossips_to_nbt(&gossips);
+        let list = tag.extract_list().expect("gossips are stored as a list");
+        let restored = gossips_from_nbt(list);
+
+        assert_eq!(restored.raw(), gossips.raw());
+        assert_eq!(restored.raw().len(), 1);
+    }
+
+    #[test]
+    fn offers_round_trip_through_nbt() {
+        let offer = pumpkin_protocol::java::client::play::MerchantOffer {
+            base_cost_a: ItemStack::new(3, &Item::EMERALD).into(),
+            output: ItemStack::new(2, &Item::BREAD).into(),
+            cost_b: Some(ItemStack::new(1, &Item::WHEAT).into()),
+            reward_exp: false,
+            uses: 3,
+            max_uses: 16,
+            xp: 5,
+            special_price: -2,
+            price_multiplier: 0.2,
+            demand: 4,
+        };
+
+        let compound = offers_to_nbt(std::slice::from_ref(&offer));
+        let restored = offers_from_nbt(&compound).expect("recipes are stored as a list");
+
+        assert_eq!(restored.len(), 1);
+        let restored = &restored[0];
+        assert_eq!(restored.base_cost_a.0.item_count, 3);
+        assert!(restored.output.0.item == &Item::BREAD);
+        assert!(
+            restored
+                .cost_b
+                .as_ref()
+                .is_some_and(|cost| cost.0.item == &Item::WHEAT)
+        );
+        assert!(!restored.reward_exp);
+        assert_eq!((restored.uses, restored.max_uses, restored.xp), (3, 16, 5));
+        assert_eq!((restored.special_price, restored.demand), (-2, 4));
+        assert!((restored.price_multiplier - 0.2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn offers_without_a_recipe_list_are_absent_not_empty() {
+        // `Offers` missing its `Recipes` list must leave a villager's or zombie villager's
+        // offers untouched instead of clearing them.
+        assert!(offers_from_nbt(&NbtCompound::new()).is_none());
     }
 }

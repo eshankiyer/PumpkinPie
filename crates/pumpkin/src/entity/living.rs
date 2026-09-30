@@ -3554,16 +3554,28 @@ impl LivingEntity {
                 mob.on_mob_death(cause).await;
             }
 
+            // `LivingEntity.die` (`LivingEntity.java:1470-1478`): `sourceEntity == null ||
+            // sourceEntity.killedEntity(level, this, source)` guards the death event, every
+            // drop and the wither rose. A `false` means the killer replaced the victim (a
+            // zombie infecting a villager), which then drops nothing. `cause` is
+            // `source.getEntity()`.
+            let perished = match cause.and_then(|killer| killer.get_mob()) {
+                Some(killer) => killer.killed_entity(&*dyn_self).await,
+                None => true,
+            };
+
             // LivingEntity.die, line 1472: this.gameEvent(GameEvent.ENTITY_DIE), fired
             // right before dropAllDeathLoot. Entity::gameEvent(event) (Entity.java:1431)
             // defaults the source entity to `this`.
-            crate::world::game_event::emit_game_event(
-                &world,
-                pumpkin_data::game_event::GameEvent::EntityDie,
-                self.entity.pos.load(),
-                crate::world::game_event::GameEventContext::of_entity(dyn_self.clone()),
-            )
-            .await;
+            if perished {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::EntityDie,
+                    self.entity.pos.load(),
+                    crate::world::game_event::GameEventContext::of_entity(dyn_self.clone()),
+                )
+                .await;
+            }
 
             // `LivingEntity.dropAllDeathLoot` only reaches the loot table when `shouldDropLoot`
             // holds: the mob_drops game rule, and for everything but a monster, not being a
@@ -3572,18 +3584,21 @@ impl LivingEntity {
             let is_monster = self.entity.entity_type.category == &MobCategory::MONSTER;
             let should_drop_loot =
                 world.level_info.load().game_rules.mob_drops && (is_monster || !is_baby);
-            if should_drop_loot {
+            if perished && should_drop_loot {
                 self.drop_loot(params.clone(), dyn_self.as_ref()).await;
             }
 
             // `LivingEntity.die` (`world/entity/LivingEntity.java:1474`) calls
             // `createWitherRose(killer)` directly after `dropAllDeathLoot`, with `killer`
             // being `getKillCredit()` (:1438) - `cause` here.
-            self.create_wither_rose(cause).await;
+            if perished {
+                self.create_wither_rose(cause).await;
+            }
 
             // Award experience
             let always_drops_experience = dyn_self.get_player().is_some();
-            if !self.skip_drop_experience.load(Ordering::Relaxed)
+            if perished
+                && !self.skip_drop_experience.load(Ordering::Relaxed)
                 && (always_drops_experience
                     || (params.killed_by_player.unwrap_or(false)
                         && world.level_info.load().game_rules.mob_drops))
@@ -3608,7 +3623,7 @@ impl LivingEntity {
             // path is implemented in `Player::handle_killed`, so the mob-style chance roll must
             // not also run for a player here - it would drop armour far less often than vanilla,
             // with spurious damage randomization, and ignore `keepInventory` entirely.
-            if dyn_self.get_player().is_none() {
+            if perished && dyn_self.get_player().is_none() {
                 self.drop_equipment(
                     looting_level,
                     params.killed_by_player.unwrap_or(false),

@@ -5,14 +5,18 @@ use std::sync::atomic::{AtomicI8, AtomicI32, Ordering};
 
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::ai::goal::break_door::{self, BreakDoorGoal};
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::mob::zombie::{
-    ZombieEntityBase, drowned::DrownedEntity, try_spawn_reinforcements,
+    ZombieEntityBase, ZombieFamily, drowned::DrownedEntity, ignite_target_on_hit, is_eye_in_water,
+    prepare_zombie_conversion, publish_under_water_conversion, try_spawn_reinforcements,
+    zombie_killed_entity,
 };
+use crate::entity::mob::zombification;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     mob::{Mob, MobEntity},
@@ -36,8 +40,7 @@ const BREAK_DOOR_CHANCE: f32 = 0.1;
 
 pub struct ZombieEntity {
     entity: Arc<ZombieEntityBase>,
-    /// Vanilla `Zombie::inWaterTime`. See `HuskEntity::in_water_time` for the same
-    /// `touching_water`-vs-`isEyeInFluid` caveat.
+    /// Vanilla `Zombie::inWaterTime`, counted while the eyes are under water.
     in_water_time: AtomicI32,
     /// Vanilla `Zombie::conversionTime`. `-1` while not converting.
     conversion_time: AtomicI32,
@@ -64,6 +67,9 @@ impl ZombieEntity {
     async fn set_can_break_doors(&self, can_break_doors: bool) {
         let new_value = i8::from(can_break_doors);
         let previous = self.can_break_doors.swap(new_value, Ordering::Relaxed);
+        self.entity
+            .can_break_doors
+            .store(can_break_doors, Ordering::Relaxed);
         if previous == new_value || (previous == CAN_BREAK_DOORS_UNDECIDED && !can_break_doors) {
             // Undecided -> false is the common case on every chunk load (most zombies rolled
             // `false`): the selector never had `BreakDoorGoal` to begin with, so skip the
@@ -90,65 +96,40 @@ impl ZombieEntity {
     }
 
     /// `Zombie::doUnderWaterConversion` (`Zombie.java:240-245`): replaces this zombie with a
-    /// `Drowned` at the same position. Mirrors `HuskEntity::finish_conversion`'s simplified
-    /// copy set (position/velocity/rotation/age/custom name/active effects) -- there is no
-    /// generic `Mob::convertTo` here (equipment/leash/passenger transfer), so those are not
-    /// carried over.
+    /// `Drowned` at the same position through `convertToZombieType`, which keeps the equipment,
+    /// baby state and the other `ConversionType.SINGLE` state (see
+    /// [`zombification::prepare_conversion`] for what is and is not carried over). The
+    /// door-breaking flag is not: a `Drowned` here has no `setCanBreakDoors`.
     async fn finish_conversion(&self) {
         let old_entity = self.get_entity();
-        let world = old_entity.world.load().clone();
-        let pos = old_entity.pos.load();
-
-        let new_entity = Entity::new(world.clone(), pos, &EntityType::DROWNED);
-        let drowned = DrownedEntity::new(new_entity);
-
-        let new_entity = drowned.get_entity();
-        new_entity.velocity.store(old_entity.velocity.load());
-        new_entity.yaw.store(old_entity.yaw.load());
-        new_entity.pitch.store(old_entity.pitch.load());
-        new_entity.on_ground.store(
-            old_entity.on_ground.load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-        new_entity
-            .age
-            .store(old_entity.age.load(Ordering::Relaxed), Ordering::Relaxed);
-        new_entity.invulnerable.store(
-            old_entity.invulnerable.load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-        if let Some(name) = &**old_entity.custom_name.load() {
-            new_entity.set_custom_name(name.clone());
-            new_entity.custom_name_visible.store(
-                old_entity.custom_name_visible.load(Ordering::Relaxed),
-                Ordering::Relaxed,
+        let drowned =
+            prepare_zombie_conversion(self, &EntityType::DROWNED, DrownedEntity::new).await;
+        zombification::complete_conversion(&self.entity.mob_entity, drowned).await;
+        if !old_entity.silent.load(Ordering::Relaxed) {
+            old_entity.world.load().sync_world_event(
+                WorldEvent::SoundZombieToDrowned,
+                old_entity.block_pos.load(),
+                0,
             );
         }
+    }
 
-        let effects: Vec<_> = self
-            .entity
-            .mob_entity
-            .living_entity
-            .active_effects
-            .lock()
-            .await
-            .values()
-            .cloned()
-            .collect();
-        let new_living = &drowned.get_mob_entity().living_entity;
-        for effect in effects {
-            new_living.add_effect(effect).await;
-        }
+    /// Settles the door-breaking state of a zombie built by a conversion. Vanilla never runs
+    /// `finalizeSpawn`'s `setCanBreakDoors` roll (`Zombie.java:493`) for one; it copies the source's
+    /// flag (`ConversionType.java:120-122`) and `handleAttributes` may force it on for a new leader
+    /// (`Zombie.java:556`). Settling it here also stops `mob_init_data_tracker` from treating the
+    /// zombie as an unrolled fresh spawn.
+    pub(super) async fn settle_conversion_door_breaking(&self, source_can_break_doors: bool) {
+        self.set_can_break_doors(
+            source_can_break_doors || self.entity.is_leader.load(Ordering::Relaxed),
+        )
+        .await;
+    }
+}
 
-        world.spawn_entity(drowned).await;
-        // Zombie.java:242 gates this on `!isSilent()`, which has no equivalent field here.
-        world.sync_world_event(
-            WorldEvent::SoundZombieToDrowned,
-            old_entity.block_pos.load(),
-            0,
-        );
-
-        old_entity.remove().await;
+impl ZombieFamily for ZombieEntity {
+    fn zombie_base(&self) -> &ZombieEntityBase {
+        &self.entity
     }
 }
 
@@ -160,7 +141,7 @@ impl NBTStorage for ZombieEntity {
     /// unconditionally already matches the gated vanilla value.
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
-            self.entity.mob_entity.living_entity.write_nbt(nbt).await;
+            self.entity.write_nbt(nbt).await;
             let in_water_time = if self
                 .entity
                 .mob_entity
@@ -190,16 +171,15 @@ impl NBTStorage for ZombieEntity {
 
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
-            self.entity.mark_restored_from_nbt();
-            self.entity
-                .mob_entity
-                .living_entity
-                .read_nbt_non_mut(nbt)
-                .await;
+            self.entity.read_nbt_non_mut(nbt).await;
             self.in_water_time
                 .store(nbt.get_int("InWaterTime").unwrap_or(0), Ordering::Relaxed);
             let time = nbt.get_int("DrownedConversionTime").unwrap_or(-1);
             self.conversion_time.store(time, Ordering::Relaxed);
+            if time != -1 {
+                // `startUnderWaterConversion(conversionTime)` (`Zombie.java:414-415`).
+                publish_under_water_conversion(self.get_entity());
+            }
             // `Zombie::readAdditionalSaveData` (`Zombie.java:411`):
             // `setCanBreakDoors(input.getBooleanOr("CanBreakDoors", false))`. Routed through
             // `set_can_break_doors` (rather than storing the flag directly) so a loaded zombie
@@ -215,6 +195,32 @@ impl NBTStorage for ZombieEntity {
 impl Mob for ZombieEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    /// `Zombie.getStepSound` (`Zombie.java:365-367`), played by `Zombie.playStepSound` at volume
+    /// `0.15F` and pitch `1.0F` (`Zombie.java:370-372`) -- the `Mob` defaults.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityZombieStep)
+    }
+
+    /// `Zombie::getBaseExperienceReward` (`Zombie.java:178-185`).
+    fn get_base_experience_reward(&self) -> u32 {
+        self.entity.base_experience_reward()
+    }
+
+    /// `LivingEntity::getVoicePitch`, reading the zombie's own baby flag.
+    fn get_sound_pitch(&self) -> f32 {
+        self.entity.voice_pitch()
+    }
+
+    /// The ignite half of `Zombie::doHurtTarget` (`Zombie.java:338-349`).
+    fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move { ignite_target_on_hit(&self.entity.mob_entity, target).await })
+    }
+
+    /// `Zombie::killedEntity` (`Zombie.java:421-435`).
+    fn killed_entity<'a>(&'a self, victim: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move { zombie_killed_entity(&self.entity, victim).await })
     }
 
     /// Delegates to `ZombieEntityBase`'s default (baby-metadata) behavior, then -- on a fresh
@@ -276,19 +282,13 @@ impl Mob for ZombieEntity {
                 if new_time < 0 {
                     self.finish_conversion().await;
                 }
-            } else if self
-                .entity
-                .mob_entity
-                .living_entity
-                .entity
-                .touching_water
-                .load(Ordering::Relaxed)
-            {
+            } else if is_eye_in_water(self.get_entity()) {
                 let new_time = self.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
                 if new_time >= WATER_TICKS_TO_START_CONVERSION {
                     self.in_water_time.store(0, Ordering::Relaxed);
                     self.conversion_time
                         .store(CONVERSION_TICKS, Ordering::Relaxed);
+                    publish_under_water_conversion(self.get_entity());
                 }
             } else {
                 self.in_water_time.store(-1, Ordering::Relaxed);

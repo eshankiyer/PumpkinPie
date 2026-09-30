@@ -2406,6 +2406,17 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async {})
     }
 
+    /// Vanilla `Entity.killedEntity` (`Entity.java:2886-2888`), called on the entity that
+    /// caused a death (`DamageSource.getEntity`, i.e. `LivingEntity::on_death`'s `cause`) with
+    /// the victim. Returning `false` means the victim was replaced rather than killed: the death
+    /// still plays, but `LivingEntity.die` (`LivingEntity.java:1470-1478`) then skips the
+    /// `ENTITY_DIE` game event, all loot, equipment and experience drops, and the wither rose.
+    /// `Zombie.killedEntity` (`Zombie.java:421-435`) is the override: it turns a villager into a
+    /// zombie villager.
+    fn killed_entity<'a>(&'a self, _victim: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async { true })
+    }
+
     fn on_eating_grass(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
     }
