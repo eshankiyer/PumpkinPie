@@ -4392,6 +4392,19 @@ impl World {
         player.breath_manager.send_air_supply(player);
         self.send_player_equipment(player).await;
 
+        // PlayerList.placeNewPlayer sends ClientboundUpdateRecipesPacket (furnace/smithing
+        // slot item sets and the stonecutter buttons) regardless of the recipe book.
+        if let crate::net::ClientPlatform::Java(java_client) = player.client.as_ref()
+            && java_client.version.load() >= JavaMinecraftVersion::V_1_21_2
+        {
+            let dynamic_recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
+            let update_packet =
+                pumpkin_protocol::java::client::play::CUpdateRecipes::new(&dynamic_recipes);
+            if let Ok(data) = java_client.serialize_packet(&update_packet) {
+                java_client.send_packet_now(data).await;
+            }
+        }
+
         if let crate::net::ClientPlatform::Java(java_client) = player.client.as_ref()
             && server.advanced_config.recipe.send_recipes
             && java_client.version.load() >= JavaMinecraftVersion::V_1_21_2

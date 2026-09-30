@@ -132,6 +132,28 @@ pub enum TrimPattern {
 }
 
 impl TrimPattern {
+    /// Every pattern, each with its own `*_armor_trim_smithing_template_smithing_trim` recipe.
+    pub const ALL: [Self; 18] = [
+        Self::Sentry,
+        Self::Dune,
+        Self::Coast,
+        Self::Wild,
+        Self::Ward,
+        Self::Eye,
+        Self::Vex,
+        Self::Tide,
+        Self::Snout,
+        Self::Rib,
+        Self::Spire,
+        Self::Wayfinder,
+        Self::Shaper,
+        Self::Silence,
+        Self::Raiser,
+        Self::Host,
+        Self::Flow,
+        Self::Bolt,
+    ];
+
     #[must_use]
     pub const fn registry_key(self) -> &'static str {
         match self {
@@ -207,27 +229,8 @@ impl TrimPattern {
 
     #[must_use]
     pub fn from_template_item(item: &Item) -> Option<Self> {
-        [
-            Self::Sentry,
-            Self::Dune,
-            Self::Coast,
-            Self::Wild,
-            Self::Ward,
-            Self::Eye,
-            Self::Vex,
-            Self::Tide,
-            Self::Snout,
-            Self::Rib,
-            Self::Spire,
-            Self::Wayfinder,
-            Self::Shaper,
-            Self::Silence,
-            Self::Raiser,
-            Self::Host,
-            Self::Flow,
-            Self::Bolt,
-        ]
-        .into_iter()
-        .find(|pattern| pattern.template_item() == item)
+        Self::ALL
+            .into_iter()
+            .find(|pattern| pattern.template_item() == item)
     }
 }

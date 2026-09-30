@@ -676,6 +676,14 @@ impl Server {
         let dynamic_recipes = self.recipe_manager.get_dynamic_recipes_internal().await;
         for player in self.get_all_players() {
             if let crate::net::ClientPlatform::Java(java_client) = player.client.as_ref() {
+                // PlayerList.reloadResources resends the update packet before the recipe book.
+                if java_client.version.load() >= pumpkin_util::version::JavaMinecraftVersion::V_1_21_2 {
+                    let update_packet =
+                        pumpkin_protocol::java::client::play::CUpdateRecipes::new(&dynamic_recipes);
+                    if let Ok(data) = java_client.serialize_packet(&update_packet) {
+                        java_client.send_packet_now(data).await;
+                    }
+                }
                 let add_packet = pumpkin_protocol::java::client::play::CRecipeBookAdd::new(
                     true,
                     &dynamic_recipes,

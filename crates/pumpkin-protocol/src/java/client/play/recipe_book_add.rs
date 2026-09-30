@@ -69,7 +69,7 @@ impl<'a> CRecipeBookAdd<'a> {
     }
 }
 
-fn item_id_versioned(item: &Item, version: JavaMinecraftVersion) -> i32 {
+pub(super) fn item_id_versioned(item: &Item, version: JavaMinecraftVersion) -> i32 {
     remap_item_id_for_version(item.id, version) as i32
 }
 
@@ -128,7 +128,7 @@ fn write_any_fuel_slot_display(
     Ok(())
 }
 
-fn resolve_item_tag(tag: &str, version: JavaMinecraftVersion) -> Option<Vec<&'static Item>> {
+pub(super) fn resolve_item_tag(tag: &str, version: JavaMinecraftVersion) -> Option<Vec<&'static Item>> {
     let tag = tag.strip_prefix('#').unwrap_or(tag);
     let full_tag = if tag.contains(':') {
         Cow::Borrowed(tag)
@@ -215,7 +215,7 @@ fn write_ingredient_slot_display(
 /// Vanilla wire format for `ByteBufCodecs.holderSet(Registries.ITEM)`:
 ///   VarInt(0)     -> named tag reference (followed by `ResourceLocation`)
 ///   VarInt(n + 1) -> direct list of n item IDs
-fn write_ingredient_holderset(
+pub(super) fn write_ingredient_holderset(
     write: &mut impl Write,
     ingredient: &RecipeIngredientTypes,
     version: JavaMinecraftVersion,
@@ -285,7 +285,7 @@ fn write_crafting_requirements(
     Ok(())
 }
 
-fn write_result_slot_display(
+pub(super) fn write_result_slot_display(
     write: &mut impl Write,
     result: &RecipeResultStruct,
     version: JavaMinecraftVersion,
