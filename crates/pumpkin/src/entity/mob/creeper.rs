@@ -5,6 +5,7 @@ use std::sync::{
 
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::tag::Taggable;
 use pumpkin_data::{
     entity::EntityType,
     item::Item,
@@ -129,6 +130,20 @@ impl CreeperEntity {
         );
     }
 
+    /// Vanilla `Creeper.ignite` (`Creeper.java:180-182`): sets `DATA_IS_IGNITED`, which only
+    /// broadcasts when the value changes.
+    fn ignite(&self) {
+        if !self.ignited.swap(true, Ordering::Relaxed) {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::creeper::IS_IGNITED,
+                    true,
+                )],
+                None,
+            );
+        }
+    }
+
     async fn explode(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         let radius = self.explosion_radius.load(Ordering::Relaxed) as f32;
@@ -216,8 +231,9 @@ impl NBTStorage for CreeperEntity {
                 self.explosion_radius
                     .store(i32::from(radius), Ordering::Relaxed);
             }
-            if let Some(ignited) = nbt.get_bool("ignited") {
-                self.ignited.store(ignited, Ordering::Relaxed);
+            // Creeper.java:113-115: `readAdditionalSaveData` calls `ignite()` when set.
+            if nbt.get_bool("ignited") == Some(true) {
+                self.ignite();
             }
         })
     }
@@ -226,6 +242,46 @@ impl NBTStorage for CreeperEntity {
 impl Mob for CreeperEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// The default `Mob` init publishes `DATA_BABY_ID` at index 16, which is `DATA_SWELL_DIR`
+    /// on a creeper, so this replaces it with the creeper's own synched data. NBT load runs
+    /// before the entity has viewers, so its broadcasts reach nobody; publish them here.
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = &self.mob_entity.living_entity.entity;
+            entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::creeper::FUSE_ID,
+                    VarInt(self.fuse_speed.load(Ordering::Relaxed)),
+                )],
+                None,
+            );
+            if self.charged.load(Ordering::Relaxed) {
+                entity.send_meta_data(
+                    &[Metadata::new(
+                        pumpkin_data::tracked_data::creeper::CHARGED,
+                        true,
+                    )],
+                    None,
+                );
+            }
+            if self.ignited.load(Ordering::Relaxed) {
+                entity.send_meta_data(
+                    &[Metadata::new(
+                        pumpkin_data::tracked_data::creeper::IS_IGNITED,
+                        true,
+                    )],
+                    None,
+                );
+            }
+        })
+    }
+
+    /// Vanilla `Creeper.doHurtTarget` (`Creeper.java:147-150`) just returns true: a creeper's
+    /// melee swing never damages or knocks back its target.
+    fn try_attack<'a>(&'a self, _target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async { true })
     }
 
     fn mob_on_lightning_strike<'a>(
@@ -320,7 +376,11 @@ impl Mob for CreeperEntity {
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
-            if item_stack.item.id != Item::FLINT_AND_STEEL.id {
+            // Creeper.java:183: `itemStack.is(ItemTags.CREEPER_IGNITERS)`.
+            if !item_stack
+                .item
+                .has_tag(&pumpkin_data::tag::Item::MINECRAFT_CREEPER_IGNITERS)
+            {
                 return self
                     .mob_entity
                     .mob_interact(player, item_stack, self.can_be_leashed())
@@ -331,24 +391,29 @@ impl Mob for CreeperEntity {
             let world = entity.world.load();
             let pos = entity.pos.load();
 
+            let sound = if item_stack.item.id == Item::FIRE_CHARGE.id {
+                Sound::ItemFirechargeUse
+            } else {
+                Sound::ItemFlintandsteelUse
+            };
             world.play_sound_fine(
-                Sound::ItemFlintandsteelUse,
+                sound,
                 SoundCategory::Hostile,
                 &pos,
                 1.0,
                 rand::random::<f32>() * 0.4 + 0.8,
             );
 
-            self.ignited.store(true, Ordering::Relaxed);
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::creeper::IS_IGNITED,
-                    true,
-                )],
-                None,
-            );
+            self.ignite();
 
-            if player.gamemode.load() != pumpkin_util::GameMode::Creative
+            // Creeper.java:190-194: non-damageable igniters (fire charge) are shrunk, even in
+            // creative; damageable ones take `hurtAndBreak`, which is a no-op in creative.
+            if !item_stack.is_damageable() {
+                item_stack.decrement(1);
+                if item_stack.item_count == 0 {
+                    item_stack.clear();
+                }
+            } else if player.gamemode.load() != pumpkin_util::GameMode::Creative
                 && item_stack.damage_item(1) == pumpkin_data::item_stack::DamageResult::Broken
             {
                 player
