@@ -20,12 +20,69 @@ use pumpkin_data::data_component_impl::{
 use pumpkin_data::entity::{EntityType, entity_from_egg};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::{Block, BlockDirection};
+use pumpkin_data::{Block, BlockDirection, translation};
 use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::math::wrap_degrees;
+use pumpkin_util::text::TextComponent;
 use uuid::Uuid;
+
+/// Vanilla `EntityType.getYOffset` (`EntityType.java:214-222`): with `tryMoveDown` the entity
+/// starts one block above `spawn_pos` and is lowered onto the highest collision surface found in
+/// the spawn cell (and the cell below when `moved_up`), by at most 1 block (2 when `moved_up`).
+fn spawn_y_offset(world: &World, spawn_pos: BlockPos, moved_up: bool, width: f64) -> f64 {
+    const EPSILON: f64 = 1.0E-7;
+    let (x, y, z) = (spawn_pos.0.x, spawn_pos.0.y, spawn_pos.0.z);
+    let half_width = width / 2.0;
+    let (min_x, max_x) = (f64::from(x) + 0.5 - half_width, f64::from(x) + 0.5 + half_width);
+    let (min_z, max_z) = (f64::from(z) + 0.5 - half_width, f64::from(z) + 0.5 + half_width);
+    let entity_min_y = f64::from(y) + 1.0;
+    let query_min_y = f64::from(y) - if moved_up { 1.0 } else { 0.0 };
+    let query_max_y = f64::from(y) + 1.0;
+
+    let mut distance: f64 = if moved_up { -2.0 } else { -1.0 };
+    // The query box spans y-1..y+1 when moved up, so tall shapes (fences) from y-2 can overlap it.
+    let lowest_cell = if moved_up { y - 2 } else { y - 1 };
+    for cell_y in (lowest_cell..=y).rev() {
+        let cell = BlockPos::new(x, cell_y, z);
+        let state = world.get_block_state(&cell);
+        for shape in state
+            .get_block_collision_shapes_at(&cell)
+            .map(|shape| shape.at_pos(cell))
+        {
+            // `getCollisions(null, aabb)` only yields shapes overlapping the unit query box.
+            if shape.min.y >= query_max_y
+                || shape.max.y <= query_min_y
+                || shape.min.x >= f64::from(x) + 1.0
+                || shape.max.x <= f64::from(x)
+                || shape.min.z >= f64::from(z) + 1.0
+                || shape.max.z <= f64::from(z)
+            {
+                continue;
+            }
+            if distance.abs() < EPSILON {
+                return 1.0;
+            }
+            // `VoxelShape.collideX` (`VoxelShape.java:251-296`): only shapes overlapping the
+            // entity footprint whose top is not above the entity's feet lower the entity.
+            if shape.max.x > min_x + EPSILON
+                && shape.min.x < max_x - EPSILON
+                && shape.max.z > min_z + EPSILON
+                && shape.min.z < max_z - EPSILON
+            {
+                let new_distance = shape.max.y - entity_min_y;
+                if new_distance <= EPSILON {
+                    distance = distance.max(new_distance);
+                }
+            }
+        }
+    }
+    if distance.abs() < EPSILON {
+        return 1.0;
+    }
+    1.0 + distance
+}
 
 pub struct SpawnEggItem;
 
@@ -78,12 +135,19 @@ async fn spawn_egg_mob(
     stack: &ItemStack,
     world: &Arc<World>,
     pos: Vector3<f64>,
+    y_offset: f64,
     player: &Player,
 ) {
     // Create rotation like Vanilla
     let yaw = wrap_degrees(rand::random::<f32>() * 360.0) % 360.0;
 
-    let mob = from_type(entity_type, pos, world, Uuid::new_v4());
+    // `EntityType.create` places the entity at `spawnPos.y + yOff` (`EntityType.java:200-208`).
+    let mob = from_type(
+        entity_type,
+        Vector3::new(pos.x, pos.y + y_offset, pos.z),
+        world,
+        Uuid::new_v4(),
+    );
 
     // Set the rotation
     mob.get_entity().set_rotation(yaw, 0.0);
@@ -168,7 +232,23 @@ impl ItemBehaviour for SpawnEggItem {
             };
 
             // `SpawnEggItem.use` gates liquid spawning with `Player.mayUseItemAt`
-            // (`SpawnEggItem.java:112-119`).
+            // (`SpawnEggItem.java:112-119`)
+            // and `ServerLevel.mayInteract` (spawn protection and world border,
+            // `ServerLevel.java:869-871`).
+            let Some(server) = world.server.upgrade() else {
+                return;
+            };
+            if player
+                .is_under_spawn_protection(&server, &world, &pos)
+                .await
+                || !world
+                    .worldborder
+                    .lock()
+                    .await
+                    .contains_block(pos.0.x, pos.0.z)
+            {
+                return;
+            }
             if !player.may_use_item_at(&pos, face, &stack).await {
                 return;
             }
@@ -178,7 +258,7 @@ impl ItemBehaviour for SpawnEggItem {
                 f64::from(pos.0.y),
                 f64::from(pos.0.z) + 0.5,
             );
-            spawn_egg_mob(entity_type, &stack, &world, spawn_pos, player).await;
+            spawn_egg_mob(entity_type, &stack, &world, spawn_pos, 0.0, player).await;
             // `SpawnEggItem.use` awards ITEM_USED after a successful liquid spawn
             // (`SpawnEggItem.java:118-122`).
             player
@@ -206,6 +286,29 @@ impl ItemBehaviour for SpawnEggItem {
         Box::pin(async move {
             if let Some(entity_type) = entity_from_egg(item.item.id) {
                 let world = player.world();
+
+                // `SpawnEggItem.useOn` (`SpawnEggItem.java:55-61`): a spawner block entity is
+                // only retargeted while the `spawner_blocks_work` rule is on; otherwise the
+                // player is told and nothing is consumed.
+                if !world.level_info.load().game_rules.spawner_blocks_work
+                    && let Some(block_entity) = world.get_block_entity(&location)
+                    && (block_entity
+                        .as_any()
+                        .downcast_ref::<MobSpawnerBlockEntity>()
+                        .is_some()
+                        || block_entity
+                            .as_any()
+                            .downcast_ref::<TrialSpawnerBlockEntity>()
+                            .is_some())
+                {
+                    player
+                        .send_system_message(&TextComponent::translate(
+                            translation::java::ADVMODE_NOTENABLED_SPAWNER,
+                            vec![],
+                        ))
+                        .await;
+                    return;
+                }
 
                 if let Some(block_entity) = player.world().get_block_entity(&location)
                     && let Some(spawner) = block_entity
@@ -257,7 +360,7 @@ impl ItemBehaviour for SpawnEggItem {
                 // Vanilla `SpawnEggItem#useOn`: the mob is placed inside the clicked block when
                 // that block has no collision shape (grass, torches, ...), and only otherwise on
                 // the block adjacent to the clicked face.
-                let pos = if world
+                let spawn_pos = if world
                     .get_block_state(&location)
                     .get_block_collision_shapes()
                     .next()
@@ -267,12 +370,19 @@ impl ItemBehaviour for SpawnEggItem {
                 } else {
                     BlockPos(location.0 + face.to_offset())
                 };
-                let pos = Vector3::new(
-                    f64::from(pos.0.x) + 0.5,
-                    f64::from(pos.0.y),
-                    f64::from(pos.0.z) + 0.5,
+                let moved_up = spawn_pos != location && face == BlockDirection::Up;
+                let y_offset = spawn_y_offset(
+                    &world,
+                    spawn_pos,
+                    moved_up,
+                    f64::from(entity_type.dimension[0]),
                 );
-                spawn_egg_mob(entity_type, item, &world, pos, player).await;
+                let pos = Vector3::new(
+                    f64::from(spawn_pos.0.x) + 0.5,
+                    f64::from(spawn_pos.0.y),
+                    f64::from(spawn_pos.0.z) + 0.5,
+                );
+                spawn_egg_mob(entity_type, item, &world, pos, y_offset, player).await;
                 item.decrement_unless_creative(player.gamemode.load(), 1);
             }
         })

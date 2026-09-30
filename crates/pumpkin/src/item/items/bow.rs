@@ -120,7 +120,11 @@ impl BowItem {
                 .any(|(e, _)| **e == pumpkin_data::Enchantment::INFINITY);
         }
 
-        Self::fire_arrow(player, power, projectile).await;
+        // Vanilla `useAmmo` (`ProjectileWeaponItem.java:124-136`) tags a copy drawn with zero ammo
+        // use (creative, or Infinity on a plain arrow) as INTANGIBLE_PROJECTILE, which the
+        // `AbstractArrow` constructor turns into `Pickup.CREATIVE_ONLY` (`AbstractArrow.java:99-101`).
+        let intangible = gamemode == GameMode::Creative || (has_infinity && infinite_projectile);
+        Self::fire_arrow(player, power, projectile, intangible).await;
 
         // Consume arrow (if not creative and no Infinity)
         if let Some(slot) = arrow_slot
@@ -151,7 +155,12 @@ impl BowItem {
     }
 
     /// Fire an arrow from the bow
-    pub async fn fire_arrow(player: &Player, power: f32, projectile: ItemStack) {
+    pub async fn fire_arrow(
+        player: &Player,
+        power: f32,
+        projectile: ItemStack,
+        intangible: bool,
+    ) {
         if power < 0.1 {
             return; // Not enough charge
         }
@@ -166,9 +175,7 @@ impl BowItem {
             ArrowEntity::entity_type_for_item(projectile.item),
         );
 
-        // Determine pickup mode based on gamemode
-        let gamemode = player.gamemode.load();
-        let pickup = if gamemode == GameMode::Creative {
+        let pickup = if intangible {
             ArrowPickup::CreativeOnly
         } else {
             ArrowPickup::Allowed
@@ -198,7 +205,7 @@ impl BowItem {
         // Set velocity based on player's look direction and power
         let (yaw, pitch) = player.rotation();
         let speed = power * Self::ARROW_SPEED_MULTIPLIER;
-        arrow.set_velocity_from_rotation(pitch, yaw, 0.0, speed, 1.0);
+        arrow.shoot_from_rotation(player.get_entity(), pitch, yaw, 0.0, speed, 1.0);
 
         // Set critical if fully charged
         if power >= 1.0 {

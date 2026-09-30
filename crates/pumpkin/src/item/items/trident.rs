@@ -13,6 +13,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -109,17 +110,23 @@ impl ItemBehaviour for TridentItem {
                     player.living_entity.clear_active_hand().await;
                     return;
                 }
+            }
 
-                // `ItemStack.nextDamageWillBreak` (`TridentItem.java:70`).
-                if stack_guard.is_damageable()
-                    && stack_guard
-                        .get_max_damage()
-                        .is_some_and(|max| stack_guard.get_damage() + 1 >= max)
-                {
-                    player.living_entity.clear_active_hand().await;
-                    return;
-                }
+            // `ItemStack.nextDamageWillBreak` and `awardStat(ITEM_USED)` apply to both the
+            // spin-attack and the throw branch (`TridentItem.java:71-77`).
+            if stack_guard.is_damageable()
+                && stack_guard
+                    .get_max_damage()
+                    .is_some_and(|max| stack_guard.get_damage() + 1 >= max)
+            {
+                player.living_entity.clear_active_hand().await;
+                return;
+            }
+            player
+                .increment_stat(StatisticCategory::Used, Item::TRIDENT.id as i32, 1)
+                .await;
 
+            if riptide_level > 0 {
                 let (yaw, pitch) = player.rotation();
                 let look_vec = Vector3::rotation_vector(pitch as f64, yaw as f64);
                 // Riptide's `trident_spin_attack_strength` is
@@ -177,9 +184,14 @@ impl ItemBehaviour for TridentItem {
                 entity,
                 player.get_entity(),
                 thrown_item_stack,
-                ArrowPickup::Allowed,
+                // `TridentItem.java:96-98`: infinite materials make the trident creative-only.
+                if player.is_creative() {
+                    ArrowPickup::CreativeOnly
+                } else {
+                    ArrowPickup::Allowed
+                },
             );
-            trident.set_velocity_from_rotation(pitch, yaw, 0.0, 2.5, 1.0);
+            trident.shoot_from_rotation(player.get_entity(), pitch, yaw, 0.0, 2.5, 1.0);
             world.spawn_entity(Arc::new(trident)).await;
 
             world.play_sound(

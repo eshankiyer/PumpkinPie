@@ -68,7 +68,7 @@ pub fn is_projectile(entity_type: &EntityType) -> bool {
 
 /// Applies `Projectile.shootFromRotation`'s known-motion inheritance
 /// (`Projectile.java:157-159`).
-fn add_known_movement(
+pub(crate) fn add_known_movement(
     projectile_velocity: Vector3<f64>,
     source_movement: Vector3<f64>,
     source_on_ground: bool,

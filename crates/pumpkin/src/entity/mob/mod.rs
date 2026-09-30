@@ -2577,6 +2577,12 @@ pub trait Mob: EntityBase + Send + Sync {
 
             offspring.get_entity().set_age(-24000);
             apply_entity_variant(item_stack, offspring.as_ref());
+            // `SpawnEggItem.spawnOffspringFromSpawnEgg` applies the egg's components (custom name,
+            // custom data) to the baby before adding it (`SpawnEggItem.java:171`).
+            offspring
+                .get_entity()
+                .apply_components_from_item_stack(item_stack)
+                .await;
             world.spawn_entity(offspring.clone()).await;
             self.on_offspring_spawned_from_egg(player, offspring.as_ref());
             item_stack.decrement_unless_creative(player.gamemode.load(), 1);

@@ -143,6 +143,27 @@ impl TridentEntity {
         );
     }
 
+    /// Vanilla `Projectile.shootFromRotation` (`Projectile.java:152-159`): aim, then inherit the
+    /// shooter's known movement, omitting vertical movement while the shooter is grounded.
+    /// Crossbows call `shoot` directly and so use `set_velocity_from_rotation` instead.
+    pub fn shoot_from_rotation(
+        &self,
+        shooter: &Entity,
+        pitch: f32,
+        yaw: f32,
+        roll: f32,
+        speed: f32,
+        divergence: f32,
+    ) {
+        self.set_velocity_from_rotation(pitch, yaw, roll, speed, divergence);
+        let velocity = super::add_known_movement(
+            self.entity.velocity.load(),
+            shooter.get_known_movement(),
+            shooter.on_ground.load(Ordering::Relaxed),
+        );
+        self.entity.velocity.store(velocity);
+    }
+
     pub fn set_velocity(&self, x: f64, y: f64, z: f64, power: f64, uncertainty: f64) {
         fn next_triangular(mode: f64, deviation: f64) -> f64 {
             deviation.mul_add(rand::random::<f64>() - rand::random::<f64>(), mode)
