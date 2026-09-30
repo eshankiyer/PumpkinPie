@@ -251,6 +251,123 @@ CLASS_METHOD_ALIASES = {
         # item/potion.rs:140 apply_effects_to is PotionContents.applyToLivingEntity
         "applyToLivingEntity": {"apply_effects_to"},
     },
+    "AreaEffectCloud": {
+        "getPistonPushReaction": {"can_be_pushed_by_piston"},
+    },
+    "StonecutterMenu": {
+        "removed": {"on_closed"},
+        "stillValid": {"container_access"},
+    },
+    "BeaconMenu": {
+        "removed": {"on_closed"},
+        "stillValid": {"container_access"},
+    },
+    "CartographyTableMenu": {
+        "removed": {"on_closed"},
+        "stillValid": {"container_access"},
+    },
+    "Projectile": {
+        "mayInteract": {"projectile_may_interact"},
+        "mayBreak": {"projectile_may_break"},
+        "hitTargetOrDeflectSelf": {"try_deflect"},
+        "onHitBlock": {"on_projectile_block_hit"},
+    },
+    "HappyGhast": {
+        "getVoicePitch": {"get_sound_pitch"},
+        "travel": {"custom_travel"},
+    },
+    "EntitySelectorParser": {
+        "isTag": {"consume_tag_start"},
+    },
+    "MerchantMenu": {
+        "stillValid": {"can_use"},
+        "quickMoveStack": {"quick_move"},
+    },
+    "AbstractHorse": {
+        "getDismountLocationForPassenger": {"horse_dismount_location"},
+    },
+    "BlockEntity": {
+        "getPosFromTag": {"block_entity_position_from_tag"},
+    },
+    "ChiseledBookShelfBlockEntity": {
+        "acceptsItemType": {"is_valid_slot_for"},
+    },
+    "CreakingHeartBlockEntity": {
+        "getUpdateTag": {"chunk_data_nbt"},
+        "preRemoveSideEffects": {"remove_protector_on_removal"},
+    },
+    "BrewingStandBlockEntity": {
+        "canPlaceItemThroughFace": {"can_insert_through_face"},
+        "canTakeItemThroughFace": {"can_extract_through_face"},
+        "createMenu": {"create_screen_handler"},
+    },
+    "SkullBlockEntity": {
+        "getUpdateTag": {"chunk_data_nbt"},
+    },
+    "TurtleEggBlock": {
+        "fallOn": {"on_landed_upon"},
+        "stepOn": {"on_entity_step"},
+    },
+    "SulfurCube": {
+        "getBucketItemStack": {"bucket_item_for_entity_type"},
+        "getFluidJumpThreshold": {"get_swim_height"},
+        "getPickupSound": {"pickup_sound_for_entity_type"},
+    },
+    "Inventory": {
+        "addAndPickItem": {"swap_stack_with_hotbar"},
+        "findSlotMatchingItem": {"get_slot_with_stack"},
+        "getFreeSlot": {"get_empty_slot"},
+        "getSelectedItem": {"held_item"},
+        "getSuitableHotbarSlot": {"get_swappable_hotbar_slot"},
+        "isHotbarSlot": {"is_valid_hotbar_index"},
+        "pickSlot": {"swap_slot_with_hotbar"},
+        "placeItemBackInInventory": {"offer_or_drop_stack"},
+        "removeItem": {"remove_stack_specific"},
+        "removeItemNoUpdate": {"remove_stack"},
+        "setSelectedItem": {"set_held_item"},
+    },
+    "ShulkerBoxBlockEntity": {
+        "canPlaceItemThroughFace": {"can_insert_through_face"},
+    },
+    "CrafterBlockEntity": {
+        "getRedstoneSignal": {"get_comparator_output"},
+    },
+    "BeaconBlockEntity": {
+        "setRemoved": {"on_block_replaced"},
+    },
+    "InfestedBlock": {
+        "getHostBlock": {"host_for_infested"},
+    },
+    "CandleCakeBlock": {
+        "byCandle": {"cake_from_candle"},
+    },
+    "SculkSensorBlock": {
+        "stepOn": {"on_entity_step"},
+    },
+    "ComparatorBlock": {
+        "getInputSignal": {"get_power"},
+        "shouldTurnOn": {"has_power"},
+    },
+    "ArmorStand": {
+        "getArmorStandPose": {"pack_rotation"},
+        "showBasePlate": {"should_show_base_plate"},
+        "showArms": {"should_show_arms"},
+        "attackable": {"is_valid_ai_target"},
+        "thunderHit": {"on_lightning_strike"},
+    },
+    "EndPortalBlock": {
+        "getEntityInsideCollisionShape": {"get_inside_collision_shape"},
+    },
+    "LeavesBlock": {
+        "getOptionalDistanceAt": {"distance_from_state"},
+    },
+    "Axolotl": {
+        "onStopAttacking": {"on_successful_attack"},
+    },
+    "Bee": {
+        "customServerAiStep": {"mob_tick"},
+        "resetTicksWithoutNectarSinceExitingHive": {"reset_ticks_without_nectar"},
+    },
 }
 
 
