@@ -68,6 +68,13 @@ pub fn can_use_golden_dandelion(
             .has_tag(&tag::EntityType::MINECRAFT_CANNOT_BE_AGE_LOCKED)
 }
 
+/// Equivalent to `AgeableMob.getSpeedUpSecondsWhenFeeding` (`AgeableMob.java:260-262`): the
+/// tick count is divided as an integer before the `0.1F` factor, then truncated.
+#[must_use]
+pub const fn speed_up_seconds_when_feeding(ticks_until_adult: i32) -> i32 {
+    ((ticks_until_adult / 20) as f32 * 0.1) as i32
+}
+
 pub struct AgeableData {
     pub forced_age: AtomicI32,
     pub forced_age_timer: AtomicI32,
@@ -270,7 +277,7 @@ pub trait AgeableMob: Mob {
     where
         Self: Sized,
     {
-        (ticks_until_adult as f32 / 20.0 * 0.1) as i32
+        speed_up_seconds_when_feeding(ticks_until_adult)
     }
 
     fn write_ageable_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
@@ -331,7 +338,17 @@ const fn age_locked_particle_timer_step(timer: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{age_locked_particle_timer_step, default_baby_dimensions};
+    use super::{
+        age_locked_particle_timer_step, default_baby_dimensions, speed_up_seconds_when_feeding,
+    };
+
+    #[test]
+    fn feeding_speed_up_divides_ticks_as_integer_first() {
+        // `AgeableMob.getSpeedUpSecondsWhenFeeding`: `(int)(ticks / 20 * 0.1F)`.
+        assert_eq!(speed_up_seconds_when_feeding(100), 0);
+        assert_eq!(speed_up_seconds_when_feeding(200), 2);
+        assert_eq!(speed_up_seconds_when_feeding(24000), 120);
+    }
 
     #[test]
     fn default_baby_dimensions_use_vanilla_age_scale() {

@@ -4,7 +4,12 @@ use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{Block, item_stack::ItemStack};
 
-use crate::entity::{EntityBaseFuture, mob::Mob, player::Player};
+use crate::entity::{
+    EntityBaseFuture,
+    ageable::{AgeableMob, speed_up_seconds_when_feeding},
+    mob::Mob,
+    player::Player,
+};
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 
@@ -31,6 +36,13 @@ pub trait Animal: Mob {
     /// also `true`).
     fn can_age_up(&self) -> bool {
         true
+    }
+
+    /// This animal's `AgeableMob` view, for the feeding path (`Animal.mobInteract` calls
+    /// `ageUp`). Animals that implement `AgeableMob` override it to return `Some(self)`; the rest
+    /// (horses, llamas, cats, ocelots, nautilus) have no age-lock/forced-age state to route through.
+    fn as_ageable_mob(&self) -> Option<&dyn AgeableMob> {
+        None
     }
 
     fn play_eating_sound(&self, sound: Sound) {
@@ -98,14 +110,26 @@ pub trait Animal: Mob {
                     return true;
                 }
 
-                if age < 0 && self.can_age_up() {
+                // Vanilla `Animal.mobInteract` (`Animal.java:141-146`): `canAgeUp()` is
+                // `isBaby() && !isAgeLocked()`; an age-locked baby falls through to `Mob`.
+                let ageable = self.as_ageable_mob();
+                let can_age_up = self.can_age_up()
+                    && ageable.map_or(age < 0, AgeableMob::can_age_up);
+                if can_age_up {
                     item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                    let speedup = (-age / 10).max(1);
-                    mob_entity
-                        .living_entity
-                        .entity
-                        .age
-                        .fetch_add(speedup, std::sync::atomic::Ordering::Relaxed);
+                    let seconds = speed_up_seconds_when_feeding(-age);
+                    if let Some(ageable) = ageable {
+                        ageable.age_up(seconds, true);
+                    } else {
+                        // No age state to route through (see `as_ageable_mob`): same arithmetic
+                        // as `AgeableMob.ageUp` without the forced-age bookkeeping.
+                        let new_age = (age + seconds * 20).min(0);
+                        mob_entity
+                            .living_entity
+                            .entity
+                            .age
+                            .store(new_age, std::sync::atomic::Ordering::Relaxed);
+                    }
 
                     let entity = &mob_entity.living_entity.entity;
                     let world = entity.world.load();

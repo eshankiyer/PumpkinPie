@@ -1141,6 +1141,10 @@ impl AgeableMob for BeeEntity {
 }
 
 impl Animal for BeeEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     /// `Bee.isFood` (`Bee.java:576-578`): `itemStack.is(ItemTags.BEE_FOOD)`.
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack.item.has_tag(&tag::Item::MINECRAFT_BEE_FOOD)

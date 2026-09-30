@@ -197,6 +197,10 @@ impl AgeableMob for FrogEntity {
 }
 
 impl Animal for FrogEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack.item.has_tag(&tag::Item::MINECRAFT_FROG_FOOD)
             || FROG_FOOD.iter().any(|i| i.id == item_stack.item.id)

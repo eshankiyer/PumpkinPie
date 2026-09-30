@@ -332,6 +332,10 @@ impl AgeableMob for WolfEntity {
 }
 
 impl Animal for WolfEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         let item = item_stack.get_item();
         item.has_tag(&tag::Item::MINECRAFT_WOLF_FOOD) || item == &Item::BONE

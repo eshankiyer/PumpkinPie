@@ -340,6 +340,10 @@ impl NBTStorage for SnifferEntity {
 }
 
 impl super::animal::Animal for SnifferEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack.item.has_tag(&tag::Item::MINECRAFT_SNIFFER_FOOD)
     }

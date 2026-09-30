@@ -321,6 +321,10 @@ impl AgeableMob for RabbitEntity {
 }
 
 impl Animal for RabbitEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         TEMPT_ITEMS.iter().any(|i| i.id == item_stack.item.id)
     }

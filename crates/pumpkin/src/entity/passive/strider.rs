@@ -120,6 +120,10 @@ impl NBTStorage for StriderEntity {
 }
 
 impl Animal for StriderEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     /// `strider_food` tag: warped fungus only (the tempt-item tag is wider, adding
     /// warped-fungus-on-a-stick, but that item isn't food for breeding purposes).
     fn is_food(&self, item_stack: &ItemStack) -> bool {

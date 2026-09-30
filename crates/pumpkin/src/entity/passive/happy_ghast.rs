@@ -544,6 +544,10 @@ impl NBTStorage for HappyGhastEntity {
 }
 
 impl Animal for HappyGhastEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack
             .item

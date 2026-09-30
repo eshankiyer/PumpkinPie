@@ -300,6 +300,10 @@ impl NBTStorage for GoatEntity {
 }
 
 impl super::animal::Animal for GoatEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     /// `Goat.isFood` (`Goat.java:212-214`).
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack.item.has_tag(&tag::Item::MINECRAFT_GOAT_FOOD)

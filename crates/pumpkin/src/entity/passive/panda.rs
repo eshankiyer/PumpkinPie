@@ -767,6 +767,10 @@ impl AgeableMob for PandaEntity {
 }
 
 impl Animal for PandaEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     /// `Panda.isFood`.
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack.item.has_tag(&tag::Item::MINECRAFT_PANDA_FOOD)

@@ -350,6 +350,10 @@ impl NBTStorage for SheepEntity {
 }
 
 impl super::animal::Animal for SheepEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        Some(self)
+    }
+
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         use pumpkin_data::tag::Taggable;
         item_stack
