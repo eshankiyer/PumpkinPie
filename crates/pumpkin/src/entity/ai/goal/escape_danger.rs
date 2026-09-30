@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering::Relaxed;
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal, GoalFuture, follow_owner::FollowOwnerGoal};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
@@ -19,6 +19,8 @@ pub struct EscapeDangerGoal {
     speed: f64,
     goal_control: Controls,
     target: Option<Vector3<f64>>,
+    /// `TamableAnimal.TamableAnimalPanicGoal`: also teleports to a far-away owner each tick.
+    tamable: bool,
 }
 
 impl EscapeDangerGoal {
@@ -28,6 +30,18 @@ impl EscapeDangerGoal {
             speed,
             goal_control: Controls::MOVE,
             target: None,
+            tamable: false,
+        })
+    }
+
+    /// Vanilla `TamableAnimal.TamableAnimalPanicGoal` (`TamableAnimal.java:298-316`).
+    #[must_use]
+    pub fn new_tamable(speed: f64) -> Box<Self> {
+        Box::new(Self {
+            speed,
+            goal_control: Controls::MOVE,
+            target: None,
+            tamable: true,
         })
     }
 
@@ -153,6 +167,19 @@ impl Goal for EscapeDangerGoal {
     fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             self.target = None;
+        })
+    }
+
+    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            if !self.tamable || FollowOwnerGoal::blocked_from_owner(mob).await {
+                return;
+            }
+            if let Some(owner) = FollowOwnerGoal::find_owner(mob)
+                && FollowOwnerGoal::should_try_teleport_to_owner(mob, &owner)
+            {
+                FollowOwnerGoal::try_teleport_to_owner(mob, &owner);
+            }
         })
     }
 

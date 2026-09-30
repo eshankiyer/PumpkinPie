@@ -190,6 +190,12 @@ impl Mob for StriderEntity {
         })
     }
 
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.steering.tick_ridden(self).await;
+        })
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,
@@ -242,7 +248,19 @@ impl Mob for StriderEntity {
 
 impl ItemSteerable for StriderEntity {
     fn boost(&self) -> bool {
-        self.steering.boost()
+        let Some(total) = self.steering.boost() else {
+            return false;
+        };
+        // Vanilla syncs the new length through `DATA_BOOST_TIME`; the riding client reads it
+        // to start its own boost timer (`Pig.onSyncedDataUpdated`).
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[pumpkin_protocol::java::client::play::Metadata::new(
+                pumpkin_data::tracked_data::strider::DATA_BOOST_TIME,
+                pumpkin_protocol::codec::var_int::VarInt(total),
+            )],
+            None,
+        );
+        true
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

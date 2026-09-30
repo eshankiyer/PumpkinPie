@@ -114,6 +114,12 @@ pub(crate) async fn equip_saddle_item(
         // `Camel.getEquipSound` (`Camel.java:634-641`) likewise returns `CAMEL_SADDLE` for the
         // saddle slot.
         IdOr::Id(Sound::EntityCamelSaddle)
+    } else if mob_entity.living_entity.entity.entity_type.id == EntityType::PIG.id {
+        // `Pig.getEquipSound` (`Pig.java:194-197`).
+        IdOr::Id(Sound::EntityPigSaddle)
+    } else if mob_entity.living_entity.entity.entity_type.id == EntityType::STRIDER.id {
+        // `Strider.getEquipSound` (`Strider.java:145-147`).
+        IdOr::Id(Sound::EntityStriderSaddle)
     } else {
         equip_sound
     };

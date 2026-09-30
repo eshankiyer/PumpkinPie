@@ -69,7 +69,7 @@ impl ParrotEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // `Parrot.registerGoals` (`Parrot.java:162-171`).
-            goal_selector.add_goal(0, EscapeDangerGoal::new(1.25));
+            goal_selector.add_goal(0, EscapeDangerGoal::new_tamable(1.25));
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(
                 1,

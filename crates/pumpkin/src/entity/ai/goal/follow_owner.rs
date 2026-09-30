@@ -35,12 +35,18 @@ impl FollowOwnerGoal {
         })
     }
 
-    async fn unable_to_move_to_owner(mob: &dyn Mob, owner: Option<&Player>) -> bool {
+    /// The owner-independent half of `TamableAnimal.unableToMoveToOwner`
+    /// (`TamableAnimal.java:290-292`): ordered to sit, riding, or leashed.
+    pub(crate) async fn blocked_from_owner(mob: &dyn Mob) -> bool {
         if mob.is_sitting() {
             return true;
         }
         let mob_entity = &mob.get_mob_entity().living_entity.entity;
-        if mob_entity.has_vehicle().await || mob_entity.is_leashed().await {
+        mob_entity.has_vehicle().await || mob_entity.is_leashed().await
+    }
+
+    async fn unable_to_move_to_owner(mob: &dyn Mob, owner: Option<&Player>) -> bool {
+        if Self::blocked_from_owner(mob).await {
             return true;
         }
         let Some(owner) = owner else {
@@ -52,7 +58,7 @@ impl FollowOwnerGoal {
         false
     }
 
-    fn find_owner(mob: &dyn Mob) -> Option<Arc<Player>> {
+    pub(crate) fn find_owner(mob: &dyn Mob) -> Option<Arc<Player>> {
         let owner_uuid = mob.get_owner_uuid()?;
         let world = mob.get_mob_entity().living_entity.entity.world.load_full();
         let player = world.get_player_by_uuid(owner_uuid)?;
@@ -68,12 +74,12 @@ impl FollowOwnerGoal {
         mob_pos.squared_distance_to_vec(&owner_pos)
     }
 
-    fn should_try_teleport_to_owner(mob: &dyn Mob, owner: &Player) -> bool {
+    pub(crate) fn should_try_teleport_to_owner(mob: &dyn Mob, owner: &Player) -> bool {
         let dist_sq = Self::distance_to_owner_sq(mob, owner);
         dist_sq >= TELEPORT_DISTANCE_SQ
     }
 
-    fn try_teleport_to_owner(mob: &dyn Mob, owner: &Player) {
+    pub(crate) fn try_teleport_to_owner(mob: &dyn Mob, owner: &Player) {
         let owner_pos = owner.living_entity.entity.pos.load();
         let mob_entity = &mob.get_mob_entity().living_entity.entity;
         let world = mob_entity.world.load_full();

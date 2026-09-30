@@ -13,7 +13,7 @@ use crate::entity::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
         tempt::TemptGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, zombified_piglin::ZombifiedPiglinEntity},
     passive::animal::Animal,
     player::Player,
 };
@@ -173,6 +173,68 @@ impl Mob for PigEntity {
         })
     }
 
+    /// `Pig.thunderHit` (`Pig.java:198-210`): outside Peaceful the pig becomes a zombified
+    /// piglin (its saddle is not kept, `keepEquipment = false`) holding a golden sword, or
+    /// rarely a golden spear, instead of taking lightning damage.
+    fn mob_on_lightning_strike<'a>(
+        &'a self,
+        caller: &'a dyn EntityBase,
+        lightning: &'a crate::entity::lightning::LightningBoltEntity,
+    ) -> EntityBaseFuture<'a, ()> {
+        use crate::entity::mob::zombification;
+        use rand::RngExt;
+        Box::pin(async move {
+            let world = self.get_entity().world.load_full();
+            if world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+                && !self.get_entity().is_removed()
+            {
+                let zombified = zombification::prepare_conversion_with_equipment(
+                    &self.mob_entity,
+                    &EntityType::ZOMBIFIED_PIGLIN,
+                    false,
+                    ZombifiedPiglinEntity::new,
+                )
+                .await;
+                zombified.set_persistence_required();
+                // `ZombifiedPiglin.populateDefaultEquipmentSlots` (`ZombifiedPiglin.java:224-226`).
+                let weapon = if rand::rng().random_range(0..20) == 0 {
+                    &Item::GOLDEN_SPEAR
+                } else {
+                    &Item::GOLDEN_SWORD
+                };
+                if let Some(living) = zombified.get_living_entity() {
+                    living
+                        .entity_equipment
+                        .lock()
+                        .await
+                        .put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, weapon));
+                }
+                zombification::complete_conversion(&self.mob_entity, zombified).await;
+                return;
+            }
+            self.mob_entity
+                .living_entity
+                .on_lightning_strike(caller, lightning)
+                .await;
+        })
+    }
+
+    /// `Pig.playStepSound` (`Pig.java:145-148`).
+    fn get_step_sound(&self) -> Option<Sound> {
+        use crate::entity::ageable::AgeableMob;
+        Some(if self.is_baby() {
+            Sound::EntityBabyPigStep
+        } else {
+            Sound::EntityPigStep
+        })
+    }
+
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.steering.tick_ridden(self).await;
+        })
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,
@@ -226,7 +288,19 @@ impl Mob for PigEntity {
 
 impl ItemSteerable for PigEntity {
     fn boost(&self) -> bool {
-        self.steering.boost()
+        let Some(total) = self.steering.boost() else {
+            return false;
+        };
+        // Vanilla syncs the new length through `DATA_BOOST_TIME`; the riding client reads it
+        // to start its own boost timer (`Pig.onSyncedDataUpdated`).
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[pumpkin_protocol::java::client::play::Metadata::new(
+                pumpkin_data::tracked_data::pig::DATA_BOOST_TIME,
+                pumpkin_protocol::codec::var_int::VarInt(total),
+            )],
+            None,
+        );
+        true
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

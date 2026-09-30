@@ -197,6 +197,20 @@ pub async fn prepare_conversion<T>(
 where
     T: EntityBase + Send + Sync + 'static,
 {
+    prepare_conversion_with_equipment(old, new_type, true, build).await
+}
+
+/// [`prepare_conversion`] with `ConversionParams.keepEquipment` (`ConversionType.java:40-47`)
+/// selectable. With `keep_equipment` false the old mob's stacks are not transferred.
+pub async fn prepare_conversion_with_equipment<T>(
+    old: &MobEntity,
+    new_type: &'static EntityType,
+    keep_equipment: bool,
+    build: impl FnOnce(Entity) -> Arc<T>,
+) -> Arc<T>
+where
+    T: EntityBase + Send + Sync + 'static,
+{
     let old_entity = &old.living_entity.entity;
     let world = old_entity.world.load().clone();
     let pos = old_entity.pos.load();
@@ -269,7 +283,7 @@ where
 
         // `ConversionType.java:40-47`: every non-empty stack moves across (`copyAndClear`) with
         // its slot's drop chance.
-        let kept: Vec<(EquipmentSlot, ItemStack)> = {
+        let kept: Vec<(EquipmentSlot, ItemStack)> = if keep_equipment {
             let mut equipment = old.living_entity.entity_equipment.lock().await;
             let kept = equipment
                 .equipment
@@ -279,6 +293,8 @@ where
                 .collect();
             equipment.clear();
             kept
+        } else {
+            Vec::new()
         };
         if !kept.is_empty() {
             let old_chances = old

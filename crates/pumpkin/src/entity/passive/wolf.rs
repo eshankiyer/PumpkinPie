@@ -111,7 +111,7 @@ impl WolfEntity {
             // Wolf.java:129-140.
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             // 1: TamableAnimalPanicGoal
-            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
+            goal_selector.add_goal(1, EscapeDangerGoal::new_tamable(1.5));
             goal_selector.add_goal(2, SitGoal::new());
             // 3: WolfAvoidEntityGoal<Llama>
             goal_selector.add_goal(

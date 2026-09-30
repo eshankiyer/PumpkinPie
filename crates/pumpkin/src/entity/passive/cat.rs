@@ -182,7 +182,7 @@ impl CatEntity {
             // Goal 1: SwimGoal (FloatGoal)
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             // Goal 1: TamableAnimalPanicGoal (EscapeDangerGoal)
-            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
+            goal_selector.add_goal(1, EscapeDangerGoal::new_tamable(1.5));
             goal_selector.add_goal(2, SitGoal::new());
             // Cat.java:110 -- Goal 3: `Cat.CatRelaxOnOwnerGoal`.
             goal_selector.add_goal(3, CatRelaxOnOwnerGoal::new(cat_weak.clone()));
