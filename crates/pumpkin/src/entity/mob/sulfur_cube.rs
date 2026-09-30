@@ -21,7 +21,7 @@ use crate::entity::{
     Entity, EntityBase, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
     ai::control::{Control, MoveControlTrait},
-    ai::goal::{Controls, Goal, GoalFuture},
+    ai::goal::{Controls, Goal, GoalFuture, to_goal_ticks},
     item::ItemEntity,
     mob::{Mob, MobEntity},
     player::Player,
@@ -60,6 +60,13 @@ pub struct SulfurCubeEntity {
     push_sound_cooldown: AtomicI32,
     fuse: AtomicI32,
     from_bucket: AtomicBool,
+    // AbstractCubeMob.CubeMobMoveControl.isAggressive (AbstractCubeMob.java:435, 442-445):
+    // set by `setDirection`, makes the next jump delay a third as long.
+    aggressive: AtomicBool,
+    // Synchronous mirror of `has_body_item` for hooks that cannot await the equipment lock
+    // (`Mob::get_mob_y_velocity_drag`, `Mob::ground_step_sounds`). Refreshed wherever the BODY
+    // slot changes and once per tick.
+    has_body_item_cached: AtomicBool,
 }
 
 impl SulfurCubeEntity {
@@ -80,6 +87,8 @@ impl SulfurCubeEntity {
             push_sound_cooldown: AtomicI32::new(0),
             fuse: AtomicI32::new(-1),
             from_bucket: AtomicBool::new(false),
+            aggressive: AtomicBool::new(false),
+            has_body_item_cached: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(cube);
 
@@ -220,6 +229,13 @@ impl SulfurCubeEntity {
         !stack.is_empty()
     }
 
+    /// Reads the BODY slot and refreshes the synchronous mirror.
+    async fn refresh_body_item_cache(&self) -> bool {
+        let has_item = self.has_body_item().await;
+        self.has_body_item_cached.store(has_item, Ordering::Relaxed);
+        has_item
+    }
+
     pub(crate) async fn can_breathe_underwater(&self) -> bool {
         self.has_body_item().await
     }
@@ -258,6 +274,7 @@ impl SulfurCubeEntity {
         self.entity
             .living_entity
             .send_equipment_changes(&[(EquipmentSlot::BODY, new_body)]);
+        self.refresh_body_item_cache().await;
 
         self.play_sound(Sound::EntitySulfurCubeAbsorb);
         true
@@ -274,6 +291,7 @@ impl SulfurCubeEntity {
         if ejected.is_empty() {
             return;
         }
+        self.has_body_item_cached.store(false, Ordering::Relaxed);
 
         let entity = &self.entity.living_entity.entity;
         let world = entity.world.load();
@@ -338,6 +356,21 @@ impl SulfurCubeEntity {
     fn get_sound_pitch(&self) -> f32 {
         let pitch_adjuster = if self.is_tiny() { 1.4 } else { 0.8 };
         (rand::random_range(0.0..1.0) - rand::random_range(0.0..1.0)) * 0.2 + 1.0 * pitch_adjuster
+    }
+
+    /// `Mob.lookAt(entity, yMax, xMax)` (`Mob.java:780-795`) turned the mob's yaw toward the
+    /// target by at most `max_yaw_change`; the goals then feed that yaw to `setDirection`.
+    fn yaw_toward(&self, target: Vector3<f64>, max_yaw_change: f32) -> f32 {
+        let entity = &self.entity.living_entity.entity;
+        let pos = entity.pos.load();
+        let bearing = ((target.z - pos.z).atan2(target.x - pos.x) as f32).to_degrees() - 90.0;
+        Self::rot_lerp(entity.yaw.load(), bearing, max_yaw_change)
+    }
+
+    /// `CubeMobMoveControl.setDirection` (`AbstractCubeMob.java:442-445`).
+    fn set_direction(&self, yaw: f32, aggressive: bool) {
+        self.target_yaw.store(yaw);
+        self.aggressive.store(aggressive, Ordering::Relaxed);
     }
 
     fn get_jump_delay() -> i32 {
@@ -515,6 +548,7 @@ impl NBTStorage for SulfurCubeEntity {
             self.set_from_bucket(nbt.get_bool("from_bucket").unwrap_or(false));
             self.fuse
                 .store(nbt.get_int("fuse").unwrap_or(-1), Ordering::Relaxed);
+            self.refresh_body_item_cache().await;
         })
     }
 }
@@ -539,6 +573,32 @@ impl Mob for SulfurCubeEntity {
         1.0
     }
 
+    /// `SulfurCube.omnidirectionalAirMover` (`SulfurCube.java:426-429`): while carrying an
+    /// item, `LivingEntity.travelInAir` (`LivingEntity.java:2483`) damps vertical velocity with
+    /// the horizontal air drag (0.91) instead of 0.98.
+    fn get_mob_y_velocity_drag(&self) -> Option<f64> {
+        self.has_body_item_cached.load(Ordering::Relaxed).then(|| {
+            crate::entity::living::modified_friction(
+                0.91,
+                self.entity
+                    .living_entity
+                    .get_attribute_value(&Attributes::AIR_DRAG_MODIFIER),
+            )
+        })
+    }
+
+    /// `SulfurCube.playStepSound` (`SulfurCube.java:590-595`): no step sound while carrying.
+    fn ground_step_sounds(
+        &self,
+        _supporting_block: &pumpkin_data::Block,
+        _supporting_state: &pumpkin_data::BlockState,
+        _above_block: &pumpkin_data::Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        self.has_body_item_cached
+            .load(Ordering::Relaxed)
+            .then(Vec::new)
+    }
+
     /// `set_size` runs from `new` and from NBT load, both before the entity has any viewers,
     /// so its broadcast reaches nobody. This is the first point at which nearby players
     /// exist. Chains the baby flag from `Mob`'s default so overriding does not drop it.
@@ -559,6 +619,7 @@ impl Mob for SulfurCubeEntity {
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            self.refresh_body_item_cache().await;
             let was_baby = self.is_baby();
             self.ageable_ai_step();
             if was_baby && !self.is_baby() {
@@ -727,6 +788,11 @@ impl MoveControlTrait for SulfurCubeMoveControl {
         // SulfurCube.java:949-960 (`SulfurCubeMobMoveControl`): movement is suppressed
         // entirely while the body slot holds a swallowed item.
         if futures::executor::block_on(cube.has_body_item()) {
+            // `collectEquipmentChanges` (`SulfurCube.java:371-376`) calls `setSpeed(0.0F)`,
+            // which also zeroes `zza`, when the slot fills; nothing refreshes them afterwards.
+            let living_entity = &mob.get_mob_entity().living_entity;
+            living_entity.speed.store(0.0);
+            living_entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
             return;
         }
 
@@ -752,7 +818,11 @@ impl MoveControlTrait for SulfurCubeMoveControl {
             if speed_modifier > 0.0 {
                 let current_delay = cube.jump_delay.load(Ordering::Relaxed);
                 if current_delay <= 0 {
-                    let next_delay = SulfurCubeEntity::get_jump_delay();
+                    let mut next_delay = SulfurCubeEntity::get_jump_delay();
+                    // AbstractCubeMob.java:465-467: aggressive cubes hop three times as often.
+                    if cube.aggressive.load(Ordering::Relaxed) {
+                        next_delay /= 3;
+                    }
                     cube.jump_delay.store(next_delay, Ordering::Relaxed);
                     mob_entity.jump_requested.store(true, Ordering::SeqCst);
                     let world = entity.world.load();
@@ -789,6 +859,10 @@ impl SulfurCubeFloatGoal {
 impl Goal for SulfurCubeFloatGoal {
     fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            // `collectEquipmentChanges` removes every goal while the BODY slot is filled.
+            if self.cube.has_body_item().await {
+                return false;
+            }
             let entity = &self.cube.entity.living_entity.entity;
             entity.touching_water.load(Ordering::Relaxed)
                 || entity.touching_lava.load(Ordering::Relaxed)
@@ -835,6 +909,9 @@ impl SulfurCubeRandomDirectionGoal {
 impl Goal for SulfurCubeRandomDirectionGoal {
     fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            if self.cube.has_body_item().await {
+                return false;
+            }
             self.cube
                 .entity
                 .living_entity
@@ -865,7 +942,7 @@ impl Goal for SulfurCubeRandomDirectionGoal {
                 self.next_randomize_time = rand::random_range(40..100);
                 self.chosen_degrees = rand::random_range(0.0..360.0);
             }
-            self.cube.target_yaw.store(self.chosen_degrees);
+            self.cube.set_direction(self.chosen_degrees, false);
         })
     }
 
@@ -887,6 +964,9 @@ impl SulfurCubeKeepOnJumpingGoal {
 impl Goal for SulfurCubeKeepOnJumpingGoal {
     fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            if self.cube.has_body_item().await {
+                return false;
+            }
             let vehicle = self.cube.entity.living_entity.entity.vehicle.lock().await;
             vehicle.is_none()
         })
@@ -927,7 +1007,10 @@ impl SulfurCubeSearchForItemsGoal {
 impl Goal for SulfurCubeSearchForItemsGoal {
     fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            if self.cube.is_baby() || self.cube.pickup_timer.load(Ordering::Relaxed) > 0 {
+            if self.cube.is_baby()
+                || self.cube.pickup_timer.load(Ordering::Relaxed) > 0
+                || self.cube.has_body_item().await
+            {
                 return false;
             }
 
@@ -974,11 +1057,10 @@ impl Goal for SulfurCubeSearchForItemsGoal {
             let entity = &self.cube.entity.living_entity.entity;
             let item_pos = item_entity.get_entity().pos.load();
             let my_pos = entity.pos.load();
-            let dx = item_pos.x - my_pos.x;
-            let dz = item_pos.z - my_pos.z;
-            let yaw = dx.atan2(dz).to_degrees() as f32;
-            self.cube.target_yaw.store(yaw);
-            self.cube.speed_modifier.store(1.0);
+            // SulfurCube.java:990-995: look at the item (10 degrees per tick) and steer
+            // aggressively toward it; the walking speed comes from the keep-on-jumping goal.
+            let yaw = self.cube.yaw_toward(item_pos, 10.0);
+            self.cube.set_direction(yaw, true);
 
             if my_pos.squared_distance_to_vec(&item_pos) <= 1.5 * 1.5 {
                 let can_hold = {
@@ -1006,12 +1088,14 @@ impl Goal for SulfurCubeSearchForItemsGoal {
         Box::pin(async move {
             !self.cube.is_baby()
                 && self.cube.pickup_timer.load(Ordering::Relaxed) <= 0
+                && !self.cube.has_body_item().await
                 && self.target_item.lock().await.is_some()
         })
     }
 
+    // SulfurCube.java:967: LOOK only, so keep-on-jumping still supplies the movement.
     fn controls(&self) -> Controls {
-        Controls::LOOK | Controls::MOVE
+        Controls::LOOK
     }
 }
 
@@ -1025,6 +1109,8 @@ const STOP_DISTANCE_SQUARED: f64 = 1.0;
 pub struct SulfurCubeTemptGoal {
     cube: Arc<SulfurCubeEntity>,
     target_player: tokio::sync::Mutex<Option<Arc<Player>>>,
+    // TemptGoal.calmDown (TemptGoal.java:24, 46-51, 102-108).
+    calm_down: i32,
 }
 
 impl SulfurCubeTemptGoal {
@@ -1032,6 +1118,7 @@ impl SulfurCubeTemptGoal {
         Self {
             cube,
             target_player: tokio::sync::Mutex::new(None),
+            calm_down: 0,
         }
     }
 
@@ -1057,18 +1144,44 @@ impl SulfurCubeTemptGoal {
 }
 
 impl Goal for SulfurCubeTemptGoal {
+    /// `TemptGoal.canUse` (`TemptGoal.java:45-53`): nearest player within `TEMPT_RANGE`
+    /// holding a tempting item, unless still calming down after the last run.
     fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            // The goal does not exist while the BODY slot is filled; it is re-created fresh.
+            if self.cube.has_body_item().await {
+                self.calm_down = 0;
+                return false;
+            }
+            if self.calm_down > 0 {
+                self.calm_down -= 1;
+                return false;
+            }
+
             let entity = &self.cube.entity.living_entity.entity;
             let pos = entity.pos.load();
             let world = entity.world.load();
+            let range = self
+                .cube
+                .entity
+                .living_entity
+                .get_attribute_value(&Attributes::TEMPT_RANGE);
+            // TargetingConditions.test (TargetingConditions.java:112-118).
+            let visibility_distance = range.max(2.0);
 
             let mut nearest: Option<(Arc<Player>, f64)> = None;
-            for player in world.get_nearby_players(pos, 10.0) {
+            for player in world.get_nearby_players(pos, visibility_distance) {
+                let dist = pos.squared_distance_to_vec(&player.get_entity().pos.load());
+                if dist > visibility_distance * visibility_distance {
+                    continue;
+                }
+                // TargetingConditions.test: `!target.canBeSeenByAnyone()` rejects spectators.
+                if player.get_entity().is_spectator() {
+                    continue;
+                }
                 if !self.is_holding_tempt_item(&player).await {
                     continue;
                 }
-                let dist = pos.squared_distance_to_vec(&player.get_entity().pos.load());
                 if nearest.as_ref().is_none_or(|(_, best)| dist < *best) {
                     nearest = Some((player, dist));
                 }
@@ -1080,20 +1193,9 @@ impl Goal for SulfurCubeTemptGoal {
         })
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(player) = self.target_player.lock().await.clone() else {
-                return false;
-            };
-            let entity = &self.cube.entity.living_entity.entity;
-            let dist = entity
-                .pos
-                .load()
-                .squared_distance_to_vec(&player.get_entity().pos.load());
-            dist <= 10.0 * 10.0 && self.is_holding_tempt_item(&player).await
-        })
-    }
-
+    /// `SulfurCubeTemptGoal.navigateTowards`/`stopNavigation` (`SulfurCube.java:1003-1017`):
+    /// within the stop distance the wanted movement is cleared, otherwise the cube turns
+    /// toward the player and steers aggressively.
     fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             let Some(player) = self.target_player.lock().await.clone() else {
@@ -1102,16 +1204,12 @@ impl Goal for SulfurCubeTemptGoal {
             let entity = &self.cube.entity.living_entity.entity;
             let my_pos = entity.pos.load();
             let player_pos = player.get_entity().pos.load();
-            let dx = player_pos.x - my_pos.x;
-            let dz = player_pos.z - my_pos.z;
-            let yaw = dx.atan2(dz).to_degrees() as f32;
-            self.cube.target_yaw.store(yaw);
 
-            // `TemptGoal.tick`: stop navigating once within `stopDistance` (1.0 here).
             if my_pos.squared_distance_to_vec(&player_pos) < STOP_DISTANCE_SQUARED {
                 self.cube.speed_modifier.store(0.0);
             } else {
-                self.cube.speed_modifier.store(1.0);
+                let yaw = self.cube.yaw_toward(player_pos, 10.0);
+                self.cube.set_direction(yaw, true);
             }
         })
     }
@@ -1119,11 +1217,14 @@ impl Goal for SulfurCubeTemptGoal {
     fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             *self.target_player.lock().await = None;
+            self.cube.speed_modifier.store(0.0);
+            self.calm_down = to_goal_ticks(100);
         })
     }
 
+    // SulfurCube.java:1001: LOOK only, so keep-on-jumping keeps the cube hopping.
     fn controls(&self) -> Controls {
-        Controls::MOVE | Controls::LOOK
+        Controls::LOOK
     }
 }
 

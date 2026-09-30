@@ -8207,7 +8207,7 @@ const fn arrow_removal_delay(arrow_count: i32) -> i32 {
 }
 
 /// Vanilla `LivingEntity.computeModifiedFriction` (`LivingEntity.java:515-517`).
-fn modified_friction(friction: f64, modifier: f64) -> f64 {
+pub(crate) fn modified_friction(friction: f64, modifier: f64) -> f64 {
     (1.0 - (1.0 - friction) * modifier).clamp(0.0, 1.0)
 }
 
