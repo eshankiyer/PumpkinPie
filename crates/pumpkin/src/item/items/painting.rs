@@ -12,6 +12,7 @@ use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
+use pumpkin_data::data_component_impl::PaintingVariantImpl;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
@@ -37,6 +38,14 @@ fn placeable_variants() -> impl Iterator<Item = &'static PaintingVariantInfo> {
     PAINTING_VARIANTS
         .iter()
         .filter(|variant| PLACEABLE_VARIANTS.contains(&variant.name))
+}
+
+/// Resolves a painting variant id from a `PAINTING_VARIANT` component; a bare id is the
+/// `minecraft:` namespace, as with any vanilla `Identifier`.
+fn variant_by_name(id: &str) -> Option<&'static PaintingVariantInfo> {
+    PAINTING_VARIANTS.iter().find(|variant| {
+        variant.name == id || variant.name.strip_prefix("minecraft:") == Some(id)
+    })
 }
 
 /// `HangingEntity.survives` (`HangingEntity.java:81-92`) for a painting of `width` x
@@ -177,10 +186,30 @@ impl ItemBehaviour for PaintingItem {
                 return;
             };
             candidates.retain(|variant| variant.width_quads * variant.height_quads == largest_area);
-            drop(border);
-            let Some(chosen) = candidates.choose(&mut rand::rng()) else {
+            let Some(&random_choice) = candidates.choose(&mut rand::rng()) else {
                 return;
             };
+
+            // `EntityType.createDefaultStackConfig` applies the stack's `PAINTING_VARIANT`
+            // component over the random pick (`Painting.applyImplicitComponent`), after which
+            // `HangingEntityItem.useOn` re-checks `survives()` for that variant.
+            let chosen = item
+                .get_data_component::<PaintingVariantImpl>()
+                .and_then(|component| variant_by_name(&component.value))
+                .unwrap_or(random_choice);
+            if !std::ptr::eq(chosen, random_choice)
+                && !painting_survives(
+                    &world,
+                    anchor,
+                    face,
+                    chosen.width_quads,
+                    chosen.height_quads,
+                    &border,
+                )
+            {
+                return;
+            }
+            drop(border);
 
             let entity = Entity::new(
                 world.clone(),
@@ -223,6 +252,13 @@ mod tests {
 
     fn area(variant: &PaintingVariantInfo) -> i32 {
         variant.width_quads * variant.height_quads
+    }
+
+    #[test]
+    fn component_variant_ids_resolve_with_or_without_namespace() {
+        assert_eq!(variant_by_name("minecraft:kebab").map(|v| v.name), Some("minecraft:kebab"));
+        assert_eq!(variant_by_name("kebab").map(|v| v.name), Some("minecraft:kebab"));
+        assert!(variant_by_name("nope").is_none());
     }
 
     #[test]
