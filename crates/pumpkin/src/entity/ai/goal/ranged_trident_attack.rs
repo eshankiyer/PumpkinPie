@@ -55,18 +55,18 @@ impl DrownedTridentAttackGoal {
 
     /// `Drowned#performRangedAttack`: `xd = target.getX() - this.getX()`,
     /// `zd = target.getZ() - this.getZ()` (from the shooter's own position, not the
-    /// trident's), `yd = target.getY(1/3) - trident.getY()`, then
+    /// trident's), `yd = target.getY(1/3) - trident.getY()` (`getY(p)` is `y + bbHeight * p`), then
     /// `spawnProjectileUsingShoot(..., yd + distanceToTarget * 0.2F, ...)` where
     /// `distanceToTarget = sqrt(xd*xd + zd*zd)`.
     fn target_vector_from_positions(
         shooter_pos: Vector3<f64>,
         trident_y: f64,
         target_pos: Vector3<f64>,
-        target_eye_height: f64,
+        target_height: f64,
     ) -> Vector3<f64> {
         let xd = target_pos.x - shooter_pos.x;
         let zd = target_pos.z - shooter_pos.z;
-        let yd = target_pos.y + target_eye_height / 3.0 - trident_y;
+        let yd = target_pos.y + target_height / 3.0 - trident_y;
         let horizontal_distance = xd.hypot(zd);
         Vector3::new(xd, yd + horizontal_distance * 0.2, zd)
     }
@@ -76,7 +76,7 @@ impl DrownedTridentAttackGoal {
             shooter.pos.load(),
             trident_y,
             target.get_entity().pos.load(),
-            target.get_entity().get_eye_height(),
+            f64::from(target.get_entity().height()),
         )
     }
 
@@ -238,11 +238,11 @@ mod tests {
             Vector3::new(0.0, 1.42, 0.0),
             1.52,
             Vector3::new(3.0, 0.0, 4.0),
-            1.8,
+            1.95,
         );
 
         assert_eq!(direction.x, 3.0);
         assert_eq!(direction.z, 4.0);
-        assert!((direction.y - 0.08).abs() < f64::EPSILON);
+        assert!((direction.y - 0.13).abs() < 1e-9);
     }
 }
