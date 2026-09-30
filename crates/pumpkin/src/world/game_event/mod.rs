@@ -9,8 +9,9 @@
 //   registered/unregistered explicitly.
 // - Vanilla's VibrationSystem.Ticker simulates a per-listener travel time before a
 //   selected vibration is actually delivered, and streams a travelling particle to
-//   clients. The shrieker block entity now drives its VibrationSelector from its own tick
-//   (`VibrationSystem.java:278-361`); other listeners still resolve synchronously here.
+//   clients (the particle is not sent). The shrieker and the sculk sensor block entities
+//   drive their VibrationSelector from their own tick (`VibrationSystem.java:278-361`);
+//   other listeners still resolve synchronously here.
 // - Vanilla's occlusion check (VibrationSystem.Listener.isOccluded) nudges the ray in
 //   all 6 directions before a ClipBlockStateContext raycast. This does a straight-line
 //   block-center sampling approximation against the same

@@ -7,10 +7,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 use crate::world::World;
+use crate::world::game_event::vibration::VibrationData;
 
 pub struct SculkSensorBlockEntity {
     pub position: BlockPos,
     pub last_vibration_frequency: Mutex<i32>,
+    /// Vanilla's `VibrationSystem.Data` (`SculkSensorBlockEntity.java:20`), shared with the
+    /// vibration listener that queues candidates and the tick that delivers them.
+    pub(crate) vibration_data: Mutex<VibrationData>,
     dirty: AtomicBool,
 }
 
@@ -28,6 +32,8 @@ impl BlockEntity for SculkSensorBlockEntity {
     /// (`SculkSensorBlockEntity.java:72-94`). Re-register it when a persisted entity is
     /// first ticked because Pumpkin's listener registry is maintained separately from the
     /// block entity map.
+    ///
+    /// The block's ticker is `VibrationSystem.Ticker.tick` (`SculkSensorBlock.java:157-165`).
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             crate::block::blocks::redstone::sculk_sensor::ensure_listener_registered(
@@ -35,6 +41,16 @@ impl BlockEntity for SculkSensorBlockEntity {
                 &self.position,
             )
             .await;
+            if crate::block::blocks::redstone::sculk_sensor::tick_vibration(
+                world,
+                &self.position,
+                &self.vibration_data,
+                Self::LISTENER_RADIUS,
+            )
+            .await
+            {
+                self.dirty.store(true, Ordering::Release);
+            }
         })
     }
 
@@ -53,9 +69,15 @@ impl BlockEntity for SculkSensorBlockEntity {
         Self: Sized,
     {
         let last_vibration_frequency = nbt.get_int("last_vibration_frequency").unwrap_or(0);
+        // `input.read("listener", Data.CODEC).orElseGet(Data::new)`.
+        let vibration_data = nbt
+            .get_compound("listener")
+            .and_then(VibrationData::from_nbt)
+            .unwrap_or_default();
         Self {
             position,
             last_vibration_frequency: Mutex::new(last_vibration_frequency),
+            vibration_data: Mutex::new(vibration_data),
             dirty: AtomicBool::new(false),
         }
     }
@@ -69,6 +91,7 @@ impl BlockEntity for SculkSensorBlockEntity {
                 "last_vibration_frequency",
                 *self.last_vibration_frequency.lock().await,
             );
+            nbt.put_compound("listener", self.vibration_data.lock().await.to_nbt());
         })
     }
 
@@ -88,11 +111,16 @@ impl BlockEntity for SculkSensorBlockEntity {
 
 impl SculkSensorBlockEntity {
     pub const ID: &'static str = "minecraft:sculk_sensor";
+    // Vanilla `SculkSensorBlockEntity.VibrationUser.LISTENER_RANGE`
+    // (`SculkSensorBlockEntity.java:77`).
+    pub const LISTENER_RADIUS: i32 = 8;
+
     #[must_use]
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
             last_vibration_frequency: Mutex::new(0),
+            vibration_data: Mutex::new(VibrationData::default()),
             dirty: AtomicBool::new(false),
         }
     }
