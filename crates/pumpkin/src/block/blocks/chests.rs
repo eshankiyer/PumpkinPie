@@ -430,23 +430,39 @@ fn get_state_for_neighbor_update_chest_impl(
     // ChestBlock.updateShape (ChestBlock.java:169-185) combines matching single chests on a
     // horizontal neighbor update and splits a half when its partner is no longer compatible.
     let neighbor_block = args.world.get_block(args.neighbor_position);
+    let mut result_props = props;
     if args.direction.to_horizontal_facing().is_some()
         && can_connect_chests(args.block, neighbor_block, copper)
     {
         let neighbor_props =
             ChestLikeProperties::from_state_id(args.neighbor_state_id, neighbor_block);
         if let Some(r#type) = combined_chest_type(props, neighbor_props, args.direction) {
-            let mut combined_props = props;
-            combined_props.r#type = r#type;
-            return combined_props.to_state_id(args.block);
+            result_props.r#type = r#type;
         }
     } else if connected_direction(props) == args.direction {
-        let mut split_props = props;
-        split_props.r#type = ChestType::Single;
-        return split_props.to_state_id(args.block);
+        result_props.r#type = ChestType::Single;
     }
 
-    args.state_id
+    // CopperChestBlock.updateShape (CopperChestBlock.java:104-117): a joined half is replaced by
+    // the partner's block so both halves share weathering and wax state.
+    if copper
+        && neighbor_block.has_tag(&tag::Block::MINECRAFT_COPPER_CHESTS)
+        && copper_half_adopts_partner(result_props, args.direction)
+    {
+        return result_props.to_state_id(neighbor_block);
+    }
+
+    if result_props.r#type == props.r#type {
+        args.state_id
+    } else {
+        result_props.to_state_id(args.block)
+    }
+}
+
+// Condition of CopperChestBlock.updateShape (CopperChestBlock.java:112-113) on the state
+// returned by ChestBlock.updateShape.
+fn copper_half_adopts_partner(props: ChestLikeProperties, direction: BlockDirection) -> bool {
+    props.r#type != ChestType::Single && connected_direction(props) == direction
 }
 
 // ChestBlock.getConnectedDirection (ChestBlock.java:200-203) maps LEFT clockwise and all other
@@ -991,6 +1007,28 @@ mod tests {
             &Block::CHEST,
             &Block::TRAPPED_CHEST,
             false
+        ));
+    }
+
+    #[test]
+    fn copper_half_adopts_partner_only_toward_connected_side() {
+        let left = ChestLikeProperties {
+            facing: HorizontalFacing::North,
+            r#type: ChestType::Left,
+            waterlogged: false,
+        };
+        assert!(copper_half_adopts_partner(left, connected_direction(left)));
+        assert!(!copper_half_adopts_partner(
+            left,
+            connected_direction(left).opposite()
+        ));
+        let single = ChestLikeProperties {
+            r#type: ChestType::Single,
+            ..left
+        };
+        assert!(!copper_half_adopts_partner(
+            single,
+            connected_direction(single)
         ));
     }
 
