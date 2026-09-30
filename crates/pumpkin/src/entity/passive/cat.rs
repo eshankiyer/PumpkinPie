@@ -186,7 +186,7 @@ impl CatEntity {
             goal_selector.add_goal(2, SitGoal::new());
             // Cat.java:110 -- Goal 3: `Cat.CatRelaxOnOwnerGoal`.
             goal_selector.add_goal(3, CatRelaxOnOwnerGoal::new(cat_weak.clone()));
-            goal_selector.add_goal(4, Box::new(TemptGoal::new(0.6, TEMPT_ITEMS, true)));
+            goal_selector.add_goal(4, Box::new(TemptGoal::for_cat(0.6, TEMPT_ITEMS, true)));
             // Vanilla priority 4, `Cat.CatAvoidEntityGoal<Player>`: only present while untamed
             // (added here since a freshly spawned cat always starts untamed; removed by
             // `reassess_tame_goals` -- see `mob_interact`'s taming branch below -- once the cat

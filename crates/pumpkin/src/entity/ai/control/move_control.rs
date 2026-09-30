@@ -47,6 +47,10 @@ impl MoveControlTrait for MoveControl {
         Self::strafe(self, forwards, right);
     }
 
+    fn set_wait(&mut self) {
+        Self::set_wait(self);
+    }
+
     fn tick(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let living_entity = &mob_entity.living_entity;

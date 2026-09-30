@@ -1,9 +1,7 @@
 //! `Fox.FoxEatBerriesGoal` (`Fox.java:906-984`), a `MoveToBlockGoal` subclass registered at
 //! priority 10 as `new Fox.FoxEatBerriesGoal(1.2F, 12, 1)` (`Fox.java:198`).
 //!
-//! Deviations from vanilla, both forced by `move_to_target_pos.rs`'s shape:
-//! * `shouldRecalculatePath` (`Fox.java:919-921`, `tryTicks % 100`) is not overridable here;
-//!   the base's `trying_time % 40` cadence is used instead.
+//! Deviation from vanilla:
 //! * Glow-berry harvesting drops one `GLOW_BERRIES` directly rather than rolling
 //!   `BuiltInLootTables.HARVEST_CAVE_VINE` (`CaveVines.java:26-33`), which that table's only
 //!   entry produces anyway.
@@ -241,5 +239,9 @@ impl MoveToTargetPos for FoxEatBerriesGoal {
 
     fn get_desired_distance_to_target(&self) -> f64 {
         ACCEPTED_DISTANCE
+    }
+
+    fn should_recalculate_path(&self, trying_time: i32) -> bool {
+        trying_time % 100 == 0
     }
 }

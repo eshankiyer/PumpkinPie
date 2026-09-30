@@ -73,6 +73,10 @@ impl MoveControlTrait for GhastMoveControl {
         }
     }
 
+    fn set_wait(&mut self) {
+        self.operation = Operation::Wait;
+    }
+
     fn has_wanted(&self) -> bool {
         self.operation == Operation::MoveTo
     }

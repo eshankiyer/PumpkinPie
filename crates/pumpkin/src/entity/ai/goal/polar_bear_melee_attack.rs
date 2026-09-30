@@ -6,12 +6,10 @@ use crate::entity::passive::polar_bear::PolarBearEntity;
 /// `PolarBear.PolarBearMeleeAttackGoal` (PolarBear.java:304-336): on top of the generic melee
 /// attack, a bear that's close to its target but not yet swinging rears up (`setStanding(true)`).
 ///
-/// It also plays a warning growl once `ticksUntilNextAttack <= 10`. The generic
-/// `MeleeAttackGoal` has no `checkAndPerformAttack` hook to override (see
-/// `FoxMeleeAttackGoal`'s documented simplification for the same limitation), so this composes
-/// with it instead of reimplementing its movement/pathing: it runs the inner goal unchanged for
-/// movement and the actual attack, then separately derives the standing/warning state from the
-/// inner goal's public `cooldown` field (vanilla's `ticksUntilNextAttack`) and target distance.
+/// Overrides `checkAndPerformAttack` with vanilla's own branch tree: the bear hits without a
+/// swing animation, and otherwise pins the cooldown at its maximum while far from the target so
+/// it must count down (standing, growling from 10 ticks out) before its first hit. This drives
+/// the inner goal's movement via `tick_movement` and runs that step itself.
 pub struct PolarBearMeleeAttackGoal {
     inner: MeleeAttackGoal,
 }
@@ -49,28 +47,22 @@ impl Goal for PolarBearMeleeAttackGoal {
 
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            let old_cooldown = self.inner.cooldown;
-            self.inner.tick(mob).await;
-
+            let Some(target) = self.inner.tick_movement(mob).await else {
+                return;
+            };
             let Some(bear) = mob.cast_any().downcast_ref::<PolarBearEntity>() else {
                 return;
             };
 
-            // The inner goal resets `cooldown` back up to its max only when it actually landed
-            // an attack this tick -- vanilla's `canPerformAttack` branch, which also drops
-            // standing.
-            if self.inner.cooldown > old_cooldown {
+            // Vanilla `PolarBearMeleeAttackGoal.checkAndPerformAttack` (PolarBear.java:310-329).
+            if self.inner.can_perform_attack(mob, target.as_ref()).await {
+                self.inner.reset_attack_cooldown();
+                mob.try_attack(target.as_ref()).await;
                 bear.set_standing(false);
                 return;
             }
 
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                bear.set_standing(false);
-                return;
-            };
             let target_entity = target.get_entity();
-
             let dist_sq = mob
                 .get_entity()
                 .pos
@@ -79,11 +71,16 @@ impl Goal for PolarBearMeleeAttackGoal {
             let near_reach = f64::from(target_entity.entity_dimension.load().width) + 3.0;
 
             if dist_sq < near_reach * near_reach {
+                if self.inner.is_time_to_attack() {
+                    bear.set_standing(false);
+                    self.inner.reset_attack_cooldown();
+                }
                 if self.inner.cooldown <= 10 {
                     bear.set_standing(true);
                     bear.play_warning_sound();
                 }
             } else {
+                self.inner.reset_attack_cooldown();
                 bear.set_standing(false);
             }
         })

@@ -184,7 +184,7 @@ impl HappyGhastEntity {
             // why the single-list approximation is used.
             goal_selector.add_goal(
                 4,
-                Box::new(TemptGoal::with_stop_distance(
+                Box::new(TemptGoal::for_non_pathfinders(
                     1.0,
                     HAPPY_GHAST_FOOD,
                     false,
@@ -287,7 +287,7 @@ impl HappyGhastEntity {
         self.mob_entity.add_goal(3, SwimGoal::default());
         self.mob_entity.add_goal(
             4,
-            TemptGoal::with_stop_distance(1.0, HAPPY_GHAST_FOOD, false, 7.0),
+            TemptGoal::for_non_pathfinders(1.0, HAPPY_GHAST_FOOD, false, 7.0),
         );
         self.mob_entity
             .add_goal(5, GhastRandomFloatAroundGoal::new());

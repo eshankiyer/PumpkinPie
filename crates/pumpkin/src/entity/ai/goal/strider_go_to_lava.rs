@@ -94,4 +94,8 @@ impl MoveToTargetPos for StriderGoToLavaGoal {
     ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
         Box::pin(async move { Self::is_target_valid(&world, block_pos) })
     }
+
+    fn should_recalculate_path(&self, trying_time: i32) -> bool {
+        trying_time % 20 == 0
+    }
 }

@@ -37,6 +37,10 @@ pub trait MoveControlTrait: Control {
     /// controls that implement `has_wanted`.
     fn set_wanted_position(&mut self, _x: f64, _y: f64, _z: f64, _speed_modifier: f64) {}
 
+    /// Vanilla `MoveControl.setWait` (`MoveControl.java:164-166`). Defaults to a no-op for
+    /// controls that do not model a wanted position.
+    fn set_wait(&mut self) {}
+
     /// Vanilla `MoveControl.getSpeedModifier`: the speed the current destination was requested
     /// at. `Cat.customServerAiStep` (`Cat.java:235-252`) and `Ocelot.customServerAiStep`
     /// (`Ocelot.java:117-134`) read it to choose their pose, so it must report the exact value

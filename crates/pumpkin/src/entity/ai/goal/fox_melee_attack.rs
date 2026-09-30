@@ -2,13 +2,13 @@ use super::melee_attack::MeleeAttackGoal;
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
 use crate::entity::passive::fox::FoxEntity;
+use pumpkin_data::sound::Sound;
 
 /// `Fox.FoxMeleeAttackGoal`: the generic `MeleeAttackGoal` with an extra gate -- a fox that's
 /// sitting, sleeping, crouching (stalking prey), or faceplanted never bites.
 ///
-/// Vanilla additionally plays `FOX_BITE` from `checkAndPerformAttack`; the generic
-/// `MeleeAttackGoal` has no attack-happened hook to intercept for that, so the sound is left as a
-/// documented simplification here rather than added via fragile cooldown-diff detection.
+/// Vanilla overrides `checkAndPerformAttack` (`Fox.java:1086-1092`): no swing animation, and
+/// `FOX_BITE` plays after the hit. This drives the inner goal's movement and runs that step.
 pub struct FoxMeleeAttackGoal {
     inner: MeleeAttackGoal,
 }
@@ -53,7 +53,16 @@ impl Goal for FoxMeleeAttackGoal {
     }
 
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        self.inner.tick(mob)
+        Box::pin(async move {
+            let Some(target) = self.inner.tick_movement(mob).await else {
+                return;
+            };
+            if self.inner.can_perform_attack(mob, target.as_ref()).await {
+                self.inner.reset_attack_cooldown();
+                mob.try_attack(target.as_ref()).await;
+                mob.get_entity().play_sound(Sound::EntityFoxBite);
+            }
+        })
     }
 
     fn should_run_every_tick(&self) -> bool {

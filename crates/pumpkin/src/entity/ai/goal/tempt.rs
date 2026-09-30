@@ -2,16 +2,31 @@ use std::sync::Arc;
 
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::EntityBase;
+use crate::entity::passive::cat::CatEntity;
+use crate::entity::passive::ocelot::OcelotEntity;
+use crate::entity::passive::tamable::TamableAnimal;
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob, player::Player};
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::item::Item;
 use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
+use uuid::Uuid;
 
 /// `TemptGoal.java`: `DEFAULT_STOP_DISTANCE`.
 const DEFAULT_STOP_DISTANCE: f64 = 2.5;
 const SCARE_RANGE_SQUARED: f64 = 36.0;
 const SCARE_MOVE_THRESHOLD_SQUARED: f64 = 0.01;
 const SCARE_ROT_THRESHOLD: f32 = 5.0;
+
+/// The vanilla `TemptGoal` subclasses that override `canScare`/`canUse`/`tick`.
+enum TemptVariant {
+    Plain,
+    /// `Ocelot.OcelotTemptGoal` (`Ocelot.java:302-314`): never scared while trusting.
+    Ocelot,
+    /// `Cat.CatTemptGoal` (`Cat.java:648-676`): only untamed, and a randomly selected player
+    /// never scares the cat.
+    Cat { selected_player: Option<Uuid> },
+}
 
 pub struct TemptGoal {
     goal_control: Controls,
@@ -28,6 +43,10 @@ pub struct TemptGoal {
     /// a tempting player. Used externally by Ocelot, Cat, and Strider to gate
     /// interaction/animation logic.
     is_running: bool,
+    variant: TemptVariant,
+    /// `TemptGoal.ForNonPathfinders` (`TemptGoal.java:132-146`): steers the mob's move control
+    /// instead of its path navigator.
+    non_pathfinder: bool,
 }
 
 /// Vanilla `TemptGoal#canContinueToUse`'s scare check, factored out as a pure
@@ -85,7 +104,73 @@ impl TemptGoal {
             prev_pitch: 0.0,
             stop_distance,
             is_running: false,
+            variant: TemptVariant::Plain,
+            non_pathfinder: false,
         }
+    }
+
+    /// `Ocelot.OcelotTemptGoal` (`Ocelot.java:302-314`).
+    #[must_use]
+    pub fn for_ocelot(speed: f64, tempt_items: &'static [&'static Item], can_scare: bool) -> Self {
+        Self {
+            variant: TemptVariant::Ocelot,
+            ..Self::new(speed, tempt_items, can_scare)
+        }
+    }
+
+    /// `Cat.CatTemptGoal` (`Cat.java:648-676`).
+    #[must_use]
+    pub fn for_cat(speed: f64, tempt_items: &'static [&'static Item], can_scare: bool) -> Self {
+        Self {
+            variant: TemptVariant::Cat {
+                selected_player: None,
+            },
+            ..Self::new(speed, tempt_items, can_scare)
+        }
+    }
+
+    /// `TemptGoal.ForNonPathfinders` (`TemptGoal.java:132-146`), used by the Happy Ghast.
+    #[must_use]
+    pub fn for_non_pathfinders(
+        speed: f64,
+        tempt_items: &'static [&'static Item],
+        can_scare: bool,
+        stop_distance: f64,
+    ) -> Self {
+        Self {
+            non_pathfinder: true,
+            ..Self::with_stop_distance(speed, tempt_items, can_scare, stop_distance)
+        }
+    }
+
+    /// Vanilla `TemptGoal.canScare`, including the `Ocelot`/`Cat` overrides.
+    fn can_scare(&self, mob: &dyn Mob, player: &Player) -> bool {
+        match &self.variant {
+            TemptVariant::Plain => self.can_scare,
+            TemptVariant::Ocelot => {
+                self.can_scare
+                    && !mob
+                        .cast_any()
+                        .downcast_ref::<OcelotEntity>()
+                        .is_some_and(OcelotEntity::is_trusting)
+            }
+            TemptVariant::Cat { selected_player } => {
+                if *selected_player == Some(player.get_entity().entity_uuid) {
+                    false
+                } else {
+                    self.can_scare
+                }
+            }
+        }
+    }
+
+    /// The extra `canUse` condition of `Cat.CatTemptGoal` (`!cat.isTame()`).
+    fn allowed_to_tempt(&self, mob: &dyn Mob) -> bool {
+        !matches!(self.variant, TemptVariant::Cat { .. })
+            || !mob
+                .cast_any()
+                .downcast_ref::<CatEntity>()
+                .is_some_and(CatEntity::is_tame)
     }
 
     fn is_tempt_item(&self, stack: &pumpkin_data::item_stack::ItemStack) -> bool {
@@ -97,6 +182,24 @@ impl TemptGoal {
     #[must_use]
     pub const fn is_running(&self) -> bool {
         self.is_running
+    }
+
+    /// Vanilla `TemptGoal.stopNavigation`; `ForNonPathfinders` waits its move control instead.
+    fn stop_navigation(&self, mob: &dyn Mob) {
+        let mob_entity = mob.get_mob_entity();
+        if self.non_pathfinder {
+            mob_entity
+                .move_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .set_wait();
+        } else {
+            mob_entity
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
+        }
     }
 
     async fn is_holding_tempt_item(&self, player: &Player) -> bool {
@@ -144,6 +247,9 @@ impl Goal for TemptGoal {
                 return false;
             }
             self.target_player = self.find_tempting_player(mob).await;
+            if !self.allowed_to_tempt(mob) {
+                return false;
+            }
             if let Some(player) = &self.target_player {
                 self.prev_pos = player.get_entity().pos.load();
                 self.is_running = true;
@@ -160,7 +266,7 @@ impl Goal for TemptGoal {
                 return false;
             };
 
-            if self.can_scare {
+            if self.can_scare(mob, &player) {
                 let mob_entity = mob.get_mob_entity();
                 let mob_pos = mob_entity.living_entity.entity.pos.load();
                 let player_pos = player.get_entity().pos.load();
@@ -191,42 +297,72 @@ impl Goal for TemptGoal {
             }
 
             self.target_player = self.find_tempting_player(mob).await;
-            self.target_player.is_some()
+            self.target_player.is_some() && self.allowed_to_tempt(mob)
         })
     }
 
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            if let Some(player) = &self.target_player {
-                let mob_entity = mob.get_mob_entity();
-                let player_pos = player.get_entity().pos.load();
+            let Some(player) = self.target_player.clone() else {
+                return;
+            };
+            let mob_entity = mob.get_mob_entity();
+            let player_pos = player.get_entity().pos.load();
 
+            mob_entity
+                .look_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .look_at(
+                    mob,
+                    player_pos.x,
+                    player.get_entity().get_eye_y(),
+                    player_pos.z,
+                );
+
+            let mob_pos = mob_entity.living_entity.entity.pos.load();
+            if mob_pos.squared_distance_to_vec(&player_pos)
+                < self.stop_distance * self.stop_distance
+            {
+                self.stop_navigation(mob);
+            } else if self.non_pathfinder {
+                // `ForNonPathfinders.navigateTowards`: a random point on the line from the mob
+                // to the player's eyes.
+                let eye = Vector3::new(player_pos.x, player.get_entity().get_eye_y(), player_pos.z);
+                let t: f64 = mob.get_random().random();
+                let target = (eye - mob_pos) * t + mob_pos;
                 mob_entity
-                    .look_control
+                    .move_control
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .look_at(
-                        mob,
-                        player_pos.x,
-                        player.get_entity().get_eye_y(),
-                        player_pos.z,
-                    );
+                    .set_wanted_position(target.x, target.y, target.z, self.speed);
+            } else {
+                mob_entity
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .set_progress(NavigatorGoal::new(mob_pos, player_pos, self.speed));
+            }
 
-                let mob_pos = mob_entity.living_entity.entity.pos.load();
-                if mob_pos.squared_distance_to_vec(&player_pos)
-                    > self.stop_distance * self.stop_distance
+            if matches!(self.variant, TemptVariant::Cat { .. }) {
+                let select = self.get_tick_count(600);
+                let deselect = self.get_tick_count(500);
+                let no_selection = matches!(
+                    self.variant,
+                    TemptVariant::Cat {
+                        selected_player: None
+                    }
+                );
+                // Vanilla short-circuits: the deselect roll only happens when
+                // the select branch was not taken.
+                if no_selection && mob.get_random().random_range(0..select) == 0 {
+                    if let TemptVariant::Cat { selected_player } = &mut self.variant {
+                        *selected_player = Some(player.get_entity().entity_uuid);
+                    }
+                } else if mob.get_random().random_range(0..deselect) == 0
+                    && let TemptVariant::Cat { selected_player } = &mut self.variant
                 {
-                    let mut navigator = mob_entity
-                        .navigator
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    navigator.set_progress(NavigatorGoal::new(mob_pos, player_pos, self.speed));
-                } else {
-                    mob_entity
-                        .navigator
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .stop();
+                    *selected_player = None;
                 }
             }
         })
@@ -235,13 +371,9 @@ impl Goal for TemptGoal {
     fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             self.target_player = None;
-            self.is_running = false;
+            self.stop_navigation(mob);
             self.cooldown = 100;
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
+            self.is_running = false;
         })
     }
 
@@ -257,6 +389,24 @@ impl Goal for TemptGoal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constructors_select_variant() {
+        assert!(matches!(
+            TemptGoal::for_cat(0.6, &[], true).variant,
+            TemptVariant::Cat {
+                selected_player: None
+            }
+        ));
+        assert!(matches!(
+            TemptGoal::for_ocelot(0.6, &[], true).variant,
+            TemptVariant::Ocelot
+        ));
+        let ghast = TemptGoal::for_non_pathfinders(1.0, &[], false, 7.0);
+        assert!(ghast.non_pathfinder);
+        assert!((ghast.stop_distance - 7.0).abs() < f64::EPSILON);
+        assert!(!TemptGoal::new(1.0, &[], false).non_pathfinder);
+    }
 
     fn pos(x: f64, y: f64, z: f64) -> Vector3<f64> {
         Vector3::new(x, y, z)

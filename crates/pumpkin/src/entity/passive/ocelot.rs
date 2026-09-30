@@ -62,9 +62,7 @@ impl OcelotEntity {
             // appears in that list.
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             // `Ocelot.OcelotTemptGoal(this, 0.6, ItemTags.OCELOT_FOOD, true)` (Ocelot.java:104).
-            // The subclass only overrides `canScare` to additionally require `!isTrusting`
-            // (Ocelot.java:310-313); that gate is not modelled by this codebase's `TemptGoal`.
-            goal_selector.add_goal(3, Box::new(TemptGoal::new(0.6, TEMPT_ITEMS, true)));
+            goal_selector.add_goal(3, Box::new(TemptGoal::for_ocelot(0.6, TEMPT_ITEMS, true)));
             // `Ocelot.OcelotAvoidEntityGoal<Player>(this, 16.0F, 0.8, 1.33)` registered from
             // `reassessTrustingGoals` only while the ocelot is not trusting (Ocelot.java:219),
             // and the subclass re-checks `!isTrusting()` in both `canUse` and `canContinueToUse`

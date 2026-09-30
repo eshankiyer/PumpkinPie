@@ -111,10 +111,6 @@ impl<M: MoveToTargetPos> MoveToTargetPosGoal<M> {
         self.target_pos.up()
     }
 
-    const fn should_reset_path(&self) -> bool {
-        self.trying_time % 40 == 0
-    }
-
     fn start_moving_to_target(&self, mob: &dyn Mob) {
         let target = self.get_target_pos().to_f64();
         let current = mob.get_entity().pos.load();
@@ -141,6 +137,12 @@ pub trait MoveToTargetPos: Send + Sync {
 
     fn get_desired_distance_to_target(&self) -> f64 {
         1.0
+    }
+
+    /// Vanilla `MoveToBlockGoal.shouldRecalculatePath` (`tryTicks % 40`); overridden by
+    /// `Fox.FoxEatBerriesGoal` (100) and `Strider.StriderGoToLavaGoal` (20).
+    fn should_recalculate_path(&self, trying_time: i32) -> bool {
+        trying_time % 40 == 0
     }
 }
 
@@ -184,13 +186,16 @@ impl<M: MoveToTargetPos> Goal for MoveToTargetPosGoal<M> {
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async {
             let block_pos = self.get_target_pos();
+            // `closerToCenterThan` measures to the block centre; the navigator target keeps
+            // vanilla's (x + 0.5, y, z + 0.5).
+            let center = block_pos.to_centered_f64();
             let block_pos: Vector3<f64> = block_pos.to_f64();
             let Some(move_to_target_pos) = self.move_to_target_pos.get() else {
                 return;
             };
             let desired_distance = move_to_target_pos.get_desired_distance_to_target();
 
-            if block_pos.squared_distance_to_vec(&mob.get_entity().pos.load())
+            if center.squared_distance_to_vec(&mob.get_entity().pos.load())
                 < desired_distance * desired_distance
             {
                 self.reached = true;
@@ -198,7 +203,7 @@ impl<M: MoveToTargetPos> Goal for MoveToTargetPosGoal<M> {
             } else {
                 self.reached = false;
                 self.trying_time += 1;
-                if self.should_reset_path() {
+                if move_to_target_pos.should_recalculate_path(self.trying_time) {
                     let mut navigator = mob
                         .get_mob_entity()
                         .navigator

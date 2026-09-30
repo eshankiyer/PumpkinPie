@@ -10,6 +10,7 @@ use pumpkin_data::{tag, tag::Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
+use std::sync::Arc;
 use uuid::Uuid;
 
 const MAX_ATTACK_TIME: i64 = 20;
@@ -37,16 +38,6 @@ const fn should_start_melee_goal(path_found: bool, in_attack_range: bool) -> boo
 /// Vanilla: `MeleeAttackGoal::canPerformAttack` requires sensing line of sight.
 async fn has_melee_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
     mob.get_mob_entity().has_line_of_sight(target).await
-}
-
-/// Vanilla `MeleeAttackGoal.checkAndPerformAttack` and `canPerformAttack`
-/// (`MeleeAttackGoal.java:127-145`) gate the attack on cooldown, reach, and line of sight.
-const fn should_perform_melee_attack(
-    cooldown: i32,
-    in_attack_range: bool,
-    has_line_of_sight: bool,
-) -> bool {
-    cooldown <= 0 && in_attack_range && has_line_of_sight
 }
 
 pub struct MeleeAttackGoal {
@@ -254,10 +245,57 @@ impl Goal for MeleeAttackGoal {
 
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async {
+            if let Some(target) = self.tick_movement(mob).await {
+                self.check_and_perform_attack(mob, target.as_ref()).await;
+            }
+        })
+    }
+
+    fn should_run_every_tick(&self) -> bool {
+        true
+    }
+
+    fn controls(&self) -> Controls {
+        self.goal_control
+    }
+}
+
+impl MeleeAttackGoal {
+    /// Vanilla `MeleeAttackGoal.isTimeToAttack` (`MeleeAttackGoal.java:139-141`).
+    #[must_use]
+    pub const fn is_time_to_attack(&self) -> bool {
+        self.cooldown <= 0
+    }
+
+    /// Vanilla `MeleeAttackGoal.resetAttackCooldown` (`MeleeAttackGoal.java:135-137`).
+    pub fn reset_attack_cooldown(&mut self) {
+        self.cooldown = self.get_max_cooldown();
+    }
+
+    /// Vanilla `MeleeAttackGoal.canPerformAttack` (`MeleeAttackGoal.java:143-145`).
+    pub async fn can_perform_attack(&self, mob: &dyn Mob, target: &dyn EntityBase) -> bool {
+        self.is_time_to_attack()
+            && mob.get_mob_entity().is_in_attack_range(target).await
+            && has_melee_line_of_sight(mob, target).await
+    }
+
+    /// Vanilla base `MeleeAttackGoal.checkAndPerformAttack` (`MeleeAttackGoal.java:127-133`).
+    /// Subclasses that override it (`FoxMeleeAttackGoal`, `PolarBearMeleeAttackGoal`) drive
+    /// [`Self::tick_movement`] themselves and run their own attack step instead.
+    pub async fn check_and_perform_attack(&mut self, mob: &dyn Mob, target: &dyn EntityBase) {
+        if self.can_perform_attack(mob, target).await {
+            self.reset_attack_cooldown();
+            mob.get_mob_entity().living_entity.swing_hand().await;
+            mob.try_attack(target).await;
+        }
+    }
+
+    /// Everything in vanilla `MeleeAttackGoal.tick` before `checkAndPerformAttack`: look,
+    /// path recalculation and the cooldown decrement. Returns the target the tick ran for.
+    pub async fn tick_movement(&mut self, mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+        {
             let target = mob.get_mob_entity().target.lock().await.clone();
-            let Some(target) = target else {
-                return;
-            };
+            let target = target?;
 
             mob.get_mob_entity()
                 .look_control
@@ -322,26 +360,8 @@ impl Goal for MeleeAttackGoal {
             }
 
             self.cooldown = (self.cooldown - 1).max(0);
-
-            let in_attack_range = mob
-                .get_mob_entity()
-                .is_in_attack_range(target.as_ref())
-                .await;
-            let has_line_of_sight = has_melee_line_of_sight(mob, target.as_ref()).await;
-            if should_perform_melee_attack(self.cooldown, in_attack_range, has_line_of_sight) {
-                self.cooldown = self.get_max_cooldown();
-                mob.get_mob_entity().living_entity.swing_hand().await;
-                mob.try_attack(target.as_ref()).await;
-            }
-        })
-    }
-
-    fn should_run_every_tick(&self) -> bool {
-        true
-    }
-
-    fn controls(&self) -> Controls {
-        self.goal_control
+            Some(target)
+        }
     }
 }
 
@@ -375,7 +395,7 @@ fn trim_cauldron_path(path: &mut Path, world: &crate::world::World) {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_continue_melee_goal, should_perform_melee_attack, should_start_melee_goal};
+    use super::{MeleeAttackGoal, should_continue_melee_goal, should_start_melee_goal};
 
     #[test]
     fn in_range_targets_continue_when_navigation_is_idle() {
@@ -400,11 +420,12 @@ mod tests {
     }
 
     #[test]
-    fn attack_requires_ready_cooldown_range_and_visibility() {
-        // Vanilla `MeleeAttackGoal.canPerformAttack` (`MeleeAttackGoal.java:139-145`).
-        assert!(should_perform_melee_attack(0, true, true));
-        assert!(!should_perform_melee_attack(1, true, true));
-        assert!(!should_perform_melee_attack(0, false, true));
-        assert!(!should_perform_melee_attack(0, true, false));
+    fn time_to_attack_follows_cooldown() {
+        // Vanilla `MeleeAttackGoal.isTimeToAttack` / `resetAttackCooldown`.
+        let mut goal = MeleeAttackGoal::new(1.0, true);
+        assert!(goal.is_time_to_attack());
+        goal.reset_attack_cooldown();
+        assert!(!goal.is_time_to_attack());
+        assert_eq!(goal.cooldown, 20);
     }
 }
