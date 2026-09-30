@@ -92,6 +92,9 @@ impl Slot for ShulkerBoxSlot {
 pub struct ShulkerBoxScreenHandler {
     /// The shulker box's inventory.
     pub inventory: Arc<dyn Inventory>,
+    /// False for a spectator opener, which `ShulkerBoxBlockEntity.startOpen`/`stopOpen`
+    /// skip (`ShulkerBoxBlockEntity.java:167-194`).
+    counts_as_opener: bool,
     behaviour: ScreenHandlerBehaviour,
 }
 
@@ -104,13 +107,18 @@ impl ShulkerBoxScreenHandler {
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
         inventory: Arc<dyn Inventory>,
+        is_spectator: bool,
     ) -> Self {
+        let counts_as_opener = !is_spectator;
         let mut handler = Self {
             inventory: inventory.clone(),
+            counts_as_opener,
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(WindowType::ShulkerBox)),
         };
 
-        inventory.on_open().await;
+        if counts_as_opener {
+            inventory.on_open().await;
+        }
 
         for index in 0..SHULKER_BOX_SIZE {
             handler.add_slot(Arc::new(ShulkerBoxSlot::new(inventory.clone(), index)));
@@ -153,7 +161,9 @@ impl ScreenHandler for ShulkerBoxScreenHandler {
     fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
             self.default_on_closed(player).await;
-            self.inventory.on_close().await;
+            if self.counts_as_opener {
+                self.inventory.on_close().await;
+            }
         })
     }
 
@@ -222,7 +232,7 @@ mod tests {
             Arc::new(HashMap::new()),
         ));
         let inventory = Arc::new(SimpleInventory::new(SHULKER_BOX_SIZE));
-        let handler = ShulkerBoxScreenHandler::new(0, &player_inventory, inventory.clone()).await;
+        let handler = ShulkerBoxScreenHandler::new(0, &player_inventory, inventory.clone(), false).await;
         (handler, inventory)
     }
 

@@ -27,7 +27,8 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 use tokio::sync::Mutex;
 
-struct ShulkerBoxScreenFactory(Arc<dyn Inventory>);
+/// Inventory plus whether the opener is a spectator (not counted as a viewer).
+struct ShulkerBoxScreenFactory(Arc<dyn Inventory>, bool);
 
 async fn unpack_shulker_loot(entity: &Arc<dyn BlockEntity>) {
     let Some((loot_key, seed)) = entity.take_loot_table() else {
@@ -93,7 +94,7 @@ impl ScreenHandlerFactory for ShulkerBoxScreenFactory {
             // `ShulkerBoxSlot`s, not a generic 9x3 chest - the slots refuse items that
             // cannot nest inside container items (`BlockItem.java:193-196`).
             let handler =
-                ShulkerBoxScreenHandler::new(sync_id, player_inventory, self.0.clone()).await;
+                ShulkerBoxScreenHandler::new(sync_id, player_inventory, self.0.clone(), self.1).await;
             let screen_handler_arc = Arc::new(Mutex::new(handler));
 
             Some(screen_handler_arc as SharedScreenHandler)
@@ -182,7 +183,10 @@ impl BlockBehaviour for ShulkerBoxBlock {
                     )
                     .await;
                 args.player
-                    .open_handled_screen(&ShulkerBoxScreenFactory(inventory), Some(*args.position))
+                    .open_handled_screen(
+                        &ShulkerBoxScreenFactory(inventory, args.player.is_spectator()),
+                        Some(*args.position),
+                    )
                     .await;
             }
 

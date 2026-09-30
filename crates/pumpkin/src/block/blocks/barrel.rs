@@ -14,7 +14,7 @@ use crate::entity::mob::piglin_shared;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BarrelLikeProperties, BlockProperties};
 use pumpkin_data::translation;
-use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
+use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3_for_opener;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
@@ -25,7 +25,8 @@ use pumpkin_world::inventory::Inventory;
 use pumpkin_world::tick::TickPriority;
 use tokio::sync::Mutex;
 
-struct BarrelScreenFactory(Arc<dyn Inventory>);
+/// Inventory plus whether the opener is a spectator (not counted as a viewer).
+struct BarrelScreenFactory(Arc<dyn Inventory>, bool);
 
 impl ScreenHandlerFactory for BarrelScreenFactory {
     fn create_screen_handler<'a>(
@@ -35,7 +36,8 @@ impl ScreenHandlerFactory for BarrelScreenFactory {
         _player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
-            let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone()).await;
+            let handler =
+                create_generic_9x3_for_opener(sync_id, player_inventory, self.0.clone(), self.1).await;
             let concrete_arc = Arc::new(Mutex::new(handler));
 
             Some(concrete_arc as SharedScreenHandler)
@@ -82,9 +84,12 @@ impl BlockBehaviour for BarrelBlock {
                     .await;
                 let opened = args
                     .player
-                    .open_handled_screen(&BarrelScreenFactory(inventory), Some(*args.position))
+                    .open_handled_screen(
+                        &BarrelScreenFactory(inventory, args.player.is_spectator()),
+                        Some(*args.position),
+                    )
                     .await;
-                if opened.is_some() && was_empty {
+                if opened.is_some() && was_empty && !args.player.is_spectator() {
                     // `ContainerOpenersCounter.incrementOpeners` schedules the opener recheck
                     // when the first viewer arrives (`ContainerOpenersCounter.java:28-38,100-102`).
                     args.world.schedule_block_tick(

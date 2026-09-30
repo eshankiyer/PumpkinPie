@@ -38,6 +38,27 @@ pub async fn create_generic_9x3(
         inventory,
         3,
         9,
+        true,
+    )
+    .await
+}
+
+/// Creates a generic 9x3 container for an opener that may be a spectator; spectators are not
+/// counted as openers (`BarrelBlockEntity.startOpen`, `BarrelBlockEntity.java:103-110`).
+pub async fn create_generic_9x3_for_opener(
+    sync_id: u8,
+    player_inventory: &Arc<PlayerInventory>,
+    inventory: Arc<dyn Inventory>,
+    is_spectator: bool,
+) -> GenericContainerScreenHandler {
+    GenericContainerScreenHandler::new(
+        WindowType::Generic9x3,
+        sync_id,
+        player_inventory,
+        inventory,
+        3,
+        9,
+        !is_spectator,
     )
     .await
 }
@@ -57,6 +78,7 @@ pub async fn create_generic_9x6(
         inventory,
         6,
         9,
+        true,
     )
     .await
 }
@@ -76,6 +98,7 @@ pub async fn create_generic_3x3(
         inventory,
         3,
         3,
+        true,
     )
     .await
 }
@@ -93,6 +116,7 @@ pub async fn create_crafter_3x3(
         inventory,
         3,
         3,
+        true,
     )
     .await
 }
@@ -112,6 +136,7 @@ pub async fn create_hopper(
         inventory,
         1,
         5,
+        true,
     )
     .await
 }
@@ -127,6 +152,9 @@ pub struct GenericContainerScreenHandler {
     pub rows: u8,
     /// Number of columns in the container grid.
     pub columns: u8,
+    /// False for a spectator opener, which vanilla `startOpen`/`stopOpen` skip; keeps the
+    /// viewer count symmetric even if the gamemode changes while the menu is open.
+    counts_as_opener: bool,
     /// Core screen handler behavior (slots, sync ID, listeners).
     behaviour: ScreenHandlerBehaviour,
 }
@@ -148,16 +176,21 @@ impl GenericContainerScreenHandler {
         inventory: Arc<dyn Inventory>,
         rows: u8,
         columns: u8,
+        counts_as_opener: bool,
     ) -> Self {
         let mut handler = Self {
             inventory: inventory.clone(),
             rows,
             columns,
+            counts_as_opener,
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(screen_type)),
         };
 
-        // TODO: Add player entity as a parameter
-        inventory.on_open().await;
+        // `BarrelBlockEntity.startOpen` / `ChestBlockEntity.startOpen` ignore spectators
+        // (`BarrelBlockEntity.java:103-110`), so they never count as an opener.
+        if counts_as_opener {
+            inventory.on_open().await;
+        }
 
         handler.add_inventory_slots();
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
@@ -216,7 +249,9 @@ impl ScreenHandler for GenericContainerScreenHandler {
     fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
             self.default_on_closed(player).await;
-            self.inventory.on_close().await;
+            if self.counts_as_opener {
+                self.inventory.on_close().await;
+            }
         })
     }
 
@@ -440,6 +475,7 @@ mod tests {
                 )),
                 rows,
                 columns,
+                true,
             )
             .await;
             assert_eq!(handler.container_slot_count(), expected);
@@ -471,6 +507,7 @@ mod tests {
             inventory.clone(),
             rows,
             columns,
+            true,
         )
         .await;
         let player = TestPlayer {

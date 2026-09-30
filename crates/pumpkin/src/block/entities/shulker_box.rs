@@ -3,6 +3,9 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::random::xoroshiro128::Xoroshiro;
+use pumpkin_util::random::{RandomImpl, get_seed};
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
@@ -174,7 +177,6 @@ impl ViewerCountListener for ShulkerBoxBlockEntity {
     ) -> ViewerFuture<'a, ()> {
         Box::pin(async move {
             Self::play_sound(world, position, 1);
-            // TODO: this.world.emitGameEvent(player, GameEvent.CONTAINER_OPEN, this.pos);
         })
     }
 
@@ -185,7 +187,6 @@ impl ViewerCountListener for ShulkerBoxBlockEntity {
     ) -> ViewerFuture<'a, ()> {
         Box::pin(async move {
             Self::play_sound(world, position, 0);
-            // TODO: this.world.emitGameEvent(player, GameEvent.CONTAINER_CLOSE, this.pos);
         })
     }
 
@@ -303,7 +304,22 @@ impl ShulkerBoxBlockEntity {
             Sound::BlockShulkerBoxClose
         };
 
-        world.play_sound(sound, SoundCategory::Blocks, &position.to_f64());
+        // `Level.playSound(null, BlockPos, ...)` plays at the block centre; the shulker box
+        // open/close sounds use volume 0.5 and pitch `nextFloat() * 0.1 + 0.9`
+        // (`ShulkerBoxBlockEntity.java:177-178,190-191`).
+        let mut rng = Xoroshiro::from_seed(get_seed());
+        let centre = Vector3::new(
+            f64::from(position.0.x) + 0.5,
+            f64::from(position.0.y) + 0.5,
+            f64::from(position.0.z) + 0.5,
+        );
+        world.play_sound_fine(
+            sound,
+            SoundCategory::Blocks,
+            &centre,
+            0.5,
+            rng.next_f32() * 0.1 + 0.9,
+        );
     }
 }
 
