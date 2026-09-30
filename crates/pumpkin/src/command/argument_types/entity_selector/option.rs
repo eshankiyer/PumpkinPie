@@ -2,7 +2,9 @@ use crate::command::argument_types::FromStringReader;
 use crate::command::argument_types::entity_selector::parser::{
     EntitySelectorParser, EntitySelectorParserSuggestions, Flags,
 };
-use crate::command::argument_types::entity_selector::{EntitySelectorPredicate, Order};
+use crate::command::argument_types::entity_selector::{
+    AdvancementExpectation, EntitySelectorPredicate, Order,
+};
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::string_reader::StringReader;
@@ -77,7 +79,8 @@ pub enum EntitySelectorOption {
 }
 
 impl EntitySelectorOption {
-    pub const VALUES: [Self; 20] = [
+    pub const VALUES: [Self; 21] = [
+        Self::Name,
         Self::Distance,
         Self::Level,
         Self::X,
@@ -202,7 +205,7 @@ impl EntitySelectorOption {
         match self {
             Self::Distance => {
                 let bounds = DoubleBounds::from_reader(parser.reader)?;
-                if bounds.min().is_none_or(|n| n < 0.0) && bounds.max().is_none_or(|n| n < 0.0) {
+                if bounds.min().is_some_and(|n| n < 0.0) || bounds.max().is_some_and(|n| n < 0.0) {
                     parser.reader.set_cursor(i);
                     Err(DISTANCE_NEGATIVE_ERROR_TYPE.create(parser.reader))
                 } else {
@@ -213,7 +216,7 @@ impl EntitySelectorOption {
             }
             Self::Level => {
                 let bounds = IntBounds::from_reader(parser.reader)?;
-                if bounds.min().is_none_or(|n| n < 0) && bounds.max().is_none_or(|n| n < 0) {
+                if bounds.min().is_some_and(|n| n < 0) || bounds.max().is_some_and(|n| n < 0) {
                     parser.reader.set_cursor(i);
                     Err(LEVEL_NEGATIVE_ERROR_TYPE.create(parser.reader))
                 } else {
@@ -288,60 +291,56 @@ impl EntitySelectorOption {
             Self::Type => {
                 let start = parser.reader.cursor();
                 let invert = parser.consume_inverted_start();
-                let is_tag = parser.consume_tag_start();
-                if is_tag {
-                    if parser.entity_type.is_some() || parser.has_flag(Flags::ENTITY_TYPE_INVERTED)
-                    {
+                if parser.consume_tag_start() {
+                    if !parser.type_state.can_parse_any_tag() {
                         parser.reader.set_cursor(start);
                         return Err(self.inapplicable_error(parser.reader));
                     }
-                } else if parser.entity_type.is_some()
-                    || parser.has_flag(Flags::ENTITY_TYPE_TAG_SET)
-                    || parser.has_flag(Flags::ENTITY_TYPE_INVERTED)
-                {
-                    parser.reader.set_cursor(start);
-                    return Err(self.inapplicable_error(parser.reader));
-                }
-                let identifier = Identifier::from_reader(parser.reader)?;
-                if is_tag {
+                    let identifier = Identifier::from_reader(parser.reader)?;
+                    if !parser.type_state.can_parse_tag(&identifier) {
+                        parser.reader.set_cursor(start);
+                        return Err(self.inapplicable_error(parser.reader));
+                    }
                     parser.add_predicate(EntitySelectorPredicate::EntityTypeTag(
                         identifier.to_string(),
                         invert,
                     ));
-                    parser.set_flag(Flags::ENTITY_TYPE_TAG_SET, true);
-                    Ok(())
-                } else if let Some(entity_type) =
-                    identifier.is_vanilla_then().and_then(EntityType::from_name)
-                {
+                    parser.type_state.mark_parsed_tag(identifier);
+                } else {
+                    if !parser.type_state.can_parse_element(invert) {
+                        parser.reader.set_cursor(start);
+                        return Err(self.inapplicable_error(parser.reader));
+                    }
+                    let identifier = Identifier::from_reader(parser.reader)?;
+                    let Some(entity_type) =
+                        identifier.is_vanilla_then().and_then(EntityType::from_name)
+                    else {
+                        parser.reader.set_cursor(start);
+                        return Err(TYPE_INVALID_ERROR_TYPE
+                            .create(parser.reader, TextComponent::text(identifier.to_string())));
+                    };
                     if entity_type.id == EntityType::PLAYER.id && !invert {
-                        parser.limit_to_players();
+                        parser.set_includes_entities(false);
                     }
                     parser.add_predicate(EntitySelectorPredicate::EntityType(entity_type, invert));
-                    if invert {
-                        parser.set_flag(Flags::ENTITY_TYPE_INVERTED, true);
-                    } else {
+                    if !invert {
                         parser.entity_type = Some(entity_type);
                     }
-                    Ok(())
-                } else {
-                    parser.reader.set_cursor(start);
-                    Err(TYPE_INVALID_ERROR_TYPE
-                        .create(parser.reader, TextComponent::text(identifier.to_string())))
+                    parser.type_state.mark_parsed_element(invert);
                 }
+                Ok(())
             }
             Self::Name => {
                 let start = parser.reader.cursor();
                 let invert = parser.consume_inverted_start();
-                if parser.has_flag(if invert {
-                    Flags::NAME_NOT_EQUALS_SET
-                } else {
-                    Flags::NAME_EQUALS_SET
-                }) {
+                let string = parser.reader.read_string()?;
+                // A positive name is only allowed while nothing was parsed; negatives stack.
+                if parser.has_flag(Flags::NAME_EQUALS_SET)
+                    || (!invert && parser.has_flag(Flags::NAME_NOT_EQUALS_SET))
+                {
                     parser.reader.set_cursor(start);
                     return Err(self.inapplicable_error(parser.reader));
                 }
-                let string = parser.reader.read_unquoted_string();
-                parser.add_predicate(EntitySelectorPredicate::Name(string, invert));
                 parser.set_flag(
                     if invert {
                         Flags::NAME_NOT_EQUALS_SET
@@ -350,6 +349,7 @@ impl EntitySelectorOption {
                     },
                     true,
                 );
+                parser.add_predicate(EntitySelectorPredicate::Name(string, invert));
                 Ok(())
             }
             Self::Tag => {
@@ -361,15 +361,13 @@ impl EntitySelectorOption {
             Self::Team => {
                 let start = parser.reader.cursor();
                 let invert = parser.consume_inverted_start();
-                if parser.has_flag(if invert {
-                    Flags::TEAM_NOT_EQUALS_SET
-                } else {
-                    Flags::TEAM_EQUALS_SET
-                }) {
+                let string = parser.reader.read_unquoted_string();
+                if parser.has_flag(Flags::TEAM_EQUALS_SET)
+                    || (!invert && parser.has_flag(Flags::TEAM_NOT_EQUALS_SET))
+                {
                     parser.reader.set_cursor(start);
                     return Err(self.inapplicable_error(parser.reader));
                 }
-                let string = parser.reader.read_unquoted_string();
                 parser.add_predicate(EntitySelectorPredicate::Team(string, invert));
                 parser.set_flag(
                     if invert {
@@ -399,7 +397,9 @@ impl EntitySelectorOption {
                     }
                 }
                 parser.reader.expect('}')?;
-                parser.add_predicate(EntitySelectorPredicate::Scores(scores));
+                if !scores.is_empty() {
+                    parser.add_predicate(EntitySelectorPredicate::Scores(scores));
+                }
                 parser.set_flag(Flags::SCORES_SET, true);
                 Ok(())
             }
@@ -409,19 +409,48 @@ impl EntitySelectorOption {
                 let mut advancements = std::collections::HashMap::new();
                 while parser.reader.can_read_char() && parser.reader.peek() != Some('}') {
                     parser.reader.skip_whitespace();
-                    let advancement_id = parser.reader.read_unquoted_string();
+                    let advancement_id = Identifier::from_reader(parser.reader)?;
                     parser.reader.skip_whitespace();
                     parser.reader.expect('=')?;
                     parser.reader.skip_whitespace();
-                    let val = parser.reader.read_bool()?;
-                    advancements.insert(advancement_id, val);
+                    let expectation = if parser.reader.can_read_char()
+                        && parser.reader.peek() == Some('{')
+                    {
+                        let mut criteria = std::collections::HashMap::new();
+                        parser.reader.skip_whitespace();
+                        parser.reader.expect('{')?;
+                        parser.reader.skip_whitespace();
+                        while parser.reader.can_read_char() && parser.reader.peek() != Some('}') {
+                            parser.reader.skip_whitespace();
+                            let criterion = parser.reader.read_unquoted_string();
+                            parser.reader.skip_whitespace();
+                            parser.reader.expect('=')?;
+                            parser.reader.skip_whitespace();
+                            let value = parser.reader.read_bool()?;
+                            criteria.insert(criterion, value);
+                            parser.reader.skip_whitespace();
+                            if parser.reader.can_read_char() && parser.reader.peek() == Some(',') {
+                                parser.reader.skip(); // Consume ','
+                            }
+                        }
+                        parser.reader.skip_whitespace();
+                        parser.reader.expect('}')?;
+                        parser.reader.skip_whitespace();
+                        AdvancementExpectation::Criteria(criteria)
+                    } else {
+                        AdvancementExpectation::Done(parser.reader.read_bool()?)
+                    };
+                    advancements.insert(advancement_id, expectation);
                     parser.reader.skip_whitespace();
                     if parser.reader.can_read_char() && parser.reader.peek() == Some(',') {
                         parser.reader.skip(); // Consume ','
                     }
                 }
                 parser.reader.expect('}')?;
-                parser.add_predicate(EntitySelectorPredicate::Advancements(advancements));
+                if !advancements.is_empty() {
+                    parser.add_predicate(EntitySelectorPredicate::Advancements(advancements));
+                    parser.set_includes_entities(false);
+                }
                 parser.set_flag(Flags::ADVANCEMENTS_SET, true);
                 Ok(())
             }
@@ -467,7 +496,7 @@ impl EntitySelectorOption {
             Self::Sort => !parser.is_current_entity && !parser.has_flag(Flags::SORT_SET),
             Self::Gamemode => !parser.has_flag(Flags::GAMEMODE_EQUALS_SET),
             Self::Team => !parser.has_flag(Flags::TEAM_EQUALS_SET),
-            Self::Type => parser.entity_type.is_none(),
+            Self::Type => parser.type_state.can_parse_any(),
             Self::Scores => !parser.has_flag(Flags::SCORES_SET),
             Self::Advancements => !parser.has_flag(Flags::ADVANCEMENTS_SET),
             Self::Tag | Self::Nbt | Self::Predicate => true,

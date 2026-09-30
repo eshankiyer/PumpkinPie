@@ -20,6 +20,8 @@ use pumpkin_util::math::bounds::{DoubleBounds, FloatDegreeBounds, IntBounds};
 use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
+use pumpkin_util::identifier::Identifier;
+use std::collections::HashSet;
 use std::pin::Pin;
 use uuid::Uuid;
 
@@ -76,14 +78,70 @@ bitflags! {
         const LIMIT_SET = 1 << 7;
         /// Whether the `sort` option has been set.
         const SORT_SET = 1 << 8;
-        /// Whether the `type` (entity type) option is inverted.
-        const ENTITY_TYPE_INVERTED = 1 << 9;
         /// Whether the `scores` option has been set.
         const SCORES_SET = 1 << 10;
         /// Whether the `advancements` option has been set.
         const ADVANCEMENTS_SET = 1 << 11;
-        /// Whether the `type` option has set an entity-type tag.
-        const ENTITY_TYPE_TAG_SET = 1 << 12;
+    }
+}
+
+/// Tracks which forms of a repeatable, invertable option (`type`) have been parsed.
+///
+/// Vanilla: `InvertableSetOptionState` (`InvertableSetOptionState.java:7-77`)
+#[derive(Debug, Default)]
+pub(crate) struct InvertableSetOptionState {
+    limitation: Limitation,
+    tags: HashSet<Identifier>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Limitation {
+    #[default]
+    None,
+    Single,
+    Multiple,
+}
+
+impl InvertableSetOptionState {
+    pub(crate) const fn can_parse_positive_element(&self) -> bool {
+        matches!(self.limitation, Limitation::None)
+    }
+
+    pub(crate) const fn can_parse_negative_element(&self) -> bool {
+        !matches!(self.limitation, Limitation::Single)
+    }
+
+    pub(crate) const fn can_parse_any_tag(&self) -> bool {
+        !matches!(self.limitation, Limitation::Single)
+    }
+
+    pub(crate) fn can_parse_tag(&self, tag: &Identifier) -> bool {
+        self.can_parse_any_tag() && !self.tags.contains(tag)
+    }
+
+    pub(crate) const fn can_parse_any(&self) -> bool {
+        !matches!(self.limitation, Limitation::Single)
+    }
+
+    pub(crate) const fn can_parse_element(&self, inverted: bool) -> bool {
+        if inverted {
+            self.can_parse_negative_element()
+        } else {
+            self.can_parse_positive_element()
+        }
+    }
+
+    pub(crate) fn mark_parsed_tag(&mut self, tag: Identifier) {
+        self.limitation = Limitation::Multiple;
+        self.tags.insert(tag);
+    }
+
+    pub(crate) const fn mark_parsed_element(&mut self, inverted: bool) {
+        self.limitation = if inverted {
+            Limitation::Multiple
+        } else {
+            Limitation::Single
+        };
     }
 }
 
@@ -106,6 +164,7 @@ pub struct EntitySelectorParser<'b, 'a> {
     entity_uuid: Option<Uuid>,
     pub(crate) entity_type: Option<&'static EntityType>,
     start_position: usize,
+    pub(crate) type_state: InvertableSetOptionState,
 
     allows_selector_variable: bool,
     uses_selector_variable: bool,
@@ -138,6 +197,7 @@ impl<'b, 'a> EntitySelectorParser<'b, 'a> {
             entity_uuid: None,
             entity_type: None,
             start_position: 0,
+            type_state: InvertableSetOptionState::default(),
             allows_selector_variable: allow_selectors,
             uses_selector_variable: false,
             includes_entities: false,
@@ -151,11 +211,11 @@ impl<'b, 'a> EntitySelectorParser<'b, 'a> {
         // We finalize our predicates.
         if let Some(x) = self.rotation.x {
             self.predicates
-                .push(EntitySelectorPredicate::Rotation(x, RotationType::Yaw));
+                .push(EntitySelectorPredicate::Rotation(x, RotationType::Pitch));
         }
         if let Some(y) = self.rotation.y {
             self.predicates
-                .push(EntitySelectorPredicate::Rotation(y, RotationType::Pitch));
+                .push(EntitySelectorPredicate::Rotation(y, RotationType::Yaw));
         }
         if let Some(level) = self.experience_level {
             self.predicates
@@ -346,6 +406,7 @@ impl<'b, 'a> EntitySelectorParser<'b, 'a> {
             let option = string.parse::<EntitySelectorOption>();
             if let Ok(option) = option {
                 if !option.can_use(self) {
+                    self.reader.set_cursor(i);
                     return Err(INAPPLICABLE_OPTION_ERROR_TYPE
                         .create(self.reader, TextComponent::text(string)));
                 }

@@ -10,12 +10,15 @@ use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::entity::player::advancement::AdvancementProgress;
 use crate::world::World;
+use crate::world::scoreboard::entity_scoreboard_name;
 use pumpkin_data::Advancement;
+use pumpkin_data::advancement_data::AdvancementRequirement;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::Taggable;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::GameMode;
+use pumpkin_util::identifier::Identifier;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::bounds::{DoubleBounds, FloatDegreeBounds, IntBounds};
 use pumpkin_util::math::vector3::Vector3;
@@ -424,7 +427,7 @@ pub enum EntitySelectorPredicate {
     /// A predicate to check the entity's scores.
     Scores(HashMap<String, IntBounds>),
     /// A predicate to check the player's advancements.
-    Advancements(HashMap<String, bool>),
+    Advancements(HashMap<Identifier, AdvancementExpectation>),
     /// A predicate to check the entity's raw NBT data.
     Nbt(NbtCompound, bool),
     /// A predicate to check loot table conditions / predicates.
@@ -432,6 +435,29 @@ pub enum EntitySelectorPredicate {
 
     /// Used to combine sub-predicates.
     AllOf(Vec<Self>),
+}
+
+/// What an `advancements` selector entry requires of one advancement's progress.
+#[derive(Debug, Clone)]
+pub enum AdvancementExpectation {
+    /// The whole advancement must be done (`true`) or not done (`false`).
+    Done(bool),
+    /// Each listed criterion must exist, and be done (`true`) or not done (`false`).
+    Criteria(HashMap<String, bool>),
+}
+
+impl AdvancementExpectation {
+    fn test(&self, progress: &AdvancementProgress) -> bool {
+        match self {
+            Self::Done(expected) => progress.is_done() == *expected,
+            Self::Criteria(criteria) => criteria.iter().all(|(criterion, expected)| {
+                progress
+                    .criteria
+                    .get(criterion.as_str())
+                    .is_some_and(|c| c.is_done() == *expected)
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -493,15 +519,13 @@ fn matches_nbt_compound(expected: &NbtCompound, actual: &NbtCompound) -> bool {
     true
 }
 
-#[allow(clippy::option_if_let_else)]
+/// Vanilla `Entity.getPlainTextName` (`Entity.java:2947-2954`): the custom name, or the
+/// entity type's translated name, for players the profile name.
 fn entity_actual_name(entity: &dyn EntityBase) -> String {
-    if let Some(player) = entity.get_player() {
-        player.gameprofile.name.clone()
-    } else if let Some(custom_name) = &**entity.get_entity().custom_name.load() {
-        custom_name.clone().get_text()
-    } else {
-        entity.get_entity().entity_type.resource_name.to_string()
-    }
+    entity.get_player().map_or_else(
+        || entity.get_name().get_text(),
+        |player| player.gameprofile.name.clone(),
+    )
 }
 
 fn matches_rotation(bounds: FloatDegreeBounds, degrees: f32) -> bool {
@@ -559,54 +583,57 @@ impl EntitySelectorPredicate {
                 (actual_name == *expected_name) ^ invert
             }
             Self::Tag(expected_tag, invert) => {
-                let has_tag = entity
-                    .get_entity()
-                    .scoreboard_tags
-                    .blocking_lock()
-                    .contains(expected_tag);
-                has_tag ^ invert
+                let tags = entity.get_entity().scoreboard_tags.blocking_lock();
+                // An empty tag matches entities without any tags (`EntitySelectorOptions.java:319-323`).
+                if expected_tag.is_empty() {
+                    tags.is_empty() ^ invert
+                } else {
+                    tags.contains(expected_tag) ^ invert
+                }
             }
             Self::Team(expected_team, invert) => {
-                let actual_name = entity_actual_name(entity);
+                let holder = entity_scoreboard_name(entity);
                 let world = entity.get_entity().world.load();
                 let scoreboard = world.scoreboard.blocking_lock();
-                let has_team = scoreboard.get_teams().iter().any(|(name, team)| {
-                    name == expected_team && team.players.contains(&actual_name)
-                });
-                has_team ^ invert
+                let actual_team = scoreboard
+                    .get_team_for_scoreboard_name(&holder)
+                    .map_or("", |team| team.name.as_str());
+                (actual_team == expected_team) ^ invert
             }
             Self::Scores(scores_map) => {
-                let actual_name = entity_actual_name(entity);
+                let holder = entity_scoreboard_name(entity);
                 let world = entity.get_entity().world.load();
                 let scoreboard = world.scoreboard.blocking_lock();
-                let entity_scores = scoreboard.get_scores().get(&actual_name);
-                for (objective, bounds) in scores_map {
-                    let score_val = entity_scores
-                        .and_then(|obj_map| obj_map.get(objective))
-                        .map_or(0, |score| score.value.0);
-                    if !bounds.matches(score_val) {
-                        return false;
-                    }
-                }
-                true
+                scores_map.iter().all(|(objective, bounds)| {
+                    scoreboard.get_objective(objective).is_some()
+                        && scoreboard
+                            .get_score(&holder, objective)
+                            .is_some_and(|score| bounds.matches(score.value.0))
+                })
             }
             Self::Advancements(advancements_map) => {
                 let Some(player) = entity.get_player() else {
                     return false;
                 };
                 let adv_mgr = player.advancements.blocking_lock();
-                for (adv_id, expected_done) in advancements_map {
-                    if let Some(advancement) = Advancement::from_name(adv_id) {
-                        let progress = adv_mgr.progress.map.get(advancement);
-                        let is_done = progress.is_some_and(AdvancementProgress::is_done);
-                        if is_done != *expected_done {
-                            return false;
-                        }
-                    } else {
+                advancements_map.iter().all(|(adv_id, expectation)| {
+                    let Some(advancement) = adv_id.is_vanilla_then().and_then(Advancement::from_name)
+                    else {
                         return false;
-                    }
-                }
-                true
+                    };
+                    // Vanilla `getOrStartProgress`: an unstarted advancement has every criterion
+                    // present and not done.
+                    adv_mgr.progress.map.get(advancement).map_or_else(
+                        || {
+                            let mut started = AdvancementProgress::default();
+                            started.update(AdvancementRequirement::from_const(
+                                advancement.requirements,
+                            ));
+                            expectation.test(&started)
+                        },
+                        |progress| expectation.test(progress),
+                    )
+                })
             }
             Self::Nbt(expected_nbt, invert) => {
                 let mut actual_nbt = NbtCompound::default();
@@ -705,7 +732,7 @@ mod tests {
             .predicates
             .iter()
             .find_map(|predicate| match predicate {
-                EntitySelectorPredicate::Rotation(bounds, RotationType::Yaw) => Some(*bounds),
+                EntitySelectorPredicate::Rotation(bounds, RotationType::Pitch) => Some(*bounds),
                 _ => None,
             })
             .expect("an x rotation predicate should have been added");
@@ -713,5 +740,77 @@ mod tests {
         assert_eq!(bounds.max(), None);
         assert!(matches_rotation(bounds, 359.0));
         assert!(!matches_rotation(bounds, 360.0));
+    }
+
+    #[test]
+    fn rotation_axes_match_vanilla() {
+        let selector = parse("@e[y_rotation=90..180]").expect("selector should parse");
+        assert!(selector.predicates.iter().any(|p| matches!(
+            p,
+            EntitySelectorPredicate::Rotation(_, RotationType::Yaw)
+        )));
+    }
+
+    #[test]
+    fn negative_distance_and_level_bounds_are_rejected() {
+        assert!(parse("@e[distance=-1..5]").is_err());
+        assert!(parse("@e[distance=..-1]").is_err());
+        assert!(parse("@e[distance=..5]").is_ok());
+        assert!(parse("@e[distance=5..]").is_ok());
+        assert!(parse("@e[level=-3..10]").is_err());
+        assert!(parse("@a[level=0..]").is_ok());
+    }
+
+    #[test]
+    fn name_and_team_repetition_follow_vanilla_state() {
+        assert!(parse("@e[name=!a,name=!b]").is_ok());
+        assert!(parse("@e[name=a,name=b]").is_err());
+        assert!(parse("@e[name=!a,name=b]").is_err());
+        assert!(parse("@e[name=a,name=!b]").is_err());
+        assert!(parse("@e[name=\"A B\"]").is_ok());
+        assert!(parse("@e[team=!a,team=!b]").is_ok());
+        assert!(parse("@e[team=a,team=b]").is_err());
+        assert!(parse("@e[team=!a,team=b]").is_err());
+    }
+
+    #[test]
+    fn type_option_state_follows_vanilla() {
+        assert!(parse("@e[type=!zombie,type=!skeleton]").is_ok());
+        assert!(parse("@e[type=zombie,type=!skeleton]").is_err());
+        assert!(parse("@e[type=!zombie,type=skeleton]").is_err());
+        assert!(parse("@e[type=zombie,type=zombie]").is_err());
+        assert!(parse("@e[type=#undead,type=#undead]").is_err());
+        assert!(parse("@e[type=#undead,type=#arthropod]").is_ok());
+        assert!(parse("@e[type=!zombie,type=#undead]").is_ok());
+        assert!(parse("@a[type=player]").is_ok());
+        assert!(
+            !parse("@e[type=player]")
+                .expect("selector should parse")
+                .includes_entities
+        );
+        assert!(
+            parse("@e[type=!player]")
+                .expect("selector should parse")
+                .includes_entities
+        );
+    }
+
+    #[test]
+    fn advancements_option_parses_ids_criteria_and_empty_maps() {
+        let selector = parse("@e[advancements={adventure/root=true}]").expect("should parse");
+        assert!(!selector.includes_entities);
+        assert!(parse("@a[advancements={minecraft:adventure/root={some_criterion=false}}]").is_ok());
+        let empty = parse("@e[advancements={}]").expect("should parse");
+        assert!(empty.includes_entities);
+        assert!(parse("@a[advancements={}, advancements={}]").is_err());
+    }
+
+    #[test]
+    fn inapplicable_option_error_points_at_the_key() {
+        let input = "@e[limit=1,limit=2]";
+        let mut reader = StringReader::new(input);
+        let result = EntitySelectorParser::new(&mut reader, true).parse_and_consume();
+        assert!(result.is_err());
+        assert_eq!(reader.cursor(), input.rfind("limit").expect("second limit"));
     }
 }
