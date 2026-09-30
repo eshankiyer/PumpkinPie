@@ -1,11 +1,8 @@
-use crate::entity::Entity;
 use crate::entity::EntityBase;
-use crate::entity::item::ItemEntity;
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
 use pumpkin_data::BlockDirection;
-use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -15,7 +12,6 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 use std::pin::Pin;
-use std::sync::Arc;
 
 pub struct HoeItem;
 
@@ -106,25 +102,17 @@ impl ItemBehaviour for HoeItem {
                         )
                         .await;
                     }
-                }
-
-                //Also rooted_dirt drop a hanging_root
-                if block == &Block::ROOTED_DIRT {
-                    let location = match face {
-                        BlockDirection::Up => location.up().to_f64(),
-                        BlockDirection::Down => location.down().to_f64(),
-                        BlockDirection::North => location.up().to_f64().add_raw(0.0, -0.4, -1.0),
-                        BlockDirection::South => location.up().to_f64().add_raw(0.0, -0.4, 1.0),
-                        BlockDirection::West => location.up().to_f64().add_raw(-1.0, -0.4, 0.0),
-                        BlockDirection::East => location.up().to_f64().add_raw(1.0, -0.4, 0.0),
-                    };
-                    let entity = Entity::new(world.clone(), location, &EntityType::ITEM);
-                    // TODO: Merge stacks together
-                    let item_entity = Arc::new(ItemEntity::new(
-                        entity,
-                        ItemStack::new(1, &Item::HANGING_ROOTS),
-                    ));
-                    world.spawn_entity(item_entity).await;
+                    // Rooted dirt also drops hanging roots
+                    // (`HoeItem.changeIntoStateAndDropItem`).
+                    if block == &Block::ROOTED_DIRT {
+                        world
+                            .pop_resource_from_face(
+                                &location,
+                                face,
+                                ItemStack::new(1, &Item::HANGING_ROOTS),
+                            )
+                            .await;
+                    }
                 }
 
                 if changed && player.gamemode.load() != GameMode::Creative {

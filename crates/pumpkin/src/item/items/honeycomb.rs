@@ -5,13 +5,17 @@ use std::sync::Arc;
 
 use crate::block::UseWithItemArgs;
 use crate::block::blocks::signs::SignTextAccess;
+use crate::block::blocks::chests::connected_direction;
 use crate::block::entities::BlockEntity;
 use crate::block::registry::BlockActionResult;
+use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
 use crate::world::World;
-use pumpkin_data::block_properties::BlockProperties;
+use crate::world::game_event::{GameEventContext, emit_game_event};
+use pumpkin_data::block_properties::{BlockProperties, ChestLikeProperties, ChestType};
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::block_properties::{OakDoorLikeProperties, OakTrapdoorLikeProperties};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -44,8 +48,42 @@ impl ItemBehaviour for HoneyCombItem {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             let world = player.world();
-            if try_wax_block(&world, location, block).await {
-                item.decrement_unless_creative(player.gamemode.load(), 1);
+            let old_state_id = world.get_block_state_id(&location);
+            let Some(new_state_id) = try_wax_block(&world, location, block).await else {
+                return;
+            };
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+
+            let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) else {
+                return;
+            };
+            // Vanilla `HoneycombItem#useOn`: `gameEvent(BLOCK_CHANGE, pos, Context.of(player,
+            // waxedState))`.
+            emit_game_event(
+                &world,
+                GameEvent::BlockChange,
+                location.to_centered_f64(),
+                GameEventContext::of_entity_with_block_state(player_arc.clone(), new_state_id),
+            )
+            .await;
+
+            // A double chest also notifies the other half (`ChestBlock.getConnectedBlockPos`).
+            if block.has_tag(&tag::Block::MINECRAFT_COPPER_CHESTS) {
+                let props = ChestLikeProperties::from_state_id(old_state_id, block);
+                if props.r#type != ChestType::Single {
+                    let neighbor_pos = location.offset(connected_direction(props).to_offset());
+                    emit_game_event(
+                        &world,
+                        GameEvent::BlockChange,
+                        neighbor_pos.to_centered_f64(),
+                        GameEventContext::of_entity_with_block_state(
+                            player_arc,
+                            world.get_block_state_id(&neighbor_pos),
+                        ),
+                    )
+                    .await;
+                    world.sync_world_event(WorldEvent::ParticlesAndSoundWaxOn, neighbor_pos, 0);
+                }
             }
         })
     }
@@ -56,11 +94,13 @@ impl ItemBehaviour for HoneyCombItem {
 }
 
 /// Waxes the block at `location` if it has a waxed equivalent, emitting the wax
-/// particles and sound on success.
-pub(crate) async fn try_wax_block(world: &Arc<World>, location: BlockPos, block: &Block) -> bool {
-    let Some(replacement) = get_waxed_equivalent(block.id) else {
-        return false;
-    };
+/// particles and sound on success, returning the new state.
+pub(crate) async fn try_wax_block(
+    world: &Arc<World>,
+    location: BlockPos,
+    block: &Block,
+) -> Option<BlockStateId> {
+    let replacement = get_waxed_equivalent(block.id)?;
     let new_block = replacement.to_block();
 
     let new_state_id = if block.has_tag(&tag::Block::MINECRAFT_DOORS) {
@@ -87,7 +127,7 @@ pub(crate) async fn try_wax_block(world: &Arc<World>, location: BlockPos, block:
         .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL)
         .await;
     world.sync_world_event(WorldEvent::ParticlesAndSoundWaxOn, location, 0);
-    true
+    Some(new_state_id)
 }
 
 impl HoneyCombItem {

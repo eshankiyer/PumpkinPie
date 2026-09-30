@@ -12,6 +12,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -57,7 +58,7 @@ impl ItemBehaviour for FireworkRocketItem {
                 ),
                 &EntityType::FIREWORK_ROCKET,
             );
-            let entity = FireworkRocketEntity::new_with_item(entity, item);
+            let entity = FireworkRocketEntity::new_placed(entity, player.get_entity(), item);
             world.spawn_entity(Arc::new(entity)).await;
             if should_consume_rocket(player.is_creative()) {
                 item.decrement(1);
@@ -128,6 +129,9 @@ impl ItemBehaviour for FireworkRocketItem {
                             .await;
                     }
                 }
+                player
+                    .increment_stat(StatisticCategory::Used, Item::FIREWORK_ROCKET.id as i32, 1)
+                    .await;
             }
         })
     }

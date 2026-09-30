@@ -884,7 +884,9 @@ impl DispenserBlock {
     }
 
     async fn dispense_firework_rocket(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
-        let _ = item.split(1);
+        // `asProjectile` launches `itemStack.copyWithCount(1)`, so the rocket keeps its
+        // Fireworks component (flight duration and explosions).
+        let stack = item.split(1);
         let facing = to_normal(ctx.facing);
         // `FireworkRocketItem.getEntityJustOutsideOfBlockPos` (FireworkRocketItem.java:92-95)
         // is the block centre pushed 0.5000099999997474 along the facing, with no vertical
@@ -894,7 +896,7 @@ impl DispenserBlock {
             .to_centered_f64()
             .add(&(facing * Self::FIREWORK_JUST_OUTSIDE_OF_BLOCK));
         let entity = Entity::new(ctx.world.clone(), position, &EntityType::FIREWORK_ROCKET);
-        let rocket = FireworkRocketEntity::new(entity);
+        let rocket = FireworkRocketEntity::new_dispensed(entity, &stack);
 
         // `FireworkRocketEntity` does not expose its inner projectile, so replicate
         // `ThrownItemEntity::set_velocity` here.
@@ -1101,7 +1103,7 @@ impl DispenserBlock {
         let front = Self::target_position(ctx);
         let front_block = ctx.world.get_block(&front);
 
-        if try_wax_block(ctx.world, front, front_block).await {
+        if try_wax_block(ctx.world, front, front_block).await.is_some() {
             item.decrement(1);
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
         } else {

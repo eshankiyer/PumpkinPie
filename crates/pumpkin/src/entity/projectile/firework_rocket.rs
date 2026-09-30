@@ -4,10 +4,14 @@ use crate::{
         projectile::{ProjectileHit, ThrownItemEntity},
     },
     server::Server,
-    world::World,
+    world::{
+        World,
+        game_event::{GameEventContext, emit_game_event},
+    },
 };
 use pumpkin_data::{
-    damage::DamageType, data_component_impl::FireworksImpl, entity::EntityStatus, item::Item,
+    damage::DamageType, data_component_impl::FireworksImpl, entity::EntityStatus,
+    game_event::GameEvent, item::Item,
     item_stack::ItemStack, sound::Sound, sound::SoundCategory,
 };
 use pumpkin_nbt::compound::NbtCompound;
@@ -39,6 +43,9 @@ pub struct FireworkRocketEntity {
     /// out of scope here). Either way it skips the normal self-propelled acceleration
     /// branch entirely and flies a plain ballistic arc.
     shot_at_angle: AtomicBool,
+    /// Vanilla `attachedToEntity`: the elytra-flying entity this rocket boosts. Distinct from
+    /// the projectile owner, which a block-placed or crossbow-fired rocket also has.
+    attached_to: Option<i32>,
 }
 
 impl FireworkRocketEntity {
@@ -47,6 +54,35 @@ impl FireworkRocketEntity {
     }
 
     pub fn new_with_item(entity: Entity, item_stack: &ItemStack) -> Self {
+        Self::new_with_item_and_angle(entity, item_stack, false)
+    }
+
+    /// Vanilla `FireworkRocketItem#asProjectile`: `new FireworkRocketEntity(level, stack, x, y,
+    /// z, true)`. Keeps the dispensed stack and flies ballistically (`shot_at_angle`).
+    pub fn new_dispensed(entity: Entity, item_stack: &ItemStack) -> Self {
+        Self::new_with_item_and_angle(entity, item_stack, true)
+    }
+
+    /// Vanilla `FireworkRocketEntity(level, owner, x, y, z, stack)`, used by
+    /// `FireworkRocketItem#useOn`: a block-placed rocket owned by the player, but not attached
+    /// to it.
+    pub fn new_placed(entity: Entity, owner: &Entity, item_stack: &ItemStack) -> Self {
+        let mut rocket = Self::new_with_item_and_angle(entity, item_stack, false);
+        // `Projectile.getAddEntityPacket` carries the owner's entity id as spawn data.
+        rocket
+            .entity
+            .entity
+            .data
+            .store(owner.entity_id, Ordering::Relaxed);
+        rocket.entity.owner_id = Some(owner.entity_id);
+        rocket
+    }
+
+    fn new_with_item_and_angle(
+        entity: Entity,
+        item_stack: &ItemStack,
+        shot_at_angle: bool,
+    ) -> Self {
         let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
 
         entity.set_velocity(Vector3::new(
@@ -70,7 +106,8 @@ impl FireworkRocketEntity {
                 random.next_bounded_i32(7),
             )
             .into(),
-            shot_at_angle: AtomicBool::new(false),
+            shot_at_angle: AtomicBool::new(shot_at_angle),
+            attached_to: None,
         }
     }
 
@@ -102,6 +139,7 @@ impl FireworkRocketEntity {
             )
             .into(),
             shot_at_angle: AtomicBool::new(false),
+            attached_to: Some(shooter.entity_id),
         };
 
         // Set shooter metadata
@@ -150,6 +188,7 @@ impl FireworkRocketEntity {
             )
             .into(),
             shot_at_angle: AtomicBool::new(true),
+            attached_to: None,
         }
     }
 
@@ -161,6 +200,19 @@ impl FireworkRocketEntity {
             Some(ActorEventType::FireworksExplode),
         );
 
+        // Vanilla `explode`: `gameEvent(EXPLODE, getOwner())`.
+        let owner = self
+            .entity
+            .owner_id
+            .and_then(|owner_id| world.get_entity_by_id(owner_id));
+        emit_game_event(
+            world,
+            GameEvent::Explode,
+            entity.pos.load(),
+            owner.map_or_else(GameEventContext::none, GameEventContext::of_entity),
+        )
+        .await;
+
         let explosion_count = self
             .item_stack
             .get_data_component::<FireworksImpl>()
@@ -170,12 +222,9 @@ impl FireworkRocketEntity {
             let rocket_pos = entity.pos.load();
             // Vanilla's flat, un-falloff damage and the loop-exclusion below apply only to
             // `attachedToEntity` - the player holding the rocket during an elytra boost. A
-            // crossbow- or dispenser-fired rocket (`shot_at_angle`) never sets that field, so
-            // its `owner` is a normal target: it takes falloff damage like anyone else, not
-            // this exemption.
-            let attached_to_entity = (!self.shot_at_angle.load(Ordering::Relaxed))
-                .then_some(self.entity.owner_id)
-                .flatten();
+            // crossbow-fired or block-placed rocket only has an `owner`, which is a normal
+            // target: it takes falloff damage like anyone else, not this exemption.
+            let attached_to_entity = self.attached_to;
             if let Some(owner_id) = attached_to_entity
                 && let Some(owner) = world.get_entity_by_id(owner_id)
             {
@@ -331,8 +380,7 @@ impl EntityBase for FireworkRocketEntity {
             let mut velocity = entity.velocity.load();
 
             let boosting_elytra_owner = self
-                .entity
-                .owner_id
+                .attached_to
                 .and_then(|shooter_id| world.get_entity_by_id(shooter_id))
                 .filter(|shooter| shooter.get_entity().is_fall_flying());
 

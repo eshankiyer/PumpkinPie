@@ -6794,6 +6794,83 @@ impl World {
         self.spawn_entity(item_entity).await;
     }
 
+    /// Vanilla `Block.popResourceFromFace`: spawns `stack` just outside `face` of `pos` with a
+    /// small outward velocity, honouring the `BLOCK_DROPS` game rule.
+    pub async fn pop_resource_from_face(
+        self: &Arc<Self>,
+        pos: &BlockPos,
+        face: BlockDirection,
+        stack: ItemStack,
+    ) {
+        if stack.is_empty() || !self.level_info.load().game_rules.block_drops {
+            return;
+        }
+        let step = face.to_offset();
+        let half_width = f64::from(EntityType::ITEM.dimension[0]) / 2.0;
+        let half_height = f64::from(EntityType::ITEM.dimension[1]) / 2.0;
+        let (spawn_pos, velocity) = {
+            let mut r = rand::rng();
+            let x = f64::from(pos.0.x)
+                + 0.5
+                + if step.x == 0 {
+                    r.random_range(-0.25..0.25)
+                } else {
+                    f64::from(step.x) * (0.5 + half_width)
+                };
+            let y = f64::from(pos.0.y)
+                + 0.5
+                + if step.y == 0 {
+                    r.random_range(-0.25..0.25)
+                } else {
+                    f64::from(step.y) * (0.5 + half_height)
+                }
+                - half_height;
+            let z = f64::from(pos.0.z)
+                + 0.5
+                + if step.z == 0 {
+                    r.random_range(-0.25..0.25)
+                } else {
+                    f64::from(step.z) * (0.5 + half_width)
+                };
+            let delta_x = if step.x == 0 {
+                r.random_range(-0.1..0.1)
+            } else {
+                f64::from(step.x) * 0.1
+            };
+            let delta_y = if step.y == 0 {
+                r.random_range(0.0..0.1)
+            } else {
+                f64::from(step.y) * 0.1 + 0.1
+            };
+            let delta_z = if step.z == 0 {
+                r.random_range(-0.1..0.1)
+            } else {
+                f64::from(step.z) * 0.1
+            };
+            (
+                Vector3::new(x, y, z),
+                Vector3::new(delta_x, delta_y, delta_z),
+            )
+        };
+
+        let entity = Entity::new(self.clone(), spawn_pos, &EntityType::ITEM);
+        let mut item_event = crate::plugin::api::events::entity::item_spawn::ItemSpawnEvent::new(
+            entity.entity_id,
+            spawn_pos,
+            stack.item.registry_key.to_string(),
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut item_event).await;
+        }
+        if item_event.cancelled {
+            return;
+        }
+
+        // `setDefaultPickUpDelay`: 10 ticks.
+        let item_entity = Arc::new(ItemEntity::new_with_velocity(entity, stack, velocity, 10));
+        self.spawn_entity(item_entity).await;
+    }
+
     pub async fn strike_lightning(self: &Arc<Self>, pos: Vector3<f64>, effect_only: bool) {
         use pumpkin_data::entity::EntityType;
         use uuid::Uuid;

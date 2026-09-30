@@ -467,7 +467,7 @@ fn copper_half_adopts_partner(props: ChestLikeProperties, direction: BlockDirect
 
 // ChestBlock.getConnectedDirection (ChestBlock.java:200-203) maps LEFT clockwise and all other
 // chest types counter-clockwise from the facing direction.
-fn connected_direction(props: ChestLikeProperties) -> BlockDirection {
+pub(crate) fn connected_direction(props: ChestLikeProperties) -> BlockDirection {
     match props.r#type {
         ChestType::Left => props.facing.rotate_clockwise().to_block_direction(),
         ChestType::Right | ChestType::Single => {
