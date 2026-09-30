@@ -1,6 +1,6 @@
 use std::sync::{
     Arc, Weak,
-    atomic::{AtomicI32, AtomicU8, Ordering, Ordering::Relaxed},
+    atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering, Ordering::Relaxed},
 };
 
 use pumpkin_data::item_stack::ItemStack;
@@ -23,6 +23,8 @@ use crate::entity::{
     player::Player,
 };
 use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_nbt::compound::NbtCompound;
 
 const TEMPT_ITEMS: &[&Item] = &[
@@ -79,6 +81,8 @@ pub struct ChickenEntity {
     pub mob_entity: MobEntity,
     pub variant: AtomicU8,
     egg_lay_time: AtomicI32,
+    /// Vanilla `Chicken.isChickenJockey` (Chicken.java:66).
+    chicken_jockey: AtomicBool,
     pub ageable_data: crate::entity::ageable::AgeableData,
 }
 
@@ -90,6 +94,7 @@ impl ChickenEntity {
             mob_entity,
             variant: AtomicU8::new(VARIANT_UNSET), // rolled from the spawn biome
             egg_lay_time: AtomicI32::new(egg_lay_time),
+            chicken_jockey: AtomicBool::new(false),
             ageable_data: crate::entity::ageable::AgeableData::default(),
         };
         let mob_arc = Arc::new(chicken);
@@ -132,12 +137,20 @@ impl crate::entity::ageable::AgeableMob for ChickenEntity {
     }
 }
 
+impl ChickenEntity {
+    /// Vanilla `Chicken.setChickenJockey` (Chicken.java:289-291).
+    pub fn set_chicken_jockey(&self, jockey: bool) {
+        self.chicken_jockey.store(jockey, Ordering::Relaxed);
+    }
+}
+
 impl NBTStorage for ChickenEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_ageable_nbt(nbt);
             self.write_animal_nbt(nbt);
+            nbt.put_bool("IsChickenJockey", self.chicken_jockey.load(Ordering::Relaxed));
             nbt.put_int("EggLayTime", self.egg_lay_time.load(Ordering::Relaxed));
             let variant_str = match self.variant.load(Ordering::Relaxed) {
                 0 => "minecraft:cold",
@@ -153,6 +166,10 @@ impl NBTStorage for ChickenEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
+            self.chicken_jockey.store(
+                nbt.get_bool("IsChickenJockey").unwrap_or(false),
+                Ordering::Relaxed,
+            );
             self.egg_lay_time
                 .store(nbt.get_int("EggLayTime").unwrap_or(6000), Ordering::Relaxed);
             if let Some(variant_str) = nbt.get_string("variant") {
@@ -183,6 +200,39 @@ impl super::animal::Animal for ChickenEntity {
 impl Mob for ChickenEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn is_chicken_jockey(&self) -> bool {
+        self.chicken_jockey.load(Ordering::Relaxed)
+    }
+
+    /// Vanilla `Chicken.getBaseExperienceReward` (Chicken.java:198-201).
+    fn get_base_experience_reward(&self) -> u32 {
+        if self.is_chicken_jockey() {
+            10
+        } else {
+            self.get_entity().entity_type.experience_reward
+        }
+    }
+
+    /// Vanilla `Chicken.getAmbientSound` via `getSoundSet` (Chicken.java:104-106,163). Only the
+    /// classic sound variant is modelled, so this is the classic adult/baby set.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(if self.is_baby() {
+            Sound::EntityBabyChickenAmbient
+        } else {
+            Sound::EntityChickenAmbient
+        })
+    }
+
+    /// Vanilla `Chicken.playStepSound` (Chicken.java:171-173): the sound set's step sound at
+    /// 0.15 / 1.0, the trait's default volume and pitch.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(if self.is_baby() {
+            Sound::EntityBabyChickenStep
+        } else {
+            Sound::EntityChickenStep
+        })
     }
 
     fn mob_set_variant_name(&self, name: &str) {
@@ -266,7 +316,7 @@ impl Mob for ChickenEntity {
         })
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async {
             if self.mob_entity.living_entity.dead.load(Relaxed) {
                 return;
@@ -279,7 +329,11 @@ impl Mob for ChickenEntity {
             if (!on_ground) && current_velocity.y < 0.0 {
                 entity.set_velocity(current_velocity.multiply(1.0, 0.6, 1.0));
             }
-            if self.egg_lay_time.fetch_sub(1, Ordering::Relaxed) <= 1 {
+            // Chicken.aiStep (Chicken.java:135): the countdown only runs for adult non-jockeys.
+            if !self.is_baby()
+                && !self.is_chicken_jockey()
+                && self.egg_lay_time.fetch_sub(1, Ordering::Relaxed) <= 1
+            {
                 let next_time = rand::rng().random_range(6000..12000);
                 let world = entity.world.load_full();
                 let pos = entity.block_pos.load();
@@ -294,6 +348,25 @@ impl Mob for ChickenEntity {
                 }
                 if !drop_event.cancelled {
                     world.drop_stack(&pos, ItemStack::new(1, &Item::EGG)).await;
+                    let f = {
+                        let mut rng = rand::rng();
+                        rng.random::<f32>() - rng.random::<f32>()
+                    };
+                    let entity_pos = entity.pos.load();
+                    world.play_sound_fine(
+                        Sound::EntityChickenEgg,
+                        self.get_sound_source(),
+                        &entity_pos,
+                        1.0,
+                        f * 0.2 + 1.0,
+                    );
+                    emit_game_event(
+                        &world,
+                        GameEvent::EntityPlace,
+                        entity_pos,
+                        GameEventContext::of_entity(caller.clone()),
+                    )
+                    .await;
                 }
                 self.egg_lay_time.store(next_time, Ordering::Relaxed);
             }

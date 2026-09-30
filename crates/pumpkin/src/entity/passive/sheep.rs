@@ -364,6 +364,25 @@ impl Mob for SheepEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `Sheep.applyImplicitComponent(SHEEP_COLOR)` (Sheep.java:248-251): a spawn egg's
+    /// `minecraft:sheep/color` sets the wool color, keeping the sheared bit.
+    fn mob_set_variant_name(&self, name: &str) {
+        if let Some(color) = DyeColor::by_name(name.strip_prefix("minecraft:").unwrap_or(name)) {
+            self.set_color(color.id());
+        }
+    }
+
+    /// Vanilla `Sheep.getAmbientSound` (Sheep.java:208-211).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntitySheepAmbient)
+    }
+
+    /// Vanilla `Sheep.playStepSound` (Sheep.java:223-225): `SHEEP_STEP` at 0.15 / 1.0, which
+    /// are the trait's default volume and pitch.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntitySheepStep)
+    }
+
     /// Vanilla `Sheep.ate`: un-shears the sheep and, if it's a baby, ages it up by 60 seconds
     /// (60 * 20 ticks), same as `Animal.ate` -> `AgeableMob.ageUp(int)`.
     fn on_eating_grass(&self) -> EntityBaseFuture<'_, ()> {

@@ -2000,6 +2000,8 @@ pub trait Mob: EntityBase + Send + Sync {
                 (**mob_entity.living_entity.entity.custom_name.load()).is_none()
             }
             id if id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id => true,
+            // Chicken.java:273-275: only a chicken jockey despawns when far away.
+            id if id == pumpkin_data::entity::EntityType::CHICKEN.id => self.is_chicken_jockey(),
             // AbstractGolem.java:34-36: golems never despawn because of distance.
             id if id == pumpkin_data::entity::EntityType::IRON_GOLEM.id
                 || id == pumpkin_data::entity::EntityType::SNOW_GOLEM.id
@@ -3078,6 +3080,11 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn get_sheep(&self) -> Option<&crate::entity::passive::sheep::SheepEntity> {
         None
+    }
+
+    /// Vanilla `Chicken.isChickenJockey` (Chicken.java:285).
+    fn is_chicken_jockey(&self) -> bool {
+        false
     }
 
     fn get_bee(&self) -> Option<&crate::entity::passive::bee::BeeEntity> {
