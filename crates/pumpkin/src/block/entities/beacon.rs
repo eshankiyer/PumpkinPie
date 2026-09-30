@@ -10,6 +10,7 @@ use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -29,7 +30,8 @@ pub struct BeaconBlockEntity {
 
     // Vanilla Parity Fields
     pub custom_name: Mutex<Option<String>>,
-    pub lock_key: Mutex<Option<String>>,
+    /// The raw `lock` compound (`LockCode` codec); enforcement is not modelled, only round-tripped.
+    pub lock_key: Mutex<Option<NbtTag>>,
     pub last_check_y: AtomicI32,
 }
 
@@ -54,6 +56,33 @@ impl BeaconBlockEntity {
             custom_name: Mutex::new(None),
             lock_key: Mutex::new(None),
             last_check_y: AtomicI32::new(position.0.y - 1),
+        }
+    }
+
+    /// Vanilla `filterEffect`: only the effects in `BEACON_EFFECTS` survive loading.
+    const fn is_valid_effect(effect: &'static StatusEffect) -> bool {
+        Self::required_level(Some(effect)) != i32::MAX
+    }
+
+    /// Vanilla `loadEffect`: the effect is stored as its registry name; ids from older Pumpkin
+    /// saves are still accepted. Returns -1 (unset) for anything not a beacon effect.
+    fn read_effect(nbt: &NbtCompound, field: &str) -> i32 {
+        let effect = match nbt.get(field) {
+            Some(NbtTag::String(name)) => {
+                StatusEffect::from_name(name.strip_prefix("minecraft:").unwrap_or(name))
+            }
+            Some(NbtTag::Int(id)) => u16::try_from(*id).ok().and_then(StatusEffect::from_id),
+            _ => None,
+        };
+        effect
+            .filter(|effect| Self::is_valid_effect(effect))
+            .map_or(-1, |effect| i32::from(effect.id))
+    }
+
+    /// Vanilla `storeEffect`: writes the registry name only when an effect is set.
+    fn store_effect(nbt: &mut NbtCompound, field: &str, id: i32) {
+        if let Some(effect) = u16::try_from(id).ok().and_then(StatusEffect::from_id) {
+            nbt.put_string(field, effect.minecraft_name.to_string());
         }
     }
 
@@ -311,13 +340,18 @@ impl BlockEntity for BeaconBlockEntity {
         Self: Sized,
     {
         // Aligning to strict vanilla NBT tags
-        let primary = nbt.get_int("primary_effect").unwrap_or(-1);
-        let secondary = nbt.get_int("secondary_effect").unwrap_or(-1);
+        let primary = Self::read_effect(nbt, "primary_effect");
+        let secondary = Self::read_effect(nbt, "secondary_effect");
         let levels = nbt.get_int("Levels").unwrap_or(0); // Vanilla uses capital L
         let custom_name = nbt
             .get_string("CustomName")
             .map(std::string::ToString::to_string);
-        let lock_key = nbt.get_string("Lock").map(std::string::ToString::to_string);
+        // Vanilla key is lowercase `lock`, and its value is a compound (`LockCode` codec); a
+        // legacy string `Lock` from older saves is not a valid LockCode and is dropped.
+        let lock_key = nbt
+            .get("lock")
+            .filter(|tag| matches!(tag, NbtTag::Compound(_)))
+            .cloned();
 
         Self {
             position,
@@ -337,11 +371,13 @@ impl BlockEntity for BeaconBlockEntity {
         nbt: &'a mut NbtCompound,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            nbt.put_int(
+            Self::store_effect(
+                nbt,
                 "primary_effect",
                 self.primary_effect.load(Ordering::Relaxed),
             );
-            nbt.put_int(
+            Self::store_effect(
+                nbt,
                 "secondary_effect",
                 self.secondary_effect.load(Ordering::Relaxed),
             );
@@ -351,20 +387,53 @@ impl BlockEntity for BeaconBlockEntity {
                 nbt.put_string("CustomName", name.clone());
             }
             if let Some(lock) = &*self.lock_key.lock().await {
-                nbt.put_string("Lock", lock.clone());
+                nbt.put("lock", lock.clone());
             }
         })
     }
 
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            // Check properties every 80 ticks matching Java
-            if world.get_time_of_day().await % 80 == 0 {
-                let levels = self.update_base(world);
-                self.levels.store(levels, Ordering::Relaxed);
+            // `BeaconBlockEntity.tick` (`BeaconBlockEntity.java:168-196`). `levels` only changes on
+            // the 80-tick step, so the transition sounds are decided there; the beam scan is
+            // instant here, so `beam_clear` stands in for a non-empty `beamSections`.
+            if world.get_world_age().await % 80 == 0 {
+                let previous_levels = self.levels.load(Ordering::Relaxed);
+                let beam_clear = self.beam_clear(world);
+                if beam_clear {
+                    self.levels
+                        .store(self.update_base(world), Ordering::Relaxed);
+                }
 
-                if levels > 0 && self.beam_clear(world) {
+                let levels = self.levels.load(Ordering::Relaxed);
+                let sound_position = Vector3::new(
+                    self.position.0.x as f64 + 0.5,
+                    self.position.0.y as f64 + 0.5,
+                    self.position.0.z as f64 + 0.5,
+                );
+                if levels > 0 && beam_clear {
                     self.apply_effects(world, levels).await;
+                    world.play_sound(
+                        Sound::BlockBeaconAmbient,
+                        SoundCategory::Blocks,
+                        &sound_position,
+                    );
+                }
+
+                let was_active = previous_levels > 0;
+                let is_active = levels > 0;
+                if !was_active && is_active {
+                    world.play_sound(
+                        Sound::BlockBeaconActivate,
+                        SoundCategory::Blocks,
+                        &sound_position,
+                    );
+                } else if was_active && !is_active {
+                    world.play_sound(
+                        Sound::BlockBeaconDeactivate,
+                        SoundCategory::Blocks,
+                        &sound_position,
+                    );
                 }
             }
         })
@@ -372,11 +441,13 @@ impl BlockEntity for BeaconBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        nbt.put_int(
+        Self::store_effect(
+            &mut nbt,
             "primary_effect",
             self.primary_effect.load(Ordering::Relaxed),
         );
-        nbt.put_int(
+        Self::store_effect(
+            &mut nbt,
             "secondary_effect",
             self.secondary_effect.load(Ordering::Relaxed),
         );
@@ -389,7 +460,7 @@ impl BlockEntity for BeaconBlockEntity {
         if let Ok(lock) = self.lock_key.try_lock()
             && let Some(ref lock) = *lock
         {
-            nbt.put_string("Lock", lock.clone());
+            nbt.put("lock", lock.clone());
         }
         Some(nbt)
     }
@@ -505,5 +576,49 @@ impl Clearable for BeaconBlockEntity {
                 *payment = ItemStack::EMPTY.clone();
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effects_round_trip_as_registry_names() {
+        let mut nbt = NbtCompound::new();
+        BeaconBlockEntity::store_effect(
+            &mut nbt,
+            "primary_effect",
+            i32::from(StatusEffect::SPEED.id),
+        );
+        assert_eq!(nbt.get_string("primary_effect"), Some("minecraft:speed"));
+        BeaconBlockEntity::store_effect(&mut nbt, "secondary_effect", -1);
+        assert!(nbt.get("secondary_effect").is_none());
+        assert_eq!(
+            BeaconBlockEntity::read_effect(&nbt, "primary_effect"),
+            i32::from(StatusEffect::SPEED.id)
+        );
+        assert_eq!(BeaconBlockEntity::read_effect(&nbt, "secondary_effect"), -1);
+    }
+
+    #[test]
+    fn non_beacon_effects_are_filtered_on_load() {
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("primary_effect", "minecraft:glowing".to_string());
+        nbt.put_int("secondary_effect", i32::from(StatusEffect::GLOWING.id));
+        assert_eq!(BeaconBlockEntity::read_effect(&nbt, "primary_effect"), -1);
+        assert_eq!(BeaconBlockEntity::read_effect(&nbt, "secondary_effect"), -1);
+    }
+
+    #[test]
+    fn lock_uses_lowercase_key_and_keeps_compound() {
+        let mut lock = NbtCompound::new();
+        lock.put_string("items", "minecraft:stick".to_string());
+        let mut nbt = NbtCompound::new();
+        nbt.put("lock", NbtTag::Compound(lock));
+        let beacon = BeaconBlockEntity::from_nbt(&nbt, BlockPos::new(0, 0, 0));
+        let out = beacon.chunk_data_nbt().unwrap_or_default();
+        assert!(matches!(out.get("lock"), Some(NbtTag::Compound(_))));
+        assert!(out.get("Lock").is_none());
     }
 }
