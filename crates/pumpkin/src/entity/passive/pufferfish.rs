@@ -10,6 +10,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -87,6 +88,15 @@ fn sting_poison_duration(puff_state: u8) -> i32 {
     60 * i32::from(puff_state)
 }
 
+/// Pufferfish.java `getScale`: dimension scale per puff state.
+const fn puff_scale(state: u8) -> f32 {
+    match state {
+        0 => 0.5,
+        1 => 0.7,
+        _ => 1.0,
+    }
+}
+
 /// Pufferfish.java `SCARY_MOB` selector: a creative player is never scary; otherwise anything
 /// not tagged `minecraft:not_scary_for_pufferfish` is.
 fn is_scary(candidate: &dyn EntityBase) -> bool {
@@ -118,6 +128,7 @@ impl PufferfishEntity {
             inflate_counter: AtomicI32::new(0),
             deflate_timer: AtomicI32::new(0),
         };
+        pufferfish.refresh_dimensions(0);
         let mob_arc = Arc::new(pufferfish);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -148,6 +159,26 @@ impl PufferfishEntity {
         };
 
         mob_arc
+    }
+
+    /// Pufferfish.java `getDefaultDimensions`: base dimensions scaled by `getScale(puffState)`.
+    /// Vanilla runs this from the constructor and `onSyncedDataUpdated(PUFF_STATE)`.
+    fn refresh_dimensions(&self, state: u8) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let base = entity.entity_type.dimension;
+        let scale = puff_scale(state);
+        let dimensions = EntityDimensions {
+            width: base[0] * scale,
+            height: base[1] * scale,
+            eye_height: entity.entity_type.eye_height * scale,
+            fixed: false,
+        };
+        entity.base_dimension.store(dimensions);
+        entity.entity_dimension.store(dimensions);
+        let pos = entity.pos.load();
+        entity
+            .bounding_box
+            .store(BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &dimensions));
     }
 
     fn send_puff_state(&self, state: u8) {
@@ -266,6 +297,7 @@ impl NBTStorage for PufferfishEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             let state = nbt.get_int("PuffState").unwrap_or(0).clamp(0, 2) as u8;
             self.puff_state.store(state, Relaxed);
+            self.refresh_dimensions(state);
         })
     }
 }
@@ -304,6 +336,7 @@ impl Mob for PufferfishEntity {
             if new_state != self.puff_state.load(Relaxed) {
                 self.puff_state.store(new_state, Relaxed);
                 self.send_puff_state(new_state);
+                self.refresh_dimensions(new_state);
             }
 
             if blow_up || blow_out {
@@ -390,6 +423,13 @@ mod tests {
         }
         assert_eq!(half_at, Some(62));
         assert_eq!(deflated_at, Some(102));
+    }
+
+    #[test]
+    fn puff_scale_per_state() {
+        assert_eq!(puff_scale(0), 0.5);
+        assert_eq!(puff_scale(1), 0.7);
+        assert_eq!(puff_scale(2), 1.0);
     }
 
     #[test]
