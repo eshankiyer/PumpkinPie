@@ -10,7 +10,8 @@ use crate::entity::{
         active_target::ActiveTargetGoal, breeze_jump::BreezeJumpGoal,
         breeze_shoot::BreezeShootGoal, breeze_shoot_when_stuck::BreezeShootWhenStuckGoal,
         breeze_slide::BreezeSlideGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        look_at_entity::LookAtEntityGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     projectile_deflection::ProjectileDeflectionType,
@@ -75,10 +76,17 @@ impl BreezeEntity {
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // BreezeAi IDLE: NEAREST_ATTACKABLE (nearest of players and iron golems, see
+            // `can_attack`) then HURT_BY attacker.
             target_selector.add_goal(
                 1,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
+                ActiveTargetGoal::with_default_types(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::PLAYER, &EntityType::IRON_GOLEM],
+                    true,
+                ),
             );
+            target_selector.add_goal(2, Box::new(RevengeGoal::new(true)));
         };
 
         mob_arc
@@ -156,6 +164,12 @@ impl Mob for BreezeEntity {
         } else {
             ProjectileDeflectionType::None
         }
+    }
+
+    /// `Breeze.canAttack` (`Breeze.java:245-247`): only players and iron golems.
+    fn can_attack(&self, target: &Entity) -> bool {
+        target.entity_type.id == EntityType::PLAYER.id
+            || target.entity_type.id == EntityType::IRON_GOLEM.id
     }
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

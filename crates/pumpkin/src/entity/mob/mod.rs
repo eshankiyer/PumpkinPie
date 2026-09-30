@@ -1748,6 +1748,12 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    /// Whether this mob runs `pushEntities`. `Bat.pushEntities` (`Bat.java:96-98`) is empty, so
+    /// a bat shoves nothing; every other mob inherits `LivingEntity.pushEntities`.
+    fn mob_pushes_entities(&self) -> bool {
+        true
+    }
+
     /// Vanilla `LivingEntity.getSecondsToDisableBlocking` (`LivingEntity.java:3967-3971`), for
     /// the mobs that replace the weapon-component lookup with a constant. `Warden`
     /// (`Warden.java:174-177`) returns `5.0`, so a shield that blocks its hit is disabled for
@@ -3367,7 +3373,8 @@ impl<T: Mob + Send + 'static> EntityBase for T {
     /// term: an emerging warden is not pushable but still pushes (and gets touched) as usual.
     fn can_push_others(&self) -> bool {
         let living = &self.get_mob_entity().living_entity;
-        living.health.load() > 0.0
+        Mob::mob_pushes_entities(self)
+            && living.health.load() > 0.0
             && !living.dead.load(std::sync::atomic::Ordering::Relaxed)
             && !living.climbing.load(std::sync::atomic::Ordering::Relaxed)
     }

@@ -129,6 +129,16 @@ impl Mob for BatEntity {
         false
     }
 
+    /// `Bat.isPushable` (`Bat.java:86-88`): a bat is never shoved by other entities.
+    fn mob_is_pushable(&self) -> bool {
+        false
+    }
+
+    /// `Bat.pushEntities` (`Bat.java:96-98`) is empty, and so is `doPush` (`Bat.java:91-93`).
+    fn mob_pushes_entities(&self) -> bool {
+        false
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.set_roosting_metadata(self.is_roosting());
