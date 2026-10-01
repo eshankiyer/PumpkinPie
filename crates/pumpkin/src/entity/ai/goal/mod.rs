@@ -119,6 +119,7 @@ pub mod polar_bear_hurt_by_target;
 pub mod polar_bear_melee_attack;
 pub mod rabbit_avoid_entity;
 pub mod raid_garden;
+pub mod raider_celebration;
 pub mod random_pos;
 pub mod ranged_bow_attack;
 pub mod ranged_crossbow_attack;

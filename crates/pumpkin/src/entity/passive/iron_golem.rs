@@ -226,7 +226,7 @@ impl NBTStorage for IronGolemEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             // `IronGolem.java:147`.
             nbt.put_bool("PlayerCreated", self.player_created.load(Ordering::Relaxed));
-            self.persistent_anger.write_nbt(nbt).await;
+            self.persistent_anger.write_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
         })
     }
 
@@ -238,7 +238,7 @@ impl NBTStorage for IronGolemEntity {
                 nbt.get_bool("PlayerCreated").unwrap_or(false),
                 Ordering::Relaxed,
             );
-            self.persistent_anger.read_nbt(nbt).await;
+            self.persistent_anger.read_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
         })
     }
 }

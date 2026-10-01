@@ -369,7 +369,7 @@ impl NBTStorage for WolfEntity {
             if let Some(owner) = self.mob_entity.owner.load() {
                 nbt.put_uuid("Owner", owner);
             }
-            self.persistent_anger.write_nbt(nbt).await;
+            self.persistent_anger.write_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
         })
     }
 
@@ -378,7 +378,7 @@ impl NBTStorage for WolfEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt).await;
+            self.persistent_anger.read_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
             if let Some(variant_str) = nbt.get_string("variant") {
                 let variant = match variant_str
                     .strip_prefix("minecraft:")

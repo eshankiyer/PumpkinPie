@@ -15,6 +15,8 @@ use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::projectile::arrow::{ArrowEntity, ArrowPickup};
 use crate::entity::{Entity, EntityBase};
+use crate::item::items::crossbow::{charge_duration_ticks, piercing_count};
+use pumpkin_data::Enchantment;
 
 /// Vanilla: `RangedCrossbowAttackGoal.CrossbowState`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,10 +26,6 @@ enum CrossbowState {
     Charged,
     ReadyToAttack,
 }
-
-/// Vanilla: `CrossbowItem.getChargeDuration` -- `Mth.floor(1.25F * 20.0F)` with no Quick Charge
-/// enchant applied (mobs never have it).
-const CHARGE_DURATION_TICKS: i32 = 25;
 
 /// Vanilla `BehaviorUtils.isWithinAttackRange` requires a projectile weapon and the mob's
 /// `canUseNonMeleeWeapon` predicate (`BehaviorUtils.java:115-121`).
@@ -72,13 +70,23 @@ impl RangedCrossbowAttackGoal {
         mob.get_mob_entity().has_line_of_sight(target).await
     }
 
+    /// Vanilla `CrossbowAttackMob.performCrossbowAttack` -> `CrossbowItem.performShooting`
+    /// with the held crossbow as the weapon (`CrossbowAttackMob.java:18-26`).
     async fn shoot(mob: &dyn Mob, target: &dyn EntityBase) {
+        let weapon = mob.get_mob_entity().living_entity.held_item(mob).await;
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
         let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), &EntityType::ARROW);
         let arrow_item = pumpkin_data::item_stack::ItemStack::new(1, &Item::ARROW);
         let arrow =
             ArrowEntity::new_shot(arrow_entity, shooter, &arrow_item, ArrowPickup::Disallowed);
+        // `CrossbowItem.createProjectile` (`CrossbowItem.java:150-163`): arrows get CROSSBOW_HIT.
+        arrow.set_sound_event(Sound::ItemCrossbowHit);
+        // `Projectile.spawnProjectile` applies the weapon's Piercing to the arrow.
+        let pierce = piercing_count(weapon.get_enchantment_level(&Enchantment::PIERCING));
+        if pierce > 0 {
+            arrow.set_pierce_level(pierce);
+        }
         let shooter_pos = shooter.get_eye_pos();
         let target_pos = target.get_entity().pos.load();
         let dx = target_pos.x - shooter_pos.x;
@@ -90,7 +98,10 @@ impl RangedCrossbowAttackGoal {
                 + horizontal * 0.2,
             dz,
         );
-        arrow.set_velocity(direction.x, direction.y, direction.z, 1.6, 10.0);
+        // `CrossbowAttackMob.java:24`: uncertainty is `14 - difficultyId * 4`.
+        let difficulty = world.level_info.load().difficulty as i32;
+        let uncertainty = f64::from(14 - difficulty * 4);
+        arrow.set_velocity(direction.x, direction.y, direction.z, 1.6, uncertainty);
         world.spawn_entity(Arc::new(arrow)).await;
 
         let sound = CSoundEffect::new(
@@ -217,7 +228,9 @@ impl Goal for RangedCrossbowAttackGoal {
                     // vanilla's `getTicksUsingItem()` does; the goal tracks its own elapsed ticks
                     // instead, which is equivalent since nothing else can interrupt the "use".
                     self.attack_delay += 1;
-                    if self.attack_delay >= CHARGE_DURATION_TICKS {
+                    // `CrossbowItem.getChargeDuration(useItem, mob)`: Quick Charge shortens it.
+                    let held = mob.get_mob_entity().living_entity.held_item(mob).await;
+                    if self.attack_delay >= charge_duration_ticks(&held) {
                         self.state = CrossbowState::Charged;
                         self.attack_delay = 20 + rand::rng().random_range(0..20);
                         mob.set_charging_crossbow(false);

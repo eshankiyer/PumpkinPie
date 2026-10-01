@@ -71,7 +71,7 @@ impl ItemMetadata for CrossbowItem {
 /// Vanilla `CrossbowItem#getChargeDuration` (CrossbowItem.java:245-248):
 /// `floor(modifyCrossbowChargingTime(crossbow, user, 1.25F) * 20.0F)`. The base 1.25s is
 /// 25 ticks; `quick_charge.json`'s `crossbow_charge_time` is in seconds, so scale by 20.
-fn charge_duration_ticks(stack: &ItemStack) -> i32 {
+pub(crate) fn charge_duration_ticks(stack: &ItemStack) -> i32 {
     let mut charge_time = 25;
     if let Some(enchantments) = stack.get_data_component::<EnchantmentsImpl>() {
         for (enchantment, level) in enchantments.enchantment.iter() {
@@ -272,7 +272,7 @@ fn crossbow_shot_pitch(index: u32, random_value: f32) -> f32 {
 /// `piercing.json`: `add` of `linear(base = 1.0, per_level_above_first = 1.0)` onto a base of 0,
 /// so level N pierces N extra entities (`AbstractArrow` discards once it has hit
 /// `pierceLevel + 1`).
-fn piercing_count(level: i32) -> u8 {
+pub(crate) fn piercing_count(level: i32) -> u8 {
     if level <= 0 {
         return 0;
     }

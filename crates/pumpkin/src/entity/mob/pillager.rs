@@ -8,6 +8,7 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -21,6 +22,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_at_entity::LookAtEntityGoal, pathfind_to_raid::PathfindToRaidGoal,
+        raider_celebration::RaiderCelebrationGoal,
         ranged_crossbow_attack::RangedCrossbowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
@@ -34,6 +36,8 @@ pub struct PillagerEntity {
     pub mob_entity: MobEntity,
     /// Vanilla: `Pillager.IS_CHARGING_CROSSBOW` synced data.
     is_charging_crossbow: AtomicBool,
+    /// Vanilla: `Raider.IS_CELEBRATING` synced data.
+    is_celebrating: AtomicBool,
     /// Vanilla: `Pillager.inventory` (a private 5-slot `SimpleContainer` that only ever holds
     /// plain white banners picked up during an active raid, for the "ominous banner leader"
     /// hand-off mechanic).
@@ -52,6 +56,7 @@ impl PillagerEntity {
         let pillager = Self {
             mob_entity,
             is_charging_crossbow: AtomicBool::new(false),
+            is_celebrating: AtomicBool::new(false),
             banner_inventory: Mutex::new(std::array::from_fn(|_| None)),
         };
         let mob_arc = Arc::new(pillager);
@@ -83,6 +88,8 @@ impl PillagerEntity {
             );
             // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
             goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            // Raider.java:67, via `super.registerGoals()`: `RaiderCelebration`.
+            goal_selector.add_goal(5, RaiderCelebrationGoal::new());
             // Pillager.java:74: `RangedCrossbowAttackGoal<>(this, 1.0, 8.0F)`.
             goal_selector.add_goal(3, Box::new(RangedCrossbowAttackGoal::new(8.0)));
             // Pillager.java:75-77: `RandomStrollGoal(this, 0.6)` at 8,
@@ -260,6 +267,24 @@ impl Mob for PillagerEntity {
                 .put(&EquipmentSlot::MAIN_HAND, crossbow.clone());
             living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, crossbow)]);
         })
+    }
+
+    /// Vanilla: `Raider.setCelebrating` (`Raider.java:177-179`).
+    fn set_celebrating(&self, celebrating: bool) {
+        if self.is_celebrating.swap(celebrating, Relaxed) != celebrating {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    tracked_data::pillager::IS_CELEBRATING,
+                    celebrating,
+                )],
+                None,
+            );
+        }
+    }
+
+    /// Vanilla: `Pillager.getCelebrateSound` (`Pillager.java:257-260`).
+    fn get_celebrate_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPillagerCelebrate)
     }
 
     /// Vanilla: `Pillager.setChargingCrossbow`. Drives `getArmPose()`'s `CROSSBOW_CHARGE` state

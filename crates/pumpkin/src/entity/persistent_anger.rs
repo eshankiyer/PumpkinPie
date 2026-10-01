@@ -12,8 +12,8 @@ pub const PERSISTENT_ANGER_MAX_TICKS: i32 = 39 * 20;
 
 /// Shared `NeutralMob`-equivalent state: a timed grudge against a specific entity, surviving reloads.
 ///
-/// Unlike vanilla's absolute `anger_end_time` game tick, this tracks a remaining-tick
-/// counter decremented in `tick`.
+/// Tracks a remaining-tick counter decremented in `tick`; vanilla's absolute `anger_end_time`
+/// game tick is converted at the NBT boundary.
 pub struct PersistentAnger {
     angry_at: Mutex<Option<Uuid>>,
     remaining_ticks: AtomicI32,
@@ -84,21 +84,40 @@ impl PersistentAnger {
         }
     }
 
-    // Vanilla `NeutralMob.java:44-46` legacy read path: a plain int holding the
-    // remaining-ticks count (`AngerTime` -> `setTimeToRemainAngry`), unlike the modern
-    // `anger_end_time` long which stores an absolute game tick this primitive doesn't track.
-    pub async fn write_nbt(&self, nbt: &mut NbtCompound) {
-        nbt.put_int("AngerTime", self.remaining_ticks.load(Relaxed).max(0));
+    /// Vanilla `NeutralMob.addPersistentAngerSaveData` (`NeutralMob.java:34-37`): the absolute
+    /// `anger_end_time` (`-1` when not angry).  The legacy `AngerTime` int is read only.
+    pub async fn write_nbt(&self, nbt: &mut NbtCompound, game_time: i64) {
+        let remaining = self.remaining_ticks.load(Relaxed).max(0);
+        nbt.put_long("anger_end_time", anger_end_time(remaining, game_time));
         if let Some(uuid) = self.angry_at().await {
             nbt.put_uuid("angry_at", uuid);
         }
     }
 
-    pub async fn read_nbt(&self, nbt: &NbtCompound) {
-        self.remaining_ticks
-            .store(nbt.get_int("AngerTime").unwrap_or(0).max(0), Relaxed);
+    /// Vanilla `NeutralMob.readPersistentAngerSaveData` (`NeutralMob.java:39-57`): the absolute
+    /// `anger_end_time` wins; otherwise the legacy relative `AngerTime` int.
+    pub async fn read_nbt(&self, nbt: &NbtCompound, game_time: i64) {
+        let remaining = nbt.get_long("anger_end_time").map_or_else(
+            || nbt.get_int("AngerTime").unwrap_or(0).max(0),
+            |end| remaining_from_end_time(end, game_time),
+        );
+        self.remaining_ticks.store(remaining, Relaxed);
         *self.angry_at.lock().await = nbt.get_uuid("angry_at");
     }
+}
+
+/// `NeutralMob.NO_ANGER_END_TIME` is `-1`; otherwise `gameTime + remaining`.
+const fn anger_end_time(remaining: i32, game_time: i64) -> i64 {
+    if remaining > 0 {
+        game_time + remaining as i64
+    } else {
+        -1
+    }
+}
+
+/// Inverse of [`anger_end_time`]: remaining ticks, clamped to the `i32` counter.
+fn remaining_from_end_time(end: i64, game_time: i64) -> i32 {
+    (end - game_time).clamp(0, i64::from(i32::MAX)) as i32
 }
 
 #[cfg(test)]
@@ -163,12 +182,27 @@ mod test {
         anger.remaining_ticks.store(123, Relaxed);
 
         let mut nbt = NbtCompound::new();
-        anger.write_nbt(&mut nbt).await;
+        anger.write_nbt(&mut nbt, 1000).await;
 
         let restored = PersistentAnger::default();
-        restored.read_nbt(&nbt).await;
+        restored.read_nbt(&nbt, 1000).await;
 
         assert_eq!(restored.remaining_ticks.load(Relaxed), 123);
         assert_eq!(restored.angry_at().await, Some(target));
+    }
+
+    #[tokio::test]
+    async fn absolute_end_time_is_preferred_over_legacy() {
+        let mut nbt = NbtCompound::new();
+        nbt.put_long("anger_end_time", 1500);
+        nbt.put_int("AngerTime", 5);
+        let anger = PersistentAnger::default();
+        anger.read_nbt(&nbt, 1000).await;
+        assert_eq!(anger.remaining_ticks.load(Relaxed), 500);
+
+        // An end time already in the past (or -1) means no anger.
+        nbt.put_long("anger_end_time", -1);
+        anger.read_nbt(&nbt, 1000).await;
+        assert_eq!(anger.remaining_ticks.load(Relaxed), 0);
     }
 }

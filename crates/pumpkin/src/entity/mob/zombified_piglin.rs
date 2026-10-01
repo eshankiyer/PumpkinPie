@@ -14,7 +14,8 @@ use rand::RngExt;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal,
+        active_target::ActiveTargetGoal, destroy_egg::DestroyEggGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
         spear_use::SpearUseGoal, wander_around::WanderAroundGoal, zombie_attack::ZombieAttackGoal,
     },
@@ -73,6 +74,15 @@ impl ZombifiedPiglinEntity {
             goal_selector.add_goal(1, SpearUseGoal::new(1.0, 1.0, 10.0, 2.0));
             goal_selector.add_goal(2, ZombieAttackGoal::new(1.0, false));
             goal_selector.add_goal(7, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
+            // Inherited `Zombie.registerGoals` (`Zombie.java:112-117`): turtle egg trampling at 4,
+            // look at player and random look around at 8 (no `MoveThroughVillageGoal`: the
+            // piglin's `addBehaviourGoals` override omits it).
+            goal_selector.add_goal(4, DestroyEggGoal::new(1.0, 3));
+            goal_selector.add_goal(
+                8,
+                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
+            );
+            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc
                 .mob_entity
@@ -259,11 +269,11 @@ impl ZombifiedPiglinEntity {
 
 impl NBTStorage for ZombifiedPiglinEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async { self.persistent_anger.write_nbt(nbt).await })
+        Box::pin(async { self.persistent_anger.write_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await })
     }
 
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async { self.persistent_anger.read_nbt(nbt).await })
+        Box::pin(async { self.persistent_anger.read_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await })
     }
 }
 

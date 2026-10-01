@@ -2141,6 +2141,15 @@ pub trait Mob: EntityBase + Send + Sync {
     /// override this to store and broadcast the flag.
     fn set_charging_crossbow(&self, _charging: bool) {}
 
+    /// Vanilla `Raider.setCelebrating` (synced `IS_CELEBRATING`, drives the cheering arm pose).
+    /// Default no-op; raiders wired to `RaiderCelebrationGoal` override it.
+    fn set_celebrating(&self, _celebrating: bool) {}
+
+    /// Vanilla `Raider.getCelebrateSound`; `None` for mobs that are not raiders.
+    fn get_celebrate_sound(&self) -> Option<Sound> {
+        None
+    }
+
     /// Vanilla `Mob.chargeSpeedModifier` (`Mob.java:1480`) scales the mounted spear
     /// approach/reposition speeds; the base mob has no modifier.
     fn charge_speed_modifier(&self) -> f32 {

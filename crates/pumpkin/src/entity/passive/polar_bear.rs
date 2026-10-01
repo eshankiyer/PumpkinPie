@@ -212,7 +212,7 @@ impl NBTStorage for PolarBearEntity {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_ageable_nbt(nbt);
-            self.persistent_anger.write_nbt(nbt).await;
+            self.persistent_anger.write_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
         })
     }
 
@@ -220,7 +220,7 @@ impl NBTStorage for PolarBearEntity {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt).await;
+            self.persistent_anger.read_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
         })
     }
 }

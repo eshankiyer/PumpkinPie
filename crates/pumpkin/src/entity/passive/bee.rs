@@ -1157,7 +1157,7 @@ impl NBTStorage for BeeEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_ageable_nbt(nbt);
             self.write_animal_nbt(nbt);
-            self.persistent_anger.write_nbt(nbt).await;
+            self.persistent_anger.write_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
             if let Some(hive_pos) = self.hive_pos.load() {
                 nbt.put("hive_pos", block_pos_to_nbt(hive_pos));
             }
@@ -1186,7 +1186,7 @@ impl NBTStorage for BeeEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt).await;
+            self.persistent_anger.read_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
             // Store the flag bits directly: the entity has no viewers yet during load, so the
             // byte is published by `mob_init_data_tracker` instead of broadcast from here.
             let mut flags = 0u8;
