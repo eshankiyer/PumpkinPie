@@ -1,10 +1,12 @@
 use core::f32;
 use std::sync::{
     Arc,
-    atomic::{AtomicU32, Ordering},
+    atomic::{AtomicI32, AtomicU32, Ordering},
 };
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -17,6 +19,9 @@ pub struct ExperienceOrbEntity {
     amount: AtomicU32,
     orb_age: AtomicU32,
     count: AtomicU32,
+    tick_count: AtomicU32,
+    /// Vanilla `ExperienceOrb.health` (`ExperienceOrb.java:42`), default 5.
+    health: AtomicI32,
 }
 
 impl ExperienceOrbEntity {
@@ -69,6 +74,8 @@ impl ExperienceOrbEntity {
             amount: AtomicU32::new(amount),
             orb_age: AtomicU32::new(0),
             count: AtomicU32::new(1),
+            tick_count: AtomicU32::new(0),
+            health: AtomicI32::new(5),
         }
     }
 
@@ -190,7 +197,8 @@ impl NBTStorage for ExperienceOrbEntity {
         nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
     ) -> super::NbtFuture<'a, ()> {
         Box::pin(async move {
-            // Vanilla `ExperienceOrb.addAdditionalSaveData`. `Health` is not tracked here.
+            // Vanilla `ExperienceOrb.addAdditionalSaveData`.
+            nbt.put_short("Health", self.health.load(Ordering::Relaxed) as i16);
             nbt.put_short("Age", self.orb_age.load(Ordering::Relaxed) as i16);
             nbt.put_short("Value", self.amount.load(Ordering::Relaxed) as i16);
             nbt.put_int("Count", self.count.load(Ordering::Relaxed) as i32);
@@ -202,6 +210,10 @@ impl NBTStorage for ExperienceOrbEntity {
         nbt: &'a pumpkin_nbt::compound::NbtCompound,
     ) -> super::NbtFuture<'a, ()> {
         Box::pin(async move {
+            self.health.store(
+                i32::from(nbt.get_short("Health").unwrap_or(5)),
+                Ordering::Relaxed,
+            );
             self.orb_age.store(
                 nbt.get_short("Age").unwrap_or(0).max(0) as u32,
                 Ordering::Relaxed,
@@ -225,6 +237,36 @@ impl EntityBase for ExperienceOrbEntity {
         false
     }
 
+    /// Vanilla `ExperienceOrb.hurtServer` (`ExperienceOrb.java:252-266`).
+    fn damage_with_context<'a>(
+        &'a self,
+        _caller: &'a dyn EntityBase,
+        amount: f32,
+        damage_type: DamageType,
+        _position: Option<Vector3<f64>>,
+        _source: Option<&'a dyn EntityBase>,
+        _cause: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            if self.entity.is_invulnerable_to(&damage_type).await {
+                return false;
+            }
+            self.entity.mark_hurt();
+            // `(int)(this.health - damage)` is float arithmetic truncated toward zero.
+            let previous = self
+                .health
+                .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |health| {
+                    Some((health as f32 - amount) as i32)
+                })
+                .unwrap_or_else(|unchanged| unchanged);
+            let remaining = (previous as f32 - amount) as i32;
+            if remaining <= 0 {
+                self.entity.remove().await;
+            }
+            true
+        })
+    }
+
     fn tick<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
@@ -234,21 +276,48 @@ impl EntityBase for ExperienceOrbEntity {
             let entity = &self.entity;
             entity.tick(caller, server).await;
 
-            let age = self.orb_age.fetch_add(1, Ordering::Relaxed);
-            if age > 0 && age.is_multiple_of(20) {
+            // Vanilla `tickCount` is incremented by `Entity.baseTick`, separate from `age`.
+            let tick_count = self.tick_count.fetch_add(1, Ordering::Relaxed) + 1;
+
+            let bounding_box = entity.bounding_box.load();
+            let world = entity.world.load();
+            let mut velo = entity.velocity.load();
+
+            // `ExperienceOrb.tick` (`ExperienceOrb.java:97-140`): water replaces gravity, gravity
+            // only applies while not inside a collision, and lava kicks the orb around.
+            let colliding = !world.is_space_empty(bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7));
+            if entity.is_eye_in_fluid(&world, &tag::Fluid::MINECRAFT_WATER) {
+                // `ExperienceOrb.setUnderwaterMovement` (`ExperienceOrb.java:234-237`).
+                velo = Vector3::new(
+                    velo.x * f64::from(0.99f32),
+                    (velo.y + f64::from(5.0e-4f32)).min(f64::from(0.06f32)),
+                    velo.z * f64::from(0.99f32),
+                );
+            } else if !colliding {
+                velo.y -= self.get_gravity();
+            }
+
+            if world
+                .get_fluid(&entity.block_pos.load())
+                .has_tag(&tag::Fluid::MINECRAFT_LAVA)
+            {
+                velo = Vector3::new(
+                    f64::from((rand::random::<f32>() - rand::random::<f32>()) * 0.2),
+                    f64::from(0.2f32),
+                    f64::from((rand::random::<f32>() - rand::random::<f32>()) * 0.2),
+                );
+            }
+            entity.velocity.store(velo);
+
+            if tick_count % 20 == 1 {
                 self.scan_for_merges().await;
             }
 
-            let bounding_box = entity.bounding_box.load();
-
-            let original_velo = entity.velocity.load();
-
-            let mut velo = original_velo;
-
-            let world = entity.world.load();
-            if let Some(player) = world.get_closest_player(entity.pos.load(), 8.0)
-                && !player.is_spectator()
-            {
+            // `followNearbyPlayer`: the nearest living, non-spectator player within 8 blocks.
+            let following = world.get_closest_player_where(entity.pos.load(), 8.0, |player| {
+                !player.is_spectator() && !player.living_entity.is_dead_or_dying()
+            });
+            if let Some(player) = &following {
                 let player_entity = player.get_entity();
                 let target = player_entity.pos.load()
                     + Vector3::new(0.0, player_entity.get_eye_height() / 2.0, 0.0);
@@ -258,19 +327,25 @@ impl EntityBase for ExperienceOrbEntity {
                     let power = (1.0 - distance / 8.0).max(0.0);
                     velo += delta.normalize() * (power * power * 0.1);
                 }
+                entity.velocity.store(velo);
+            } else if colliding
+                && !world.is_space_empty(
+                    bounding_box
+                        .shift(velo)
+                        .expand(-1.0e-7, -1.0e-7, -1.0e-7),
+                )
+            {
+                // Stuck in a block with nowhere to fall: `Entity.moveTowardsClosestSpace`, then
+                // `needsSync` re-sends the new velocity.
+                let position = entity.pos.load();
+                entity.push_out_of_blocks(Vector3::new(
+                    position.x,
+                    f64::midpoint(bounding_box.min.y, bounding_box.max.y),
+                    position.z,
+                ));
+                entity.velocity_dirty.store(true, Ordering::SeqCst);
+                velo = entity.velocity.load();
             }
-
-            let no_clip = !self
-                .entity
-                .world
-                .load()
-                .is_space_empty(bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7));
-            // TODO: isSubmergedIn
-            if !no_clip {
-                velo.y -= self.get_gravity();
-            }
-
-            entity.velocity.store(velo);
 
             let fall_speed = velo.y;
             entity.move_entity(caller, velo).await;
@@ -293,7 +368,7 @@ impl EntityBase for ExperienceOrbEntity {
             }
             entity.velocity.store(damped);
 
-            if age >= 6000 {
+            if self.orb_age.fetch_add(1, Ordering::Relaxed) + 1 >= 6000 {
                 self.entity.remove().await;
             }
         })

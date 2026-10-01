@@ -829,6 +829,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                             Attributes::ALL
                                 .iter()
                                 .find(|attribute| attribute.id == *id)
+                                .filter(|attribute| attributes::is_client_syncable(attribute))
                                 .map(|attribute| {
                                     let modifiers = instance
                                         .modifiers

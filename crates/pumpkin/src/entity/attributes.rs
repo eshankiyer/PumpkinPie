@@ -219,6 +219,22 @@ impl AttributeInstance {
     }
 }
 
+/// Vanilla `Attribute.isClientSyncable` (`Attribute.java:30-38`).
+///
+/// Every attribute in `Attributes.java` is registered with `setSyncable(true)` except these
+/// eight, which `AttributeMap.getSyncableAttributes` and `onAttributeModified` never send.
+#[must_use]
+pub fn is_client_syncable(attribute: &Attributes) -> bool {
+    !(*attribute == Attributes::ATTACK_DAMAGE
+        || *attribute == Attributes::ATTACK_KNOCKBACK
+        || *attribute == Attributes::FOLLOW_RANGE
+        || *attribute == Attributes::KNOCKBACK_RESISTANCE
+        || *attribute == Attributes::SPAWN_REINFORCEMENTS
+        || *attribute == Attributes::TEMPT_RANGE
+        || *attribute == Attributes::WAYPOINT_TRANSMIT_RANGE
+        || *attribute == Attributes::WAYPOINT_RECEIVE_RANGE)
+}
+
 /// Send updates for multiple attributes in a single packet for the given living entity.
 pub async fn send_attribute_updates_for_living(
     living: &crate::entity::living::LivingEntity,
@@ -232,6 +248,10 @@ pub async fn send_attribute_updates_for_living(
     use pumpkin_protocol::java::client::play::AttributeModifier as JeAttrMod;
     use pumpkin_protocol::java::client::play::CUpdateAttributes as JePacket;
     use pumpkin_protocol::java::client::play::Property as JeProperty;
+
+    if attributes.is_empty() {
+        return;
+    }
 
     let mut je_properties: Vec<JeProperty> = Vec::with_capacity(attributes.len());
     let mut be_attributes: Vec<BeAttribute> = Vec::with_capacity(attributes.len());
@@ -257,12 +277,14 @@ pub async fn send_attribute_updates_for_living(
             }
         }
 
-        // Move modifiers into the property
-        je_properties.push(JeProperty::new(
-            VarInt(i32::from(attribute.id)),
-            base_value,
-            modifiers,
-        ));
+        // Only the Java packet honours `Attribute.isClientSyncable`; Bedrock needs these values.
+        if is_client_syncable(&attribute) {
+            je_properties.push(JeProperty::new(
+                VarInt(i32::from(attribute.id)),
+                base_value,
+                modifiers,
+            ));
+        }
 
         let name = match attribute.id {
             22 => "minecraft:movement".to_string(),
@@ -349,7 +371,16 @@ pub(crate) const fn sanitize_value(value: f64, min_value: f64, max_value: f64) -
 
 #[cfg(test)]
 mod tests {
-    use super::{AttributeInstance, Modifier, ModifierOperation};
+    use super::{AttributeInstance, Modifier, ModifierOperation, is_client_syncable};
+    use pumpkin_data::attributes::Attributes;
+
+    #[test]
+    fn non_syncable_attributes_match_vanilla() {
+        assert!(!is_client_syncable(&Attributes::ATTACK_DAMAGE));
+        assert!(!is_client_syncable(&Attributes::KNOCKBACK_RESISTANCE));
+        assert!(is_client_syncable(&Attributes::MAX_HEALTH));
+        assert!(is_client_syncable(&Attributes::MOVEMENT_SPEED));
+    }
 
     #[test]
     fn ranged_values_match_vanilla_sanitization() {
