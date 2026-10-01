@@ -94,6 +94,14 @@ pub trait GameEventListener: Send + Sync {
     fn listener_source(&self) -> PositionSource;
     fn listener_radius(&self) -> i32;
 
+    /// Whether `VibrationSystem.Listener.isOccluded` applies to this listener. Vanilla runs it
+    /// only inside the vibration-system listener (`VibrationSystem.java:231`);
+    /// `GameEventDispatcher.post` itself does no occlusion, so plain listeners (the Allay's
+    /// jukebox listener, the sculk catalyst) opt out.
+    fn checks_vibration_occlusion(&self) -> bool {
+        true
+    }
+
     fn handle_game_event<'a>(
         &'a self,
         world: &'a Arc<World>,
@@ -205,7 +213,7 @@ fn is_occluded(world: &World, from: Vector3<f64>, to: Vector3<f64>) -> bool {
 
 // GameEventDispatcher.post: notifies every registered listener within the event's
 // notification radius, closest-first (GameEvent.ListenerInfo::compareTo), gated by the
-// occlusion check above. Vanilla's chunk-section iteration is replaced by scanning the
+// occlusion check above for vibration-system listeners. Vanilla's chunk-section iteration is replaced by scanning the
 // flat registry (see module doc comment).
 pub async fn emit_game_event(
     world: &Arc<World>,
@@ -244,7 +252,7 @@ pub async fn emit_game_event(
     in_range.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     for (_, listener, listener_pos) in in_range {
-        if is_occluded(world, position, listener_pos) {
+        if listener.checks_vibration_occlusion() && is_occluded(world, position, listener_pos) {
             continue;
         }
         listener

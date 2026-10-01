@@ -2380,6 +2380,13 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async {})
     }
 
+    /// Whether damage caused by `cause` (vanilla `DamageSource.getEntity()`, the causing entity
+    /// rather than the direct one) is discarded before any hurt handling, as in
+    /// `Allay.hurtServer` (`Allay.java:154-157`). No damage, knockback or hurt sound results.
+    fn is_immune_to_damage_cause(&self, _cause: Option<&dyn EntityBase>) -> bool {
+        false
+    }
+
     /// Called before damage is applied. Return `false` to cancel the damage entirely.
     /// Used by endermen to dodge projectiles via teleportation.
     fn pre_damage<'a>(
@@ -3603,6 +3610,9 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         cause: Option<&'a dyn EntityBase>,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
+            if self.is_immune_to_damage_cause(cause) {
+                return false;
+            }
             // pre_damage hook: allows mobs to dodge/cancel damage (e.g. enderman projectile dodge)
             if !self.pre_damage(damage_type, source).await {
                 return false;

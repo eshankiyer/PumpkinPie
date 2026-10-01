@@ -24,12 +24,9 @@
 //   glance at nearby players while idling. `SetWalkTargetFromLookTarget` in the `RunOne` is
 //   kept, but with nothing writing `LOOK_TARGET` from the world it only ever follows a look
 //   target some other behavior set.
-// - `DATA_DANCING`/`DATA_CAN_DUPLICATE` client-synced booleans and the client-side
-//   `holdingItemAnimationTicks`/`dancingAnimationTicks`/`spinningAnimationTicks` animation
-//   state (`Allay.java:80-81, 228-260, 393-404`): Pumpkin's `Entity` has no generic boolean
-//   tracked-data slot exposed to per-mob code the way vanilla's `SynchedEntityData.Builder`
-//   does, and no client animation-state channel at all (the same gap `warden.rs` notes for
-//   `AnimationState`). `is_dancing` below is server-side only.
+// - The client-side `holdingItemAnimationTicks`/`dancingAnimationTicks`/`spinningAnimationTicks`
+//   animation state (`Allay.java:228-260, 393-404`) is renderer-only; its server-side inputs,
+//   `DATA_DANCING` and `DATA_CAN_DUPLICATE`, are published through `send_meta_data`.
 // - `hasNonMatchingPotion` (`Allay.java:353-358`), which compares
 //   `DataComponents.POTION_CONTENTS`: the item-identity half of `allayConsidersItemEqual` is
 //   ported, the potion-content special case is not, so an Allay holding a healing potion will
@@ -55,6 +52,11 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::tracked_data::allay::{DATA_CAN_DUPLICATE, DATA_DANCING};
+use pumpkin_data::{Block, BlockState};
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
@@ -66,6 +68,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 use uuid::Uuid;
 
+use crate::entity::ai::control::flying_move_control::FlyingMoveControl;
 use crate::entity::ai::brain::behavior::count_down_cooldown_ticks::CountDownCooldownTicks;
 use crate::entity::ai::brain::behavior::do_nothing::DoNothing;
 use crate::entity::ai::brain::behavior::gate::GateBehavior;
@@ -86,12 +89,16 @@ use crate::entity::ai::brain::sensor::nearest_living_entities::NearestLivingEnti
 use crate::entity::ai::brain::{Activity, ActivityData, Brain};
 use crate::entity::player::Player;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    living::LivingEntity,
     mob::{Mob, MobEntity},
 };
 use crate::world::World;
+use crate::world::game_event::vibration::{
+    VibrationData, VibrationInfo, is_valid_vibration,
+};
 use crate::world::game_event::{
-    GameEventContext, GameEventFuture, GameEventListener, PositionSource,
+    GameEventContext, GameEventFuture, GameEventListener, PositionSource, vibration_frequency,
 };
 
 /// `Allay.DUPLICATION_COOLDOWN_TICKS`
@@ -147,6 +154,8 @@ pub struct AllayEntity {
     /// Synchronous mirror of `EquipmentSlot::MAIN_HAND`; see the module comment.
     item_in_hand: std::sync::Mutex<ItemStack>,
     duplication_cooldown: AtomicI64,
+    /// `Allay.vibrationData` (`Allay.java:91`), ticked by `tick_vibration`.
+    vibration_data: std::sync::Mutex<VibrationData>,
     listener_registered: AtomicBool,
     vibration_listener: std::sync::Mutex<Option<Arc<AllayVibrationListener>>>,
     jukebox_listener: std::sync::Mutex<Option<Arc<AllayJukeboxListener>>>,
@@ -156,6 +165,7 @@ impl AllayEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mut mob_entity = MobEntity::new(entity);
         mob_entity.brain = Some(Self::make_brain());
+        Self::install_flight(&mob_entity);
 
         let allay = Self {
             mob_entity,
@@ -164,6 +174,7 @@ impl AllayEntity {
             inventory: std::sync::Mutex::new(ItemStack::EMPTY.clone()),
             item_in_hand: std::sync::Mutex::new(ItemStack::EMPTY.clone()),
             duplication_cooldown: AtomicI64::new(0),
+            vibration_data: std::sync::Mutex::new(VibrationData::default()),
             listener_registered: AtomicBool::new(false),
             vibration_listener: std::sync::Mutex::new(None),
             jukebox_listener: std::sync::Mutex::new(None),
@@ -181,6 +192,24 @@ impl AllayEntity {
         }));
 
         mob_arc
+    }
+
+    /// The `Allay` constructor's `FlyingMoveControl(this, 20, true)` (`Allay.java:105`) and
+    /// `Allay.createNavigation` (`Allay.java:133-140`).
+    fn install_flight(mob_entity: &MobEntity) {
+        *mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(FlyingMoveControl::new(20.0, true));
+        let mut navigator = mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        navigator.set_flying(true);
+        navigator.set_can_open_doors(false);
+        navigator.set_can_float(true);
+        navigator.set_required_path_length(48.0);
     }
 
     /// `Allay.BRAIN_PROVIDER` (`Allay.java:83-85`) / `AllayAi.getActivities()`
@@ -260,10 +289,18 @@ impl AllayEntity {
         self.is_dancing.load(Ordering::Relaxed)
     }
 
-    /// `Allay.setDancing`, minus the `isEffectiveAi`/panic gate and the client `DATA_DANCING`
-    /// sync (see module doc comment).
+    /// `Allay.setDancing` (`Allay.java:381-385`): written only while the AI is effective and,
+    /// when starting to dance, not panicking. `is_dancing` mirrors `DATA_DANCING`.
     fn set_dancing(&self, dancing: bool) {
-        self.is_dancing.store(dancing, Ordering::Relaxed);
+        if self.mob_entity.is_no_ai() || (dancing && self.is_panicking()) {
+            return;
+        }
+        if self.is_dancing.swap(dancing, Ordering::Relaxed) != dancing {
+            self.mob_entity
+                .living_entity
+                .entity
+                .send_meta_data(&[Metadata::new(DATA_DANCING, dancing)], None);
+        }
     }
 
     /// `Allay.setJukeboxPlaying`
@@ -318,9 +355,78 @@ impl AllayEntity {
         self.duplication_cooldown.load(Ordering::Relaxed) > 0
     }
 
+    /// `Allay.setDuplicationCooldown` (`Allay.java:454-457`): `DATA_CAN_DUPLICATE` is
+    /// `cooldown == 0`.
+    fn set_duplication_cooldown(&self, cooldown: i64) {
+        let previous = self.duplication_cooldown.swap(cooldown, Ordering::Relaxed);
+        if (previous == 0) != (cooldown == 0) {
+            self.mob_entity
+                .living_entity
+                .entity
+                .send_meta_data(&[Metadata::new(DATA_CAN_DUPLICATE, cooldown == 0)], None);
+        }
+    }
+
     fn reset_duplication_cooldown(&self) {
-        self.duplication_cooldown
-            .store(DUPLICATION_COOLDOWN_TICKS, Ordering::Relaxed);
+        self.set_duplication_cooldown(DUPLICATION_COOLDOWN_TICKS);
+    }
+
+    /// `Allay.isLikedPlayer` (`Allay.java:164-171`).
+    fn is_liked_player(&self, other: Option<&dyn EntityBase>) -> bool {
+        let Some(player) = other.and_then(EntityBase::get_player) else {
+            return false;
+        };
+        self.brain()
+            .get::<LikedPlayerMemory>()
+            .is_some_and(|liked| liked == player.get_entity().entity_uuid)
+    }
+
+    /// `Allay.VibrationUser.canReceiveVibration` (`Allay.java:562-575`). The dimension half of
+    /// `GlobalPos.isCloseEnough` is not representable (see module comment).
+    fn can_receive_vibration(&self, pos: BlockPos) -> bool {
+        if self.mob_entity.is_no_ai() {
+            return false;
+        }
+        let Some(liked) = self.brain().get::<LikedNoteblockPositionMemory>() else {
+            return true;
+        };
+        let my_pos = self.mob_entity.living_entity.entity.block_pos.load();
+        chessboard_distance(liked, my_pos) <= MAX_NOTEBLOCK_DISTANCE && liked == pos
+    }
+
+    /// `VibrationSystem.Ticker.tick` (`VibrationSystem.java:278-298`) for the Allay's data.
+    /// Returns the origin of a vibration that has finished travelling, which
+    /// `Allay.VibrationUser.onReceiveVibration` (`Allay.java:577-589`) hands to `hearNoteblock`:
+    /// the only listenable event is `note_block_play`, so no event kind has to be stored.
+    async fn tick_vibration(&self) -> Option<BlockPos> {
+        let needs_tick = {
+            let data = self.vibration_data.lock().unwrap();
+            data.current_vibration.is_some() || !data.selector.is_empty()
+        };
+        if !needs_tick {
+            return None;
+        }
+        let game_time = u64::try_from(
+            self.mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .get_world_age()
+                .await,
+        )
+        .unwrap_or(0);
+        let mut data = self.vibration_data.lock().unwrap();
+        if data.current_vibration.is_none() {
+            data.select_and_schedule(game_time);
+        }
+        let current = data.current_vibration?;
+        data.travel_time = data.travel_time.saturating_sub(1);
+        if data.travel_time > 0 {
+            return None;
+        }
+        data.current_vibration = None;
+        Some(BlockPos::floored_v(current.pos))
     }
 
     /// `Allay.hasItemInHand` (`Allay.java:267-269`), off the sync mirror.
@@ -406,6 +512,14 @@ fn get_item_deposit_position(mob: &dyn Mob, brain: &Brain) -> Option<PositionTra
     get_liked_player_position_tracker(mob, brain)
 }
 
+/// `Vec3i.distChessboard`.
+fn chessboard_distance(a: BlockPos, b: BlockPos) -> i32 {
+    (a.0.x - b.0.x)
+        .abs()
+        .max((a.0.y - b.0.y).abs())
+        .max((a.0.z - b.0.z).abs())
+}
+
 /// `AllayAi.shouldDepositItemsAtLikedNoteblock` (`AllayAi.java:127-134`).
 /// `GlobalPos.isCloseEnough` is a **chessboard** distance compare (`GlobalPos.java:31-33`), not
 /// Euclidean, and its dimension-equality half is not representable here (see module comment).
@@ -416,11 +530,7 @@ fn should_deposit_items_at_liked_noteblock(
 ) -> bool {
     let entity = &mob.get_mob_entity().living_entity.entity;
     let mob_block_pos = entity.block_pos.load();
-    let chessboard_distance = (noteblock_pos.0.x - mob_block_pos.0.x)
-        .abs()
-        .max((noteblock_pos.0.y - mob_block_pos.0.y).abs())
-        .max((noteblock_pos.0.z - mob_block_pos.0.z).abs());
-    if chessboard_distance > MAX_NOTEBLOCK_DISTANCE {
+    if chessboard_distance(noteblock_pos, mob_block_pos) > MAX_NOTEBLOCK_DISTANCE {
         return false;
     }
     if entity.world.load().get_block(&noteblock_pos) != &pumpkin_data::Block::NOTE_BLOCK {
@@ -477,7 +587,61 @@ fn on_item_thrown(mob: &dyn Mob, _item: &ItemStack, _target_pos: BlockPos, game_
     );
 }
 
-impl NBTStorage for AllayEntity {}
+impl NBTStorage for AllayEntity {
+    /// `Allay.addAdditionalSaveData` (`Allay.java:427-433`). The base entity data is written by
+    /// the world's save path.
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            // `InventoryCarrier.writeInventoryToTag` stores the non-empty stacks as a list.
+            let stack = self.inventory.lock().unwrap().clone();
+            if !stack.is_empty() {
+                let mut item_nbt = NbtCompound::new();
+                stack.write_item_stack(&mut item_nbt);
+                nbt.put("Inventory", NbtTag::List(vec![NbtTag::Compound(item_nbt)]));
+            }
+            nbt.put_compound("listener", self.vibration_data.lock().unwrap().to_nbt());
+            nbt.put_long(
+                "DuplicationCooldown",
+                self.duplication_cooldown.load(Ordering::Relaxed),
+            );
+        })
+    }
+
+    /// `Allay.readAdditionalSaveData` (`Allay.java:435-441`).
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            // `SimpleContainer.fromItemList`: clear, then `addItem` each stack.
+            if let Some(items) = nbt.get_list("Inventory") {
+                let mut slot = self.inventory.lock().unwrap();
+                *slot = ItemStack::EMPTY.clone();
+                for mut stack in items
+                    .iter()
+                    .filter_map(|tag| tag.extract_compound().and_then(ItemStack::read_item_stack))
+                {
+                    if slot.is_empty() {
+                        *slot = stack;
+                    } else if slot.are_items_and_components_equal(&stack) {
+                        let room = slot.get_max_stack_size().saturating_sub(slot.item_count);
+                        let moved = stack.item_count.min(room);
+                        slot.item_count += moved;
+                        stack.item_count -= moved;
+                    }
+                }
+            }
+            *self.vibration_data.lock().unwrap() = nbt
+                .get_compound("listener")
+                .and_then(VibrationData::from_nbt)
+                .unwrap_or_default();
+            // `getIntOr`: vanilla writes a long but reads it back as an int.
+            let cooldown = nbt
+                .get_long("DuplicationCooldown")
+                .or_else(|| nbt.get_int("DuplicationCooldown").map(i64::from))
+                .and_then(|value| i32::try_from(value).ok())
+                .unwrap_or(0);
+            self.set_duplication_cooldown(i64::from(cooldown));
+        })
+    }
+}
 
 impl Mob for AllayEntity {
     fn get_mob_entity(&self) -> &MobEntity {
@@ -486,6 +650,88 @@ impl Mob for AllayEntity {
 
     fn should_follow_leash(&self) -> bool {
         false
+    }
+
+    /// `Allay.hurtServer` (`Allay.java:154-157`): the liked player, or anything that player
+    /// causes, cannot hurt the Allay.
+    fn is_immune_to_damage_cause(&self, cause: Option<&dyn EntityBase>) -> bool {
+        self.is_liked_player(cause)
+    }
+
+    /// `Allay.playStepSound` (`Allay.java:173-175`) is empty: no footstep sound.
+    fn ground_step_sounds(
+        &self,
+        _supporting_block: &Block,
+        _supporting_state: &BlockState,
+        _above_block: &Block,
+    ) -> Option<Vec<(Sound, f32, f32)>> {
+        Some(Vec::new())
+    }
+
+    /// `Allay.travel` (`Allay.java:149-152`) is `travelFlying(input, getSpeed())`
+    /// (`LivingEntity.java:2443-2457`): no gravity, block friction or fluid physics.
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            let entity = &living.entity;
+            let in_water = entity.touching_water.load(Ordering::Relaxed);
+            let in_lava = !in_water && entity.touching_lava.load(Ordering::Relaxed);
+            let speed = if in_water || in_lava {
+                f64::from(0.02f32)
+            } else {
+                living.speed.load()
+            };
+            entity.update_velocity_from_input(living.movement_input.load(), speed);
+            entity.move_entity(caller, entity.velocity.load()).await;
+            let drag = if in_water {
+                f64::from(0.8f32)
+            } else if in_lava {
+                0.5
+            } else {
+                f64::from(0.91f32)
+            };
+            entity.velocity.store(entity.velocity.load() * drag);
+            true
+        })
+    }
+
+    /// `Allay.dropEquipment` (`Allay.java:411-420`): the carried inventory and then the main
+    /// hand, unconditionally unless the hand item has `PREVENT_EQUIPMENT_DROP`.
+    fn drop_death_inventory(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            let world = living.entity.world.load_full();
+            let block_pos = living.entity.block_pos.load();
+
+            let carried = std::mem::replace(
+                &mut *self.inventory.lock().unwrap(),
+                ItemStack::EMPTY.clone(),
+            );
+            if !carried.is_empty() {
+                world.drop_stack(&block_pos, carried).await;
+            }
+
+            let held = living
+                .entity_equipment
+                .lock()
+                .await
+                .equipment
+                .get(&EquipmentSlot::MAIN_HAND)
+                .cloned();
+            if let Some(held) = held
+                && !held.is_empty()
+                && !LivingEntity::item_prevents_equipment_drop(&held)
+            {
+                living
+                    .entity_equipment
+                    .lock()
+                    .await
+                    .equipment
+                    .remove(&EquipmentSlot::MAIN_HAND);
+                *self.item_in_hand.lock().unwrap() = ItemStack::EMPTY.clone();
+                world.drop_stack(&block_pos, held).await;
+            }
+        })
     }
 
     /// `Allay.canPickUpLoot` (`Allay.java:262-265`).
@@ -555,6 +801,15 @@ impl Mob for AllayEntity {
                 .age
                 .load(Ordering::Relaxed);
 
+            // `Allay.tick`'s server branch (`Allay.java:254-259`): the vibration ticker, then
+            // stop dancing while panicking.
+            if let Some(pos) = self.tick_vibration().await {
+                self.hear_noteblock(pos);
+            }
+            if self.is_panicking() {
+                self.set_dancing(false);
+            }
+
             // `Allay.aiStep`: heal 1 HP every 10 ticks while alive.
             if age % 10 == 0 && self.mob_entity.living_entity.entity.is_alive() {
                 self.mob_entity.living_entity.heal(1.0);
@@ -570,8 +825,9 @@ impl Mob for AllayEntity {
             }
 
             // `Allay.updateDuplicationCooldown`
-            if self.duplication_cooldown.load(Ordering::Relaxed) > 0 {
-                self.duplication_cooldown.fetch_sub(1, Ordering::Relaxed);
+            let cooldown = self.duplication_cooldown.load(Ordering::Relaxed);
+            if cooldown > 0 {
+                self.set_duplication_cooldown(cooldown - 1);
             }
         })
     }
@@ -659,31 +915,56 @@ impl GameEventListener for AllayVibrationListener {
         16
     }
 
+    /// `VibrationSystem.Listener.handleGameEvent` (`VibrationSystem.java:209-237`): the event
+    /// is only queued as a candidate; `AllayEntity::tick_vibration` delivers it after its
+    /// travel time. `isOccluded` already ran in `emit_game_event`.
     fn handle_game_event<'a>(
         &'a self,
-        _world: &'a Arc<World>,
+        world: &'a Arc<World>,
         event: &'a GameEvent,
-        _context: &'a GameEventContext,
+        context: &'a GameEventContext,
         source_position: Vector3<f64>,
     ) -> GameEventFuture<'a> {
         Box::pin(async move {
             let Some(allay) = self.allay.upgrade() else {
                 return false;
             };
+            if allay.vibration_data.lock().unwrap().current_vibration.is_some() {
+                return false;
+            }
             // GameEventTags.ALLAY_CAN_LISTEN is just `note_block_play`
             // (pumpkin-data/src/generated/tag.rs, GameEvent::MINECRAFT_ALLAY_CAN_LISTEN).
             if !matches!(event, GameEvent::NoteBlockPlay) {
                 return false;
             }
-            if allay.mob_entity.is_no_ai() {
+            // `canTriggerAvoidVibration` is false for the Allay.
+            if !is_valid_vibration(event, context, false).await {
                 return false;
             }
-            let pos = BlockPos::new(
-                source_position.x.floor() as i32,
-                source_position.y.floor() as i32,
-                source_position.z.floor() as i32,
-            );
-            allay.hear_noteblock(pos);
+            if !allay.can_receive_vibration(BlockPos::floored_v(source_position)) {
+                return false;
+            }
+            // `EntityPositionSource(allay, eyeHeight)`.
+            let entity = &allay.mob_entity.living_entity.entity;
+            let mut destination = entity.pos.load();
+            destination.y += entity.get_eye_height();
+            let vibration = VibrationInfo {
+                frequency: vibration_frequency(event),
+                distance: (destination - source_position).length() as f32,
+                pos: source_position,
+                source_entity: context
+                    .source_entity
+                    .as_ref()
+                    .map(|source| source.get_entity().entity_uuid),
+                projectile_owner: None,
+            };
+            let game_time = u64::try_from(world.get_world_age().await).unwrap_or(0);
+            allay
+                .vibration_data
+                .lock()
+                .unwrap()
+                .selector
+                .add_candidate(vibration, game_time);
             true
         })
     }
@@ -703,6 +984,11 @@ impl GameEventListener for AllayJukeboxListener {
     fn listener_radius(&self) -> i32 {
         // GameEvent.JUKEBOX_PLAY.value().notificationRadius() == 10
         10
+    }
+
+    /// A plain `GameEventListener`: `GameEventDispatcher.post` does no occlusion check.
+    fn checks_vibration_occlusion(&self) -> bool {
+        false
     }
 
     fn handle_game_event<'a>(
@@ -781,5 +1067,12 @@ mod tests {
             brain.get::<LikedNoteblockPositionMemory>(),
             Some(BlockPos::new(1, 2, 3))
         );
+    }
+
+    #[test]
+    fn chessboard_distance_is_the_largest_axis_difference() {
+        let a = BlockPos::new(0, 0, 0);
+        assert_eq!(chessboard_distance(a, BlockPos::new(3, -7, 5)), 7);
+        assert_eq!(chessboard_distance(a, a), 0);
     }
 }

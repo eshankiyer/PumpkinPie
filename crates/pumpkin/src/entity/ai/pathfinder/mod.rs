@@ -91,6 +91,9 @@ pub struct Navigator {
     /// The `PathFinder.distance` override of `Warden.createNavigation`
     /// (`Warden.java:544-558`): the cost of a step ignores its vertical component.
     horizontal_step_distance: bool,
+    /// `PathNavigation.requiredPathLength` (`PathNavigation.java:57`): the floor under
+    /// `getMaxPathLength`, which is `max(FOLLOW_RANGE, requiredPathLength)`.
+    required_path_length: f32,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -129,6 +132,7 @@ impl Default for Navigator {
             wall_climber_direct: false,
             avoid_sun: false,
             horizontal_step_distance: false,
+            required_path_length: 16.0,
         }
     }
 }
@@ -361,6 +365,11 @@ impl Navigator {
         }
     }
 
+    /// `PathNavigation.setRequiredPathLength` (`PathNavigation.java:74-77`).
+    pub const fn set_required_path_length(&mut self, length: f32) {
+        self.required_path_length = length;
+    }
+
     pub fn set_can_float(&mut self, can_float: bool) {
         self.evaluator.set_can_float(can_float);
     }
@@ -520,6 +529,7 @@ impl Navigator {
             wall_climber_direct: false,
             avoid_sun: self.avoid_sun,
             horizontal_step_distance: self.horizontal_step_distance,
+            required_path_length: self.required_path_length,
         }
     }
 
@@ -618,10 +628,11 @@ impl Navigator {
 
         let world = entity.entity.world.load_full();
 
-        // PathNavigation.getMaxPathLength() is at least the required path length (16 blocks),
-        // even when FOLLOW_RANGE is smaller. PathFinder visits floor(maxPathLength * 16) nodes.
-        let max_path_length =
-            (entity.get_attribute_value(&Attributes::FOLLOW_RANGE) as f32).max(16.0);
+        // PathNavigation.getMaxPathLength() is at least the required path length (16 blocks by
+        // default), even when FOLLOW_RANGE is smaller. PathFinder visits floor(maxPathLength * 16)
+        // nodes.
+        let max_path_length = (entity.get_attribute_value(&Attributes::FOLLOW_RANGE) as f32)
+            .max(self.required_path_length);
         let max_iterations = (max_path_length * 16.0).floor() as usize;
 
         let root_vehicle_id = entity.entity.root_vehicle_id().await;

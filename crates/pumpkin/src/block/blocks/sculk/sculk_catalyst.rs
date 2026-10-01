@@ -134,6 +134,12 @@ impl GameEventListener for CatalystListener {
         LISTENER_RADIUS
     }
 
+    /// `SculkCatalystBlockEntity.CatalystListener` is a plain `GameEventListener`, not a
+    /// `VibrationSystem.Listener`, so it is not subject to vibration occlusion.
+    fn checks_vibration_occlusion(&self) -> bool {
+        false
+    }
+
     /// `handleGameEvent` (lines 84-103).
     ///
     /// The catalyst consumes the experience rather than sharing it: vanilla calls
