@@ -37,12 +37,7 @@ const TRAP_MAX_LIFE: i32 = 18000;
 pub struct SkeletonHorseEntity {
     pub mob_entity: MobEntity,
     /// Vanilla `SkeletonHorse.isTrap` -- set on horses spawned by the "lightning near a lightning
-    /// rod" environmental trap mechanic. Nothing in Pumpkin currently spawns a skeleton horse
-    /// with this set to `true` at construction time (the lightning-triggered spawn path in
-    /// `World`'s chunk tick spawns a plain, non-trap `SkeletonHorseEntity` today), so in practice
-    /// this stays `false` -- exactly like `MoveTowardsRestrictionGoal`'s dormant
-    /// `position_target_range`, it's still correct to carry the field and the gated goal so that
-    /// whichever spawn path is later updated to set it just works.
+    /// rod" environmental trap mechanic. Set by `World::tick_spawning_chunk`'s thunder roll.
     is_trap: AtomicBool,
     trap_time: AtomicI32,
     pub horse_data: AbstractHorseData,
@@ -307,13 +302,11 @@ impl Mob for SkeletonHorseEntity {
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            // Vanilla: `SkeletonHorse.aiStep` -- an untriggered trap horse despawns after
-            // `TRAP_MAX_LIFE` ticks. `isPersistenceRequired` gating is skipped (Pumpkin doesn't
-            // expose that flag to entities generically here); this only matters once something
-            // actually spawns a trap horse, which nothing does yet (see `is_trap`'s doc comment).
-            if self.is_trap.load(Ordering::Relaxed) {
-                let elapsed = self.trap_time.fetch_add(1, Ordering::Relaxed) + 1;
-                if elapsed >= TRAP_MAX_LIFE {
+            // Vanilla: `SkeletonHorse.aiStep` (`SkeletonHorse.java:126-132`) -- an untriggered
+            // trap horse despawns once the pre-increment `trapTime` reaches `TRAP_MAX_LIFE`.
+            if !self.is_persistence_required() && self.is_trap.load(Ordering::Relaxed) {
+                let previous = self.trap_time.fetch_add(1, Ordering::Relaxed);
+                if previous >= TRAP_MAX_LIFE {
                     self.mob_entity.living_entity.entity.remove().await;
                 }
             }

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::EntityBase;
@@ -26,6 +29,9 @@ enum TemptVariant {
     /// `Cat.CatTemptGoal` (`Cat.java:648-676`): only untamed, and a randomly selected player
     /// never scares the cat.
     Cat { selected_player: Option<Uuid> },
+    /// `NautilusAi`'s `FollowTemptation` (`NautilusAi.java:86`): stop distance is 2.5 for a baby
+    /// and 3.5 for an adult, evaluated each tick.
+    Nautilus,
 }
 
 pub struct TemptGoal {
@@ -44,6 +50,9 @@ pub struct TemptGoal {
     /// interaction/animation logic.
     is_running: bool,
     variant: TemptVariant,
+    /// Mirror of `is_running` for owners that cannot reach the boxed goal (Ocelot's
+    /// `temptGoal.isRunning()` check in `mobInteract`).
+    running_flag: Option<Arc<AtomicBool>>,
     /// `TemptGoal.ForNonPathfinders` (`TemptGoal.java:132-146`): steers the mob's move control
     /// instead of its path navigator.
     non_pathfinder: bool,
@@ -105,8 +114,16 @@ impl TemptGoal {
             stop_distance,
             is_running: false,
             variant: TemptVariant::Plain,
+            running_flag: None,
             non_pathfinder: false,
         }
+    }
+
+    /// Publishes `isRunning` (set in `start`, cleared in `stop`) to `flag`.
+    #[must_use]
+    pub fn with_running_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.running_flag = Some(flag);
+        self
     }
 
     /// `Ocelot.OcelotTemptGoal` (`Ocelot.java:302-314`).
@@ -115,6 +132,16 @@ impl TemptGoal {
         Self {
             variant: TemptVariant::Ocelot,
             ..Self::new(speed, tempt_items, can_scare)
+        }
+    }
+
+    /// Nautilus `FollowTemptation(mob -> 1.3F, mob -> mob.isBaby() ? 2.5 : 3.5)`
+    /// (`NautilusAi.java:86`); it has no scare check.
+    #[must_use]
+    pub fn for_nautilus(speed: f64, tempt_items: &'static [&'static Item]) -> Self {
+        Self {
+            variant: TemptVariant::Nautilus,
+            ..Self::new(speed, tempt_items, false)
         }
     }
 
@@ -154,6 +181,7 @@ impl TemptGoal {
                         .downcast_ref::<OcelotEntity>()
                         .is_some_and(OcelotEntity::is_trusting)
             }
+            TemptVariant::Nautilus => false,
             TemptVariant::Cat { selected_player } => {
                 if *selected_player == Some(player.get_entity().entity_uuid) {
                     false
@@ -171,6 +199,17 @@ impl TemptGoal {
                 .cast_any()
                 .downcast_ref::<CatEntity>()
                 .is_some_and(CatEntity::is_tame)
+    }
+
+    fn stop_distance(&self, mob: &dyn Mob) -> f64 {
+        if matches!(self.variant, TemptVariant::Nautilus) {
+            return if mob.get_entity().age.load(Ordering::Relaxed) < 0 {
+                2.5
+            } else {
+                3.5
+            };
+        }
+        self.stop_distance
     }
 
     fn is_tempt_item(&self, stack: &pumpkin_data::item_stack::ItemStack) -> bool {
@@ -321,9 +360,8 @@ impl Goal for TemptGoal {
                 );
 
             let mob_pos = mob_entity.living_entity.entity.pos.load();
-            if mob_pos.squared_distance_to_vec(&player_pos)
-                < self.stop_distance * self.stop_distance
-            {
+            let stop_distance = self.stop_distance(mob);
+            if mob_pos.squared_distance_to_vec(&player_pos) < stop_distance * stop_distance {
                 self.stop_navigation(mob);
             } else if self.non_pathfinder {
                 // `ForNonPathfinders.navigateTowards`: a random point on the line from the mob
@@ -368,8 +406,19 @@ impl Goal for TemptGoal {
         })
     }
 
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(flag) = &self.running_flag {
+                flag.store(true, Ordering::Relaxed);
+            }
+        })
+    }
+
     fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
+            if let Some(flag) = &self.running_flag {
+                flag.store(false, Ordering::Relaxed);
+            }
             self.target_player = None;
             self.stop_navigation(mob);
             self.cooldown = 100;

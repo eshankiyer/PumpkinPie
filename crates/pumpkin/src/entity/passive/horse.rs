@@ -317,6 +317,14 @@ impl Mob for HorseEntity {
         self.abstract_horse_mob_interact(player, item_stack)
     }
 
+    /// `Horse.applyImplicitComponent(HORSE_VARIANT)` -> `setVariant`: replaces only the coat
+    /// colour byte and keeps the markings byte (`Horse.java:93-95,108-112`).
+    fn mob_set_variant_name(&self, name: &str) {
+        if let Some(id) = horse_variant_id(name) {
+            self.set_variant_and_markings(id, self.markings());
+        }
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.sync_type_variant();
@@ -373,5 +381,32 @@ impl Mob for HorseEntity {
 
             Some(baby)
         })
+    }
+}
+
+/// Serialized names of `equine/Variant.java:12-18`, indexed by id.
+fn horse_variant_id(name: &str) -> Option<u8> {
+    let name = name.strip_prefix("minecraft:").unwrap_or(name);
+    match name {
+        "white" => Some(0),
+        "creamy" => Some(1),
+        "chestnut" => Some(2),
+        "brown" => Some(3),
+        "black" => Some(4),
+        "gray" => Some(5),
+        "dark_brown" => Some(6),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod variant_name_tests {
+    use super::horse_variant_id;
+
+    #[test]
+    fn maps_names_to_vanilla_ids() {
+        assert_eq!(horse_variant_id("white"), Some(0));
+        assert_eq!(horse_variant_id("minecraft:dark_brown"), Some(6));
+        assert_eq!(horse_variant_id("purple"), None);
     }
 }

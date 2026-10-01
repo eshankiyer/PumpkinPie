@@ -1985,11 +1985,7 @@ pub trait Mob: EntityBase + Send + Sync {
             id if id == pumpkin_data::entity::EntityType::CAT.id => {
                 !mob_entity.is_tamed() && mob_entity.tick_count.load(Relaxed) > 2400
             }
-            // Ocelot.java: Pumpkin has no trust state yet, so its spawned ocelots
-            // follow the vanilla untamed branch.
-            id if id == pumpkin_data::entity::EntityType::OCELOT.id => {
-                mob_entity.tick_count.load(Relaxed) > 2400
-            }
+            // Ocelot.java:139-141 is overridden on `OcelotEntity` (needs its trust state).
             // AbstractFish.java: tadpoles are bucketable fish despite their
             // CREATURE category.
             id if id == pumpkin_data::entity::EntityType::TADPOLE.id => true,

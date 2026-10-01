@@ -2760,24 +2760,49 @@ impl World {
 
             if self.is_raining_at_unchecked(&target) {
                 let spawn_mobs = self.level_info.load().game_rules.spawn_mobs;
-                if lightning_trap_allowed(
+                // `ServerLevel.java:548-552`: the trap chance is the local effective difficulty
+                // times 0.01 (0.0 on Peaceful).
+                let effective_difficulty = f64::from(
+                    crate::entity::mob::equipment::RegionalDifficulty::at(self, target.to_f64())
+                        .effective_difficulty,
+                );
+                let is_trap = lightning_trap_allowed(
                     spawn_mobs,
-                    rng().random::<f32>() < 0.0675,
+                    rng().random::<f64>() < effective_difficulty * 0.01,
                     // `ServerLevel.java:552` tests `BlockTags.LIGHTNING_RODS`, so any weathered or
                     // waxed rod suppresses the skeleton-horse trap, not just the unaffected one.
                     self.get_block(&target.down())
                         .has_tag(&tag::Block::MINECRAFT_LIGHTNING_RODS),
-                ) {
-                    let entity =
-                        Entity::new(self.clone(), target.to_f64(), &EntityType::SKELETON_HORSE);
-                    self.spawn_entity(Arc::new(entity)).await;
-                }
-                let entity = Entity::new(
-                    self.clone(),
-                    target.to_f64().add_raw(0.5, 0., 0.5),
-                    &EntityType::LIGHTNING_BOLT,
                 );
-                self.spawn_entity(Arc::new(entity)).await;
+                if is_trap {
+                    let horse = crate::entity::r#type::from_type(
+                        &EntityType::SKELETON_HORSE,
+                        target.to_f64(),
+                        self,
+                        Uuid::new_v4(),
+                    );
+                    // `setAge(0)` is a no-op: new entities already start at age 0.
+                    if let Some(horse) = horse
+                        .cast_any()
+                        .downcast_ref::<crate::entity::passive::skeleton_horse::SkeletonHorseEntity>()
+                    {
+                        horse.set_trap(true);
+                    }
+                    self.spawn_entity(horse).await;
+                }
+                let bolt = crate::entity::r#type::from_type(
+                    &EntityType::LIGHTNING_BOLT,
+                    target.to_f64().add_raw(0.5, 0., 0.5),
+                    self,
+                    Uuid::new_v4(),
+                );
+                if let Some(bolt) = bolt
+                    .cast_any()
+                    .downcast_ref::<crate::entity::lightning::LightningBoltEntity>()
+                {
+                    bolt.set_visual_only(is_trap);
+                }
+                self.spawn_entity(bolt).await;
             }
         }
 

@@ -34,6 +34,9 @@ const TEMPT_ITEMS: &[&Item] = &[&Item::COD, &Item::SALMON];
 pub struct OcelotEntity {
     pub mob_entity: MobEntity,
     pub is_trusting: AtomicBool,
+    /// Vanilla `Ocelot.temptGoal.isRunning()` (`Ocelot.java:168`), shared with the registered
+    /// `TemptGoal` since the goal itself is boxed into the selector.
+    tempt_running: Arc<AtomicBool>,
 }
 
 impl OcelotEntity {
@@ -42,6 +45,7 @@ impl OcelotEntity {
         let ocelot = Self {
             mob_entity,
             is_trusting: AtomicBool::new(false),
+            tempt_running: Arc::new(AtomicBool::new(false)),
         };
         let mob_arc = Arc::new(ocelot);
         let mob_weak: Weak<dyn Mob> = {
@@ -62,7 +66,13 @@ impl OcelotEntity {
             // appears in that list.
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             // `Ocelot.OcelotTemptGoal(this, 0.6, ItemTags.OCELOT_FOOD, true)` (Ocelot.java:104).
-            goal_selector.add_goal(3, Box::new(TemptGoal::for_ocelot(0.6, TEMPT_ITEMS, true)));
+            goal_selector.add_goal(
+                3,
+                Box::new(
+                    TemptGoal::for_ocelot(0.6, TEMPT_ITEMS, true)
+                        .with_running_flag(mob_arc.tempt_running.clone()),
+                ),
+            );
             // `Ocelot.OcelotAvoidEntityGoal<Player>(this, 16.0F, 0.8, 1.33)` registered from
             // `reassessTrustingGoals` only while the ocelot is not trusting (Ocelot.java:219),
             // and the subclass re-checks `!isTrusting()` in both `canUse` and `canContinueToUse`
@@ -202,6 +212,11 @@ impl Mob for OcelotEntity {
         })
     }
 
+    /// `Ocelot.removeWhenFarAway` (`Ocelot.java:139-141`).
+    fn remove_when_far_away(&self, _dist_sqr: f64) -> bool {
+        !self.is_trusting() && self.mob_entity.tick_count.load(Ordering::Relaxed) > 2400
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
@@ -238,7 +253,12 @@ impl Mob for OcelotEntity {
                 .load()
                 .squared_distance_to_vec(&player.get_entity().pos.load());
 
-            if !self.is_trusting() && is_food && dist_sqr < 9.0 {
+            // `(temptGoal == null || temptGoal.isRunning())` (`Ocelot.java:168`).
+            if self.tempt_running.load(Ordering::Relaxed)
+                && !self.is_trusting()
+                && is_food
+                && dist_sqr < 9.0
+            {
                 item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
                 let mut rng = rand::rng();
