@@ -1293,6 +1293,8 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 let players = world.get_players_at_box(&entity_bb);
                 for player in players {
                     if player.get_entity().entity_id != self_entity.entity_id
+                        // `Parrot.doPush` (`Parrot.java:389-394`) skips players.
+                        && self_entity.entity_type != &EntityType::PARROT
                         && (!has_teams
                             || team_allows_push(
                                 &world,

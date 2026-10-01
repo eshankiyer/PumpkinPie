@@ -15,7 +15,7 @@ use pumpkin_data::data_component_impl::{
     AxolotlVariantImpl, CatVariantImpl, ChickenVariantImpl, CowVariantImpl, FoxVariantImpl,
     FrogVariantImpl, HorseVariantImpl, LlamaVariantImpl, MooshroomVariantImpl, PigVariantImpl,
     RabbitVariantImpl, SheepColorImpl, ShulkerColorImpl, VillagerVariantImpl, WolfVariantImpl,
-    ZombieNautilusVariantImpl,
+    ParrotVariantImpl, ZombieNautilusVariantImpl,
 };
 use pumpkin_data::entity::{EntityType, entity_from_egg};
 use pumpkin_data::item::Item;
@@ -126,6 +126,8 @@ pub(crate) fn apply_entity_variant(item: &ItemStack, mob: &dyn EntityBase) {
     } else if let Some(comp) = item.get_data_component::<SheepColorImpl>() {
         mob.set_variant_name(&comp.value);
     } else if let Some(comp) = item.get_data_component::<ShulkerColorImpl>() {
+        mob.set_variant_name(&comp.value);
+    } else if let Some(comp) = item.get_data_component::<ParrotVariantImpl>() {
         mob.set_variant_name(&comp.value);
     }
 }

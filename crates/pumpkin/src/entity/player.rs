@@ -1422,17 +1422,52 @@ impl Player {
         false
     }
 
+    /// `ServerPlayer.playShoulderEntityAmbientSound` (`ServerPlayer.java:774-792`): a non-silent
+    /// parrot on the shoulder imitates a nearby mob or squawks at a 1/200 chance per tick.
+    fn play_shoulder_entity_ambient_sound(&self, tag: Option<&NbtCompound>) {
+        let Some(tag) = tag else {
+            return;
+        };
+        if tag.get_bool("Silent").unwrap_or(false) || rand::random_range(0..200) != 0 {
+            return;
+        }
+        let is_parrot = tag
+            .get_string("id")
+            .is_some_and(|id| id.strip_prefix("minecraft:").unwrap_or(id) == "parrot");
+        if !is_parrot {
+            return;
+        }
+        let world = self.world();
+        let entity = &self.living_entity.entity;
+        if !crate::entity::passive::parrot::imitate_nearby_mobs(
+            &world,
+            entity,
+            pumpkin_data::sound::SoundCategory::Players,
+        ) && let Some(sound) = crate::entity::passive::parrot::get_ambient(&world)
+        {
+            world.play_sound_fine(
+                sound,
+                pumpkin_data::sound::SoundCategory::Players,
+                &entity.pos.load(),
+                1.0,
+                crate::entity::passive::parrot::get_pitch(),
+            );
+        }
+    }
+
     /// `ServerPlayer.handleShoulderEntities` (`ServerPlayer.java:766-772`), called every tick
-    /// from `LivingEntity::tick`. Vanilla also plays each shoulder entity's ambient sound at a
-    /// 1/200 chance per tick (`playShoulderEntityAmbientSound`, `ServerPlayer.java:774-790`,
-    /// including `Parrot.imitateNearbyMobs`'s broader mimicry check); that half is not ported
-    /// here, only the dismount-condition half below.
+    /// from `LivingEntity::tick`: each shoulder entity's ambient sound, then the dismount
+    /// conditions.
     pub async fn handle_shoulder_entities(&self) {
         if self.shoulder_entity_left.lock().await.is_none()
             && self.shoulder_entity_right.lock().await.is_none()
         {
             return;
         }
+        let left = self.shoulder_entity_left.lock().await.clone();
+        let right = self.shoulder_entity_right.lock().await.clone();
+        self.play_shoulder_entity_ambient_sound(left.as_ref());
+        self.play_shoulder_entity_ambient_sound(right.as_ref());
         let fall_distance = self.living_entity.fall_distance.load();
         let flying = self.abilities.lock().await.flying;
         if fall_distance > 0.5
