@@ -6,7 +6,10 @@ use crate::{
     block::entities::sign::DyeColor,
     entity::EntityBase,
     entity::{ageable::AgeableMob, mob::sulfur_cube::SulfurCubeEntity},
-    entity::passive::tropical_fish::{Pattern, TropicalFishEntity},
+    entity::passive::{
+        salmon::{SalmonEntity, SalmonVariant},
+        tropical_fish::{Pattern, TropicalFishEntity},
+    },
     entity::player::Player,
     entity::r#type::from_type,
     item::{ItemBehaviour, ItemMetadata},
@@ -15,7 +18,7 @@ use pumpkin_data::{
     Block, BlockDirection, BlockStateId,
     data_component::DataComponent,
     data_component_impl::{
-        DataComponentImpl, TropicalFishBaseColorImpl, TropicalFishPatternColorImpl,
+        DataComponentImpl, SalmonSizeImpl, TropicalFishBaseColorImpl, TropicalFishPatternColorImpl,
         TropicalFishPatternImpl,
     },
     dimension::Dimension,
@@ -457,6 +460,12 @@ fn read_tropical_fish_variant(
     ))
 }
 
+/// Fish variant data a filled bucket carries (`saveToBucketTag` components).
+enum BucketVariant {
+    Tropical(Option<Pattern>, Option<DyeColor>, Option<DyeColor>),
+    Salmon(SalmonVariant),
+}
+
 async fn try_place_powder_snow(
     world: &Arc<World>,
     pos: BlockPos,
@@ -585,7 +594,7 @@ async fn spawn_mob_bucket_entity(
     player: Option<Arc<Player>>,
     user: &Player,
     evaporated: bool,
-    tropical_fish_variant: Option<(Option<Pattern>, Option<DyeColor>, Option<DyeColor>)>,
+    bucket_variant: Option<BucketVariant>,
 ) {
     let Some(entity_type) = mob_bucket_entity_type(item) else {
         return;
@@ -607,14 +616,23 @@ async fn spawn_mob_bucket_entity(
         .store(true, std::sync::atomic::Ordering::Relaxed);
     // `TropicalFish.saveToBucketTag`/`applyImplicitComponents`: restore the exact caught
     // variant instead of leaving the fresh (random-rolled) one from construction.
-    if let Some((pattern, base_color, pattern_color)) = tropical_fish_variant
-        && let Some(fish) = entity.cast_any().downcast_ref::<TropicalFishEntity>()
-    {
-        fish.set_variant(
-            pattern.unwrap_or_else(|| fish.pattern()),
-            base_color.unwrap_or_else(|| fish.base_color()),
-            pattern_color.unwrap_or_else(|| fish.pattern_color()),
-        );
+    match bucket_variant {
+        Some(BucketVariant::Tropical(pattern, base_color, pattern_color)) => {
+            if let Some(fish) = entity.cast_any().downcast_ref::<TropicalFishEntity>() {
+                fish.set_variant(
+                    pattern.unwrap_or_else(|| fish.pattern()),
+                    base_color.unwrap_or_else(|| fish.base_color()),
+                    pattern_color.unwrap_or_else(|| fish.pattern_color()),
+                );
+            }
+        }
+        // `Salmon.applyImplicitComponent`: SALMON_SIZE overrides the `finalizeSpawn` roll.
+        Some(BucketVariant::Salmon(variant)) => {
+            if let Some(salmon) = entity.cast_any().downcast_ref::<SalmonEntity>() {
+                salmon.set_variant(variant);
+            }
+        }
+        None => {}
     }
     if entity_type.id == EntityType::SULFUR_CUBE.id
         && let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
@@ -824,7 +842,26 @@ impl ItemBehaviour for EmptyBucketItem {
             let components = entity
                 .cast_any()
                 .downcast_ref::<TropicalFishEntity>()
-                .map_or_else(Vec::new, |fish| {
+                .map_or_else(
+                    || {
+                        // `Salmon.saveToBucketTag` (Salmon.java:107-111): SALMON_SIZE copied
+                        // from the salmon's variant.
+                        entity
+                            .cast_any()
+                            .downcast_ref::<SalmonEntity>()
+                            .map_or_else(Vec::new, |salmon| {
+                                vec![(
+                                    DataComponent::SalmonSize,
+                                    Some(
+                                        SalmonSizeImpl {
+                                            value: salmon.variant().name().into(),
+                                        }
+                                        .to_dyn(),
+                                    ),
+                                )]
+                            })
+                    },
+                    |fish| {
                     vec![
                         (
                             DataComponent::TropicalFishPattern,
@@ -854,7 +891,8 @@ impl ItemBehaviour for EmptyBucketItem {
                             ),
                         ),
                     ]
-                });
+                    },
+                );
             let bucket_stack = ItemStack::new_with_component(1, bucket_item, components);
 
             give_player_bucket_item(player, bucket_stack, false).await;
@@ -878,9 +916,17 @@ impl ItemBehaviour for FilledBucketItem {
             let world = player.world();
 
             // Read off the caught variant before the held stack is overwritten below.
-            let tropical_fish_variant = if item.id == Item::TROPICAL_FISH_BUCKET.id {
+            let bucket_variant = if item.id == Item::TROPICAL_FISH_BUCKET.id {
                 let held_stack = player.inventory.held_item().await;
                 read_tropical_fish_variant(&held_stack)
+                    .map(|(pattern, base, pattern_color)| {
+                        BucketVariant::Tropical(pattern, base, pattern_color)
+                    })
+            } else if item.id == Item::SALMON_BUCKET.id {
+                let held_stack = player.inventory.held_item().await;
+                held_stack
+                    .get_data_component::<SalmonSizeImpl>()
+                    .map(|value| BucketVariant::Salmon(SalmonVariant::from_name(&value.value)))
             } else {
                 None
             };
@@ -1015,7 +1061,7 @@ impl ItemBehaviour for FilledBucketItem {
                 player_arc,
                 player,
                 evaporated,
-                tropical_fish_variant,
+                bucket_variant,
             )
             .await;
             if player.gamemode.load() != GameMode::Creative {

@@ -148,7 +148,7 @@ impl SalmonEntity {
             .store(BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &dimensions));
     }
 
-    fn set_variant(&self, variant: SalmonVariant) {
+    pub fn set_variant(&self, variant: SalmonVariant) {
         self.variant.store(variant as u8, Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
