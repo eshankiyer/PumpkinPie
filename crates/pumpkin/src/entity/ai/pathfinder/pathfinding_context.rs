@@ -429,6 +429,13 @@ impl PathfindingContext {
             .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_WATER))
     }
 
+    /// `FluidState.is(FluidTags.LAVA)` for the pathfinding context.
+    #[must_use]
+    pub fn is_lava(&self, pos: Vector3<i32>) -> bool {
+        Fluid::from_state_id(self.world.get_block_state_id(&pos.as_blockpos()))
+            .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_LAVA))
+    }
+
     /// Matches `FluidState.isEmpty()` for the pathfinding context.
     #[must_use]
     pub fn is_fluid_empty(&self, pos: Vector3<i32>) -> bool {

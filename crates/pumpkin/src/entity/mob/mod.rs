@@ -1723,6 +1723,19 @@ pub trait Mob: EntityBase + Send + Sync {
         0.15
     }
 
+    /// Vanilla `LivingEntity.canStandOnFluid` (`LivingEntity.java:2425-2427`): whether the mob
+    /// treats `fluid` as a floor. `Strider` stands on lava.
+    fn can_stand_on_fluid(&self, _fluid: &pumpkin_data::fluid::Fluid) -> bool {
+        false
+    }
+
+    /// Height of `LivingEntity.getLiquidCollisionShape` (`LivingEntity.java:2429-2431`), the
+    /// shape a standable liquid block presents to this mob; `None` is the empty default shape.
+    /// `Strider.getLiquidCollisionShape` is a half-block column (`Strider.java:341-344`).
+    fn liquid_collision_height(&self) -> Option<f64> {
+        None
+    }
+
     /// Vanilla `Entity.nextStep` (`Entity.java:1259-1261`): the `moveDist` a step sound and its
     /// `STEP` vibration wait for after one has just been emitted at `move_dist`. `Warden.nextStep`
     /// (`Warden.java:179-182`) shortens the interval to `0.55`.

@@ -24,6 +24,7 @@ pub struct WalkNodeEvaluator {
     water_bound: bool,
     allow_breaching: bool,
     frog: bool,
+    strider: bool,
     prefers_shallow_swimming: bool,
 }
 
@@ -39,6 +40,7 @@ impl WalkNodeEvaluator {
             water_bound: false,
             allow_breaching: false,
             frog: false,
+            strider: false,
             prefers_shallow_swimming: false,
         }
     }
@@ -82,6 +84,17 @@ impl WalkNodeEvaluator {
     #[must_use]
     pub const fn is_frog(&self) -> bool {
         self.frog
+    }
+
+    /// Marks the evaluator as a `Strider`'s: `canStandOnFluid(lava)` makes `getStart` begin on top
+    /// of a lava column (`WalkNodeEvaluator.java:57-60,81-85`).
+    pub const fn set_strider(&mut self, strider: bool) {
+        self.strider = strider;
+    }
+
+    #[must_use]
+    pub const fn is_strider(&self) -> bool {
+        self.strider
     }
 
     #[must_use]
@@ -833,7 +846,26 @@ impl NodeEvaluator for WalkNodeEvaluator {
             return self.get_start_node(start).await;
         }
 
-        let y = if (self.is_amphibious() && mob_data.in_water) || on_ground {
+        // `WalkNodeEvaluator.getStart` (`WalkNodeEvaluator.java:81-85`): a mob that can stand on
+        // the fluid it is in starts on top of that column instead of inside it.
+        let lava_column_start = if self.strider
+            && let Some(context) = self.base.context.as_ref()
+        {
+            let (x, z) = (mob_x.floor() as i32, mob_z.floor() as i32);
+            let mut start_y = mob_y_f64.floor() as i32;
+            context.is_lava(Vector3::new(x, start_y, z)).then(|| {
+                while context.is_lava(Vector3::new(x, start_y, z)) {
+                    start_y += 1;
+                }
+                start_y - 1
+            })
+        } else {
+            None
+        };
+
+        let y = if let Some(start_y) = lava_column_start {
+            start_y
+        } else if (self.is_amphibious() && mob_data.in_water) || on_ground {
             (mob_y_f64 + 0.5).floor() as i32
         } else {
             let start_y = (mob_y_f64 + 1.0).floor() as i32;

@@ -81,6 +81,7 @@ pub struct Navigator {
     pub is_idle: AtomicBool,
     navigation_kind: NavigationKind,
     turtle_travel: bool,
+    strider: bool,
     wall_climber: bool,
     wall_climber_target: Option<BlockPos>,
     wall_climber_direct: bool,
@@ -127,6 +128,7 @@ impl Default for Navigator {
             is_idle: AtomicBool::new(true),
             navigation_kind: NavigationKind::Ground,
             turtle_travel: false,
+            strider: false,
             wall_climber: false,
             wall_climber_target: None,
             wall_climber_direct: false,
@@ -297,7 +299,11 @@ impl Navigator {
         pos: &BlockPos,
     ) -> bool {
         match self.navigation_kind {
-            NavigationKind::Ground => world.get_block_state(&pos.down()).is_solid_render(),
+            NavigationKind::Ground => {
+                // `Strider.StriderPathNavigation.isStableDestination` (`Strider.java:526-529`).
+                (self.strider && Block::from_state_id(world.get_block_state(pos).id).id == Block::LAVA.id)
+                    || world.get_block_state(&pos.down()).is_solid_render()
+            }
             NavigationKind::Water => !world.get_block_state(pos).is_solid_render(),
             NavigationKind::Flying => world.get_block_state(pos).is_side_solid(BlockDirection::Up),
             NavigationKind::Amphibious => {
@@ -395,6 +401,13 @@ impl Navigator {
 
     pub const fn set_frog(&mut self, frog: bool) {
         self.evaluator.set_frog(frog);
+    }
+
+    /// `Strider.StriderPathNavigation` (`Strider.java:515-530`): lava is a stable destination and
+    /// the path starts on top of a lava column.
+    pub const fn set_strider(&mut self, strider: bool) {
+        self.evaluator.set_strider(strider);
+        self.strider = strider;
     }
 
     pub const fn set_turtle_travel(&mut self, traveling: bool) {
@@ -505,6 +518,7 @@ impl Navigator {
                 evaluator.set_water_bound(self.evaluator.is_water_bound());
                 evaluator.set_allow_breaching(self.evaluator.allows_breaching());
                 evaluator.set_frog(self.evaluator.is_frog());
+                evaluator.set_strider(self.evaluator.is_strider());
                 evaluator
             },
             current_path: None,
@@ -524,6 +538,7 @@ impl Navigator {
             is_idle: AtomicBool::new(true),
             navigation_kind: self.navigation_kind,
             turtle_travel: self.turtle_travel,
+            strider: self.strider,
             wall_climber: self.wall_climber,
             wall_climber_target: None,
             wall_climber_direct: false,

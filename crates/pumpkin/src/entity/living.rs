@@ -3207,6 +3207,15 @@ impl LivingEntity {
             return;
         }
 
+        // `Strider.checkFallDamage` (`Strider.java:289-296`) resets the fall distance while the
+        // strider is in lava and skips `super.checkFallDamage`.
+        if caller.get_entity().entity_type == &EntityType::STRIDER
+            && self.entity.touching_lava.load(SeqCst)
+        {
+            self.fall_distance.store(0.0);
+            return;
+        }
+
         // A passenger is snapped back onto its vehicle every tick by `Entity.positionRider`, so
         // it never builds up a fall of its own; the vehicle hands it the fall through
         // `Entity.propagateFallToPassengers` (`Entity.java:1583-1589`) instead. Without this

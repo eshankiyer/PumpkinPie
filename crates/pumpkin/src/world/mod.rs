@@ -2560,6 +2560,38 @@ impl World {
         }
     }
 
+    /// `LiquidBlock.getCollisionShape` (`LiquidBlock.java:82-96`): a source lava block is solid
+    /// only for a mob that can stand on lava, from above, and only as that mob's liquid collision
+    /// shape (`Strider.getLiquidCollisionShape`); flowing lava has no collision shape at all.
+    fn lava_standing_shape(
+        &self,
+        state: &pumpkin_data::BlockState,
+        pos: &BlockPos,
+        entity: &dyn EntityBase,
+    ) -> Option<BoundingBox> {
+        if state.id != Block::LAVA.default_state.id {
+            return None;
+        }
+        let mob = entity.get_mob()?;
+        if !mob.can_stand_on_fluid(&Fluid::FLOWING_LAVA) {
+            return None;
+        }
+        let height = mob.liquid_collision_height()?;
+        // `EntityCollisionContext.isAbove` uses the entity's feet Y
+        // (`EntityCollisionContext.java:73-75`) and `canStandOnFluid` requires the fluid above
+        // to be of another type (`EntityCollisionContext.java:60-65`).
+        let above_shape = entity.get_entity().pos.load().y
+            > f64::from(pos.0.y) + height - f64::from(1.0E-5f32);
+        if !above_shape || self.get_fluid(&pos.up()).id == Fluid::FLOWING_LAVA.id {
+            return None;
+        }
+        let (x, y, z) = (f64::from(pos.0.x), f64::from(pos.0.y), f64::from(pos.0.z));
+        Some(BoundingBox::new(
+            Vector3::new(x, y, z),
+            Vector3::new(x + 1.0, y + height, z + 1.0),
+        ))
+    }
+
     // For adjusting movement
     pub async fn get_block_collisions(
         self: &Arc<Self>,
@@ -2639,6 +2671,13 @@ impl World {
                         collided = true;
                         collisions.push(shape);
                     }
+                }
+            } else if block == &Block::LAVA {
+                if let Some(shape) = self.lava_standing_shape(state, &pos, entity)
+                    && shape.intersects(&bounding_box)
+                {
+                    collided = true;
+                    collisions.push(shape);
                 }
             } else {
                 for shape in state.get_block_collision_shapes_at(&pos) {
