@@ -23,6 +23,7 @@ use crate::entity::{
         look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal,
         pathfind_to_raid::PathfindToRaidGoal,
+        raider_celebration::RaiderCelebrationGoal,
         revenge::RevengeGoal,
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
@@ -36,6 +37,8 @@ pub struct VindicatorEntity {
     /// Vanilla: `Vindicator.isJohnny`. One-way latch set (via `mob_tick`) once the vindicator is
     /// custom-named "Johnny".
     is_johnny: AtomicBool,
+    /// Vanilla `Raider.IS_CELEBRATING` (synced data).
+    is_celebrating: AtomicBool,
 }
 
 impl VindicatorEntity {
@@ -44,6 +47,7 @@ impl VindicatorEntity {
         let vindicator = Self {
             mob_entity,
             is_johnny: AtomicBool::new(false),
+            is_celebrating: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(vindicator);
         // Vanilla `populateDefaultEquipmentSlots`: only gives the axe `if getCurrentRaid() ==
@@ -85,6 +89,8 @@ impl VindicatorEntity {
             );
             // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
             goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            // Raider.java:67, via `super.registerGoals()`: `RaiderCelebration`.
+            goal_selector.add_goal(5, RaiderCelebrationGoal::new());
             // Vindicator.java:68: `MeleeAttackGoal(this, 1.0, false)`.
             goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.0, false)));
             // Vindicator.java:74-76: `RandomStrollGoal(this, 0.6)` at 8,
@@ -170,6 +176,28 @@ impl Mob for VindicatorEntity {
         &self.mob_entity
     }
 
+    /// Vanilla: `Raider.setCelebrating` (`Raider.java:177-179`).
+    fn set_celebrating(&self, celebrating: bool) {
+        if self
+            .is_celebrating
+            .swap(celebrating, std::sync::atomic::Ordering::Relaxed)
+            != celebrating
+        {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[pumpkin_protocol::java::client::play::Metadata::new(
+                    pumpkin_data::tracked_data::vindicator::IS_CELEBRATING,
+                    celebrating,
+                )],
+                None,
+            );
+        }
+    }
+
+    /// Vanilla: `Vindicator.java:121-123`.
+    fn get_celebrate_sound(&self) -> Option<pumpkin_data::sound::Sound> {
+        Some(pumpkin_data::sound::Sound::EntityVindicatorCelebrate)
+    }
+
     /// `AbstractIllager.considersEntityAsAlly` (`AbstractIllager.java:32-38`).
     fn considers_entity_as_ally(
         &self,
@@ -185,10 +213,8 @@ impl Mob for VindicatorEntity {
     /// Vanilla: `Vindicator.setCustomName`'s one-way "Johnny" latch. Pumpkin has no per-mob
     /// custom-name-changed hook, so this lazily checks-and-latches every tick instead (up to one
     /// tick of latency versus vanilla's setter-time latch, unobservable to a player).
-    /// Also `customServerAiStep`: `getNavigation().setCanOpenDoors(level.isRaided(pos))`,
-    /// approximated with `has_active_raid()` (this mob's own raid membership) rather than
-    /// re-querying the level for any raid covering this position -- same approximation
-    /// `InteractWithDoorGoal::raid_gated`/`BreakDoorGoal` already use.
+    /// Also `customServerAiStep` (`Vindicator.java:85-92`):
+    /// `getNavigation().setCanOpenDoors(level.isRaided(blockPosition()))`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             if !self.is_johnny.load(Relaxed)
@@ -198,12 +224,20 @@ impl Mob for VindicatorEntity {
                 self.is_johnny.store(true, Relaxed);
             }
 
-            let can_open_doors = self.mob_entity.living_entity.has_active_raid();
-            self.mob_entity
-                .navigator
-                .lock()
-                .unwrap()
-                .set_can_open_doors(can_open_doors);
+            // `!isNoAi() && hasGroundPathNavigation()`; vindicators always have ground navigation.
+            if !self.mob_entity.is_no_ai() {
+                let entity = &self.mob_entity.living_entity.entity;
+                let can_open_doors = entity
+                    .world
+                    .load()
+                    .is_raided_at(entity.block_pos.load())
+                    .await;
+                self.mob_entity
+                    .navigator
+                    .lock()
+                    .unwrap()
+                    .set_can_open_doors(can_open_doors);
+            }
         })
     }
 

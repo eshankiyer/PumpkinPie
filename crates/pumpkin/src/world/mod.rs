@@ -2841,6 +2841,11 @@ impl World {
         self.raids.lock().await.is_active_raid_at(position)
     }
 
+    /// `ServerLevel.isRaided` (`ServerLevel.java:1566-1568`).
+    pub async fn is_raided_at(&self, position: BlockPos) -> bool {
+        self.raids.lock().await.is_raided_at(position)
+    }
+
     pub async fn get_time_of_day(&self) -> i64 {
         self.level_time.lock().await.time_of_day
     }

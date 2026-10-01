@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Weak};
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::control::ghast_move_control::GhastMoveControl,
     ai::goal::{
         Controls, Goal, GoalFuture, ghast_random_float::GhastRandomFloatAroundGoal,
@@ -86,6 +86,27 @@ impl Mob for GhastEntity {
     fn get_mob_gravity(&self) -> f64 {
         0.0 // Ghasts fly, no gravity applied in standard travel
     }
+
+    /// Vanilla `Ghast.travel` (`Ghast.java:93-96`) is `travelFlying(input, 0.02F)`
+    /// (`LivingEntity.java:2443-2457`): 0.02 acceleration in every medium, no gravity or block
+    /// friction, then 0.8 (water), 0.5 (lava) or 0.91 drag on all axes.
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            let entity = &living.entity;
+            entity.update_velocity_from_input(living.movement_input.load(), f64::from(0.02f32));
+            entity.move_entity(caller, entity.velocity.load()).await;
+            let drag = if entity.touching_water.load(Ordering::Relaxed) {
+                f64::from(0.8f32)
+            } else if entity.touching_lava.load(Ordering::Relaxed) {
+                0.5
+            } else {
+                f64::from(0.91f32)
+            };
+            entity.velocity.store(entity.velocity.load() * drag);
+            true
+        })
+    }
 }
 
 #[expect(dead_code)]
@@ -104,6 +125,30 @@ impl GhastLookGoal {
     }
 }
 
+/// Vanilla `Ghast.faceMovementDirection` (`Ghast.java:186-202`).
+///
+/// Instantly turns the body (and yaw) toward the target when it is within 64 blocks, or toward
+/// the movement direction when there is no target. It does not go through `LookControl`.
+pub async fn face_movement_direction(mob: &dyn Mob) {
+    let mob_entity = mob.get_mob_entity();
+    let entity = &mob_entity.living_entity.entity;
+    let target = mob_entity.target.lock().await.clone();
+    let yaw = if let Some(target) = target {
+        let pos = entity.pos.load();
+        let target_pos = target.get_entity().pos.load();
+        if pos.squared_distance_to_vec(&target_pos) >= 4096.0 {
+            return;
+        }
+        let (dx, dz) = (target_pos.x - pos.x, target_pos.z - pos.z);
+        (-f64::atan2(dx, dz) as f32) * (180.0 / std::f32::consts::PI)
+    } else {
+        let velocity = entity.velocity.load();
+        (-f64::atan2(velocity.x, velocity.z) as f32) * (180.0 / std::f32::consts::PI)
+    };
+    entity.yaw.store(yaw);
+    entity.body_yaw.store(yaw);
+}
+
 impl Goal for GhastLookGoal {
     fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async { true })
@@ -115,29 +160,7 @@ impl Goal for GhastLookGoal {
 
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async {
-            let mob_entity = mob.get_mob_entity();
-            let target_opt = mob_entity.target.lock().await.clone();
-
-            if let Some(target) = target_opt {
-                let mob_pos = mob_entity.living_entity.entity.pos.load();
-                let target_pos = target.get_entity().pos.load();
-
-                if mob_pos.squared_distance_to_vec(&target_pos) < 4096.0 {
-                    let mut look_control = mob_entity
-                        .look_control
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    look_control.look_at(mob, target_pos.x, target_pos.y, target_pos.z);
-                }
-            } else {
-                // If no target, face the movement direction
-                let velocity = mob_entity.living_entity.entity.velocity.load();
-                if velocity.x != 0.0 || velocity.z != 0.0 {
-                    let yaw = (-f64::atan2(velocity.x, velocity.z) * (180.0 / std::f64::consts::PI))
-                        as f32;
-                    mob_entity.living_entity.entity.yaw.store(yaw);
-                }
-            }
+            face_movement_direction(mob).await;
         })
     }
 

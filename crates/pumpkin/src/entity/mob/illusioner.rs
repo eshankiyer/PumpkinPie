@@ -20,6 +20,7 @@ use crate::entity::{
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         pathfind_to_raid::PathfindToRaidGoal,
+        raider_celebration::RaiderCelebrationGoal,
         ranged_bow_attack::RangedBowAttackGoal,
         revenge::RevengeGoal,
         spellcaster::SpellcasterState,
@@ -33,6 +34,8 @@ pub struct IllusionerEntity {
     pub mob_entity: MobEntity,
     /// Vanilla: `SpellcasterIllager.spellCastingTickCount` / `currentSpell`.
     pub spellcaster: SpellcasterState,
+    /// Vanilla `Raider.IS_CELEBRATING` (synced data).
+    is_celebrating: std::sync::atomic::AtomicBool,
 }
 
 impl IllusionerEntity {
@@ -41,6 +44,7 @@ impl IllusionerEntity {
         let illusioner = Self {
             mob_entity,
             spellcaster: SpellcasterState::new(),
+            is_celebrating: std::sync::atomic::AtomicBool::new(false),
         };
         let mob_arc = Arc::new(illusioner);
         mob_arc
@@ -75,6 +79,8 @@ impl IllusionerEntity {
             );
             // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
             goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            // Raider.java:67, via `super.registerGoals()`: `RaiderCelebration`.
+            goal_selector.add_goal(5, RaiderCelebrationGoal::new());
             goal_selector.add_goal(
                 4,
                 Box::new(IllusionerMirrorSpellGoal::new(illusioner_weak.clone())),
@@ -141,6 +147,28 @@ impl NBTStorage for IllusionerEntity {
 impl Mob for IllusionerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla: `Raider.setCelebrating` (`Raider.java:177-179`).
+    fn set_celebrating(&self, celebrating: bool) {
+        if self
+            .is_celebrating
+            .swap(celebrating, std::sync::atomic::Ordering::Relaxed)
+            != celebrating
+        {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[pumpkin_protocol::java::client::play::Metadata::new(
+                    pumpkin_data::tracked_data::illusioner::IS_CELEBRATING,
+                    celebrating,
+                )],
+                None,
+            );
+        }
+    }
+
+    /// Vanilla: `Illusioner.java:130-132`.
+    fn get_celebrate_sound(&self) -> Option<pumpkin_data::sound::Sound> {
+        Some(pumpkin_data::sound::Sound::EntityIllusionerAmbient)
     }
 
     /// `AbstractIllager.considersEntityAsAlly` (`AbstractIllager.java:32-38`).

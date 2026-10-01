@@ -5647,10 +5647,12 @@ impl Entity {
     pub const LEASH_ELASTIC_DISTANCE: f64 = 6.0;
 
     /// Vanilla `HappyGhast.leashElasticDistance`/`leashSnapDistance`
-    /// (`HappyGhast.java:509-516`) override the shared leash thresholds.
+    /// (`HappyGhast.java:509-516`) and `Ghast` (`Ghast.java:177-185`) override the shared leash thresholds.
     #[must_use]
     pub const fn leash_elastic_distance(&self) -> f64 {
-        if self.entity_type.id == EntityType::HAPPY_GHAST.id {
+        if self.entity_type.id == EntityType::HAPPY_GHAST.id
+            || self.entity_type.id == EntityType::GHAST.id
+        {
             10.0
         } else {
             Self::LEASH_ELASTIC_DISTANCE
@@ -5659,7 +5661,9 @@ impl Entity {
 
     #[must_use]
     pub const fn leash_snap_distance(&self) -> f64 {
-        if self.entity_type.id == EntityType::HAPPY_GHAST.id {
+        if self.entity_type.id == EntityType::HAPPY_GHAST.id
+            || self.entity_type.id == EntityType::GHAST.id
+        {
             16.0
         } else {
             Self::LEASH_SNAP_DISTANCE

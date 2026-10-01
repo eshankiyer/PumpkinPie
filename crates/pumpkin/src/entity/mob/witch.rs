@@ -26,8 +26,9 @@ use crate::entity::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         nearest_attackable_witch_target::NearestAttackableWitchTargetGoal,
         nearest_healable_raider_target::NearestHealableRaiderTargetGoal,
-        pathfind_to_raid::PathfindToRaidGoal, revenge::RevengeGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal, witch_attack::WitchAttackGoal,
+        pathfind_to_raid::PathfindToRaidGoal, raider_celebration::RaiderCelebrationGoal,
+        revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        witch_attack::WitchAttackGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -48,6 +49,8 @@ pub struct WitchEntity {
     pub can_attack_players: AtomicBool,
     /// Vanilla: `Witch.usingTime`.
     drink_ticks_remaining: AtomicI32,
+    /// Vanilla `Raider.IS_CELEBRATING` (synced data).
+    is_celebrating: AtomicBool,
 }
 
 impl WitchEntity {
@@ -60,6 +63,7 @@ impl WitchEntity {
             // -1 is idle; zero is a valid active value because Java finishes
             // on the tick where `usingTime--` observes zero.
             drink_ticks_remaining: AtomicI32::new(-1),
+            is_celebrating: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(witch);
         let mob_weak: Weak<dyn Mob> = {
@@ -91,6 +95,8 @@ impl WitchEntity {
             goal_selector.add_goal(3, Box::new(RandomLookAroundGoal::default()));
             // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
             goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            // Raider.java:67, via `super.registerGoals()`: `RaiderCelebration`.
+            goal_selector.add_goal(5, RaiderCelebrationGoal::new());
 
             // Witch.java:72: `HurtByTargetGoal(this, Raider.class)`.
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
@@ -294,6 +300,28 @@ impl NBTStorage for WitchEntity {}
 impl Mob for WitchEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla: `Raider.setCelebrating` (`Raider.java:177-179`).
+    fn set_celebrating(&self, celebrating: bool) {
+        if self
+            .is_celebrating
+            .swap(celebrating, std::sync::atomic::Ordering::Relaxed)
+            != celebrating
+        {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[pumpkin_protocol::java::client::play::Metadata::new(
+                    pumpkin_data::tracked_data::witch::IS_CELEBRATING,
+                    celebrating,
+                )],
+                None,
+            );
+        }
+    }
+
+    /// Vanilla: `Witch.java:182-185`.
+    fn get_celebrate_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityWitchCelebrate)
     }
 
     /// Vanilla: `Witch.aiStep` (non-client-only steps): heal-cooldown/attack-gate, the

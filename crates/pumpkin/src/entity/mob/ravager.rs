@@ -13,8 +13,9 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal,
-        melee_attack::MeleeAttackGoal, pathfind_to_raid::PathfindToRaidGoal, revenge::RevengeGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal,
+        melee_attack::MeleeAttackGoal, pathfind_to_raid::PathfindToRaidGoal,
+        raider_celebration::RaiderCelebrationGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -37,6 +38,8 @@ pub struct RavagerEntity {
     stunned_tick: AtomicI32,
     /// Vanilla: `Ravager.roarTick`.
     roar_tick: AtomicI32,
+    /// Vanilla `Raider.IS_CELEBRATING` (synced data).
+    is_celebrating: std::sync::atomic::AtomicBool,
 }
 
 impl RavagerEntity {
@@ -47,6 +50,7 @@ impl RavagerEntity {
             attack_tick: AtomicI32::new(0),
             stunned_tick: AtomicI32::new(0),
             roar_tick: AtomicI32::new(0),
+            is_celebrating: std::sync::atomic::AtomicBool::new(false),
         };
         let mob_arc = Arc::new(ravager);
         let mob_weak: Weak<dyn Mob> = {
@@ -64,6 +68,8 @@ impl RavagerEntity {
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
             goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            // Raider.java:67, via `super.registerGoals()`: `RaiderCelebration`.
+            goal_selector.add_goal(5, RaiderCelebrationGoal::new());
             goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, true)));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(0.4)));
             goal_selector.add_goal(
@@ -266,6 +272,28 @@ impl NBTStorage for RavagerEntity {
 impl Mob for RavagerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla: `Raider.setCelebrating` (`Raider.java:177-179`).
+    fn set_celebrating(&self, celebrating: bool) {
+        if self
+            .is_celebrating
+            .swap(celebrating, std::sync::atomic::Ordering::Relaxed)
+            != celebrating
+        {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[pumpkin_protocol::java::client::play::Metadata::new(
+                    pumpkin_data::tracked_data::ravager::IS_CELEBRATING,
+                    celebrating,
+                )],
+                None,
+            );
+        }
+    }
+
+    /// Vanilla: `Ravager.java:124-127`.
+    fn get_celebrate_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityRavagerCelebrate)
     }
 
     fn can_be_raid_leader(&self) -> bool {

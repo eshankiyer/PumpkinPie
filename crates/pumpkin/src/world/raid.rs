@@ -1076,6 +1076,14 @@ impl RaidManager {
             .is_some_and(|raid| !raid.is_over())
     }
 
+    /// `ServerLevel.isRaided(pos)` (`ServerLevel.java:1566-1568`): any active raid whose
+    /// centre is within `Raids.getNearbyRaid`'s 9216 squared-block radius. Unlike
+    /// [`Self::is_active_raid_at`] it does not exclude finished raids.
+    #[must_use]
+    pub fn is_raided_at(&self, pos: BlockPos) -> bool {
+        self.find_active_raid_near(pos).is_some()
+    }
+
     fn find_active_raid_near(&self, pos: BlockPos) -> Option<i32> {
         self.raids
             .iter()
