@@ -128,7 +128,7 @@ impl BlockBehaviour for StemBlock {
                         .set_block_state(
                             args.position,
                             Self::state_with_age(block, state, age + 1),
-                            BlockFlags::NOTIFY_NEIGHBORS,
+                            BlockFlags::NOTIFY_LISTENERS,
                         )
                         .await;
                 } else {
@@ -153,15 +153,11 @@ impl BlockBehaviour for StemBlock {
                             .set_block_state(
                                 &plant_block_pos,
                                 gourd.default_state.id,
-                                BlockFlags::NOTIFY_NEIGHBORS,
+                                BlockFlags::NOTIFY_ALL,
                             )
                             .await;
                         args.world
-                            .set_block_state(
-                                args.position,
-                                attached_stem,
-                                BlockFlags::NOTIFY_NEIGHBORS,
-                            )
+                            .set_block_state(args.position, attached_stem, BlockFlags::NOTIFY_ALL)
                             .await;
                     }
                 }

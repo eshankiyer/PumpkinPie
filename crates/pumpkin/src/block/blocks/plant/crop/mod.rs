@@ -109,8 +109,9 @@ trait CropBlockBase: PlantBlockBase {
                     }
                     new_state_id = event.new_state_id;
                 }
+                // `CropBlock.java:85`: `setBlock(..., 2)`.
                 world
-                    .set_block_state(pos, new_state_id, BlockFlags::NOTIFY_NEIGHBORS)
+                    .set_block_state(pos, new_state_id, BlockFlags::NOTIFY_LISTENERS)
                     .await;
             }
         }
@@ -138,7 +139,8 @@ pub async fn ravager_destroy_crop(
     if entity.get_entity().entity_type == &EntityType::RAVAGER
         && world.level_info.load().game_rules.mob_griefing
     {
-        world.break_block(position, None, BlockFlags::empty()).await;
+        // `destroyBlock(pos, true, entity)` drops and writes with flag 3 (`Level.java:296`).
+        world.break_block(position, None, BlockFlags::NOTIFY_ALL).await;
     }
 }
 

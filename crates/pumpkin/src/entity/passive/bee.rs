@@ -9,12 +9,14 @@ use crossbeam::atomic::AtomicCell;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{
-    BlockProperties, DoubleBlockHalf, TallSeagrassLikeProperties,
+    BlockProperties, CaveVinesLikeProperties, CaveVinesPlantLikeProperties, DoubleBlockHalf,
+    TallSeagrassLikeProperties,
 };
 use pumpkin_data::block_state::BlockState;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, effect::StatusEffect, item::Item, potion::Effect};
 use pumpkin_data::{entity::EntityType, tracked_data};
 use pumpkin_nbt::compound::NbtCompound;
@@ -31,6 +33,7 @@ use crate::block::entities::beehive::{BeehiveBlockEntity, bees_stay_in_hive, is_
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
+    ai::control::flying_move_control::FlyingMoveControl,
     ai::goal::{
         Controls, Goal, GoalFuture, active_target::ActiveTargetGoal, breed::BreedGoal,
         follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
@@ -38,7 +41,6 @@ use crate::entity::{
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
         swim::SwimGoal, wander_around::WanderAroundGoal,
     },
-    ai::control::flying_move_control::FlyingMoveControl,
     ai::pathfinder::{NavigatorGoal, node::PathType},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
@@ -1157,7 +1159,18 @@ impl NBTStorage for BeeEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_ageable_nbt(nbt);
             self.write_animal_nbt(nbt);
-            self.persistent_anger.write_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
+            self.persistent_anger
+                .write_nbt(
+                    nbt,
+                    self.mob_entity
+                        .living_entity
+                        .entity
+                        .world
+                        .load()
+                        .get_world_age()
+                        .await,
+                )
+                .await;
             if let Some(hive_pos) = self.hive_pos.load() {
                 nbt.put("hive_pos", block_pos_to_nbt(hive_pos));
             }
@@ -1186,7 +1199,18 @@ impl NBTStorage for BeeEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
-            self.persistent_anger.read_nbt(nbt, self.mob_entity.living_entity.entity.world.load().get_world_age().await).await;
+            self.persistent_anger
+                .read_nbt(
+                    nbt,
+                    self.mob_entity
+                        .living_entity
+                        .entity
+                        .world
+                        .load()
+                        .get_world_age()
+                        .await,
+                )
+                .await;
             // Store the flag bits directly: the entity has no viewers yet during load, so the
             // byte is published by `mob_init_data_tracker` instead of broadcast from here.
             let mut flags = 0u8;
@@ -1460,9 +1484,9 @@ fn bee_is_angry(bee: &BeeEntity) -> bool {
 /// (`CropBlock.getMaxAge`, `StemBlock.AGE`'s range, `SweetBerryBushBlock.AGE`'s range). There is
 /// no generic max-age query on `Block` here, so the five families are tabulated.
 ///
-/// Two tag members are deliberately absent. `cave_vines`/`cave_vines_plant` are grown by vanilla
-/// through `BonemealableBlock.performBonemeal`, and no bone-meal entry point is reachable from mob
-/// AI in this codebase yet. `pitcher_crop` is grown by vanilla's goal not at all:
+/// Two tag members are deliberately absent. `cave_vines`/`cave_vines_plant` have no age to bump:
+/// vanilla grows them through `performBonemeal`, handled by [`cave_vines_with_berries`]
+/// instead. `pitcher_crop` is grown by vanilla's goal not at all:
 /// `PitcherCropBlock extends DoublePlantBlock` (`PitcherCropBlock.java:33`), so it matches none of
 /// `BeeGrowCropGoal.tick`'s four `instanceof`/`is` branches even though it is in the tag. A bee
 /// flying over either simply grows nothing, rather than growing something wrong -- bumping only
@@ -1474,9 +1498,33 @@ const fn bee_growable_max_age(block: &Block) -> Option<u8> {
         // beetroots (`BeetrootBlock.MAX_AGE = 3`), sweet_berry_bush
         // (`SweetBerryBushBlock.MAX_AGE = 3`)
         665 | 861 => Some(3),
-        // torchflower_crop (`TorchflowerCropBlock.MAX_AGE = 1`)
+        // torchflower_crop: its `AGE_1` property tops out at 1; `getMaxAge()` is 2, and the
+        // step to 2 becomes a `torchflower` (special-cased in `BeeGrowCropGoal::grown_state`)
         662 => Some(1),
         _ => None,
+    }
+}
+
+/// `BeeGrowCropGoal.tick`'s cave vines branch: `isValidBonemealTarget` is `!BERRIES` and
+/// `performBonemeal` sets `BERRIES` (`CaveVinesBlock.java:76-89`, `CaveVinesPlantBlock.java:59-72`).
+/// Returns the berried state, or `None` when the block is not a cave vine or already has berries.
+fn cave_vines_with_berries(block: &Block, state_id: BlockStateId) -> Option<BlockStateId> {
+    if block.id == Block::CAVE_VINES.id {
+        let mut props = CaveVinesLikeProperties::from_state_id(state_id, block);
+        if props.berries {
+            return None;
+        }
+        props.berries = true;
+        Some(props.to_state_id(block))
+    } else if block.id == Block::CAVE_VINES_PLANT.id {
+        let mut props = CaveVinesPlantLikeProperties::from_state_id(state_id, block);
+        if props.berries {
+            return None;
+        }
+        props.berries = true;
+        Some(props.to_state_id(block))
+    } else {
+        None
     }
 }
 
@@ -1747,6 +1795,11 @@ impl BeeGrowCropGoal {
             .1
             .parse()
             .ok()?;
+        // `TorchflowerCropBlock.getMaxAge()` is 2 and its `getStateForAge(2)` is a full torchflower
+        // (`TorchflowerCropBlock.java:51-53`, `:61-63`), so a bee finishes an age-1 crop.
+        if block.id == Block::TORCHFLOWER_CROP.id && age >= max_age {
+            return Some(Block::TORCHFLOWER.default_state.id);
+        }
         if age >= max_age {
             return None;
         }
@@ -1797,9 +1850,20 @@ impl Goal for BeeGrowCropGoal {
                 if !block.has_tag(&tag::Block::MINECRAFT_BEE_GROWABLES) {
                     continue;
                 }
+                if let Some(berried) = cave_vines_with_berries(block, state_id) {
+                    // `performBonemeal` writes with flag 2; the goal's following
+                    // `setBlockAndUpdate` re-writes the same state, a no-op, so it is skipped.
+                    world
+                        .set_block_state(&below, berried, BlockFlags::NOTIFY_LISTENERS)
+                        .await;
+                    world.sync_world_event(WorldEvent::ParticlesBeeGrowth, below, 15);
+                    bee.increment_crops_grown_since_pollination();
+                    continue;
+                }
                 let Some(grown) = Self::grown_state(block, state_id) else {
                     continue;
                 };
+                world.sync_world_event(WorldEvent::ParticlesBeeGrowth, below, 15);
                 world
                     .set_block_state(&below, grown, BlockFlags::NOTIFY_ALL)
                     .await;
@@ -1910,7 +1974,6 @@ mod tests {
             &Block::PUMPKIN_STEM,
             &Block::BEETROOTS,
             &Block::SWEET_BERRY_BUSH,
-            &Block::TORCHFLOWER_CROP,
         ] {
             let max = super::bee_growable_max_age(block)
                 .unwrap_or_else(|| panic!("{} should be tabulated", block.name));
@@ -1932,9 +1995,69 @@ mod tests {
         }
     }
 
-    /// The two deliberate exclusions must not be tabulated: cave vines (vanilla grows them
-    /// via bone meal, unreachable from mob AI here) and pitcher crop (a `DoublePlantBlock`,
-    /// which vanilla's own goal never matches).
+    /// `TorchflowerCropBlock.getStateForAge(2)` is a full torchflower, so a bee grows an age-0
+    /// crop to age 1 and an age-1 crop into `minecraft:torchflower`.
+    #[test]
+    fn bee_finishes_a_torchflower_crop() {
+        use pumpkin_data::Block;
+        let young = super::state_id_with_age(&Block::TORCHFLOWER_CROP, 0).expect("age 0 state");
+        let older = super::state_id_with_age(&Block::TORCHFLOWER_CROP, 1).expect("age 1 state");
+        assert_eq!(
+            super::BeeGrowCropGoal::grown_state(&Block::TORCHFLOWER_CROP, young),
+            Some(older)
+        );
+        assert_eq!(
+            super::BeeGrowCropGoal::grown_state(&Block::TORCHFLOWER_CROP, older),
+            Some(Block::TORCHFLOWER.default_state.id)
+        );
+    }
+
+    /// Cave vines grow by gaining berries (`performBonemeal`), and only when they have none.
+    #[test]
+    fn bee_gives_cave_vines_berries_once() {
+        use pumpkin_data::Block;
+        use pumpkin_data::block_properties::{
+            BlockProperties, CaveVinesLikeProperties, CaveVinesPlantLikeProperties,
+        };
+        let mut head = CaveVinesLikeProperties::default(&Block::CAVE_VINES);
+        head.berries = false;
+        head.age = 5;
+        let grown = super::cave_vines_with_berries(
+            &Block::CAVE_VINES,
+            head.to_state_id(&Block::CAVE_VINES),
+        )
+        .expect("berry-less head is growable");
+        let grown = CaveVinesLikeProperties::from_state_id(grown, &Block::CAVE_VINES);
+        assert!(grown.berries);
+        assert_eq!(grown.age, 5);
+        head.berries = true;
+        assert_eq!(
+            super::cave_vines_with_berries(
+                &Block::CAVE_VINES,
+                head.to_state_id(&Block::CAVE_VINES)
+            ),
+            None
+        );
+
+        let mut body = CaveVinesPlantLikeProperties::default(&Block::CAVE_VINES_PLANT);
+        body.berries = false;
+        let grown = super::cave_vines_with_berries(
+            &Block::CAVE_VINES_PLANT,
+            body.to_state_id(&Block::CAVE_VINES_PLANT),
+        )
+        .expect("berry-less body is growable");
+        assert!(
+            CaveVinesPlantLikeProperties::from_state_id(grown, &Block::CAVE_VINES_PLANT).berries
+        );
+        assert_eq!(
+            super::cave_vines_with_berries(&Block::WHEAT, Block::WHEAT.default_state.id),
+            None
+        );
+    }
+
+    /// Blocks outside the age table: cave vines (grown via berries, see
+    /// `cave_vines_with_berries`) and pitcher crop (a `DoublePlantBlock`, which vanilla's own
+    /// goal never matches).
     #[test]
     fn cave_vines_are_not_tabulated() {
         use pumpkin_data::Block;
