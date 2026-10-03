@@ -346,7 +346,9 @@ mod tests {
     fn feeding_speed_up_divides_ticks_as_integer_first() {
         // `AgeableMob.getSpeedUpSecondsWhenFeeding`: `(int)(ticks / 20 * 0.1F)`.
         assert_eq!(speed_up_seconds_when_feeding(100), 0);
-        assert_eq!(speed_up_seconds_when_feeding(200), 2);
+        // 200 / 20 = 10, 10 * 0.1F = 1.0F -> 1; 399 / 20 = 19, 19 * 0.1F = 1.9F -> 1.
+        assert_eq!(speed_up_seconds_when_feeding(200), 1);
+        assert_eq!(speed_up_seconds_when_feeding(399), 1);
         assert_eq!(speed_up_seconds_when_feeding(24000), 120);
     }
 

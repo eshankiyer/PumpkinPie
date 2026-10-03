@@ -1465,18 +1465,30 @@ fn potion_item(
     potion_name: &str,
 ) -> pumpkin_data::item_stack::ItemStack {
     let mut stack = pumpkin_data::item_stack::ItemStack::new(1, item);
+    // SetPotionFunction.run (SetPotionFunction.java:32) is `itemStack.update(POTION_CONTENTS,
+    // EMPTY, potion, PotionContents::withPotion)`, which replaces the component in place
+    // (ItemStack.update -> set). `ItemStack::new(POTION)` already carries a WATER
+    // `PotionContents` patch entry and `get_data_component` returns the first match, so
+    // pushing a second entry left the ejected potion reading as water.
     if let Some(potion) = pumpkin_data::potion::Potion::from_name(potion_name) {
-        stack.patch.push((
-            pumpkin_data::data_component::DataComponent::PotionContents,
-            Some(Box::new(
-                pumpkin_data::data_component_impl::PotionContentsImpl {
-                    potion_id: Some(potion.id as i32),
-                    custom_color: None,
-                    custom_effects: Vec::new(),
-                    custom_name: None,
-                },
-            )),
-        ));
+        let potion_id = Some(potion.id as i32);
+        if let Some(contents) =
+            stack.get_data_component_mut::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+        {
+            contents.potion_id = potion_id;
+        } else {
+            stack.patch.push((
+                pumpkin_data::data_component::DataComponent::PotionContents,
+                Some(Box::new(
+                    pumpkin_data::data_component_impl::PotionContentsImpl {
+                        potion_id,
+                        custom_color: None,
+                        custom_effects: Vec::new(),
+                        custom_name: None,
+                    },
+                )),
+            ));
+        }
     }
     stack
 }
@@ -1818,7 +1830,15 @@ mod tests {
     #[test]
     fn potion_item_applies_the_named_potion() {
         use pumpkin_data::item::Item;
-        assert_eq!(potion_item(&Item::POTION, "regeneration").patch.len(), 1);
+        let stack = potion_item(&Item::POTION, "regeneration");
+        // set_potion replaces the default WATER contents: one component, naming regeneration.
+        assert_eq!(stack.patch.len(), 1);
+        assert_eq!(
+            stack
+                .get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+                .and_then(|contents| contents.potion_id),
+            Some(pumpkin_data::potion::Potion::REGENERATION.id as i32)
+        );
     }
 
     // `ClipContext.Block.VISUAL` clips through `Shapes.empty()` visual shapes (TransparentBlock,

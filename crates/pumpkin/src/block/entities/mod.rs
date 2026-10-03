@@ -1422,9 +1422,33 @@ mod test {
     #[tokio::test]
     async fn placed_block_entity_data_component_is_applied() {
         // `BlockItem.updateCustomBlockEntityTag` loads the typed payload into the freshly
-        // placed entity before the remaining placement callbacks (`BlockItem.java:76-80,
-        // 148-170`).
+        // placed entity before `updateBlockEntityComponents` applies the implicit components
+        // (`BlockItem.java:76-80, 148-170`; `TypedEntityData.java:139-150`).
         let position = BlockPos::new(3, 64, -2);
+        let mut test_nbt = NbtCompound::new();
+        test_nbt.put_string("message", "from item".to_string());
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::TEST_BLOCK,
+            vec![(
+                pumpkin_data::data_component::DataComponent::BlockEntityData,
+                Some(Box::new(BlockEntityDataImpl { nbt: test_nbt })),
+            )],
+        );
+        let entity: Arc<dyn BlockEntity> = Arc::new(TestBlockBlockEntity::new(position));
+        let applied = apply_components_from_item_stack(entity.as_ref(), &stack)
+            .expect("block entity data should rebuild the placed entity");
+        let test_block = applied
+            .as_any()
+            .downcast_ref::<TestBlockBlockEntity>()
+            .expect("the rebuilt entity should stay a test block");
+        // `TestBlockEntity.loadAdditional` reads `message` (`TestBlockEntity.java:40-42`).
+        assert_eq!(test_block.get_message().await, "from item");
+
+        // A chest item's prototype carries an empty CONTAINER (`Items.java:421`), and
+        // `BaseContainerBlockEntity.applyImplicitComponents` copies it over every slot after the
+        // payload is loaded (`BaseContainerBlockEntity.java:149-154`; `BlockEntity.java:280-297`;
+        // `ItemContainerContents.java:118-122`), so raw `Items` in the payload do not survive.
         let stored = ItemStack::new(5, &Item::DIAMOND);
         let mut item_nbt = NbtCompound::new();
         stored.write_item_stack(&mut item_nbt);
@@ -1447,8 +1471,7 @@ mod test {
             .get_inventory()
             .expect("chest block entity should expose its inventory");
         let restored = inventory.get_stack(0).await;
-        assert_eq!(restored.item.id, Item::DIAMOND.id);
-        assert_eq!(restored.item_count, 5);
+        assert!(restored.is_empty());
     }
 
     #[tokio::test]
