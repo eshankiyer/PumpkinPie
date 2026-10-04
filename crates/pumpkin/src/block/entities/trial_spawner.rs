@@ -9,8 +9,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::{Block, BlockId, BlockStateId, world::WorldEvent};
+use pumpkin_data::{Block, BlockStateId, world::WorldEvent};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::GameMode;
@@ -685,9 +684,8 @@ impl TrialSpawnerBlockEntity {
         !matches!(state, TrialSpawnerState::Cooldown) || became_ominous
     }
 
-    // TrialSpawnerStateData.java:120-158; the collision-shape raycast approximates the
-    // `ClipContext.Block.VISUAL` line-of-sight check used by PlayerDetector (see
-    // `blocks_visual_line_of_sight` for what is and is not modelled).
+    // TrialSpawnerStateData.java:120-158; PlayerDetector clips with
+    // `ClipContext.Block.VISUAL` (`World::raycast_visual`).
     #[allow(clippy::too_many_lines)]
     async fn try_detect_players(
         &self,
@@ -716,10 +714,10 @@ impl TrialSpawnerBlockEntity {
                 continue;
             }
             if world
-                .raycast_collision(
+                .raycast_visual(
                     self.position.to_centered_f64(),
                     player.eye_position(),
-                    async |block_pos, world| blocks_visual_line_of_sight(world, block_pos),
+                    async |block_pos, world| !world.get_block_state(block_pos).is_air(),
                 )
                 .await
                 .is_none_or(|(hit, _)| hit == self.position)
@@ -823,14 +821,13 @@ impl TrialSpawnerBlockEntity {
 
     // TrialSpawner.java:288-291 and PlayerDetector.java:55-58: clip from the spawn position
     // to the spawner centre; the line is clear when nothing but the spawner block is hit.
-    // `ClipContext.Block.VISUAL` uses `getVisualShape`, which defaults to the collision
-    // shape (hence `raycast_collision`); see `blocks_visual_line_of_sight` for the overrides.
+    // `ClipContext.Block.VISUAL` uses `getVisualShape` (`World::raycast_visual`).
     async fn in_line_of_sight(&self, world: &Arc<World>, dest: Vector3<f64>) -> bool {
         world
-            .raycast_collision(
+            .raycast_visual(
                 dest,
                 self.position.to_centered_f64(),
-                async |block_pos, world| blocks_visual_line_of_sight(world, block_pos),
+                async |block_pos, world| !world.get_block_state(block_pos).is_air(),
             )
             .await
             .is_none_or(|(hit, _)| hit == self.position)
@@ -1295,10 +1292,10 @@ impl TrialSpawnerBlockEntity {
             entity_pos.z,
         );
         let hit_block = world
-            .raycast_collision(
+            .raycast_visual(
                 entity_pos,
                 try_spawn_pos,
-                async |block_pos, world| blocks_visual_line_of_sight(world, block_pos),
+                async |block_pos, world| !world.get_block_state(block_pos).is_air(),
             )
             .await
             .map_or_else(
@@ -1319,40 +1316,6 @@ impl TrialSpawnerBlockEntity {
 // `RandomSource.triangle(min, max)`: `min + max * (nextDouble - nextDouble)`.
 fn triangle(min: f64, max: f64) -> f64 {
     (rand::random::<f64>() - rand::random::<f64>()).mul_add(max, min)
-}
-
-// Blocks whose `getVisualShape` is `Shapes.empty()`, which `ClipContext.Block.VISUAL` clips
-// straight through: `TransparentBlock` (glass, stained and tinted glass, and the copper grates
-// via `WaterloggedTransparentBlock`; TransparentBlock.java:25-27), `IronBarsBlock` (iron and
-// copper bars, glass panes; IronBarsBlock.java:81-83) and powder snow
-// (PowderSnowBlock.java:135-137).
-fn has_empty_visual_shape(block: &Block) -> bool {
-    block.has_tag(&tag::Block::C_GLASS_BLOCKS)
-        || block.has_tag(&tag::Block::C_GLASS_PANES)
-        || block.has_tag(&tag::Block::MINECRAFT_BARS)
-        || matches!(
-            block.id,
-            BlockId::POWDER_SNOW
-                | BlockId::COPPER_GRATE
-                | BlockId::EXPOSED_COPPER_GRATE
-                | BlockId::WEATHERED_COPPER_GRATE
-                | BlockId::OXIDIZED_COPPER_GRATE
-                | BlockId::WAXED_COPPER_GRATE
-                | BlockId::WAXED_EXPOSED_COPPER_GRATE
-                | BlockId::WAXED_WEATHERED_COPPER_GRATE
-                | BlockId::WAXED_OXIDIZED_COPPER_GRATE
-        )
-}
-
-// Hit filter for the trial spawner line-of-sight rays (TrialSpawner.inLineOfSight and
-// PlayerDetector.inLineOfSight clip with `ClipContext.Block.VISUAL`). Blocks with an empty
-// visual shape never stop the ray. Not modelled: the visual shapes that differ from the
-// collision shape while being non-empty (soul sand and mud are full blocks, snow layers use
-// their layer shape, fences use their outline; SoulSandBlock/MudBlock/SnowLayerBlock/
-// FenceBlock.getVisualShape); the ray still tests those against the collision shape.
-fn blocks_visual_line_of_sight(world: &World, pos: &BlockPos) -> bool {
-    let state = world.get_block_state(pos);
-    !state.is_air() && !has_empty_visual_shape(Block::from_state_id(state.id))
 }
 
 fn custom_spawn_rules_allow(world: &World, pos: &BlockPos, spawn_data: &NbtCompound) -> bool {
@@ -1947,7 +1910,7 @@ mod tests {
             &Block::WAXED_WEATHERED_COPPER_GRATE,
             &Block::POWDER_SNOW,
         ] {
-            assert!(has_empty_visual_shape(block), "{}", block.name);
+            assert!(crate::world::has_empty_visual_shape(block), "{}", block.name);
         }
         for block in [
             &Block::STONE,
@@ -1958,7 +1921,7 @@ mod tests {
             &Block::COPPER_BLOCK,
             &Block::COPPER_TRAPDOOR,
         ] {
-            assert!(!has_empty_visual_shape(block), "{}", block.name);
+            assert!(!crate::world::has_empty_visual_shape(block), "{}", block.name);
         }
     }
 

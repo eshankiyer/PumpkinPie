@@ -119,6 +119,14 @@ pub(crate) fn block_sound_type(block: &Block) -> (Sound, Sound, f32, f32) {
             1.0,
         ),
         "gravel" => (Sound::BlockGravelStep, Sound::BlockGravelFall, 1.0, 1.0),
+        // `DecoratedPotBlock.getSoundType` (`DecoratedPotBlock.java:211-214`): the cracked and
+        // intact types differ only in their break sound (`SoundType.java:736-753`).
+        "decorated_pot" => (
+            Sound::BlockDecoratedPotStep,
+            Sound::BlockDecoratedPotFall,
+            1.0,
+            1.0,
+        ),
         "suspicious_gravel" => (
             Sound::BlockSuspiciousGravelStep,
             Sound::BlockSuspiciousGravelFall,
@@ -231,6 +239,7 @@ pub(crate) fn block_place_sound_type(block: &Block) -> (Sound, f32, f32) {
         Sound::BlockSandStep => Sound::BlockSandPlace,
         Sound::BlockSuspiciousSandStep => Sound::BlockSuspiciousSandPlace,
         Sound::BlockGravelStep => Sound::BlockGravelPlace,
+        Sound::BlockDecoratedPotStep => Sound::BlockDecoratedPotPlace,
         Sound::BlockSuspiciousGravelStep => Sound::BlockSuspiciousGravelPlace,
         Sound::BlockGlassStep => Sound::BlockGlassPlace,
         Sound::BlockGrassStep => Sound::BlockGrassPlace,
@@ -942,6 +951,117 @@ impl BlockIsReplacing {
     }
 }
 
+/// Subtracts `cut` from `boxes`, splitting each box into at most six pieces.
+fn subtract_box(boxes: Vec<BoundingBox>, cut: &BoundingBox) -> Vec<BoundingBox> {
+    let mut out = Vec::with_capacity(boxes.len());
+    for b in boxes {
+        if !b.intersects(cut) {
+            out.push(b);
+            continue;
+        }
+        let mut rest = b;
+        // Slabs below and above the cut on Y, then on X, then on Z of what is left.
+        if rest.min.y < cut.min.y {
+            out.push(BoundingBox::new(rest.min, Vector3::new(rest.max.x, cut.min.y, rest.max.z)));
+            rest.min.y = cut.min.y;
+        }
+        if rest.max.y > cut.max.y {
+            out.push(BoundingBox::new(Vector3::new(rest.min.x, cut.max.y, rest.min.z), rest.max));
+            rest.max.y = cut.max.y;
+        }
+        if rest.min.x < cut.min.x {
+            out.push(BoundingBox::new(rest.min, Vector3::new(cut.min.x, rest.max.y, rest.max.z)));
+            rest.min.x = cut.min.x;
+        }
+        if rest.max.x > cut.max.x {
+            out.push(BoundingBox::new(Vector3::new(cut.max.x, rest.min.y, rest.min.z), rest.max));
+            rest.max.x = cut.max.x;
+        }
+        if rest.min.z < cut.min.z {
+            out.push(BoundingBox::new(rest.min, Vector3::new(rest.max.x, rest.max.y, cut.min.z)));
+        }
+        if rest.max.z > cut.max.z {
+            out.push(BoundingBox::new(Vector3::new(rest.min.x, rest.min.y, cut.max.z), rest.max));
+        }
+    }
+    out
+}
+
+/// `Shapes.joinUnoptimized(old, new, BooleanOp.ONLY_SECOND)`: the volume of `new` that `old`
+/// does not cover, as disjoint boxes in block-local coordinates.
+fn added_collision_boxes(old: &[BoundingBox], new: &[BoundingBox]) -> Vec<BoundingBox> {
+    let mut added: Vec<BoundingBox> = new.to_vec();
+    for cut in old {
+        added = subtract_box(added, cut);
+    }
+    added
+}
+
+/// `Shapes.collide(Axis.Y, moving, [added], -1.0)` (`Shapes.java:232-242`,
+/// `VoxelShape.java:251-300`): how far `moving` can travel down (a negative distance) before
+/// resting on the top of an added box that overlaps it in X and Z and lies below its feet.
+fn collide_down(moving: &BoundingBox, added: &[BoundingBox]) -> f64 {
+    const EPSILON: f64 = 1.0E-7;
+    let mut distance: f64 = -1.0;
+    for b in added {
+        if b.max.x > moving.min.x + EPSILON
+            && b.min.x < moving.max.x - EPSILON
+            && b.max.z > moving.min.z + EPSILON
+            && b.min.z < moving.max.z - EPSILON
+            && b.max.y <= moving.min.y + EPSILON
+        {
+            distance = distance.max(b.max.y - moving.min.y);
+        }
+    }
+    if distance.abs() < EPSILON { 0.0 } else { distance }
+}
+
+/// `Block.pushEntitiesUp` (`Block.java:144-157`): lifts every entity that intersects the
+/// collision volume `new_state` adds over `old_state` so it rests on the new shape. Each
+/// entity is moved with a teleport, so players receive the position sync.
+pub(crate) async fn push_entities_up(
+    world: &Arc<World>,
+    old_state: &BlockState,
+    new_state: &BlockState,
+    pos: &BlockPos,
+) {
+    let old: Vec<BoundingBox> = old_state.get_block_collision_shapes_at(pos).collect();
+    let new: Vec<BoundingBox> = new_state.get_block_collision_shapes_at(pos).collect();
+    let offset = pos.to_f64();
+    let added: Vec<BoundingBox> = added_collision_boxes(&old, &new)
+        .iter()
+        .map(|b| b.shift(offset))
+        .collect();
+    // `offsetShape.bounds()`.
+    let Some(bounds) = added.iter().copied().reduce(|a, b| {
+        BoundingBox::new(
+            Vector3::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y), a.min.z.min(b.min.z)),
+            Vector3::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y), a.max.z.max(b.max.z)),
+        )
+    }) else {
+        return;
+    };
+
+    let mut entities = world.get_entities_at_box(&bounds);
+    entities.extend(
+        world
+            .get_players_at_box(&bounds)
+            .into_iter()
+            .map(|player| player as Arc<dyn EntityBase>),
+    );
+    // `getEntities(null, bb)` filters with `EntitySelector.NO_SPECTATORS`.
+    for entity in entities {
+        if entity.is_spectator() {
+            continue;
+        }
+        let base = entity.get_entity();
+        let moving = base.bounding_box.load().shift(Vector3::new(0.0, 1.0, 0.0));
+        let dy = 1.0 + collide_down(&moving, &added);
+        let target = base.pos.load().add(&Vector3::new(0.0, dy, 0.0));
+        entity.teleport(target, None, None, world.clone()).await;
+    }
+}
+
 pub async fn calculate_comparator_output(
     inventory: &dyn pumpkin_world::inventory::Inventory,
 ) -> u8 {
@@ -971,6 +1091,29 @@ pub async fn calculate_comparator_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Block.pushEntitiesUp` for farmland -> dirt adds the slab y 15/16..1, and an entity
+    /// standing on the farmland (feet at 15/16) is lifted exactly 1/16.
+    #[test]
+    fn push_entities_up_farmland_to_dirt_lifts_one_sixteenth() {
+        let farmland: Vec<BoundingBox> = Block::FARMLAND
+            .default_state
+            .get_block_collision_shapes()
+            .collect();
+        let dirt: Vec<BoundingBox> = Block::DIRT.default_state.get_block_collision_shapes().collect();
+        let added = added_collision_boxes(&farmland, &dirt);
+        assert_eq!(added.len(), 1);
+        assert!((added[0].min.y - 0.9375).abs() < 1e-9);
+        assert!((added[0].max.y - 1.0).abs() < 1e-9);
+
+        let standing = BoundingBox::new(Vector3::new(0.2, 0.9375, 0.2), Vector3::new(0.8, 2.7375, 0.8));
+        let moving = standing.shift(Vector3::new(0.0, 1.0, 0.0));
+        let dy = 1.0 + collide_down(&moving, &added);
+        assert!((dy - 0.0625).abs() < 1e-9);
+
+        // Replacing a shape with itself adds nothing.
+        assert!(added_collision_boxes(&dirt, &dirt).is_empty());
+    }
 
     #[test]
     fn block_bounce_restitution_matches_vanilla_properties() {

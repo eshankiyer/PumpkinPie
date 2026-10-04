@@ -236,11 +236,14 @@ pub trait SculkWorld: SpreadTarget {
         true
     }
 
-    /// Simplified `Block.pushEntitiesUp`: real vanilla diffs old/new collision shapes;
-    /// this codebase's existing ports (`farmland.rs`, `dirt_path.rs`) approximate it as
-    /// "teleport entities in this column up by one block", and this reuses that same
-    /// simplification rather than inventing shape-diff math for sculk specifically.
-    fn push_entities_up(&self, pos: BlockPos);
+    /// `Block.pushEntitiesUp(oldState, newState, level, pos)`: lifts entities out of the
+    /// collision volume `new_state` adds over `old_state` at `pos`.
+    fn push_entities_up(
+        &self,
+        old_state: BlockStateId,
+        new_state: BlockStateId,
+        pos: BlockPos,
+    ) -> BlockFuture<'_, ()>;
 }
 
 /// `SculkBehaviour` interface. Every default method mirrors the Java default exactly;
@@ -440,7 +443,12 @@ mod tests {
         fn play_block_sound(&self, _pos: BlockPos, _sound: Sound) {
             panic!("unexpected call in DEFAULT.attemptUseCharge test")
         }
-        fn push_entities_up(&self, _pos: BlockPos) {
+        fn push_entities_up(
+            &self,
+            _old_state: BlockStateId,
+            _new_state: BlockStateId,
+            _pos: BlockPos,
+        ) -> BlockFuture<'_, ()> {
             panic!("unexpected call in DEFAULT.attemptUseCharge test")
         }
     }

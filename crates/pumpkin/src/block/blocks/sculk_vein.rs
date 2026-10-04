@@ -37,9 +37,7 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId, FacingExt, tag};
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::random::{RandomGenerator, RandomImpl};
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
@@ -349,20 +347,21 @@ impl SculkWorld for WorldSpreadTarget<'_> {
         self.world.is_loaded(&pos)
     }
 
-    fn push_entities_up(&self, pos: BlockPos) {
-        // Simplified `Block.pushEntitiesUp`, matching the existing approximation in
-        // `farmland.rs`/`dirt_path.rs`: teleport entities in this 1x1x1 column up by one
-        // block rather than diffing old/new collision shapes.
-        let min = Vector3::new(f64::from(pos.0.x), f64::from(pos.0.y), f64::from(pos.0.z));
-        let max = Vector3::new(min.x + 1.0, min.y + 1.0, min.z + 1.0);
-        let aabb = BoundingBox::new(min, max);
-        for entity in self.world.get_entities_at_box(&aabb) {
-            let entity = entity.get_entity();
-            let entity_pos = entity.pos.load();
-            entity
-                .pos
-                .store(Vector3::new(entity_pos.x, entity_pos.y + 1.0, entity_pos.z));
-        }
+    fn push_entities_up(
+        &self,
+        old_state: BlockStateId,
+        new_state: BlockStateId,
+        pos: BlockPos,
+    ) -> BlockFuture<'_, ()> {
+        Box::pin(async move {
+            crate::block::push_entities_up(
+                self.world,
+                BlockState::from_id(old_state),
+                BlockState::from_id(new_state),
+                &pos,
+            )
+            .await;
+        })
     }
 }
 
@@ -448,7 +447,7 @@ async fn attempt_place_sculk(
             continue;
         }
         let support_pos = pos.offset(support.to_offset());
-        let support_block = world.accessor().get_block(&support_pos);
+        let (support_block, support_state) = world.accessor().get_block_and_state(&support_pos);
         if !support_block.has_tag(spreader.replaceable_blocks()) {
             continue;
         }
@@ -456,7 +455,9 @@ async fn attempt_place_sculk(
         world
             .set_block(support_pos, Block::SCULK.default_state.id)
             .await;
-        world.push_entities_up(support_pos);
+        world
+            .push_entities_up(support_state.id, Block::SCULK.default_state.id, support_pos)
+            .await;
         world.play_block_sound(support_pos, Sound::BlockSculkSpread);
 
         let vein_config = SculkVeinSpreaderConfig::vein(false);
@@ -748,7 +749,14 @@ mod tests {
             self.sounds_played.lock().unwrap().push((pos, sound));
         }
 
-        fn push_entities_up(&self, _pos: BlockPos) {}
+        fn push_entities_up(
+            &self,
+            _old_state: BlockStateId,
+            _new_state: BlockStateId,
+            _pos: BlockPos,
+        ) -> BlockFuture<'_, ()> {
+            Box::pin(async {})
+        }
     }
 
     fn vein_state(faces: &[BlockDirection]) -> &'static BlockState {

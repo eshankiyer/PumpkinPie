@@ -8,6 +8,8 @@ use crate::block::OnLandedUponArgs;
 use crate::block::OnPlaceArgs;
 use crate::block::OnScheduledTickArgs;
 use crate::block::RandomTickArgs;
+use crate::block::push_entities_up;
+use crate::entity::EntityBase;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::Block;
@@ -19,7 +21,6 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::tag;
 use pumpkin_data::tag::Taggable;
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
@@ -39,7 +40,7 @@ impl BlockBehaviour for FarmlandBlock {
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if !can_place_at(args.world.as_ref(), args.position) {
-                turn_to_dirt(args.world, args.position).await;
+                turn_to_dirt(args.world, args.position, None).await;
             }
         })
     }
@@ -56,7 +57,11 @@ impl BlockBehaviour for FarmlandBlock {
                 && dimensions.width * dimensions.width * dimensions.height > 0.512
                 && rand::rng().random::<f32>() < args.fall_distance - 0.5
             {
-                turn_to_dirt(args.world, args.position).await;
+                // `turnToDirt(entity, ...)`: the trampler is the game event's source.
+                let source = args
+                    .world
+                    .get_entity_by_id(args.entity.get_entity().entity_id);
+                turn_to_dirt(args.world, args.position, source).await;
             }
 
             // `FarmlandBlock#fallOn` ends with `super.fallOn`, so normal fall damage still
@@ -157,15 +162,23 @@ impl BlockBehaviour for FarmlandBlock {
                     return;
                 }
 
-                turn_to_dirt(args.world, args.position).await;
+                turn_to_dirt(args.world, args.position, None).await;
             }
         })
     }
 }
 
-/// `FarmlandBlock#turnToDirt`.
-async fn turn_to_dirt(world: &Arc<World>, block_pos: &BlockPos) {
-    push_up_entities(world, block_pos);
+/// `FarmlandBlock.turnToDirt` (`FarmlandBlock.java:121-125`): lifts entities onto the new
+/// full block, sets dirt and emits `BLOCK_CHANGE` with the dirt state and the optional
+/// source entity (`GameEvent.Context.of(sourceEntity, newState)`). `DirtPathBlock.tick`
+/// reuses it with a null source.
+pub(crate) async fn turn_to_dirt(
+    world: &Arc<World>,
+    block_pos: &BlockPos,
+    source: Option<Arc<dyn EntityBase>>,
+) {
+    let old_state = world.get_block_state(block_pos);
+    push_entities_up(world, old_state, Block::DIRT.default_state, block_pos).await;
     world
         .set_block_state(
             block_pos,
@@ -177,7 +190,10 @@ async fn turn_to_dirt(world: &Arc<World>, block_pos: &BlockPos) {
         world,
         GameEvent::BlockChange,
         block_pos.to_centered_f64(),
-        GameEventContext::none(),
+        GameEventContext {
+            source_entity: source,
+            affected_block_state: Some(Block::DIRT.default_state.id),
+        },
     )
     .await;
 }
@@ -185,24 +201,6 @@ async fn turn_to_dirt(world: &Arc<World>, block_pos: &BlockPos) {
 fn can_place_at(world: &dyn BlockAccessor, block_pos: &BlockPos) -> bool {
     let (block, state) = world.get_block_and_state(&block_pos.up());
     !state.is_solid() || block.has_tag(&tag::Block::MINECRAFT_MAINTAINS_FARMLAND)
-}
-
-/// Simplified port of vanilla's `Block.pushEntitiesUp`: teleports any entity
-/// overlapping the 1x1x1 column at `block_pos` up by one block, rather than
-/// vanilla's exact old-shape/new-shape collision diff.
-fn push_up_entities(world: &Arc<World>, block_pos: &BlockPos) {
-    let min = Vector3::new(
-        f64::from(block_pos.0.x),
-        f64::from(block_pos.0.y),
-        f64::from(block_pos.0.z),
-    );
-    let max = Vector3::new(min.x + 1.0, min.y + 1.0, min.z + 1.0);
-    let aabb = BoundingBox::new(min, max);
-    for entity in world.get_entities_at_box(&aabb) {
-        let entity = entity.get_entity();
-        let pos = entity.pos.load();
-        entity.pos.store(Vector3::new(pos.x, pos.y + 1.0, pos.z));
-    }
 }
 
 /// Mirrors vanilla `FarmBlock#isNearWater`, which tests the *fluid* state of every

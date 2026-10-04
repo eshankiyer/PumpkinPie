@@ -558,7 +558,14 @@ mod tests {
             })
         }
         fn play_block_sound(&self, _pos: BlockPos, _sound: Sound) {}
-        fn push_entities_up(&self, _pos: BlockPos) {}
+        fn push_entities_up(
+            &self,
+            _old_state: BlockStateId,
+            _new_state: BlockStateId,
+            _pos: BlockPos,
+        ) -> BlockFuture<'_, ()> {
+            Box::pin(async {})
+        }
     }
 
     fn random() -> RandomGenerator {

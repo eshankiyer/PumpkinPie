@@ -896,7 +896,7 @@ impl LootPoolEntryTypesExt for LootPoolEntryTypes {
                         .as_any()
                         .downcast_ref::<DecoratedPotBlockEntity>()
                 })
-                .and_then(DecoratedPotBlockEntity::decorations)
+                .and_then(DecoratedPotBlockEntity::ordered_decorations)
                 .map_or_else(Vec::new, |decorations| {
                     decorations
                         .iter()

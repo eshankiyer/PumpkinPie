@@ -136,6 +136,31 @@ use pumpkin_protocol::{
 };
 use pumpkin_world::world_info::data_files::WorldBorderData;
 
+/// Blocks whose `getVisualShape` is `Shapes.empty()`.
+///
+/// `ClipContext.Block.VISUAL` clips straight through them: `TransparentBlock` (glass, stained and tinted glass, and the copper grates
+/// via `WaterloggedTransparentBlock`; `TransparentBlock.java:25-27`), `IronBarsBlock` (iron and
+/// copper bars, glass panes; `IronBarsBlock.java:81-83`) and powder snow
+/// (`PowderSnowBlock.java:135-137`).
+#[must_use]
+pub fn has_empty_visual_shape(block: &Block) -> bool {
+    block.has_tag(&tag::Block::C_GLASS_BLOCKS)
+        || block.has_tag(&tag::Block::C_GLASS_PANES)
+        || block.has_tag(&tag::Block::MINECRAFT_BARS)
+        || matches!(
+            block.id,
+            pumpkin_data::BlockId::POWDER_SNOW
+                | pumpkin_data::BlockId::COPPER_GRATE
+                | pumpkin_data::BlockId::EXPOSED_COPPER_GRATE
+                | pumpkin_data::BlockId::WEATHERED_COPPER_GRATE
+                | pumpkin_data::BlockId::OXIDIZED_COPPER_GRATE
+                | pumpkin_data::BlockId::WAXED_COPPER_GRATE
+                | pumpkin_data::BlockId::WAXED_EXPOSED_COPPER_GRATE
+                | pumpkin_data::BlockId::WAXED_WEATHERED_COPPER_GRATE
+                | pumpkin_data::BlockId::WAXED_OXIDIZED_COPPER_GRATE
+        )
+}
+
 type RayShapeCheck =
     fn(&World, &BlockPos, Vector3<f64>, Vector3<f64>) -> (bool, Option<BlockDirection>);
 use pumpkin_protocol::{
@@ -2295,17 +2320,23 @@ impl World {
             .max_snow_accumulation_height
             .clamp(0, 8) as u8;
         if maximum_layers > 0 && self.should_snow_at(biome, &top) {
-            let state_id = self.get_block_state_id(&top);
-            if state_id == Block::SNOW.default_state.id {
-                let mut properties = SnowLikeProperties::from_state_id(state_id, &Block::SNOW);
+            let (block, state) = self.get_block_and_state(&top);
+            // `state.is(Blocks.SNOW)`: any layer count grows, not only the one-layer default.
+            if block == &Block::SNOW {
+                let mut properties = SnowLikeProperties::from_state_id(state.id, &Block::SNOW);
                 if properties.layers < maximum_layers {
                     properties.layers += 1;
+                    let new_state_id = properties.to_state_id(&Block::SNOW);
+                    // `Block.pushEntitiesUp(state, newState, this, topPos)` (`ServerLevel.java:592`).
+                    crate::block::push_entities_up(
+                        self,
+                        state,
+                        BlockState::from_id(new_state_id),
+                        &top,
+                    )
+                    .await;
                     self.clone()
-                        .set_block_state(
-                            &top,
-                            properties.to_state_id(&Block::SNOW),
-                            BlockFlags::NOTIFY_ALL,
-                        )
+                        .set_block_state(&top, new_state_id, BlockFlags::NOTIFY_ALL)
                         .await;
                 }
             } else {
@@ -7044,6 +7075,48 @@ impl World {
             &CWorldEvent::new(world_event as i32, position, data, false),
         );
     }
+    /// `ServerLevel.globalLevelEvent` (`ServerLevel.java:1083-1103`): with
+    /// `global_sound_events` on, every player on the server hears the event. Players in this
+    /// world get it at the block centre, clamped to 32 blocks along the direction to it;
+    /// players in other worlds get it at their own position. With the gamerule off it is a
+    /// plain `levelEvent`.
+    pub fn sync_global_world_event(&self, world_event: WorldEvent, position: BlockPos, data: i32) {
+        if !self.level_info.load().game_rules.global_sound_events {
+            self.sync_world_event(world_event, position, data);
+            return;
+        }
+        let Some(server) = self.server.upgrade() else {
+            return;
+        };
+        let event_id = world_event as i32;
+        let center = position.to_centered_f64();
+        for player in server.get_all_players() {
+            let ClientPlatform::Java(client) = player.client.as_ref() else {
+                continue;
+            };
+            let player_pos = player.get_entity().pos.load();
+            let sound_pos = if std::ptr::eq(Arc::as_ptr(&player.world()), self) {
+                if player_pos.squared_distance_to_vec(&center) < 32.0 * 32.0 {
+                    center
+                } else {
+                    let direction = (center - player_pos).normalize();
+                    player_pos + direction * 32.0
+                }
+            } else {
+                player_pos
+            };
+            Self::broadcast_java_clients(
+                &CWorldEvent::new(
+                    event_id,
+                    BlockPos::floored_v(sound_pos),
+                    data,
+                    true,
+                ),
+                std::iter::once(client),
+            );
+        }
+    }
+
     #[must_use]
     pub fn is_valid(dest: BlockPos) -> bool {
         Self::is_valid_horizontally(dest) && Self::is_valid_vertically(dest.0.y)
@@ -8018,6 +8091,43 @@ impl World {
         }
 
         (false, None)
+    }
+
+    /// `ClipContext.Block.VISUAL`: clips each block against `getVisualShape`, which defaults
+    /// to the collision shape (`BlockBehaviour.java:339`). Overrides: fences use their outline
+    /// (`FenceBlock.java:49-52`), snow layers `SHAPES[layers]`, i.e. the outline
+    /// (`SnowLayerBlock.java:61-64`), soul sand and mud a full cube (`SoulSandBlock.java:36-38`,
+    /// `MudBlock.java:36-38`), and transparent blocks, bars and powder snow are empty.
+    fn ray_visual_check(
+        &self,
+        block_pos: &BlockPos,
+        from: Vector3<f64>,
+        to: Vector3<f64>,
+    ) -> (bool, Option<BlockDirection>) {
+        let block = self.get_block(block_pos);
+        if has_empty_visual_shape(block) {
+            return (false, None);
+        }
+        if block.has_tag(&tag::Block::MINECRAFT_FENCES) || block == &Block::SNOW {
+            return self.ray_outline_check(block_pos, from, to);
+        }
+        if block == &Block::SOUL_SAND || block == &Block::MUD {
+            let block_min = block_pos.0.to_f64();
+            let block_max = block_min.add(&Vector3::new(1.0, 1.0, 1.0));
+            return Self::intersects_aabb_with_direction(from, to, block_min, block_max)
+                .map_or((false, None), |(direction, _)| (true, Some(direction)));
+        }
+        self.ray_collision_check(block_pos, from, to)
+    }
+
+    pub async fn raycast_visual(
+        self: &Arc<Self>,
+        start_pos: Vector3<f64>,
+        end_pos: Vector3<f64>,
+        hit_check: impl AsyncFn(&BlockPos, &Arc<Self>) -> bool,
+    ) -> Option<(BlockPos, BlockDirection)> {
+        self.raycast_with_check(start_pos, end_pos, hit_check, Self::ray_visual_check)
+            .await
     }
 
     pub async fn raycast(

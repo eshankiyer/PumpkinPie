@@ -20,7 +20,7 @@ use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, GetComparatorOutputArgs,
-    NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs, RandomTickArgs, UseWithItemArgs,
+    OnPlaceArgs, OnStateReplacedArgs, RandomTickArgs, UseWithItemArgs,
 };
 use crate::entity::EntityBase;
 use crate::world::World;
@@ -124,26 +124,13 @@ impl BlockBehaviour for CopperGolemStatueBlock {
         })
     }
 
-    /// `useItemOn` with an empty hand: cycles the pose.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            Self::update_pose(
-                args.world,
-                args.block,
-                state.id,
-                args.position,
-                Some(args.player),
-            )
-            .await;
-            BlockActionResult::Success
-        })
-    }
-
-    /// `WeatheringCopperGolemStatueBlock.useItemOn` (lines 50-82). An axe on the UNAFFECTED
-    /// stage releases the golem here; on any other stage it is passed through so the axe item
-    /// can de-wax or scrape it. Honeycomb is passed through to the waxing path, and anything
-    /// else cycles the pose.
+    /// `CopperGolemStatueBlock.useItemOn` (lines 101-115) for the waxed statues and
+    /// `WeatheringCopperGolemStatueBlock.useItemOn` (lines 50-82) for the unwaxed four. Neither
+    /// overrides `useWithoutItem`, and an empty hand reaches this path too, so it cycles the
+    /// pose like any other non-axe stack.
+    ///
+    /// Every non-consuming outcome is a plain PASS (not `TRY_WITH_EMPTY_HAND`), so the held
+    /// item's own `useOn` runs next: the axe scrapes or de-waxes, honeycomb waxes.
     ///
     /// UNAFFECTED is the unwaxed `minecraft:copper_golem_statue` alone: the waxed variants are
     /// plain `CopperGolemStatueBlock`s in vanilla (only the unwaxed four extend
@@ -154,50 +141,66 @@ impl BlockBehaviour for CopperGolemStatueBlock {
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             let item: &Item = args.item_stack.item;
-            if item.has_tag(&tag::Item::MINECRAFT_AXES) {
-                if args.block.id != BlockId::COPPER_GOLEM_STATUE {
-                    return BlockActionResult::PassToDefaultBlockAction;
+            let is_axe = item.has_tag(&tag::Item::MINECRAFT_AXES);
+
+            if !OXIDATION_FAMILY.iter().any(|b| b.id == args.block.id) {
+                // Plain `CopperGolemStatueBlock`: an axe passes, anything else cycles the pose.
+                if is_axe {
+                    return BlockActionResult::Pass;
                 }
-
                 let state = args.world.get_block_state(args.position);
-                let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
-
-                // The block entity is created on placement (`block/entities/mod.rs`), but a
-                // statue restored from an older world may predate that, and vanilla's own
-                // `useItemOn` no-ops when the block entity is missing.
-                let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                    return BlockActionResult::PassToDefaultBlockAction;
-                };
-                let Some(statue) = block_entity
-                    .as_any()
-                    .downcast_ref::<CopperGolemStatueBlockEntity>()
-                else {
-                    return BlockActionResult::PassToDefaultBlockAction;
-                };
-
-                statue
-                    .remove_statue(args.world, props.facing, props.waterlogged)
-                    .await;
-                // `itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot())`, line 72.
-                args.player
-                    .damage_item_in_slot(args.equipment_slot, 1)
-                    .await;
+                Self::update_pose(
+                    args.world,
+                    args.block,
+                    state.id,
+                    args.position,
+                    Some(args.player),
+                )
+                .await;
                 return BlockActionResult::Success;
             }
 
-            if item.id == Item::HONEYCOMB.id {
-                return BlockActionResult::PassToDefaultBlockAction;
+            // The weathering subclass does nothing without its block entity (line 60).
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return BlockActionResult::Pass;
+            };
+            let Some(statue) = block_entity
+                .as_any()
+                .downcast_ref::<CopperGolemStatueBlockEntity>()
+            else {
+                return BlockActionResult::Pass;
+            };
+
+            if !is_axe {
+                if item.id == Item::HONEYCOMB.id {
+                    return BlockActionResult::Pass;
+                }
+                let state = args.world.get_block_state(args.position);
+                Self::update_pose(
+                    args.world,
+                    args.block,
+                    state.id,
+                    args.position,
+                    Some(args.player),
+                )
+                .await;
+                return BlockActionResult::Success;
+            }
+
+            if args.block.id != BlockId::COPPER_GOLEM_STATUE {
+                return BlockActionResult::Pass;
             }
 
             let state = args.world.get_block_state(args.position);
-            Self::update_pose(
-                args.world,
-                args.block,
-                state.id,
-                args.position,
-                Some(args.player),
-            )
-            .await;
+            let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
+            // `itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot())` (line 72) runs before
+            // the golem is spawned and the statue removed (lines 74-75).
+            args.player
+                .damage_item_in_slot(args.equipment_slot, 1)
+                .await;
+            statue
+                .remove_statue(args.world, props.facing, props.waterlogged)
+                .await;
             BlockActionResult::Success
         })
     }

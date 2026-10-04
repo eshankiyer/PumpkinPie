@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, BlockDirection, BlockId, block_properties::BlockProperties};
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use pumpkin_world::world::BlockFlags;
@@ -88,17 +89,26 @@ impl EndPortal {
         true
     }
 
+    /// The pattern-match branch of `EnderEyeItem.useOn` (`EnderEyeItem.java:55-66`): each
+    /// interior block is destroyed with drops (`destroyBlock(pos, true, null)`) before the
+    /// end portal is set with flag 2, then the portal-open sound is a global level event at
+    /// the centre.
     async fn create_portal(world: &Arc<World>, pos: BlockPos) {
         for x in -1..=1 {
             for z in -1..=1 {
+                let portal_pos = pos.offset(Vector3::new(x, 0, z));
+                world
+                    .break_block(&portal_pos, None, BlockFlags::NOTIFY_ALL)
+                    .await;
                 world
                     .set_block_state(
-                        &pos.offset(Vector3::new(x, 0, z)),
+                        &portal_pos,
                         Block::END_PORTAL.default_state.id,
                         BlockFlags::NOTIFY_LISTENERS,
                     )
                     .await;
             }
         }
+        world.sync_global_world_event(WorldEvent::SoundEndPortalSpawn, pos, 0);
     }
 }

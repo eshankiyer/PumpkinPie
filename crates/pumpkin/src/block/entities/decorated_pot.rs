@@ -303,6 +303,18 @@ impl DecoratedPotBlockEntity {
             .ok()
     }
 
+    /// `getDecorations().ordered()` as used by `DecoratedPotBlock.getDrops`
+    /// (`DecoratedPotBlock.java:181-192`). A missing `sherds` tag is `PotDecorations.EMPTY`
+    /// (`DecoratedPotBlockEntity.java:39-41,57`), and so is a list the codec rejects (more
+    /// than four entries, a non-string or an unknown item; `PotDecorations.java:23-27`).
+    /// Sides past the end of a shorter list are empty (`getItem`, `PotDecorations.java:41-48`),
+    /// and `ordered` turns every empty side into a brick (`PotDecorations.java:50-52`).
+    /// Returns `None` only when the sherds lock is contended.
+    pub fn ordered_decorations(&self) -> Option<[Cow<'static, str>; 4]> {
+        let sherds = self.sherds.try_lock().ok()?;
+        Some(ordered_sherds(sherds.as_deref()))
+    }
+
     /// Exports the item-backed components used by the creative include-data pick path.
     /// `DecoratedPotBlockEntity.collectImplicitComponents` writes both components
     /// (`DecoratedPotBlockEntity.java:112-116`), and the live caller is
@@ -397,6 +409,28 @@ impl DecoratedPotBlockEntity {
     pub async fn get_comparator_output(&self) -> u8 {
         crate::block::calculate_comparator_output(self).await
     }
+}
+
+/// `PotDecorations` decode followed by `ordered()`; see
+/// [`DecoratedPotBlockEntity::ordered_decorations`].
+fn ordered_sherds(sherds: Option<&[NbtTag]>) -> [Cow<'static, str>; 4] {
+    const BRICK: &str = "minecraft:brick";
+    let decoded = sherds.filter(|list| list.len() <= 4).and_then(|list| {
+        list.iter()
+            .map(|tag| {
+                let id = tag.extract_string()?;
+                pumpkin_data::item::Item::from_registry_key(
+                    id.strip_prefix("minecraft:").unwrap_or(id),
+                )?;
+                Some(id.to_string())
+            })
+            .collect::<Option<Vec<_>>>()
+    });
+    let list = decoded.unwrap_or_default();
+    std::array::from_fn(|i| {
+        list.get(i)
+            .map_or(Cow::Borrowed(BRICK), |id| Cow::Owned(id.clone()))
+    })
 }
 
 /// `ContainerSingleItem` defaults (`ContainerSingleItem.java:8-65`) over `getTheItem`,
@@ -555,6 +589,29 @@ mod tests {
         );
         assert_eq!(stone.item_count, 2);
         assert_eq!(pot.get_stack(0).await.item_count, 1);
+    }
+
+    /// `PotDecorations.EMPTY` and the `getItem` padding both drop bricks through
+    /// `ordered()` (`PotDecorations.java:41-52`); a list the codec rejects is `EMPTY`.
+    #[test]
+    fn ordered_decorations_pad_with_bricks() {
+        use pumpkin_nbt::tag::NbtTag;
+        let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
+        let ordered = pot.ordered_decorations().expect("uncontended lock");
+        assert!(ordered.iter().all(|id| id == "minecraft:brick"));
+
+        let short = [NbtTag::String("minecraft:angler_pottery_sherd".into())];
+        let ordered = super::ordered_sherds(Some(&short));
+        assert_eq!(ordered[0], "minecraft:angler_pottery_sherd");
+        assert!(ordered[1..].iter().all(|id| id == "minecraft:brick"));
+
+        let too_long = vec![NbtTag::String("minecraft:angler_pottery_sherd".into()); 5];
+        let ordered = super::ordered_sherds(Some(&too_long));
+        assert!(ordered.iter().all(|id| id == "minecraft:brick"));
+
+        let not_string = [NbtTag::Int(3)];
+        let ordered = super::ordered_sherds(Some(&not_string));
+        assert!(ordered.iter().all(|id| id == "minecraft:brick"));
     }
 
     /// `splitTheItem` (`DecoratedPotBlockEntity.java:138-147`) leaves the remainder.

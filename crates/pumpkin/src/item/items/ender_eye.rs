@@ -68,6 +68,15 @@ impl ItemBehaviour for EnderEyeItem {
                 block.from_properties(&props).to_state_id(block)
             };
 
+            // `Block.pushEntitiesUp(targetState, newState, level, pos)` (`EnderEyeItem.java:49`)
+            // lifts anything standing on the frame onto the eye.
+            crate::block::push_entities_up(
+                &world,
+                pumpkin_data::BlockState::from_id(state_id),
+                pumpkin_data::BlockState::from_id(new_state_id),
+                &location,
+            )
+            .await;
             world
                 .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_LISTENERS)
                 .await;

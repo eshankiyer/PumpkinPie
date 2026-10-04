@@ -300,7 +300,12 @@ impl CreakingEntity {
         false
     }
 
-    pub fn is_looking_at_me(&self, player: &Player) -> bool {
+    /// `LivingEntity.isLookingAtMe(player, 0.5, false, true, eyeY, y + 0.5, (eyeY + y) / 2)`
+    /// (`Creaking.java:470`, `LivingEntity.java:1755-1773`): `adjustForDistance` is false, so
+    /// the cone is a fixed `dot > 0.5`, and each gaze height also needs the player's
+    /// `hasLineOfSight` with `ClipContext.Block.VISUAL` (`LivingEntity.java:3331-3343`).
+    pub async fn is_looking_at_me(&self, player: &Player) -> bool {
+        const CONE_SIZE: f64 = 0.5;
         let creaking_entity = &self.mob_entity.living_entity.entity;
         let creaking_pos = creaking_entity.pos.load();
         let eye_y = creaking_entity.get_eye_y();
@@ -320,6 +325,7 @@ impl CreakingEntity {
             (yaw.cos() * cos_pitch) as f64,
         );
 
+        let world = creaking_entity.world.load_full();
         let targets_y = [eye_y, feet_y, mid_y];
         for target_y in targets_y {
             let target = Vector3::new(creaking_pos.x, target_y, creaking_pos.z);
@@ -328,7 +334,15 @@ impl CreakingEntity {
             if distance > 0.001 {
                 let norm_dir = Vector3::new(dir.x / distance, dir.y / distance, dir.z / distance);
                 let dot = look_dir.dot(&norm_dir);
-                if dot > 1.0 - 0.5 / distance {
+                if dot > 1.0 - CONE_SIZE
+                    && distance <= 128.0
+                    && world
+                        .raycast_visual(player_eye_pos, target, async |pos, world| {
+                            !world.get_block_state(pos).is_air()
+                        })
+                        .await
+                        .is_none()
+                {
                     return true;
                 }
             }
@@ -369,7 +383,7 @@ impl CreakingEntity {
             {
                 has_potential_target = true;
                 let is_disguised = Self::is_player_disguised(&player);
-                if (!active || !is_disguised) && self.is_looking_at_me(&player) {
+                if (!active || !is_disguised) && self.is_looking_at_me(&player).await {
                     if active {
                         return false;
                     }

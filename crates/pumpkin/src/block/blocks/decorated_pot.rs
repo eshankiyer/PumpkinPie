@@ -16,7 +16,7 @@ use pumpkin_macros::pumpkin_block;
 use crate::block::entities::decorated_pot::{DecoratedPotBlockEntity, WobbleStyle};
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, GetComparatorOutputArgs,
+    BlockBehaviour, BlockFuture, GetCloneItemStackArgs, GetComparatorOutputArgs,
     NormalUseArgs, OnPlaceArgs, OnProjectileHitArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs,
     PlacedArgs, PlayerWillDestroyArgs, UseWithItemArgs,
 };
@@ -168,19 +168,6 @@ impl BlockBehaviour for DecoratedPotBlock {
     ) -> BlockFuture<'a, bool> {
         Box::pin(async move {
             args.r#type == DecoratedPotBlockEntity::EVENT_POT_WOBBLES && args.data < 2
-        })
-    }
-
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) is dispatched
-            // by `World::break_block` while its captured block entity is available; this
-            // post-break hook only retains the shatter sound.
-            args.world.play_sound(
-                Sound::BlockDecoratedPotShatter,
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
         })
     }
 

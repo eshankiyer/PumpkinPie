@@ -465,7 +465,14 @@ mod tests {
             self.sounds_played.lock().unwrap().push((pos, sound));
         }
 
-        fn push_entities_up(&self, _pos: BlockPos) {}
+        fn push_entities_up(
+            &self,
+            _old_state: BlockStateId,
+            _new_state: BlockStateId,
+            _pos: BlockPos,
+        ) -> BlockFuture<'_, ()> {
+            Box::pin(async {})
+        }
     }
 
     #[tokio::test]
