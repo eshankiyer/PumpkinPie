@@ -7,6 +7,7 @@ use crate::entity::player::Player;
 use crate::server::Server;
 use crate::world::World;
 use pumpkin_data::translation;
+use pumpkin_util::PermissionLvl;
 use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::math::wrap_degrees;
@@ -103,6 +104,10 @@ pub struct CommandSource {
     pub silent: bool,
     pub command_result_taker: ResultValueTaker,
     pub entity_anchor: EntityAnchor,
+    /// Upper bound on this source's permission level, applied on top of the
+    /// sender's own permissions (vanilla `CommandSourceStack.withMaximumPermission`,
+    /// `CommandSourceStack.java:282-284`). [`None`] means uncapped.
+    pub permission_cap: Option<PermissionLvl>,
 }
 
 impl CommandSource {
@@ -130,6 +135,7 @@ impl CommandSource {
             silent: false,
             command_result_taker: ResultValueTaker::new(),
             entity_anchor: EntityAnchor::Feet,
+            permission_cap: None,
         }
     }
 
@@ -157,6 +163,7 @@ impl CommandSource {
             silent: false,
             command_result_taker: ResultValueTaker(Vec::new()),
             entity_anchor: EntityAnchor::Feet,
+            permission_cap: None,
         }
     }
 
@@ -176,6 +183,7 @@ impl CommandSource {
             silent: self.silent,
             command_result_taker: self.command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -195,6 +203,7 @@ impl CommandSource {
             silent: true,
             command_result_taker: self.command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -216,6 +225,7 @@ impl CommandSource {
             silent: self.silent,
             command_result_taker: self.command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -235,6 +245,7 @@ impl CommandSource {
             silent: self.silent,
             command_result_taker: self.command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -254,6 +265,7 @@ impl CommandSource {
             silent: self.silent,
             command_result_taker: self.command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -281,6 +293,7 @@ impl CommandSource {
             silent: true,
             command_result_taker: self.command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -300,6 +313,7 @@ impl CommandSource {
             silent: self.silent,
             command_result_taker,
             entity_anchor: self.entity_anchor,
+            permission_cap: self.permission_cap,
         }
     }
 
@@ -319,7 +333,19 @@ impl CommandSource {
             silent: true,
             command_result_taker: self.command_result_taker,
             entity_anchor,
+            permission_cap: self.permission_cap,
         }
+    }
+
+    /// Returns a new [`CommandSource`] whose permission level is capped at `lvl`
+    /// (vanilla `withMaximumPermission`, `CommandSourceStack.java:282-284`).
+    ///
+    /// The union of two level-based permission sets is the lower level
+    /// (`LevelBasedPermissionSet.java:23-29`), so this only ever lowers the cap.
+    #[must_use]
+    pub fn with_maximum_permission(mut self, lvl: PermissionLvl) -> Self {
+        self.permission_cap = Some(self.permission_cap.map_or(lvl, |cap| cap.min(lvl)));
+        self
     }
 
     /// Returns a new [`CommandSource`] with the rotation changed in such
@@ -480,7 +506,10 @@ impl CommandSource {
     /// server (i.e. this is a dummy [`CommandSource`].)
     #[must_use]
     pub async fn has_permission(&self, permission: &str) -> bool {
-        self.output.has_permission(self.server(), permission).await
+        let allowed = self.output.has_permission(self.server(), permission).await;
+        self.permission_cap.map_or(allowed, |cap| {
+            allowed && crate::command::node_default_allows_at(self.server(), permission, cap)
+        })
     }
 
     /// Returns whether this source has the permission provided.

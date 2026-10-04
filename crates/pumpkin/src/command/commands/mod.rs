@@ -388,6 +388,14 @@ fn register_level_0_permissions(registry: &PermissionRegistry) {
 #[expect(clippy::too_many_lines)]
 fn register_level_2_permissions(registry: &PermissionRegistry) {
     // Register permissions for commands with PermissionLvl::Two
+    // Vanilla `SetWorldSpawnCommand.java:20` requires LEVEL_GAMEMASTERS.
+    registry
+        .register_permission(Permission::new(
+            "minecraft:command.setworldspawn",
+            "Sets the world spawn point",
+            PermissionDefault::Op(PermissionLvl::Two),
+        ))
+        .unwrap_or_else(|e| tracing::warn!("{e}"));
     registry
         .register_permission(Permission::new(
             "minecraft:command.worldborder",
@@ -595,13 +603,6 @@ fn register_level_2_permissions(registry: &PermissionRegistry) {
 
 fn register_level_3_permissions(registry: &PermissionRegistry) {
     // Register permissions for commands with PermissionLvl::Three
-    registry
-        .register_permission(Permission::new(
-            "minecraft:command.setworldspawn",
-            "Sets the world spawn point",
-            PermissionDefault::Op(PermissionLvl::Three),
-        ))
-        .unwrap_or_else(|e| tracing::warn!("{e}"));
     registry
         .register_permission(Permission::new(
             "minecraft:command.deop",

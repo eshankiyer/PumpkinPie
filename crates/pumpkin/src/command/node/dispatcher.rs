@@ -14,10 +14,13 @@ use crate::command::node::detached::CommandDetachedNode;
 use crate::command::node::tree::{NodeIdClassification, ROOT_NODE_ID, Tree};
 use crate::command::string_reader::StringReader;
 use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
+use crate::command::node_default_allows_at;
 use crate::command::tree::Command;
+use crate::server::Server;
 use futures::future;
 use pumpkin_data::translation::java::COMMAND_CONTEXT_HERE;
 use pumpkin_protocol::java::client::play::CommandSuggestion;
+use pumpkin_util::PermissionLvl;
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::click::ClickEvent;
 use pumpkin_util::text::color::{Color, NamedColor};
@@ -538,6 +541,15 @@ impl CommandDispatcher {
             // Note: 'Permission denied' also falls under this error as
             //       no executable node could be found.
             if error.is(&DISPATCHER_UNKNOWN_COMMAND) {
+                // The fallback dispatcher only sees the `CommandSender`, so a capped
+                // source (a function body, `FunctionCommand.java:106-108`) must not
+                // reach it unless the legacy command is allowed at the cap.
+                if let Some(cap) = source.permission_cap
+                    && !self.fallback_allows_at(source.server(), Self::command_name(input), cap)
+                {
+                    Self::send_error_to_source(source, error, input).await;
+                    return;
+                }
                 // Run the fallback dispatcher instead.
                 // It might have the command we're looking for.
                 self.fallback_dispatcher
@@ -548,6 +560,17 @@ impl CommandDispatcher {
                 Self::send_error_to_source(source, error, input).await;
             }
         }
+    }
+
+    /// Returns whether the legacy dispatcher has a command `name` whose permission
+    /// node is granted at the permission level `cap`.
+    fn fallback_allows_at(&self, server: &Server, name: &str, cap: PermissionLvl) -> bool {
+        self.fallback_dispatcher.commands.contains_key(name)
+            && self
+                .fallback_dispatcher
+                .permissions
+                .get(name)
+                .is_some_and(|node| node_default_allows_at(server, node, cap))
     }
 
     /// Sends a command error to the provided source.

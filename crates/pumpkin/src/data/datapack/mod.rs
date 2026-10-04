@@ -3,7 +3,7 @@ pub mod macro_function;
 pub mod recipe_loader;
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
 use pumpkin_data::translation;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::recipe::DynamicRecipe;
+use pumpkin_util::PermissionLvl;
 use pumpkin_util::text::TextComponent;
 
 use crate::command::context::command_source::CommandSource;
@@ -56,6 +57,10 @@ pub enum ExecuteFunctionError {
     /// No function or function tag exists under this id (vanilla
     /// `arguments.function.unknown`, raised by `FunctionArgument`).
     Unknown(String),
+    /// No function tag exists under this id (vanilla
+    /// `arguments.function.tag.unknown`, `FunctionArgument.java:80-86`). Holds
+    /// the tag id without the leading `#`.
+    UnknownTag(String),
     /// Macro instantiation failed. Port of
     /// `ERROR_FUNCTION_INSTANTATION_FAILURE`
     /// (`FunctionCommand.java:49-51`, raised at `:139-141`) wrapping the
@@ -234,6 +239,28 @@ impl DatapackManager {
         names
     }
 
+    /// Resolves a function id, or a `#`-prefixed function tag, to the ordered ids
+    /// of the functions it names (vanilla `FunctionArgument.getFunctionCollection`,
+    /// `FunctionArgument.java:76-103`). Tag members that do not exist are skipped.
+    pub async fn resolve_function_ids(&self, name: &str) -> Result<Vec<String>, ExecuteFunctionError> {
+        let all_fns = self.functions.read().await;
+        if let Some(tag_name) = name.strip_prefix('#') {
+            let tags = self.function_tags.read().await;
+            if !tags.contains_key(tag_name) {
+                return Err(ExecuteFunctionError::UnknownTag(tag_name.to_string()));
+            }
+            let mut resolved = Vec::new();
+            let mut visited = HashSet::new();
+            collect_tag_functions(tag_name, &tags, &mut visited, &mut resolved);
+            resolved.retain(|fn_id| all_fns.contains_key(fn_id));
+            Ok(resolved)
+        } else if all_fns.contains_key(name) {
+            Ok(vec![name.to_string()])
+        } else {
+            Err(ExecuteFunctionError::Unknown(name.to_string()))
+        }
+    }
+
     /// Executes a function or function tag, optionally supplying macro
     /// arguments (vanilla `/function <name> <compound>`).
     pub async fn execute_function(
@@ -294,24 +321,14 @@ impl DatapackManager {
         arguments: Option<&NbtCompound>,
         limit: i64,
     ) -> Result<usize, ExecuteFunctionError> {
-        let (functions_to_run, is_tag) = if let Some(tag_name) = name.strip_prefix('#') {
-            let tags = self.function_tags.read().await;
-            let Some(fns) = tags.get(tag_name) else {
-                return Err(ExecuteFunctionError::Unknown(format!("#{tag_name}")));
-            };
-            (fns.clone(), true)
-        } else {
-            (vec![name.to_string()], false)
-        };
+        let functions_to_run = self.resolve_function_ids(name).await?;
 
         let all_fns = self.functions.read().await;
         let mut total_executed = 0;
 
         for fn_id in functions_to_run {
+            // A reload between resolution and this lookup may drop the function.
             let Some(function) = all_fns.get(&fn_id) else {
-                if !is_tag {
-                    return Err(ExecuteFunctionError::Unknown(fn_id));
-                }
                 continue;
             };
 
@@ -395,11 +412,52 @@ impl DatapackManager {
     }
 }
 
+/// Prefixes `minecraft:` onto an id without a namespace, as vanilla's
+/// `Identifier` parsing of tag entries does.
+fn normalize_namespace(id: &str) -> String {
+    if id.contains(':') {
+        id.to_string()
+    } else {
+        format!("minecraft:{id}")
+    }
+}
+
+/// Appends the members of `tag_id` to `out`, expanding nested `#tag` entries
+/// and dropping duplicates in first-seen order (vanilla `TagLoader.build`
+/// collecting into a `LinkedHashSet` via `TagEntry.build`, `TagLoader.java:77-81`,
+/// `TagEntry.java:59-66`). `visited` guards against tag cycles.
+fn collect_tag_functions(
+    tag_id: &str,
+    tags: &HashMap<String, Vec<String>>,
+    visited: &mut HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    if !visited.insert(tag_id.to_string()) {
+        return;
+    }
+    let Some(entries) = tags.get(tag_id) else {
+        return;
+    };
+    for entry in entries {
+        if let Some(nested) = entry.strip_prefix('#') {
+            collect_tag_functions(&normalize_namespace(nested), tags, visited, out);
+        } else {
+            let id = normalize_namespace(entry);
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+    }
+}
+
 /// Builds the execution source used by `FunctionCommand.runGuarded` after
 /// `modifySenderForExecution` (`FunctionCommand.java:235-264`, with source modification at
-/// `:106-108`).
+/// `:106-108`): output is suppressed and permissions are capped at GAMEMASTER (level 2).
 fn function_source_for_execution(source: &CommandSource) -> CommandSource {
-    source.clone().with_silent()
+    source
+        .clone()
+        .with_silent()
+        .with_maximum_permission(PermissionLvl::Two)
 }
 
 /// Translates a macro instantiation failure into the user-facing component
@@ -484,10 +542,13 @@ fn load_recipes_from_dir(
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandSource, function_source_for_execution};
+    use super::{CommandSource, collect_tag_functions, function_source_for_execution};
+    use std::collections::{HashMap, HashSet};
+    use pumpkin_util::PermissionLvl;
 
     /// `FunctionCommand.modifySenderForExecution` (`FunctionCommand.java:106-108`) suppresses
-    /// output on the function execution source while leaving the caller's source unchanged.
+    /// output and caps permissions at GAMEMASTER on the function execution source while
+    /// leaving the caller's source unchanged.
     #[test]
     fn function_execution_source_suppresses_output() {
         let source = CommandSource::dummy();
@@ -495,5 +556,38 @@ mod tests {
 
         assert!(!source.silent);
         assert!(function_source.silent);
+        assert!(source.permission_cap.is_none());
+        assert_eq!(function_source.permission_cap, Some(PermissionLvl::Two));
+    }
+
+    /// Nested tags are expanded, ids default to `minecraft:` and duplicates are
+    /// dropped in first-seen order (`TagLoader.java:77-81`, `TagEntry.java:59-66`).
+    #[test]
+    fn tag_resolution_expands_nested_and_dedupes() {
+        let mut tags = HashMap::new();
+        tags.insert(
+            "minecraft:load".to_string(),
+            vec!["#ns:init".to_string(), "foo".to_string(), "ns:a".to_string()],
+        );
+        tags.insert(
+            "ns:init".to_string(),
+            vec!["ns:a".to_string(), "#minecraft:load".to_string(), "ns:b".to_string()],
+        );
+        let mut out = Vec::new();
+        collect_tag_functions("minecraft:load", &tags, &mut HashSet::new(), &mut out);
+        assert_eq!(out, vec!["ns:a", "ns:b", "minecraft:foo"]);
+    }
+
+    /// The union of level-based permission sets keeps the lower level
+    /// (`LevelBasedPermissionSet.java:23-29`), so a cap only ever lowers.
+    #[test]
+    fn maximum_permission_only_lowers() {
+        let source = CommandSource::dummy().with_maximum_permission(PermissionLvl::One);
+        assert_eq!(
+            source
+                .with_maximum_permission(PermissionLvl::Two)
+                .permission_cap,
+            Some(PermissionLvl::One)
+        );
     }
 }

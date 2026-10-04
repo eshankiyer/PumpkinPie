@@ -177,14 +177,7 @@ impl CommandSender {
             Self::Console | Self::Rcon(_) => true, // Console and RCON always have all permissions
             Self::Player(p) => p.has_permission(server, node).await,
             Self::CommandBlock(..) | Self::Dummy => {
-                let Some(p) = server.permission_manager.get_permission(node) else {
-                    return false;
-                };
-                match p.default {
-                    PermissionDefault::Allow => true,
-                    PermissionDefault::Deny => false,
-                    PermissionDefault::Op(o) => o <= PermissionLvl::Two,
-                }
+                node_default_allows_at(server, node, PermissionLvl::Two)
             }
         }
     }
@@ -405,6 +398,22 @@ impl CommandSender {
         };
 
         (world, spawn_point.to_f64())
+    }
+}
+
+/// Returns whether permission level `lvl` grants `node` by its registered default.
+///
+/// Port of vanilla `LevelBasedPermissionSet.hasPermission`
+/// (`LevelBasedPermissionSet.java:14-20`). Unregistered nodes are denied.
+#[must_use]
+pub fn node_default_allows_at(server: &Server, node: &str, lvl: PermissionLvl) -> bool {
+    let Some(p) = server.permission_manager.get_permission(node) else {
+        return false;
+    };
+    match p.default {
+        PermissionDefault::Allow => true,
+        PermissionDefault::Deny => false,
+        PermissionDefault::Op(o) => o <= lvl,
     }
 }
 

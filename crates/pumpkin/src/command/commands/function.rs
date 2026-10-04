@@ -1,10 +1,11 @@
 use pumpkin_data::translation;
+use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
 
 use crate::command::argument_builder::{ArgumentBuilder, argument, command};
-use crate::command::argument_types::core::string::StringArgumentType;
+use crate::command::argument_types::function::FunctionArgumentType;
 use crate::command::argument_types::nbt::NbtCompoundArgumentType;
 use crate::command::context::command_context::CommandContext;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
@@ -21,6 +22,18 @@ const PERMISSION: &str = "minecraft:command.function";
 static ERROR_UNKNOWN_FUNCTION: CommandErrorType<1> = CommandErrorType::new(
     translation::java::ARGUMENTS_FUNCTION_UNKNOWN,
     translation::java::ARGUMENTS_FUNCTION_UNKNOWN,
+);
+
+static ERROR_UNKNOWN_TAG: CommandErrorType<1> = CommandErrorType::new(
+    translation::java::ARGUMENTS_FUNCTION_TAG_UNKNOWN,
+    translation::java::ARGUMENTS_FUNCTION_TAG_UNKNOWN,
+);
+
+/// Port of vanilla's `ERROR_NO_FUNCTIONS` (`FunctionCommand.java:45-47`),
+/// raised for a function tag without any functions (`:244-246`).
+static ERROR_NO_FUNCTIONS: CommandErrorType<1> = CommandErrorType::new(
+    translation::java::COMMANDS_FUNCTION_SCHEDULED_NO_FUNCTIONS,
+    translation::java::COMMANDS_FUNCTION_SCHEDULED_NO_FUNCTIONS,
 );
 
 /// Port of vanilla's `ERROR_FUNCTION_INSTANTATION_FAILURE`
@@ -60,20 +73,7 @@ struct FunctionExecutor;
 
 impl CommandExecutor for FunctionExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let name_str = StringArgumentType::get(context, "name")?;
-            let server = context.server();
-
-            let executed_count = server
-                .datapack_manager
-                .execute_function(server, &context.source, name_str, None)
-                .await
-                .map_err(|error| map_error(error, name_str))?;
-
-            send_success_feedback(context, executed_count, name_str).await;
-
-            Ok(executed_count as i32)
-        })
+        Box::pin(async move { run_guarded(context, None).await })
     }
 }
 
@@ -86,65 +86,73 @@ struct FunctionWithArgumentsExecutor;
 impl CommandExecutor for FunctionWithArgumentsExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
         Box::pin(async move {
-            let name_str = StringArgumentType::get(context, "name")?;
             let arguments = NbtCompoundArgumentType::get(context, "arguments")?;
-            let server = context.server();
-
-            let executed_count = server
-                .datapack_manager
-                .execute_function(server, &context.source, name_str, Some(arguments))
-                .await
-                .map_err(|error| map_error(error, name_str))?;
-
-            send_success_feedback(context, executed_count, name_str).await;
-
-            Ok(executed_count as i32)
+            run_guarded(context, Some(arguments)).await
         })
     }
 }
 
-async fn send_success_feedback(context: &CommandContext<'_>, executed_count: usize, name: &str) {
-    if name.starts_with('#') {
-        context
-            .source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_MULTIPLE,
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_MULTIPLE,
-                    [
-                        TextComponent::text(executed_count.to_string()),
-                        TextComponent::text(name.to_string()),
-                    ],
-                ),
-                true,
-            )
-            .await;
-    } else {
-        context
-            .source
-            .send_feedback(
-                TextComponent::translate_cross(
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_SINGLE,
-                    translation::java::COMMANDS_FUNCTION_SUCCESS_SINGLE,
-                    [
-                        TextComponent::text(executed_count.to_string()),
-                        TextComponent::text(name.to_string()),
-                    ],
-                ),
-                true,
-            )
-            .await;
+/// Port of `FunctionCustomExecutor.runGuarded` (`FunctionCommand.java:235-265`):
+/// resolves the functions, fails on an empty collection, announces the scheduled
+/// functions to the sender and only then runs them.
+async fn run_guarded(
+    context: &CommandContext<'_>,
+    arguments: Option<&NbtCompound>,
+) -> Result<i32, CommandSyntaxError> {
+    let name = FunctionArgumentType::get(context, "name")?.printable();
+    let server = context.server();
+
+    let function_ids = server
+        .datapack_manager
+        .resolve_function_ids(&name)
+        .await
+        .map_err(map_error)?;
+    if function_ids.is_empty() {
+        let tag_id = name.strip_prefix('#').unwrap_or(&name).to_string();
+        return Err(ERROR_NO_FUNCTIONS.create_without_context(TextComponent::text(tag_id)));
     }
+
+    let message = if let [function_id] = function_ids.as_slice() {
+        TextComponent::translate_cross(
+            translation::java::COMMANDS_FUNCTION_SCHEDULED_SINGLE,
+            translation::java::COMMANDS_FUNCTION_SCHEDULED_SINGLE,
+            [TextComponent::text(function_id.clone())],
+        )
+    } else {
+        // `ComponentUtils.formatList` with the gray ", " separator
+        // (`ComponentUtils.java:19,116-138`).
+        TextComponent::translate_cross(
+            translation::java::COMMANDS_FUNCTION_SCHEDULED_MULTIPLE,
+            translation::java::COMMANDS_FUNCTION_SCHEDULED_MULTIPLE,
+            [TextComponent::join_with_comma(
+                function_ids.iter().cloned().map(TextComponent::text).collect(),
+            )],
+        )
+    };
+    context.source.send_feedback(message, true).await;
+
+    let executed_count = server
+        .datapack_manager
+        .execute_function(server, &context.source, &name, arguments)
+        .await
+        .map_err(map_error)?;
+
+    Ok(executed_count as i32)
 }
 
 /// Maps execution failures to their vanilla counterparts: unknown ids surface
-/// as `arguments.function.unknown` and macro instantiation failures as
+/// as `arguments.function.unknown` / `arguments.function.tag.unknown`
+/// (`FunctionArgument.java:76-86`) and macro instantiation failures as
 /// `commands.function.instantiationFailure` (`FunctionCommand.java:49-51`,
 /// raised at `:139-141`).
-fn map_error(error: ExecuteFunctionError, requested_name: &str) -> CommandSyntaxError {
+fn map_error(error: ExecuteFunctionError) -> CommandSyntaxError {
     match error {
-        ExecuteFunctionError::Unknown(_) => ERROR_UNKNOWN_FUNCTION
-            .create_without_context(TextComponent::text(requested_name.to_string())),
+        ExecuteFunctionError::Unknown(function_id) => {
+            ERROR_UNKNOWN_FUNCTION.create_without_context(TextComponent::text(function_id))
+        }
+        ExecuteFunctionError::UnknownTag(tag_id) => {
+            ERROR_UNKNOWN_TAG.create_without_context(TextComponent::text(tag_id))
+        }
         ExecuteFunctionError::InstantiationFailure {
             function_id,
             reason,
@@ -162,7 +170,7 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
 
     dispatcher.register(
         command("function", DESCRIPTION).requires(PERMISSION).then(
-            argument("name", StringArgumentType::SingleWord)
+            argument("name", FunctionArgumentType)
                 .suggests(FunctionSuggestionProvider)
                 .executes(FunctionExecutor)
                 // `/function <name> <compound>` — vanilla registers the

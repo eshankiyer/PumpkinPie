@@ -5,9 +5,9 @@ use crate::command::argument_types::coordinates::block_pos::NOT_LOADED_ERROR_TYP
 use crate::command::argument_types::coordinates::rotation::RotationArgumentType;
 use crate::command::argument_types::coordinates::swizzle::SwizzleArgumentType;
 use crate::command::argument_types::coordinates::vec3::Vec3ArgumentType;
-use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::argument_types::entity::EntityArgumentType;
 use crate::command::argument_types::entity_anchor::EntityAnchorArgumentType;
+use crate::command::argument_types::function::FunctionArgumentType;
 use crate::command::argument_types::heightmap::HeightmapTypeArgumentType;
 use crate::command::argument_types::resource::{ENTITY_TYPE_ARGUMENT, ResourceArgument};
 use crate::command::argument_types::resource_key::ResourceKeyArgument;
@@ -41,6 +41,11 @@ static DIMENSION_REGISTRY: &Identifier = &Identifier::vanilla_static("dimension"
 static ERROR_UNKNOWN_FUNCTION: CommandErrorType<1> = CommandErrorType::new(
     pumpkin_data::translation::java::ARGUMENTS_FUNCTION_UNKNOWN,
     pumpkin_data::translation::java::ARGUMENTS_FUNCTION_UNKNOWN,
+);
+
+static ERROR_UNKNOWN_FUNCTION_TAG: CommandErrorType<1> = CommandErrorType::new(
+    pumpkin_data::translation::java::ARGUMENTS_FUNCTION_TAG_UNKNOWN,
+    pumpkin_data::translation::java::ARGUMENTS_FUNCTION_TAG_UNKNOWN,
 );
 
 static ERROR_FUNCTION_INSTANTIATION_FAILURE: CommandErrorType<2> = CommandErrorType::new(
@@ -416,6 +421,9 @@ fn map_function_condition_error(error: ExecuteFunctionError) -> CommandSyntaxErr
         ExecuteFunctionError::Unknown(function_id) => {
             ERROR_UNKNOWN_FUNCTION.create_without_context(TextComponent::text(function_id))
         }
+        ExecuteFunctionError::UnknownTag(tag_id) => {
+            ERROR_UNKNOWN_FUNCTION_TAG.create_without_context(TextComponent::text(tag_id))
+        }
         ExecuteFunctionError::InstantiationFailure {
             function_id,
             reason,
@@ -435,11 +443,11 @@ fn execute_function_modifier<'a>(
     expected: bool,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let name = StringArgumentType::get(context, "name")?;
+        let name = FunctionArgumentType::get(context, "name")?.printable();
         let executed_count = context
             .server()
             .datapack_manager
-            .execute_function(context.server(), &context.source, name, None)
+            .execute_function(context.server(), &context.source, &name, None)
             .await
             .map_err(map_function_condition_error)?;
 
@@ -608,7 +616,7 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                 )
                 .then(
                     literal("function").then(
-                        argument("name", StringArgumentType::SingleWord)
+                        argument("name", FunctionArgumentType)
                             // Vanilla attaches FunctionCommand.SUGGEST_FUNCTION here
                             // (`ExecuteCommand.java:652-656`).
                             .suggests(super::function::FunctionSuggestionProvider)
@@ -654,7 +662,7 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                 )
                 .then(
                     literal("function").then(
-                        argument("name", StringArgumentType::SingleWord)
+                        argument("name", FunctionArgumentType)
                             // Vanilla attaches FunctionCommand.SUGGEST_FUNCTION here
                             // (`ExecuteCommand.java:652-656`).
                             .suggests(super::function::FunctionSuggestionProvider)

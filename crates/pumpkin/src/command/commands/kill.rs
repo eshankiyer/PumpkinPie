@@ -76,7 +76,8 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
     registry.register_permission_or_panic(Permission::new(
         PERMISSION,
         DESCRIPTION,
-        PermissionDefault::Op(PermissionLvl::Four),
+        // Vanilla `KillCommand.java:16` requires LEVEL_GAMEMASTERS.
+        PermissionDefault::Op(PermissionLvl::Two),
     ));
 
     dispatcher.register(

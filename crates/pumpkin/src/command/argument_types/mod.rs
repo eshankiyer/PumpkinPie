@@ -226,6 +226,7 @@ pub mod display_slot;
 pub mod entity;
 pub mod entity_anchor;
 pub mod entity_selector;
+pub mod function;
 pub mod game_profile;
 pub mod heightmap;
 pub mod hex_color;
