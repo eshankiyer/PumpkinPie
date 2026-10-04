@@ -459,6 +459,49 @@ fn get_state_for_neighbor_update_chest_impl(
     }
 }
 
+/// `HopperBlockEntity.getBlockContainer` (`HopperBlockEntity.java:372-385`) for the block-entity
+/// case: a chest-block's block entity is replaced by `ChestBlock.getContainer(.., true)`
+/// (`ChestBlock.java:279-299`, `DoubleBlockCombiner.java:14-58`), so both halves of a double
+/// chest are reached, RIGHT first, even when the chest is blocked. Any other block entity's
+/// inventory is returned as-is.
+pub(crate) fn get_block_container_at(world: &World, pos: &BlockPos) -> Option<Arc<dyn Inventory>> {
+    let (block, state_id) = world.get_block_and_state_id(pos);
+    let inventory = world.get_block_entity(pos)?.get_inventory()?;
+    if !(block == &Block::CHEST
+        || block == &Block::TRAPPED_CHEST
+        || block.has_tag(&tag::Block::MINECRAFT_COPPER_CHESTS))
+    {
+        return Some(inventory);
+    }
+    let props = ChestLikeProperties::from_state_id(state_id, block);
+    if props.r#type == ChestType::Single {
+        return Some(inventory);
+    }
+    let neighbor_pos = pos.offset(connected_direction(props).to_offset());
+    let (neighbor_block, neighbor_state_id) = world.get_block_and_state_id(&neighbor_pos);
+    if neighbor_block != block {
+        return Some(inventory);
+    }
+    let neighbor_props = ChestLikeProperties::from_state_id(neighbor_state_id, neighbor_block);
+    if neighbor_props.r#type == ChestType::Single
+        || neighbor_props.r#type == props.r#type
+        || neighbor_props.facing != props.facing
+    {
+        return Some(inventory);
+    }
+    let Some(neighbor_inventory) = world
+        .get_block_entity(&neighbor_pos)
+        .and_then(BlockEntity::get_inventory)
+    else {
+        return Some(inventory);
+    };
+    Some(if props.r#type == ChestType::Right {
+        DoubleInventory::new(inventory, neighbor_inventory)
+    } else {
+        DoubleInventory::new(neighbor_inventory, inventory)
+    })
+}
+
 // Condition of CopperChestBlock.updateShape (CopperChestBlock.java:112-113) on the state
 // returned by ChestBlock.updateShape.
 fn copper_half_adopts_partner(props: ChestLikeProperties, direction: BlockDirection) -> bool {

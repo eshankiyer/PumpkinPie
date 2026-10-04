@@ -2,6 +2,8 @@ use rand::{RngExt, rng};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::block::blocks::chests::get_block_container_at;
+use crate::block::blocks::composter;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::PropertyDelegate;
 use crate::block::entities::crafter::CrafterBlockEntity;
@@ -9,10 +11,10 @@ use crate::block::entities::hopper::HopperBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, GetComparatorOutputArgs, NormalUseArgs, OnNeighborUpdateArgs,
-    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs, PlayerPlacedArgs,
 };
-use crate::entity::Entity;
 use crate::entity::item::ItemEntity;
+use crate::entity::{Entity, EntityBase};
 use crate::world::World;
 use pumpkin_data::block_properties::{
     BlockProperties, CrafterLikeProperties, HorizontalFacing, Orientation,
@@ -22,7 +24,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::recipe_remainder::get_recipe_remainder_id;
 use pumpkin_data::translation;
 use pumpkin_data::world::WorldEvent;
-use pumpkin_data::{BlockDirection, BlockStateId};
+use pumpkin_data::{Block, BlockDirection, BlockStateId, FacingExt};
 use pumpkin_inventory::crafter_screen_handler::CrafterScreenHandler;
 use pumpkin_inventory::crafting::crafting_screen_handler::match_crafting_recipe;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
@@ -110,35 +112,42 @@ impl BlockBehaviour for CrafterBlock {
 
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
+            // `CrafterBlock.getStateForPlacement` (`CrafterBlock.java:114-125`): the front is
+            // the opposite of the player's nearest looking direction, and TRIGGERED starts
+            // as `hasNeighborSignal`.
             let mut props = CrafterLikeProperties::default(args.block);
-            let facing = args.direction;
+            let front = args
+                .player
+                .get_entity()
+                .get_facing()
+                .opposite()
+                .to_block_direction();
             let horizontal = args.player.living_entity.entity.get_horizontal_facing();
-            props.orientation = match facing {
-                BlockDirection::Down => match horizontal {
-                    HorizontalFacing::North => Orientation::DownNorth,
-                    HorizontalFacing::South => Orientation::DownSouth,
-                    HorizontalFacing::East => Orientation::DownEast,
-                    HorizontalFacing::West => Orientation::DownWest,
-                },
-                BlockDirection::Up => match horizontal {
-                    HorizontalFacing::North => Orientation::UpNorth,
-                    HorizontalFacing::South => Orientation::UpSouth,
-                    HorizontalFacing::East => Orientation::UpEast,
-                    HorizontalFacing::West => Orientation::UpWest,
-                },
-                BlockDirection::North => Orientation::NorthUp,
-                BlockDirection::South => Orientation::SouthUp,
-                BlockDirection::East => Orientation::EastUp,
-                BlockDirection::West => Orientation::WestUp,
-            };
+            props.orientation = placement_orientation(front, horizontal);
+            props.triggered = block_receives_redstone_power(args.world, args.position).await;
             props.to_state_id(args.block)
         })
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
+            // `CrafterBlock.newBlockEntity` (`CrafterBlock.java:107-111`) copies TRIGGERED
+            // into the block entity.
             let crafter_block_entity = CrafterBlockEntity::new(*args.position);
+            crafter_block_entity.set_triggered(
+                CrafterLikeProperties::from_state_id(args.state_id, args.block).triggered,
+            );
             args.world.add_block_entity(Arc::new(crafter_block_entity));
+        })
+    }
+
+    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `CrafterBlock.setPlacedBy` (`CrafterBlock.java:128-132`).
+            if CrafterLikeProperties::from_state_id(args.state_id, args.block).triggered {
+                args.world
+                    .schedule_block_tick(args.block, *args.position, 4, TickPriority::Normal);
+            }
         })
     }
 
@@ -346,6 +355,30 @@ const fn front_direction(orientation: Orientation) -> BlockDirection {
     }
 }
 
+/// `FrontAndTop.fromFrontAndTop` as chosen by `CrafterBlock.getStateForPlacement`
+/// (`CrafterBlock.java:116-121`): a downward front takes the opposite of the horizontal
+/// direction as its top, an upward front takes it as-is, and a horizontal front has top UP.
+const fn placement_orientation(front: BlockDirection, horizontal: HorizontalFacing) -> Orientation {
+    match front {
+        BlockDirection::Down => match horizontal {
+            HorizontalFacing::North => Orientation::DownSouth,
+            HorizontalFacing::South => Orientation::DownNorth,
+            HorizontalFacing::East => Orientation::DownWest,
+            HorizontalFacing::West => Orientation::DownEast,
+        },
+        BlockDirection::Up => match horizontal {
+            HorizontalFacing::North => Orientation::UpNorth,
+            HorizontalFacing::South => Orientation::UpSouth,
+            HorizontalFacing::East => Orientation::UpEast,
+            HorizontalFacing::West => Orientation::UpWest,
+        },
+        BlockDirection::North => Orientation::NorthUp,
+        BlockDirection::South => Orientation::SouthUp,
+        BlockDirection::East => Orientation::EastUp,
+        BlockDirection::West => Orientation::WestUp,
+    }
+}
+
 /// `Direction.get3DDataValue`, the payload level event 2010 carries.
 const fn direction_3d_data(direction: BlockDirection) -> i32 {
     match direction {
@@ -361,11 +394,11 @@ const fn direction_3d_data(direction: BlockDirection) -> i32 {
 /// Vanilla `CrafterBlock.dispenseItem` (`CrafterBlock.java:188-231`): push the stack into
 /// the container the crafter faces, and throw whatever will not fit.
 ///
-/// Vanilla resolves the destination with `HopperBlockEntity.getContainerAt`, which also
-/// finds double chests and container *entities* (minecarts). This port reuses the same
-/// block-entity-inventory lookup the hopper here uses, so those two cases are not covered.
-/// Vanilla also inserts the whole stack at once for a non-crafter destination; inserting
-/// one item at a time reaches the same end state.
+/// Vanilla resolves the destination with `HopperBlockEntity.getContainerAt`: a composter's
+/// `InputContainer`, a block entity's inventory (both halves of a double chest), or a
+/// container *entity* (minecarts), which is not covered here. Vanilla also inserts the whole
+/// stack at once for a non-crafter destination; inserting one item at a time reaches the same
+/// end state.
 async fn dispense_item(
     world: &Arc<World>,
     position: &BlockPos,
@@ -375,12 +408,19 @@ async fn dispense_item(
 ) {
     let mut remaining = result;
     let target_position = position.offset(front.to_offset());
-    let into = world
-        .get_block_entity(&target_position)
-        .and_then(crate::block::entities::BlockEntity::get_inventory);
+    let target_face = front.opposite();
 
-    if let Some(into) = into {
-        let target_face = front.opposite();
+    if world.get_block(&target_position) == &Block::COMPOSTER {
+        // `ComposterBlock.InputContainer` (`ComposterBlock.java:397-440`) has max stack size 1
+        // and latches `changed` after its first accepted item, so at most one item is
+        // composted per call; the rest is thrown below.
+        if composter::hopper_insert_item(world, &target_position, target_face, remaining.item.id)
+            .await
+        {
+            remaining.decrement(1);
+        }
+    } else if let Some(into) = get_block_container_at(world, &target_position) {
+        let mut inserted = false;
         let target_slots = into.slots_for_face(target_face);
         let mut insertable = Vec::new();
         for &slot in &target_slots {
@@ -398,6 +438,20 @@ async fn dispense_item(
                 break;
             }
             remaining.decrement(1);
+            inserted = true;
+        }
+        if inserted {
+            // `JukeboxBlockEntity` / `ChiseledBookShelfBlockEntity` react to `setItem`.
+            crate::block::blocks::jukebox::JukeboxBlock::refresh_after_inventory_transfer(
+                world,
+                &target_position,
+            )
+            .await;
+            crate::block::blocks::chiseled_bookshelf::ChiseledBookshelfBlock::refresh_after_inventory_transfer(
+                world,
+                &target_position,
+            )
+            .await;
         }
     }
 
@@ -443,9 +497,36 @@ fn triangle(min: f64, max: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{direction_3d_data, front_direction};
+    use super::{direction_3d_data, front_direction, placement_orientation};
     use pumpkin_data::BlockDirection;
-    use pumpkin_data::block_properties::Orientation;
+    use pumpkin_data::block_properties::{HorizontalFacing, Orientation};
+
+    /// `CrafterBlock.getStateForPlacement` (`CrafterBlock.java:116-121`): a crafter facing
+    /// down takes the opposite horizontal direction as its top; one facing up keeps it.
+    #[test]
+    fn placement_orientation_matches_vanilla() {
+        use BlockDirection as D;
+        use HorizontalFacing as H;
+        use Orientation as O;
+        let cases = [
+            (D::Down, H::North, O::DownSouth),
+            (D::Down, H::South, O::DownNorth),
+            (D::Down, H::East, O::DownWest),
+            (D::Down, H::West, O::DownEast),
+            (D::Up, H::North, O::UpNorth),
+            (D::Up, H::South, O::UpSouth),
+            (D::Up, H::East, O::UpEast),
+            (D::Up, H::West, O::UpWest),
+            (D::North, H::East, O::NorthUp),
+            (D::South, H::West, O::SouthUp),
+            (D::East, H::North, O::EastUp),
+            (D::West, H::South, O::WestUp),
+        ];
+        for (front, horizontal, expected) in cases {
+            assert_eq!(placement_orientation(front, horizontal), expected);
+            assert_eq!(front_direction(expected), front);
+        }
+    }
 
     /// `FrontAndTop` names front first, so every `Down*`/`Up*` variant faces that way and
     /// the four `*Up` variants face horizontally (`CrafterBlock.java:196`).

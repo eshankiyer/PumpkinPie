@@ -5,6 +5,7 @@ use pumpkin_data::block_properties::{
     BlockProperties, EastRedstone, HorizontalFacing, NorthRedstone, ObserverLikeProperties,
     RedstoneWireLikeProperties, RepeaterLikeProperties, SouthRedstone, WestRedstone,
 };
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockDirection, BlockState, HorizontalFacingExt, Mirror, Rotation};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
@@ -55,10 +56,9 @@ impl BlockBehaviour for RedstoneWireBlock {
             let old_state = wire;
 
             let new_side: WireConnection = match args.direction {
-                BlockDirection::Up => {
-                    return args.state_id;
-                }
-                BlockDirection::Down => {
+                // Up: vanilla RedStoneWireBlock.java:184-186; the block above decides
+                // `canConnectUp`, so every side is recomputed (getConnectionState).
+                BlockDirection::Up | BlockDirection::Down => {
                     return get_regulated_sides(wire, args.world, args.position)
                         .await
                         .to_state_id(args.block);
@@ -392,24 +392,36 @@ fn can_connect_diagonal_to(block: &Block) -> bool {
 }
 
 pub async fn get_side(world: &World, pos: &BlockPos, side: BlockDirection) -> WireConnection {
+    // `RedStoneWireBlock.getConnectingSide` (vanilla: RedStoneWireBlock.java:240-256): the
+    // step-up check runs BEFORE `shouldConnectTo`, so a signal source with wire on top reports
+    // UP, and the block under the upper wire only needs to be one wire can sit on (or a trapdoor).
     let neighbor_pos: BlockPos = pos.offset(side.to_offset());
     let (neighbor, state) = world.get_block_and_state(&neighbor_pos);
+
+    let can_connect_up = !world
+        .get_block_state(&pos.offset(BlockDirection::Up.to_offset()))
+        .is_solid_block();
+    if can_connect_up {
+        let placeable_above =
+            neighbor.has_tag(&tag::Block::MINECRAFT_TRAPDOORS) || can_survive_on(neighbor, state);
+        if placeable_above
+            && can_connect_diagonal_to(
+                world.get_block(&neighbor_pos.offset(BlockDirection::Up.to_offset())),
+            )
+        {
+            return if state.is_side_solid(side.opposite()) {
+                WireConnection::Up
+            } else {
+                WireConnection::Side
+            };
+        }
+    }
 
     if can_connect_to(world, neighbor, side, state).await {
         return WireConnection::Side;
     }
 
-    let up_pos = pos.offset(BlockDirection::Up.to_offset());
-    let up_state = world.get_block_state(&up_pos);
-
-    if !up_state.is_solid_block()
-        && state.is_side_solid(side.opposite())
-        && can_connect_diagonal_to(
-            world.get_block(&neighbor_pos.offset(BlockDirection::Up.to_offset())),
-        )
-    {
-        WireConnection::Up
-    } else if !state.is_solid_block()
+    if !state.is_solid_block()
         && can_connect_diagonal_to(
             world.get_block(&neighbor_pos.offset(BlockDirection::Down.to_offset())),
         )
@@ -418,6 +430,11 @@ pub async fn get_side(world: &World, pos: &BlockPos, side: BlockDirection) -> Wi
     } else {
         WireConnection::None
     }
+}
+
+/// `RedStoneWireBlock.canSurviveOn` (vanilla: RedStoneWireBlock.java:267-269).
+fn can_survive_on(block: &Block, state: &BlockState) -> bool {
+    state.is_side_solid(BlockDirection::Up) || block == &Block::HOPPER
 }
 
 async fn get_all_sides(

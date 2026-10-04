@@ -2,6 +2,8 @@ use rand::{Rng, RngExt, rng};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::block::blocks::chests::get_block_container_at;
+use crate::block::blocks::composter;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
@@ -13,10 +15,10 @@ use crate::entity::{Entity, EntityBase};
 
 use crate::block::entities::dropper::DropperBlockEntity;
 use crate::block::entities::hopper::HopperBlockEntity;
-use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, Facing};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::world::WorldEvent;
+use pumpkin_data::{Block, BlockStateId};
 use pumpkin_data::{FacingExt, translation};
 use pumpkin_inventory::generic_container_screen_handler::create_generic_3x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
@@ -167,9 +169,27 @@ impl BlockBehaviour for DropperBlock {
                         .position
                         .offset(props.facing.to_block_direction().to_offset());
 
-                    if let Some(entity) = args.world.get_block_entity(&target_pos)
-                        && let Some(container) = entity.get_inventory()
-                    {
+                    // `HopperBlockEntity.getContainerAt` (`HopperBlockEntity.java:363-385`): a
+                    // composter is always a `WorldlyContainerHolder`, so the dropper never throws
+                    // into one; only a DOWN-facing dropper can compost, one item at a time, and a
+                    // refused item stays in the slot with no sound (`DropperBlock.java:62-71`).
+                    // TODO getEntityContainer (container minecarts / chest boats)
+                    if args.world.get_block(&target_pos) == &Block::COMPOSTER {
+                        if composter::hopper_insert_item(
+                            args.world,
+                            &target_pos,
+                            props.facing.to_block_direction().opposite(),
+                            item.item.id,
+                        )
+                        .await
+                        {
+                            item.decrement(1);
+                            dropper.set_stack(slot_index, item).await;
+                        }
+                        return;
+                    }
+
+                    if let Some(container) = get_block_container_at(args.world, &target_pos) {
                         // The face of the target container the dropper touches is the face
                         // pointing back at the dropper, i.e. the opposite of its facing.
                         let target_face = props.facing.to_block_direction().opposite();
@@ -194,6 +214,11 @@ impl BlockBehaviour for DropperBlock {
                         )
                         .await
                         {
+                            crate::block::blocks::jukebox::JukeboxBlock::refresh_after_inventory_transfer(
+                                args.world,
+                                &target_pos,
+                            )
+                            .await;
                             crate::block::blocks::chiseled_bookshelf::ChiseledBookshelfBlock::refresh_after_inventory_transfer(
                                 args.world,
                                 &target_pos,
