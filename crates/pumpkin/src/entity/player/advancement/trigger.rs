@@ -25,6 +25,10 @@ pub enum AdvancementTrigger {
     /// `CriteriaTriggers.TAME_ANIMAL` (`TameAnimalTrigger.java:20-23`), fired by
     /// `AbstractHorse.tameWithName` (`AbstractHorse.java:712-714`).
     TamedAnimal,
+    /// `CriteriaTriggers.HONEY_BLOCK_SLIDE` (`SlideDownBlockTrigger.java:22-24`), fired by
+    /// `HoneyBlock.maybeDoSlideAchievement` (`HoneyBlock.java:103-107`). Its only consumer,
+    /// `adventure/honey_block_slide`, matches `minecraft:honey_block`, the sole firing block.
+    SlideDownBlock,
 }
 
 impl Player {
@@ -526,6 +530,18 @@ impl Player {
                     self.trigger_advancement_criterion(
                         Advancement::ADVENTURE_SLEEP_IN_BED,
                         "slept_in_bed",
+                    )
+                    .await;
+                }
+            }
+            AdvancementTrigger::SlideDownBlock => {
+                if !self
+                    .has_advancement(Advancement::ADVENTURE_HONEY_BLOCK_SLIDE)
+                    .await
+                {
+                    self.trigger_advancement_criterion(
+                        Advancement::ADVENTURE_HONEY_BLOCK_SLIDE,
+                        "honey_block_slide",
                     )
                     .await;
                 }

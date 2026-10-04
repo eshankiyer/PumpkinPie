@@ -4,6 +4,7 @@ use pumpkin_data::BlockState;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -48,6 +49,11 @@ pub struct FallingEntity {
 
 impl FallingEntity {
     pub fn new(entity: Entity, block_state_id: BlockStateId) -> Self {
+        // `getAddEntityPacket` always sends `Block.getId(blockState)` as the spawn data
+        // (`FallingBlockEntity.java:339-342`), so mirror the carried state from construction on.
+        entity
+            .data
+            .store(i32::from(block_state_id.as_u16()), Ordering::Relaxed);
         let is_anvil = Block::from_state_id(block_state_id).has_tag(&tag::Block::MINECRAFT_ANVIL);
         let start_pos = entity.block_pos.load();
         // `AnvilBlock.falling`: `entity.setHurtsEntities(2.0F, 40)`, applied at spawn time since
@@ -117,21 +123,27 @@ impl FallingEntity {
         block_state: BlockStateId,
         hurts_entities: Option<(f32, i32)>,
     ) {
-        // Replace the original block, TODO: use fluid state
+        // `FallingBlockEntity.fall` (`FallingBlockEntity.java:91-102`): the entity carries the
+        // state with `waterlogged=false`, and the origin is replaced by the state's fluid as a
+        // legacy block, so a waterlogged block leaves a water source behind.
+        let origin_waterlogged = BlockState::from_id(block_state).is_waterlogged();
+        let carried = crate::item::items::bucket::set_waterlogged(
+            Block::from_state_id(block_state),
+            block_state,
+            false,
+        );
+        let origin_replacement = if origin_waterlogged {
+            Block::WATER.default_state.id
+        } else {
+            Block::AIR.default_state.id
+        };
         world
-            .set_block_state(
-                &position,
-                Block::AIR.default_state.id,
-                BlockFlags::NOTIFY_ALL,
-            )
+            .set_block_state(&position, origin_replacement, BlockFlags::NOTIFY_ALL)
             .await;
 
         let spawn_position = position.0.to_f64().add_raw(0.5, 0.0, 0.5);
         let entity = Entity::new(world.clone(), spawn_position, &EntityType::FALLING_BLOCK);
-        entity
-            .data
-            .store(i32::from(block_state.as_u16()), Ordering::Relaxed);
-        let entity = Arc::new(Self::new(entity, block_state));
+        let entity = Arc::new(Self::new(entity, carried));
         entity.set_start_pos(position);
         if let Some((damage_per_distance, damage_max)) = hurts_entities {
             entity.set_hurts_entities(damage_per_distance, damage_max);
@@ -330,12 +342,21 @@ impl FallingEntity {
             && !would_continue_falling;
 
         if may_replace && would_survive {
-            let final_state_id = crate::block::blocks::falling::on_land_state(
+            let mut final_state_id = crate::block::blocks::falling::on_land_state(
                 &**world,
                 pos,
                 falling_state_id,
                 current_state,
             );
+            // `FallingBlockEntity.java:190-192`: re-waterlog when landing in source water.
+            // `is(Fluids.WATER)` excludes flowing water, which `get_fluid` would not.
+            if world.get_fluid_and_fluid_state(pos).0.id == Fluid::WATER.id {
+                final_state_id = crate::item::items::bucket::set_waterlogged(
+                    Block::from_state_id(final_state_id),
+                    final_state_id,
+                    true,
+                );
+            }
             world
                 .set_block_state(pos, final_state_id, BlockFlags::NOTIFY_ALL)
                 .await;

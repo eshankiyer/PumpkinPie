@@ -3294,19 +3294,22 @@ impl LivingEntity {
         }
     }
 
+    /// Port of `LivingEntity.causeFallDamage` (`LivingEntity.java:1784-1810`): returns whether
+    /// the landing dealt fall damage, which `HoneyBlock.fallOn` uses to play its extra fall sound.
     pub async fn handle_fall_damage(
         &self,
         caller: &dyn EntityBase,
         fall_distance: f32,
         damage_per_distance: f32,
-    ) {
+    ) -> bool {
         let may_fly = if let Some(player) = caller.get_player() {
             player.abilities.lock().await.allow_flying
         } else {
             false
         };
         if may_fly {
-            return;
+            // `Player.causeFallDamage` returns false when `abilities.mayfly`.
+            return false;
         }
 
         // `Player.causeFallDamage` awards FALL_ONE_CM before its `super` call,
@@ -3320,7 +3323,7 @@ impl LivingEntity {
         }
 
         if self.is_immune_to_fall_damage() {
-            return;
+            return false;
         }
 
         // `LivingEntity.causeFallDamage` reaches `Entity.causeFallDamage`
@@ -3354,7 +3357,10 @@ impl LivingEntity {
             }
             #[allow(clippy::cast_precision_loss)]
             self.damage(caller, damage as f32, DamageType::FALL).await; // Fall
+            return true;
         }
+        // `Entity.causeFallDamage` (`Entity.java:1574-1581`) always returns false.
+        false
     }
 
     /// Vanilla `Entity.propagateFallToPassengers` (`Entity.java:1583-1589`): a falling vehicle

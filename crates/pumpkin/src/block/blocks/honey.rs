@@ -1,5 +1,5 @@
 use pumpkin_data::entity::{EntityStatus, EntityType};
-use pumpkin_data::sound::Sound;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag;
 use pumpkin_data::tag::Taggable;
 use pumpkin_macros::pumpkin_block;
@@ -7,7 +7,8 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 
 use crate::block::{BlockBehaviour, BlockFuture, OnEntityCollisionArgs, OnLandedUponArgs};
-use crate::entity::{Entity, EntityBase};
+use crate::entity::player::advancement::trigger::AdvancementTrigger;
+use crate::entity::{Entity, EntityBase, mob};
 
 /// `HoneyBlock.SLIDE_STARTS_WHEN_VERTICAL_SPEED_IS_AT_LEAST` (`HoneyBlock.java:27`).
 const SLIDE_STARTS_WHEN_VERTICAL_SPEED_IS_AT_LEAST: f64 = 0.13;
@@ -89,18 +90,50 @@ fn do_slide_movement(entity: &dyn EntityBase) {
 
 impl BlockBehaviour for HoneyBlock {
     /// `HoneyBlock.fallOn` (`HoneyBlock.java:51-61`): the slide sound always plays, and fall
-    /// damage is scaled by 0.2 rather than the vanilla default of 1.0.
+    /// damage is scaled by 0.2 rather than the vanilla default of 1.0. A landing that dealt
+    /// damage additionally plays the honey fall sound at half volume and 0.75 pitch.
     fn on_landed_upon<'a>(&'a self, args: OnLandedUponArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let entity = args.entity.get_entity();
-            entity.play_sound(Sound::BlockHoneyBlockSlide);
+            // `Entity.playSound` is gated on `isSilent` (`Entity.java:1486-1490`).
+            if !entity.is_silent() {
+                entity.play_sound(Sound::BlockHoneyBlockSlide);
+            }
             args.world
                 .send_entity_status(entity, EntityStatus::HoneyJump, None);
 
-            if let Some(living) = args.entity.get_living_entity() {
-                living
+            if let Some(living) = args.entity.get_living_entity()
+                && living
                     .handle_fall_damage(args.entity, args.fall_distance, 0.2)
-                    .await;
+                    .await
+                && !entity.is_silent()
+            {
+                // `this.soundType` is `SoundType.HONEY_BLOCK` (volume 1.0, pitch 1.0). The category
+                // is `entity.getSoundSource()`, and `Player.playSound` (`Player.java:398-399`)
+                // excludes the player, whose client already played the sound locally.
+                let pos = entity.pos.load();
+                if let Some(player) = args.entity.get_player() {
+                    args.world.play_sound_raw_expect(
+                        player,
+                        Sound::BlockHoneyBlockFall as u16,
+                        SoundCategory::Players,
+                        &pos,
+                        0.5,
+                        0.75,
+                    );
+                } else {
+                    let category = args
+                        .entity
+                        .get_mob()
+                        .map_or(SoundCategory::Neutral, mob::Mob::get_sound_source);
+                    args.world.play_sound_fine(
+                        Sound::BlockHoneyBlockFall,
+                        category,
+                        &pos,
+                        0.5,
+                        0.75,
+                    );
+                }
             }
         })
     }
@@ -113,13 +146,19 @@ impl BlockBehaviour for HoneyBlock {
                 return;
             }
 
-            // `maybeDoSlideAchievement` (`HoneyBlock.java:103-107`) is an advancement trigger and
-            // has no analogue here.
+            // `maybeDoSlideAchievement` (`HoneyBlock.java:103-107`).
+            if let Some(player) = args.entity.get_player()
+                && args.world.get_world_age().await % 20 == 0
+            {
+                player
+                    .trigger_advancement(AdvancementTrigger::SlideDownBlock)
+                    .await;
+            }
             do_slide_movement(args.entity);
 
             // `maybeDoSlideEffects` (`HoneyBlock.java:121-132`).
             if does_entity_do_slide_effects(args.entity) {
-                if rng().random_range(0..5) == 0 {
+                if rng().random_range(0..5) == 0 && !entity.is_silent() {
                     entity.play_sound(Sound::BlockHoneyBlockSlide);
                 }
                 if rng().random_range(0..5) == 0 {
