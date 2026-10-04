@@ -36,6 +36,102 @@ mod test {
         assert!(resumed.has_structure(StructureKeys::Monument));
     }
 
+    // Vanilla `ChunkGenerator.createStructures` multi-entry pick: a failed weighted draw is
+    // removed and the draw repeats over the remaining weight.
+    #[test]
+    fn structure_selection_drops_failed_entries() {
+        use crate::generation::proto_chunk::select_structure_start;
+        use crate::generation::structure::structures::{
+            StructurePiecesCollector, StructurePosition, create_chunk_random,
+        };
+        use pumpkin_data::structures::{StructureKeys, StructureSet};
+        use pumpkin_util::math::position::BlockPos;
+        use pumpkin_util::random::RandomImpl;
+        use std::sync::{Arc, Mutex};
+
+        let set = &StructureSet::NETHER_COMPLEXES;
+        let (seed, cx, cz) = (42i64, 5, -7);
+        let position = || StructurePosition {
+            start_pos: BlockPos::new(0, 0, 0),
+            collector: Arc::new(Mutex::new(StructurePiecesCollector::default())),
+        };
+
+        // Fortress (weight 2) then BastionRemnant (weight 3).
+        let first_choice = create_chunk_random(seed, cx, cz).next_bounded_i32(5);
+        let expected_first = if first_choice < 2 {
+            StructureKeys::Fortress
+        } else {
+            StructureKeys::BastionRemnant
+        };
+
+        let mut tried = Vec::new();
+        let selected = select_structure_start(set, seed, cx, cz, |entry| {
+            tried.push(entry.structure);
+            Some(position())
+        });
+        assert_eq!(selected.map(|(key, _)| key), Some(expected_first));
+        assert_eq!(tried, vec![expected_first]);
+
+        let mut tried = Vec::new();
+        let selected = select_structure_start(set, seed, cx, cz, |entry| {
+            tried.push(entry.structure);
+            (entry.structure == StructureKeys::BastionRemnant).then(position)
+        });
+        assert_eq!(
+            selected.map(|(key, _)| key),
+            Some(StructureKeys::BastionRemnant)
+        );
+        assert_eq!(tried.last(), Some(&StructureKeys::BastionRemnant));
+        assert!(tried.len() <= 2);
+
+        assert!(select_structure_start(set, seed, cx, cz, |_| None).is_none());
+    }
+
+    // Vanilla `createReferences` scans every source chunk within 8, so a mineshaft (spacing 1)
+    // must be referenced by a chunk two or more chunks away from its start.
+    #[test]
+    fn far_mineshaft_pieces_are_referenced() {
+        use pumpkin_data::structures::StructureKeys;
+
+        let seed = Seed(1_782_124_772_053_846_960);
+        let world_gen = get_world_gen(seed, Dimension::OVERWORLD, false, Vec::new(), String::new());
+        let WorldGenerator::Noise(generator) = &*world_gen else {
+            unreachable!()
+        };
+
+        let mut found = None;
+        'search: for cz in 0..40 {
+            for cx in 0..40 {
+                let mut proto = ProtoChunk::new(cx, cz, &world_gen);
+                proto.step_to_biomes(generator);
+                proto.set_structure_starts(generator);
+                for key in [StructureKeys::Mineshaft, StructureKeys::MineshaftMesa] {
+                    let Some(bbox) = proto.structure_start_bounding_box(key) else {
+                        continue;
+                    };
+                    let max_cx = (bbox.max.x >> 4).min(cx + 8);
+                    if max_cx - cx >= 2 {
+                        let target_z = cz.clamp(bbox.min.z >> 4, bbox.max.z >> 4);
+                        found = Some((key, (cx, cz), (max_cx, target_z)));
+                        break 'search;
+                    }
+                }
+            }
+        }
+        let Some((key, source, (tx, tz))) = found else {
+            panic!("no mineshaft spanning two chunks found in the search area");
+        };
+
+        let mut target = ProtoChunk::new(tx, tz, &world_gen);
+        target.step_to_biomes(generator);
+        target.set_structure_starts(generator);
+        target.set_structure_references(generator);
+        assert!(
+            target.structure_reference_sources(key).contains(&source),
+            "chunk ({tx}, {tz}) does not reference the {key:?} starting at {source:?}"
+        );
+    }
+
     // Regression test for transposed heightmaps during Noise-stage chunk resume.
     // Flat terrain cannot expose this bug, so use a sloped chunk.
     #[test]

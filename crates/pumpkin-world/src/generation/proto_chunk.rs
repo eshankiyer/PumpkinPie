@@ -1,6 +1,5 @@
-use crate::generation::structure::placement::GlobalStructureCache;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use pumpkin_data::block_properties::is_air;
 use pumpkin_data::chunk::DoublePerlinNoiseParameters;
@@ -48,7 +47,8 @@ use crate::generation::section_coords::section_to_block;
 use crate::generation::structure::lazily_generate_structure;
 use crate::generation::structure::placement::should_generate_structure;
 use crate::generation::structure::structures::{
-    StructureGeneratorContext, StructureInstance, create_chunk_random,
+    HeightSampler, StructureGeneratorContext, StructurePiecesCollector, StructurePosition,
+    create_chunk_random,
 };
 use crate::generation::surface::rule::try_apply_material_rule;
 use crate::{
@@ -242,7 +242,15 @@ pub struct ProtoChunk {
     pub flat_surface_wg_height_map: [i16; CHUNK_AREA],
     /// `OCEAN_FLOOR_WG`: frozen after `Surface`, like `flat_surface_wg_height_map`.
     pub flat_ocean_floor_wg_height_map: [i16; CHUNK_AREA],
-    structure_starts: FxHashMap<StructureKeys, StructureInstance>,
+    /// Vanilla `ChunkAccess.structureStarts`: the at most one start per structure set
+    /// that this chunk selected in `set_structure_starts`.
+    structure_starts: FxHashMap<StructureKeys, StructurePosition>,
+    /// Vanilla `ChunkAccess.structuresRefences`: for each structure, every start chunk
+    /// (with its pieces) whose bounding box intersects this chunk. The source chunk gives
+    /// the `LongSet` semantics; this chunk's own start is just one more entry.
+    #[expect(clippy::type_complexity)]
+    structure_references:
+        FxHashMap<StructureKeys, Vec<((i32, i32), Arc<Mutex<StructurePiecesCollector>>)>>,
 
     height: u16,
     bottom_y: i8,
@@ -525,7 +533,22 @@ impl TerrainCache {
 impl ProtoChunk {
     #[cfg(test)]
     pub(crate) fn has_structure(&self, key: StructureKeys) -> bool {
-        self.structure_starts.contains_key(&key)
+        self.structure_starts.contains_key(&key) || self.structure_references.contains_key(&key)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn structure_start_bounding_box(&self, key: StructureKeys) -> Option<BlockBox> {
+        self.structure_starts
+            .get(&key)
+            .map(StructurePosition::get_bounding_box)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn structure_reference_sources(&self, key: StructureKeys) -> Vec<(i32, i32)> {
+        self.structure_references
+            .get(&key)
+            .map(|entries| entries.iter().map(|(source, _)| *source).collect())
+            .unwrap_or_default()
     }
 
     #[must_use]
@@ -592,6 +615,7 @@ impl ProtoChunk {
             flat_surface_wg_height_map: default_heightmap,
             flat_ocean_floor_wg_height_map: default_heightmap,
             structure_starts: FxHashMap::default(),
+            structure_references: FxHashMap::default(),
             height,
             bottom_y,
             sea_level,
@@ -723,7 +747,7 @@ impl ProtoChunk {
         // `ChunkData` has no on-disk field for `structure_starts`/`structure_references`, so a
         // chunk saved at or past `StructureReferences` and reloaded here would otherwise resume
         // with that map permanently empty: the later `Features`-stage jigsaw placement reads
-        // only `self.structure_starts` and silently places nothing for this chunk. Recompute it
+        // only `self.structure_references` and silently places nothing for this chunk. Recompute it
         // here instead of persisting it -- it's a pure function of seed, biomes (just restored
         // above) and the world-wide structure cache, so redoing it is cheap and exact.
         proto_chunk.stage = resumed_stage;
@@ -1164,7 +1188,9 @@ impl ProtoChunk {
         let chunk_start_x = self.start_block_x();
         let chunk_start_z = self.start_block_z();
 
-        for (key, instance) in &self.structure_starts {
+        // Vanilla `Beardifier.forStructuresInChunk` reads only this chunk's references
+        // (`StructureManager.startsForStructure` over `getAllReferences`).
+        for (key, references) in &self.structure_references {
             let structure = pumpkin_data::structures::Structure::get(key);
             let terrain_adaptation = match structure.terrain_adaptation {
                 pumpkin_data::structures::TerrainAdaptation::None => {
@@ -1189,36 +1215,70 @@ impl ProtoChunk {
                 continue;
             }
 
-            let collector = match instance {
-                StructureInstance::Start(pos) => &pos.collector,
-                StructureInstance::Reference(collector) => collector,
-            };
+            for (_, collector) in references {
+                let collector = collector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                for piece in &collector.pieces {
+                    let bounding_box = piece.get_structure_piece().bounding_box;
 
-            let collector = collector
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for piece in &collector.pieces {
-                let bounding_box = piece.get_structure_piece().bounding_box;
+                    // Match `piece.isCloseToChunk(chunkPos, 12)`
+                    // Validates if an expansion 12 blocks out covers the chunk borders
+                    if !bounding_box.intersects_raw_xz(
+                        chunk_start_x - 12,
+                        chunk_start_z - 12,
+                        chunk_start_x + 15 + 12,
+                        chunk_start_z + 15 + 12,
+                    ) {
+                        continue;
+                    }
 
-                // Match `piece.isCloseToChunk(chunkPos, 12)`
-                // Validates if an expansion 12 blocks out covers the chunk borders
-                if !bounding_box.intersects_raw_xz(
-                    chunk_start_x - 12,
-                    chunk_start_z - 12,
-                    chunk_start_x + 15 + 12,
-                    chunk_start_z + 15 + 12,
-                ) {
-                    continue;
-                }
+                    let mut ground_level_delta = 0;
 
-                let mut ground_level_delta = 0;
+                    if let Some(jigsaw_piece) = piece.as_any().downcast_ref::<crate::generation::structure::structures::jigsaw::PoolElementStructurePiece>() {
+                        // Java only adds to rigids if projection is RIGID
+                        if jigsaw_piece.projection == crate::generation::structure::structures::jigsaw::JigsawProjection::Rigid {
+                            ground_level_delta = jigsaw_piece.ground_level_delta;
+                            any_piece_bounding_box = any_piece_bounding_box.map_or(Some(bounding_box), |mut b| {
+                                     b.encompass(&bounding_box);
+                                     Some(b)
+                                 });
 
-                if let Some(jigsaw_piece) = piece.as_any().downcast_ref::<crate::generation::structure::structures::jigsaw::PoolElementStructurePiece>() {
-                    // Java only adds to rigids if projection is RIGID
-                    if jigsaw_piece.projection == crate::generation::structure::structures::jigsaw::JigsawProjection::Rigid {
-                        ground_level_delta = jigsaw_piece.ground_level_delta;
-                        any_piece_bounding_box = any_piece_bounding_box.map_or(Some(bounding_box), |mut b| {
-                                 b.encompass(&bounding_box);
+                            beardifier_structures.push(
+                                crate::generation::noise::router::density_function::beardifier::BeardifierStructure {
+                                    bounding_box,
+                                    terrain_adaptation,
+                                    ground_level_delta,
+                                }
+                            );
+                        }
+
+                        for j in &jigsaw_piece.junctions {
+                            let j_x = j.source_x;
+                            let j_z = j.source_z;
+                            // Junction bounds filter (match vanilla proximity checks)
+                            if j_x > chunk_start_x - 12
+                                && j_z > chunk_start_z - 12
+                                && j_x < chunk_start_x + 15 + 12
+                                && j_z < chunk_start_z + 15 + 12
+                            {
+                                beardifier_junctions.push(
+                                    crate::generation::noise::router::density_function::beardifier::BeardifierJunction {
+                                        x: j_x,
+                                        ground_y: j.source_ground_y,
+                                        z: j_z,
+                                    }
+                                );
+                                let junction_box = BlockBox::from_pos(BlockPos::new(j_x, j.source_ground_y, j_z));
+                         any_piece_bounding_box = any_piece_bounding_box.map_or(Some(junction_box), |mut b| {
+                                b.encompass(&junction_box);
+                                 Some(b)
+                            });
+                            }
+                        }
+                    } else {
+                            any_piece_bounding_box = any_piece_bounding_box.map_or(Some(bounding_box), |mut b| {
+                                b.encompass(&bounding_box);
                                  Some(b)
                              });
 
@@ -1230,43 +1290,6 @@ impl ProtoChunk {
                             }
                         );
                     }
-
-                    for j in &jigsaw_piece.junctions {
-                        let j_x = j.source_x;
-                        let j_z = j.source_z;
-                        // Junction bounds filter (match vanilla proximity checks)
-                        if j_x > chunk_start_x - 12
-                            && j_z > chunk_start_z - 12
-                            && j_x < chunk_start_x + 15 + 12
-                            && j_z < chunk_start_z + 15 + 12
-                        {
-                            beardifier_junctions.push(
-                                crate::generation::noise::router::density_function::beardifier::BeardifierJunction {
-                                    x: j_x,
-                                    ground_y: j.source_ground_y,
-                                    z: j_z,
-                                }
-                            );
-                            let junction_box = BlockBox::from_pos(BlockPos::new(j_x, j.source_ground_y, j_z));
-                     any_piece_bounding_box = any_piece_bounding_box.map_or(Some(junction_box), |mut b| {
-                            b.encompass(&junction_box);
-                             Some(b)
-                        });
-                        }
-                    }
-                } else {
-                        any_piece_bounding_box = any_piece_bounding_box.map_or(Some(bounding_box), |mut b| {
-                            b.encompass(&bounding_box);
-                             Some(b)
-                         });
-
-                    beardifier_structures.push(
-                        crate::generation::noise::router::density_function::beardifier::BeardifierStructure {
-                            bounding_box,
-                            terrain_adaptation,
-                            ground_level_delta,
-                        }
-                    );
                 }
             }
         }
@@ -1780,74 +1803,15 @@ impl ProtoChunk {
         population_seed: u64,
         world_seed: i64,
     ) {
+        // Vanilla `startsForStructure(sectionPos, structure)` reads only the centre chunk's
+        // references (`ChunkGenerator.applyBiomeDecoration`), which already include every
+        // start within 8 chunks whose bounding box reaches this chunk.
         let mut tasks = Vec::new();
-        {
-            let center_chunk = cache.get_center_chunk();
-            let center_x = center_chunk.x;
-            let center_z = center_chunk.z;
-
-            for (id, instance) in &center_chunk.structure_starts {
-                let s = Structure::get(id);
-                if s.step.ordinal() != step {
-                    continue;
-                }
-
-                match instance {
-                    StructureInstance::Start(pos) => tasks.push(pos.collector.clone()),
-                    StructureInstance::Reference(collector) => {
-                        let collector_arc = collector.clone();
-                        if !tasks.iter().any(|t| Arc::ptr_eq(t, &collector_arc)) {
-                            tasks.push(collector_arc);
-                        }
-                    }
-                }
+        for (id, references) in &cache.get_center_chunk().structure_references {
+            if Structure::get(id).step.ordinal() != step {
+                continue;
             }
-
-            let radius = 8;
-            for dx in -radius..=radius {
-                for dz in -radius..=radius {
-                    if dx == 0 && dz == 0 {
-                        continue;
-                    }
-
-                    let neighbor_x = center_x + dx;
-                    let neighbor_z = center_z + dz;
-
-                    if let Some(neighbor) = cache.try_get_proto_chunk(neighbor_x, neighbor_z) {
-                        for (id, instance) in &neighbor.structure_starts {
-                            let s = Structure::get(id);
-                            if s.step.ordinal() != step {
-                                continue;
-                            }
-
-                            match instance {
-                                StructureInstance::Start(pos) => {
-                                    let start_x = chunk_pos::start_block_x(center_x);
-                                    let start_z = chunk_pos::start_block_z(center_z);
-                                    let end_x = start_x + 15;
-                                    let end_z = start_z + 15;
-
-                                    if pos
-                                        .get_bounding_box()
-                                        .intersects_raw_xz(start_x, start_z, end_x, end_z)
-                                    {
-                                        let collector_arc = pos.collector.clone();
-                                        if !tasks.iter().any(|t| Arc::ptr_eq(t, &collector_arc)) {
-                                            tasks.push(collector_arc);
-                                        }
-                                    }
-                                }
-                                StructureInstance::Reference(collector) => {
-                                    let collector_arc = collector.clone();
-                                    if !tasks.iter().any(|t| Arc::ptr_eq(t, &collector_arc)) {
-                                        tasks.push(collector_arc);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            tasks.extend(references.iter().map(|(_, collector)| collector.clone()));
         }
 
         let decorator_seed = get_decorator_seed(population_seed, 0, step as u64);
@@ -1883,11 +1847,11 @@ impl ProtoChunk {
     pub fn set_structure_starts(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::Biomes);
         let random_config = &generator.random_config;
-        let settings = generator.settings;
         let global_cache = &generator.global_structure_cache;
         let calculator = &generator.structure_calculator;
 
         let seed = random_config.seed;
+        let min_y = self.bottom_y() as i32;
 
         let mut height_sampler =
             crate::generation::structure::height_sampler::NoiseHeightSampler::new(
@@ -1932,113 +1896,31 @@ impl ProtoChunk {
                 continue;
             }
 
-            if set.structures.len() == 1 {
-                if let Some(entry) = set.structures.first() {
-                    self.try_set_structure_start(
-                        global_cache,
-                        settings.sea_level,
-                        entry,
+            let (chunk_x, chunk_z) = (self.x, self.z);
+            if let Some((key, pos)) =
+                select_structure_start(set, seed as i64, chunk_x, chunk_z, |entry| {
+                    compute_structure_start(
                         generator,
+                        entry,
+                        chunk_x,
+                        chunk_z,
+                        min_y,
                         &mut height_sampler,
                         &biome_supplier,
                         &mut multi_noise_sampler,
-                    );
-                }
-                continue;
-            }
-
-            let mut candidates = set.structures.to_vec();
-            // Vanilla `ChunkGenerator.createStructures`: `setLargeFeatureSeed` over the
-            // legacy LCG picks the weighted entry of a multi-structure set.
-            let mut random = create_chunk_random(seed as i64, self.x, self.z);
-
-            let mut total_weight: u32 = candidates.iter().map(|e| e.weight).sum();
-
-            while !candidates.is_empty() {
-                let mut roll = random.next_bounded_i32(total_weight as i32);
-                let mut selected_idx = 0;
-
-                for (i, entry) in candidates.iter().enumerate() {
-                    roll -= entry.weight as i32;
-                    if roll < 0 {
-                        selected_idx = i;
-                        break;
-                    }
-                }
-
-                let selected_entry = &candidates[selected_idx];
-
-                if self.try_set_structure_start(
-                    global_cache,
-                    settings.sea_level,
-                    selected_entry,
-                    generator,
-                    &mut height_sampler,
-                    &biome_supplier,
-                    &mut multi_noise_sampler,
-                ) {
-                    break;
-                }
-
-                let failed_entry = candidates.remove(selected_idx);
-                total_weight -= failed_entry.weight;
+                    )
+                })
+            {
+                self.structure_starts.insert(key, pos);
             }
         }
         self.stage = StagedChunkEnum::StructureStart;
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    fn try_set_structure_start(
-        &mut self,
-        global_cache: &GlobalStructureCache,
-        sea_level: i32,
-        entry: &WeightedEntry,
-        generator: &super::generator::VanillaGenerator,
-        height_sampler: &mut dyn crate::generation::structure::structures::HeightSampler,
-        biome_supplier: &dyn BiomeSupplier,
-        multi_noise_sampler: &mut MultiNoiseSampler,
-    ) -> bool {
-        let chunk_x = self.x;
-        let chunk_z = self.z;
-        let min_y = self.bottom_y() as i32;
-        let seed = generator.random_config.seed as i64;
-        // `ChunkGenerator.tryGenerateStructure` -> `Structure.findValidGenerationPoint`;
-        // `lazily_generate_structure` also runs the monument's own biome pre-check.
-        let position =
-            global_cache.get_or_compute_structure_start(entry.structure, chunk_x, chunk_z, || {
-                let structure = Structure::get(&entry.structure);
-                let context = StructureGeneratorContext {
-                    seed,
-                    chunk_x,
-                    chunk_z,
-                    random: create_chunk_random(seed, chunk_x, chunk_z),
-                    sea_level,
-                    min_y,
-                    height_sampler: Some(height_sampler),
-                    structure_key: Some(entry.structure),
-                };
-                lazily_generate_structure(
-                    &entry.structure,
-                    structure,
-                    context,
-                    biome_supplier,
-                    multi_noise_sampler,
-                )
-            });
-
-        if let Some(pos) = position {
-            self.structure_starts
-                .insert(entry.structure, StructureInstance::Start(pos));
-            return true;
-        }
-        false
     }
 
     #[expect(clippy::too_many_lines)]
     pub fn set_structure_references(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::StructureStart);
         let random_config = &generator.random_config;
-        let settings = generator.settings;
         let dimension = &generator.dimension;
         let noise_router = &generator.base_router;
         let global_cache = &generator.global_structure_cache;
@@ -2084,11 +1966,17 @@ impl ProtoChunk {
 
             match &set.placement.placement_type {
                 StructurePlacementType::RandomSpread(spread) => {
-                    let region_x = pumpkin_util::math::floor_div(self.x, spread.spacing);
-                    let region_z = pumpkin_util::math::floor_div(self.z, spread.spacing);
+                    // Vanilla `createReferences` scans every source chunk within 8; each
+                    // spread region holds at most one candidate, so visit every region
+                    // that overlaps that square (spacing 1 for mineshafts, 2 for fossils).
+                    let spacing = spread.spacing;
+                    let min_region_x = pumpkin_util::math::floor_div(self.x - 8, spacing);
+                    let max_region_x = pumpkin_util::math::floor_div(self.x + 8, spacing);
+                    let min_region_z = pumpkin_util::math::floor_div(self.z - 8, spacing);
+                    let max_region_z = pumpkin_util::math::floor_div(self.z + 8, spacing);
 
-                    for rx in (region_x - 1)..=(region_x + 1) {
-                        for rz in (region_z - 1)..=(region_z + 1) {
+                    for rx in min_region_x..=max_region_x {
+                        for rz in min_region_z..=max_region_z {
                             candidate_chunks.push(
                                 crate::generation::structure::placement::get_structure_chunk_in_region(
                                     spread,
@@ -2118,6 +2006,11 @@ impl ProtoChunk {
             }
 
             for (candidate_chunk_x, candidate_chunk_z) in candidate_chunks {
+                if (candidate_chunk_x - self.x).abs() > 8 || (candidate_chunk_z - self.z).abs() > 8
+                {
+                    continue;
+                }
+
                 if !should_generate_structure(
                     &set.placement,
                     calculator,
@@ -2130,73 +2023,58 @@ impl ProtoChunk {
                     continue;
                 }
 
-                if (candidate_chunk_x - self.x).abs() <= 8
-                    && (candidate_chunk_z - self.z).abs() <= 8
-                {
-                    for entry in set.structures {
-                        let structure = Structure::get(&entry.structure);
-
-                        // A structure's placement depends only on its start chunk and the
-                        // world seed, so cache it: otherwise every surrounding chunk whose
-                        // references overlap it would re-run the (expensive) jigsaw
-                        // expansion. `context` is only built on a cache miss.
-                        let start_data = global_cache.get_or_compute_structure_start(
-                            entry.structure,
+                // Vanilla references only the start the source chunk actually holds
+                // (`getAllStarts`), so rerun its `createStructures` selection. Starts are
+                // memoised per (structure, chunk) in the global cache, so this agrees with
+                // the source chunk's own `set_structure_starts` whichever runs first.
+                let Some((key, start_data)) = select_structure_start(
+                    set,
+                    seed,
+                    candidate_chunk_x,
+                    candidate_chunk_z,
+                    |entry| {
+                        compute_structure_start(
+                            generator,
+                            entry,
                             candidate_chunk_x,
                             candidate_chunk_z,
-                            || {
-                                let context = StructureGeneratorContext {
-                                    seed,
-                                    chunk_x: candidate_chunk_x,
-                                    chunk_z: candidate_chunk_z,
-                                    random: create_chunk_random(
-                                        seed,
-                                        candidate_chunk_x,
-                                        candidate_chunk_z,
-                                    ),
-                                    sea_level: settings.sea_level,
-                                    min_y: chunk_min_y,
-                                    height_sampler: Some(&mut height_sampler),
-                                    structure_key: Some(entry.structure),
-                                };
-                                lazily_generate_structure(
-                                    &entry.structure,
-                                    structure,
-                                    context,
-                                    &biome_supplier,
-                                    &mut multi_noise_sampler,
-                                )
-                            },
-                        );
+                            chunk_min_y,
+                            &mut height_sampler,
+                            &biome_supplier,
+                            &mut multi_noise_sampler,
+                        )
+                    },
+                ) else {
+                    continue;
+                };
 
-                        // `StructureStart.getBoundingBox` is `Structure.adjustBoundingBox` of the
-                        // piece union, which inflates by 12 for terrain-adapting structures so the
-                        // beardifier of chunks just outside the pieces still sees them.
-                        if let Some(start_data) = start_data
-                            && {
-                                let bbox = start_data.get_bounding_box();
-                                let bbox = if structure.terrain_adaptation
-                                    == pumpkin_data::structures::TerrainAdaptation::None
-                                {
-                                    bbox
-                                } else {
-                                    bbox.expand(12, 12, 12)
-                                };
-                                bbox.intersects_raw_xz(start_x, start_z, end_x, end_z)
-                            }
-                        {
-                            references.push((entry.structure, start_data.collector.clone()));
-                            break;
-                        }
-                    }
+                // `StructureStart.getBoundingBox` is `Structure.adjustBoundingBox` of the
+                // piece union, which inflates by 12 for terrain-adapting structures so the
+                // beardifier of chunks just outside the pieces still sees them.
+                let bbox = start_data.get_bounding_box();
+                let bbox = if Structure::get(&key).terrain_adaptation
+                    == pumpkin_data::structures::TerrainAdaptation::None
+                {
+                    bbox
+                } else {
+                    bbox.expand(12, 12, 12)
+                };
+                if bbox.intersects_raw_xz(start_x, start_z, end_x, end_z) {
+                    references.push((
+                        key,
+                        (candidate_chunk_x, candidate_chunk_z),
+                        start_data.collector,
+                    ));
                 }
             }
         }
 
-        for (key, pos) in references {
-            self.structure_starts
-                .entry(key)
-                .or_insert_with(|| StructureInstance::Reference(pos));
+        // `ChunkAccess.addReferenceForStructure`: a set of source chunks per structure.
+        for (key, source, collector) in references {
+            let entries = self.structure_references.entry(key).or_default();
+            if !entries.iter().any(|(pos, _)| *pos == source) {
+                entries.push((source, collector));
+            }
         }
 
         self.stage = StagedChunkEnum::StructureReferences;
@@ -2217,6 +2095,88 @@ impl ProtoChunk {
     const fn start_block_z(&self) -> i32 {
         start_block_z(self.z)
     }
+}
+
+/// The weighted structure pick of vanilla `ChunkGenerator.createStructures`: a single-entry
+/// set tries its structure directly; otherwise `setLargeFeatureSeed` over the legacy LCG
+/// draws weighted entries, dropping each one that fails until one generates.
+pub(crate) fn select_structure_start(
+    set: &StructureSet,
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+    mut try_generate: impl FnMut(&WeightedEntry) -> Option<StructurePosition>,
+) -> Option<(StructureKeys, StructurePosition)> {
+    if let [entry] = set.structures {
+        return try_generate(entry).map(|pos| (entry.structure, pos));
+    }
+
+    let mut options = set.structures.to_vec();
+    let mut random = create_chunk_random(seed, chunk_x, chunk_z);
+    let mut total_weight: u32 = options.iter().map(|e| e.weight).sum();
+
+    while !options.is_empty() {
+        let mut choice = random.next_bounded_i32(total_weight as i32);
+        let mut index = 0;
+        for entry in &options {
+            choice -= entry.weight as i32;
+            if choice < 0 {
+                break;
+            }
+            index += 1;
+        }
+        let index = index.min(options.len() - 1);
+
+        if let Some(pos) = try_generate(&options[index]) {
+            return Some((options[index].structure, pos));
+        }
+        total_weight -= options.remove(index).weight;
+    }
+    None
+}
+
+/// `ChunkGenerator.tryGenerateStructure` -> `Structure.generate`, memoised per (structure,
+/// start chunk). A start without pieces is not `isValid`, so it counts as a failure.
+#[expect(clippy::too_many_arguments)]
+fn compute_structure_start(
+    generator: &super::generator::VanillaGenerator,
+    entry: &WeightedEntry,
+    chunk_x: i32,
+    chunk_z: i32,
+    min_y: i32,
+    height_sampler: &mut dyn HeightSampler,
+    biome_supplier: &dyn BiomeSupplier,
+    multi_noise_sampler: &mut MultiNoiseSampler,
+) -> Option<StructurePosition> {
+    let seed = generator.random_config.seed as i64;
+    // `lazily_generate_structure` also runs the monument's own biome pre-check.
+    generator
+        .global_structure_cache
+        .get_or_compute_structure_start(entry.structure, chunk_x, chunk_z, || {
+            let context = StructureGeneratorContext {
+                seed,
+                chunk_x,
+                chunk_z,
+                random: create_chunk_random(seed, chunk_x, chunk_z),
+                sea_level: generator.settings.sea_level,
+                min_y,
+                height_sampler: Some(height_sampler),
+                structure_key: Some(entry.structure),
+            };
+            lazily_generate_structure(
+                &entry.structure,
+                Structure::get(&entry.structure),
+                context,
+                biome_supplier,
+                multi_noise_sampler,
+            )
+        })
+        .filter(|pos| {
+            !pos.collector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        })
 }
 
 impl BlockAccessor for ProtoChunk {
