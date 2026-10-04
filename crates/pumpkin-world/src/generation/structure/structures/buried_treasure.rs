@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use pumpkin_data::{Block, BlockDirection, BlockId};
-use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
     HeightMap,
     math::{block_box::BlockBox, position::BlockPos},
-    random::{RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand},
+    random::RandomGenerator,
 };
 
 use crate::{
@@ -59,9 +58,9 @@ impl StructurePieceBase for BuriedTreasurePiece {
         &mut self,
         chunk: &mut ProtoChunk,
         _block_registry: &dyn WorldPortalExt,
-        _random: &mut RandomGenerator,
+        random: &mut RandomGenerator,
         _seed: i64,
-        _chunk_box: &BlockBox,
+        chunk_box: &BlockBox,
     ) {
         let boundingbox = self.bounding_box();
         let y = chunk.get_top_y(
@@ -121,20 +120,20 @@ impl StructurePieceBase for BuriedTreasurePiece {
                     chunk.set_block_state(offset_pos.0.x, offset_pos.0.y, offset_pos.0.z, state1);
                 }
 
-                chunk.set_block_state(pos.0.x, pos.0.y, pos.0.z, Block::CHEST.default_state);
-
-                let mut chest_nbt = NbtCompound::new();
-                chest_nbt.put_string("id", "minecraft:chest".to_string());
-                chest_nbt.put_int("x", pos.0.x);
-                chest_nbt.put_int("y", pos.0.y);
-                chest_nbt.put_int("z", pos.0.z);
-                chest_nbt.put_string("LootTable", "minecraft:chests/buried_treasure".to_string());
-
-                let mut random =
-                    LegacyRand::from_seed(hash_block_pos(pos.0.x, pos.0.y, pos.0.z) as u64);
-                chest_nbt.put_long("LootTableSeed", random.next_i64());
-
-                chunk.add_block_entity(chest_nbt);
+                // `BuriedTreasurePieces.java:70`: the piece's box shrinks to the chest block.
+                self.piece.bounding_box =
+                    BlockBox::new(pos.0.x, pos.0.y, pos.0.z, pos.0.x, pos.0.y, pos.0.z);
+                // `BuriedTreasurePieces.java:71-72`: the chest goes through `createChest`, so it
+                // is reoriented against its neighbours and seeded from the piece random.
+                self.piece.add_chest(
+                    chunk,
+                    chunk_box,
+                    random,
+                    pos.0.x,
+                    pos.0.y,
+                    pos.0.z,
+                    "minecraft:chests/buried_treasure",
+                );
                 return;
             }
             pos = pos.down();

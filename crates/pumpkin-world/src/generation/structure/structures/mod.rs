@@ -1043,6 +1043,30 @@ mod reorient_tests {
     }
 
     #[test]
+    fn three_walls_open_the_chest_towards_the_free_side() {
+        // A desert pyramid arm chest: walls north, south and east, air to the west.
+        let mut world = FlatWorld::default();
+        world.put(0, 0, -1, Block::STONE.default_state);
+        world.put(0, 0, 1, Block::STONE.default_state);
+        world.put(1, 0, 0, Block::STONE.default_state);
+
+        let state = reorient(&world, &ORIGIN, &Block::CHEST, Block::CHEST.default_state);
+        assert_eq!(facing(state), HorizontalFacing::West);
+    }
+
+    #[test]
+    fn a_fully_enclosed_chest_ends_facing_east() {
+        // A buried treasure chest: north -> south -> clockwise west -> opposite east.
+        let mut world = FlatWorld::default();
+        for (x, z) in [(0, -1), (0, 1), (-1, 0), (1, 0)] {
+            world.put(x, 0, z, Block::STONE.default_state);
+        }
+
+        let state = reorient(&world, &ORIGIN, &Block::CHEST, Block::CHEST.default_state);
+        assert_eq!(facing(state), HorizontalFacing::East);
+    }
+
+    #[test]
     fn water_beside_the_chest_is_not_a_wall() {
         let mut world = FlatWorld::default();
         world.put(0, 0, -1, Block::STONE.default_state);

@@ -4,13 +4,11 @@ use pumpkin_data::{
     Block, BlockState,
     block_properties::{BlockProperties, HorizontalFacing, OakStairsLikeProperties},
 };
-use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
     BlockDirection, HeightMap,
     math::{block_box::BlockBox, position::BlockPos},
     random::{
-        RandomDeriverImpl, RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand,
-        xoroshiro128::Xoroshiro,
+        RandomDeriverImpl, RandomGenerator, RandomImpl, xoroshiro128::Xoroshiro,
     },
 };
 
@@ -195,42 +193,6 @@ impl DesertPyramidPiece {
         let roof_z = roof_random.next_inbetween_i32(z0, z1);
         let roof_pos = self.piece.offset_pos(roof_x, y0, roof_z);
         self.random_collapsed_roof_pos = BlockPos::new(roof_pos.x, roof_pos.y, roof_pos.z);
-    }
-
-    fn try_place_chest(
-        &mut self,
-        chunk: &mut ProtoChunk,
-        bb: &BlockBox,
-        index: usize,
-        x: i32,
-        y: i32,
-        z: i32,
-    ) {
-        if self.has_placed_chest[index] {
-            return;
-        }
-
-        let world_pos = self.piece.offset_pos(x, y, z);
-        if !bb.contains_pos(&world_pos) {
-            return;
-        }
-
-        self.piece
-            .add_block(chunk, Block::CHEST.default_state, x, y, z, bb);
-
-        let mut nbt = NbtCompound::new();
-        nbt.put_int("x", world_pos.x);
-        nbt.put_int("y", world_pos.y);
-        nbt.put_int("z", world_pos.z);
-        nbt.put_string("id", "minecraft:chest".to_string());
-        nbt.put_string("LootTable", "minecraft:chests/desert_pyramid".to_string());
-
-        let mut random =
-            LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
-        nbt.put_long("LootTableSeed", random.next_i64());
-
-        chunk.add_block_entity(nbt);
-        self.has_placed_chest[index] = true;
     }
 
     fn add_cellar(
@@ -857,8 +819,20 @@ impl StructurePieceBase for DesertPyramidPiece {
         self.piece.add_block(chunk, chiseled, 10, -10, 13, bb);
         self.piece.add_block(chunk, cut, 10, -11, 13, bb);
 
-        for (index, x, z) in [(0, 10, 12), (1, 8, 10), (2, 10, 8), (3, 12, 10)] {
-            self.try_place_chest(chunk, bb, index, x, -11, z);
+        // `Direction.Plane.HORIZONTAL` order (N, E, S, W), indexed by `get2DDataValue`
+        // (`DesertPyramidPiece.java:295-303`).
+        for (index, x, z) in [(2, 10, 8), (3, 12, 10), (0, 10, 12), (1, 8, 10)] {
+            if !self.has_placed_chest[index] {
+                self.has_placed_chest[index] = self.piece.add_chest(
+                    chunk,
+                    bb,
+                    random,
+                    x,
+                    -11,
+                    z,
+                    "minecraft:chests/desert_pyramid",
+                );
+            }
         }
 
         self.add_cellar(chunk, bb, &mut level_random, seed);
