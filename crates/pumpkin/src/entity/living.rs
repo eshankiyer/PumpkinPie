@@ -4766,6 +4766,9 @@ impl LivingEntity {
             player.hunger_manager.restart();
         }
 
+        // Vanilla respawn builds a fresh `ServerPlayer` (`PlayerList.java:391`), so a
+        // catalyst-consumed death must not suppress XP orbs on later deaths.
+        self.skip_drop_experience.store(false, Relaxed);
         self.dead.store(false, Relaxed);
     }
 

@@ -10,6 +10,7 @@ use crate::block::{
     PlacedArgs,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
+use crate::entity::living::LivingEntity;
 use crate::world::World;
 use crate::world::game_event::{
     GameEventContext, GameEventFuture, GameEventListener, PositionSource,
@@ -143,10 +144,11 @@ impl GameEventListener for CatalystListener {
     /// `handleGameEvent` (lines 84-103).
     ///
     /// The catalyst consumes the experience rather than sharing it: vanilla calls
-    /// `mob.skipDropExperience()` (`SculkCatalystBlockEntity.java:80`), which sets the
-    /// flag that `shouldDropExperience()` gates the orb on in the death path
-    /// (`LivingEntity.java:278,1527,1680`). Without that the death would pay out twice,
-    /// once as an orb and once as sculk charge.
+    /// `mob.skipDropExperience()` (`SculkCatalystBlockEntity.java:95`) whenever it handles
+    /// a not-yet-consumed death, which sets the flag that gates the orb in the death path
+    /// (`LivingEntity.java:1527,1680-1686`). Listeners are delivered closest-first, so only
+    /// the nearest catalyst in range absorbs and blooms; farther ones see
+    /// `wasExperienceConsumed()` and do nothing.
     fn handle_game_event<'a>(
         &'a self,
         world: &'a Arc<World>,
@@ -165,12 +167,25 @@ impl GameEventListener for CatalystListener {
                 return false;
             };
 
+            // `if (!mob.wasExperienceConsumed())`, claimed atomically so two catalysts
+            // handling the same death concurrently cannot both absorb it. Setting the flag
+            // before computing the reward is equivalent to vanilla's set-after-compute
+            // because `get_experience_reward` does not read it.
+            if living
+                .skip_drop_experience
+                .swap(true, std::sync::atomic::Ordering::AcqRel)
+            {
+                return true;
+            }
+
+            // Vanilla passes the last damage source's entity as the killer; every Rust
+            // `get_experience_reward` ignores it, so `None` is equivalent today.
             let experience_would_drop = source_entity.get_experience_reward(None);
-            if experience_would_drop > 0 {
-                // Claim the drop before the death path reaches its orb spawn.
-                living
-                    .skip_drop_experience
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            // `mob.shouldDropExperience() && experienceWouldDrop > 0`; `Tadpole` overrides
+            // `shouldDropExperience` to return false (`Tadpole.java:254`).
+            let should_drop_experience = living.entity.entity_type.id
+                != pumpkin_data::entity::EntityType::TADPOLE.id;
+            if should_drop_experience && experience_would_drop > 0 {
                 // `BlockPos.containing(sourcePosition.relative(Direction.UP, 0.5))`.
                 let cursor_pos = BlockPos::floored(
                     source_position.x,
@@ -188,12 +203,42 @@ impl GameEventListener for CatalystListener {
                         experience_would_drop.min(i32::MAX as u32) as i32,
                     );
                 }
+                try_award_it_spreads_advancement(world, living).await;
             }
 
             bloom(world, self.pos).await;
             true
         })
     }
+}
+
+/// `CatalystListener.tryAwardItSpreadsAdvancement` (lines 117-122): awards "It Spreads"
+/// to the player returned by `getLastHurtByMob()`. The criterion has no conditions.
+async fn try_award_it_spreads_advancement(world: &Arc<World>, mob: &LivingEntity) {
+    use std::sync::atomic::Ordering::Relaxed;
+
+    let attacker_id = mob.last_attacker_id.load(Relaxed);
+    if attacker_id == 0 {
+        return;
+    }
+    // `getLastHurtByMob` is cleared once the attack is more than 100 ticks old
+    // (`LivingEntity.java:489-496`).
+    if mob.entity.age.load(Relaxed) - mob.get_last_hurt_by_mob_timestamp() > 100 {
+        return;
+    }
+    let Some(player) = world.get_player_by_id(attacker_id) else {
+        return;
+    };
+    // ... or when the attacker is no longer alive.
+    if player.living_entity.dead.load(Relaxed) {
+        return;
+    }
+    player
+        .trigger_advancement_criterion(
+            pumpkin_data::advancement::Advancement::ADVENTURE_KILL_MOB_NEAR_SCULK_CATALYST,
+            "kill_mob_near_sculk_catalyst",
+        )
+        .await;
 }
 
 /// `CatalystListener.bloom` (lines 110-115).
