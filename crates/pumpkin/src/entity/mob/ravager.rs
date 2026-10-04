@@ -348,20 +348,37 @@ impl Mob for RavagerEntity {
         })
     }
 
-    /// Vanilla: `Ravager.doHurtTarget` (`attackTick = 10`, broadcasts entity event `4`, plays the
-    /// attack sound) -- runs after `MobEntity::try_attack` lands a successful hit.
-    fn on_successful_attack<'a>(&'a self, _target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
+    /// Vanilla: `Ravager.doHurtTarget` (`Ravager.java:293-299`): `attackTick = 10`, entity
+    /// event `4` and the attack sound run unconditionally, before `super.doHurtTarget`, so a
+    /// shield-blocked or invulnerable-target swing still animates and sets the attack tick
+    /// before `blocked_by_item` sees it.
+    fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
             self.attack_tick.store(10, Relaxed);
             let entity = &self.mob_entity.living_entity.entity;
             let world = entity.world.load();
             world.send_entity_status(entity, EntityStatus::StartAttacking, None);
-            world.play_sound(
-                Sound::EntityRavagerAttack,
-                SoundCategory::Hostile,
-                &entity.pos.load(),
-            );
+            // `Entity.playSound` skips silent entities.
+            if !entity.is_silent() {
+                world.play_sound(
+                    Sound::EntityRavagerAttack,
+                    self.get_sound_source(),
+                    &entity.pos.load(),
+                );
+            }
+            self.mob_entity.try_attack(target).await
         })
+    }
+
+    /// Vanilla: `Monster.getSoundSource` (`Monster.java:37-39`); the ravager is a `Monster`.
+    fn get_sound_source(&self) -> SoundCategory {
+        SoundCategory::Hostile
+    }
+
+    /// Vanilla: `Ravager.playStepSound` (`Ravager.java:316-319`) ignores the block and plays
+    /// `RAVAGER_STEP` at `0.15`/`1.0`, the default step volume and pitch.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityRavagerStep)
     }
 
     /// Vanilla: `Ravager.blockedByItem` -- while not roaring, a 50/50 roll either stuns self for

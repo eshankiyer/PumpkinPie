@@ -1278,7 +1278,14 @@ impl MobEntity {
             },
         );
 
-        base_box.expand(attack_range, 0.0, attack_range)
+        // `Ravager.getAttackBoundingBox` (`Ravager.java:335-339`) deflates the default box by
+        // `0.05` horizontally.
+        let horizontal = if self.living_entity.entity.entity_type == &EntityType::RAVAGER {
+            attack_range - 0.05
+        } else {
+            attack_range
+        };
+        base_box.expand(horizontal, 0.0, horizontal)
     }
 
     async fn is_sun_burn_tick(&self, brightness: f32) -> bool {
