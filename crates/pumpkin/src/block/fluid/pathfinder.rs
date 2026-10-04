@@ -1,40 +1,96 @@
 use super::physics;
 use crate::block::fluid::flowing_trait::FlowingFluid;
 use crate::world::World;
-use pumpkin_data::BlockStateId;
 use pumpkin_data::{
-    Block, BlockDirection,
-    fluid::{EnumVariants, Falling, Fluid, FluidProperties, Level},
+    Block, BlockDirection, BlockState, BlockStateId,
+    fluid::{Fluid, FluidProperties},
 };
 use pumpkin_util::math::position::BlockPos;
 use std::sync::Arc;
 
-/// Represents a node in the BFS pathfinding queue for fluid flow calculation.
-#[derive(Clone, Copy)]
-pub struct PathNode {
-    pub pos: BlockPos,
-    pub distance: i32,
-    pub exclude_dir: BlockDirection,
+const HORIZONTAL: [BlockDirection; 4] = [
+    BlockDirection::North,
+    BlockDirection::South,
+    BlockDirection::West,
+    BlockDirection::East,
+];
+
+/// `FlowingFluid.canPassThroughWall` (`FlowingFluid.java:198-252`).
+///
+/// A full collision cube on either side blocks the fluid, and so does a sturdy face on the
+/// shared side (`Shapes.mergedFaceOccludes`), as for a top slab seen from above.
+#[must_use]
+pub const fn can_pass_through_wall(
+    direction: BlockDirection,
+    from_state: &BlockState,
+    to_state: &BlockState,
+) -> bool {
+    !(from_state.is_full_cube()
+        || to_state.is_full_cube()
+        || from_state.is_side_solid(direction)
+        || to_state.is_side_solid(direction.opposite()))
 }
 
-/// Checks if a position has a hole (downward flow opportunity) below it.
-fn is_hole(world: &Arc<World>, fluid: &Fluid, pos: &BlockPos) -> bool {
+/// `FlowingFluid.canHoldFluid` (`FlowingFluid.java:409-430`): `canHoldAnyFluid` excludes
+/// bubble columns, and `canHoldSpecificFluid` sends a waterloggable block to
+/// `SimpleWaterloggedBlock.canPlaceLiquid`, which accepts only water. The rest is Pumpkin's
+/// replaceability approximation.
+fn can_hold_fluid(state: &BlockState, block: &Block, fluid: &Fluid) -> bool {
+    if block == &Block::BUBBLE_COLUMN {
+        return false;
+    }
+    if !fluid.matches_type(&Fluid::WATER) && block.with_waterlogged(state.id).is_some() {
+        return false;
+    }
+    physics::can_be_replaced(state, block, fluid)
+}
+
+/// `FlowingFluid.isWaterHole` (`FlowingFluid.java:310-318`): the fluid at `pos` may drop into
+/// the block below. Same-type fluid below (any level, or waterlogged) always counts as a hole.
+#[must_use]
+pub fn is_water_hole(world: &World, fluid: &Fluid, pos: &BlockPos) -> bool {
+    let state = world.get_block_state(pos);
     let below_pos = pos.down();
     let below_state = world.get_block_state(&below_pos);
-    let below_block = Block::from_state_id(below_state.id);
-    let (below_fluid, below_fluid_state) = world.get_fluid_and_fluid_state(&below_pos);
-    // `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:292-296`) asks the target fluid
-    // state whether the incoming fluid may replace it before checking the block container.
-    if below_block.is_waterlogged(below_state.id) {
-        false
-    } else if below_fluid != &Fluid::EMPTY {
-        physics::can_be_replaced_with(below_fluid, below_fluid_state, fluid, BlockDirection::Down)
-    } else {
-        physics::can_be_replaced(below_state, below_block, fluid)
+    if !can_pass_through_wall(BlockDirection::Down, state, below_state) {
+        return false;
     }
+    let (below_fluid, _) = world.get_fluid_and_fluid_state(&below_pos);
+    below_fluid.matches_type(fluid)
+        || can_hold_fluid(below_state, Block::from_state_id(below_state.id), fluid)
 }
 
-/// Determines valid spread directions for fluid flow using hole-first priority.
+/// `FlowingFluid.canMaybePassThrough` (`FlowingFluid.java:334-346`): the target is not a source
+/// of this fluid, can hold some fluid, and no wall separates it from `from_state`.
+fn can_maybe_pass_through(
+    world: &World,
+    fluid: &Fluid,
+    from_state: &BlockState,
+    direction: BlockDirection,
+    pos: &BlockPos,
+) -> bool {
+    let (pos_fluid, pos_fluid_state) = world.get_fluid_and_fluid_state(pos);
+    if pos_fluid.matches_type(fluid) && pos_fluid_state.is_source {
+        return false;
+    }
+    let state = world.get_block_state(pos);
+    if !can_pass_through_wall(direction, from_state, state) {
+        return false;
+    }
+    let block = Block::from_state_id(state.id);
+    // A waterlogged block is a water source (handled above for water) and cannot take lava.
+    if block.is_waterlogged(state.id) {
+        return false;
+    }
+    // Air and water/lava blocks: `LiquidBlock` neither blocks motion nor is excluded.
+    if Fluid::from_state_id(state.id).is_some() {
+        return true;
+    }
+    can_hold_fluid(state, block, fluid)
+}
+
+/// Determines valid spread directions for fluid flow, ported from `FlowingFluid.getSpread`
+/// (`FlowingFluid.java:368-407`).
 ///
 /// - Holes (downward flow opportunities) get distance 0 priority
 /// - All directions with equal minimum distance are returned
@@ -48,36 +104,12 @@ pub async fn get_spread<T: FlowingFluid + Sync + ?Sized>(
     let mut min_dist = 1000;
     let mut result = [(BlockDirection::North, BlockStateId::default()); 4];
     let mut result_count = 0;
+    let state = world.get_block_state(block_pos);
+    let slope_find_distance = fluid_impl.get_max_flow_distance(world);
 
-    for direction in [
-        BlockDirection::North,
-        BlockDirection::South,
-        BlockDirection::West,
-        BlockDirection::East,
-    ] {
+    for direction in HORIZONTAL {
         let side_pos = block_pos.offset(direction.to_offset());
-        let side_state = world.get_block_state(&side_pos);
-        let side_state_id = side_state.id;
-        let side_block = Block::from_state_id(side_state.id);
-
-        let side_fluid_props = fluid_impl.get_effective_props(fluid, side_state_id);
-
-        // Check if we can pass through (not a solid source block or waterlogged)
-        let (side_fluid, side_fluid_state) = world.get_fluid_and_fluid_state(&side_pos);
-        // `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:292-296`) uses the horizontal
-        // direction when testing a fluid state for replacement.
-        let can_replace = if side_block.is_waterlogged(side_state.id) {
-            false
-        } else if side_fluid != &Fluid::EMPTY {
-            physics::can_be_replaced_with(side_fluid, side_fluid_state, fluid, direction)
-        } else {
-            physics::can_be_replaced(side_state, side_block, fluid)
-        };
-        if !can_replace
-            || side_fluid_props
-                .as_ref()
-                .is_some_and(|p| p.level == Level::L8 && p.falling != Falling::True)
-        {
+        if !can_maybe_pass_through(world, fluid, state, direction, &side_pos) {
             continue;
         }
 
@@ -86,18 +118,17 @@ pub async fn get_spread<T: FlowingFluid + Sync + ?Sized>(
             continue;
         };
 
-        let new_state_id = new_fluid_props.to_state_id(fluid);
-
         // Holes get distance 0
-        let slope_dist = if is_hole(world, fluid, &side_pos) {
+        let slope_dist = if is_water_hole(world, fluid, &side_pos) {
             0
         } else {
-            get_in_flow_down_distance_iterative(
-                fluid_impl,
+            get_slope_distance(
                 world,
                 fluid,
                 side_pos,
+                1,
                 direction.opposite(),
+                slope_find_distance,
             )
         };
 
@@ -106,18 +137,14 @@ pub async fn get_spread<T: FlowingFluid + Sync + ?Sized>(
             result_count = 0;
         }
 
-        // Add all directions with equal minimum distance
+        // Add all directions with equal minimum distance. The minimum is lowered even when the
+        // side's fluid refuses the new fluid (water never spreads sideways into water).
         if slope_dist <= min_dist {
-            // Check if the fluid at this position can be replaced
-            let can_replace = side_fluid_props.as_ref().is_none_or(|sp| {
-                // Can replace if new level is higher or if target is falling
-                let target_level = i32::from(sp.level.to_index()) + 1;
-                let new_level = i32::from(new_fluid_props.level.to_index()) + 1;
-                new_level > target_level || sp.falling == Falling::True
-            });
-
-            if can_replace && result_count < 4 {
-                result[result_count] = (direction, new_state_id);
+            let (side_fluid, side_fluid_state) = world.get_fluid_and_fluid_state(&side_pos);
+            if physics::can_be_replaced_with(side_fluid, side_fluid_state, fluid, direction)
+                && result_count < 4
+            {
+                result[result_count] = (direction, new_fluid_props.to_state_id(fluid));
                 result_count += 1;
             }
 
@@ -127,121 +154,60 @@ pub async fn get_spread<T: FlowingFluid + Sync + ?Sized>(
     (result, result_count)
 }
 
-/// Performs iterative BFS search to find the shortest distance to a downward flow opportunity.
-///
-/// Uses stack-allocated array for zero heap allocations. Searches up to `get_max_flow_distance`
-/// (dynamic) horizontally from the starting position.
+/// `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:282-308`): the number of horizontal
+/// steps past `pos` to the nearest hole, searching at most `slope_find_distance` steps deep.
 ///
 /// # Returns
-/// Distance to nearest hole, or 1000 if no hole found within search distance
-pub fn get_in_flow_down_distance_iterative<T: FlowingFluid + Sync + ?Sized>(
-    fluid_impl: &T,
-    world: &Arc<World>,
+/// `pass` at the first hole found, or 1000 if no hole is reachable
+#[must_use]
+pub fn get_slope_distance(
+    world: &World,
     fluid: &Fluid,
-    start_pos: BlockPos,
-    initial_exclude_dir: BlockDirection,
+    pos: BlockPos,
+    pass: i32,
+    from: BlockDirection,
+    slope_find_distance: i32,
 ) -> i32 {
-    const MAX_QUEUE_SIZE: usize = 64;
+    let mut lowest = 1000;
+    let state = world.get_block_state(&pos);
 
-    let mut queue: [PathNode; MAX_QUEUE_SIZE] = [PathNode {
-        pos: BlockPos::new(0, 0, 0),
-        distance: 0,
-        exclude_dir: BlockDirection::North,
-    }; MAX_QUEUE_SIZE];
-
-    let mut queue_start = 0;
-    let mut queue_end = 0;
-
-    queue[queue_end] = PathNode {
-        pos: start_pos,
-        distance: 1,
-        exclude_dir: initial_exclude_dir,
-    };
-    queue_end = 1;
-
-    let mut visited_bitset = [0u64; 4];
-    let slope_find_distance = fluid_impl.get_max_flow_distance(world);
-
-    let get_bit_index = |pos: BlockPos| -> Option<usize> {
-        let dx = pos.0.x - start_pos.0.x + slope_find_distance;
-        let dz = pos.0.z - start_pos.0.z + slope_find_distance;
-        let grid_size = slope_find_distance * 2 + 1;
-        (dx >= 0 && dx < grid_size && dz >= 0 && dz < grid_size)
-            .then(|| (dz * grid_size + dx) as usize)
-    };
-
-    while queue_start < queue_end {
-        let node = queue[queue_start];
-        queue_start += 1;
-
-        if node.distance > slope_find_distance {
+    for direction in HORIZONTAL {
+        if direction == from {
             continue;
         }
-
-        if let Some(bit_idx) = get_bit_index(node.pos) {
-            let word_idx = bit_idx / 64;
-            let bit_pos = bit_idx % 64;
-            if (visited_bitset[word_idx] & (1u64 << bit_pos)) != 0 {
-                continue;
-            }
-            visited_bitset[word_idx] |= 1u64 << bit_pos;
+        let test_pos = pos.offset(direction.to_offset());
+        if !can_maybe_pass_through(world, fluid, state, direction, &test_pos) {
+            continue;
         }
-
-        // Check for hole (downward flow opportunity)
-        let below_pos = node.pos.down();
-        let below_state = world.get_block_state(&below_pos);
-        let below_block = Block::from_state_id(below_state.id);
-        if physics::can_be_replaced(below_state, below_block, fluid) {
-            return node.distance;
+        if is_water_hole(world, fluid, &test_pos) {
+            return pass;
         }
-
-        for direction in [
-            BlockDirection::North,
-            BlockDirection::South,
-            BlockDirection::West,
-            BlockDirection::East,
-        ] {
-            if direction == node.exclude_dir {
-                continue;
-            }
-
-            let next_pos = node.pos.offset(direction.to_offset());
-
-            let next_state = world.get_block_state(&next_pos);
-            let next_block = Block::from_state_id(next_state.id);
-            let (next_fluid, next_fluid_state) = world.get_fluid_and_fluid_state(&next_pos);
-            // `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:292-296`) applies the
-            // replacement rule before extending the search through a neighboring block.
-            let can_replace = if next_block.is_waterlogged(next_state.id) {
-                false
-            } else if next_fluid != &Fluid::EMPTY {
-                physics::can_be_replaced_with(next_fluid, next_fluid_state, fluid, direction)
-            } else {
-                physics::can_be_replaced(next_state, next_block, fluid)
-            };
-            if !can_replace {
-                continue;
-            }
-
-            // Source blocks (including waterlogged) block horizontal pathfinding
-            let next_state_id = world.get_block_state_id(&next_pos);
-            if fluid_impl
-                .get_effective_props(fluid, next_state_id)
-                .is_some_and(|p| p.level == Level::L8 && p.falling == Falling::False)
-            {
-                continue;
-            }
-
-            if queue_end < MAX_QUEUE_SIZE {
-                queue[queue_end] = PathNode {
-                    pos: next_pos,
-                    distance: node.distance + 1,
-                    exclude_dir: direction.opposite(),
-                };
-                queue_end += 1;
-            }
+        if pass < slope_find_distance {
+            lowest = lowest.min(get_slope_distance(
+                world,
+                fluid,
+                test_pos,
+                pass + 1,
+                direction.opposite(),
+                slope_find_distance,
+            ));
         }
     }
 
-    1000
+    lowest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_pass_through_wall;
+    use pumpkin_data::{Block, BlockDirection};
+
+    #[test]
+    fn wall_blocks_full_cubes() {
+        let air = Block::AIR.default_state;
+        let stone = Block::STONE.default_state;
+        assert!(can_pass_through_wall(BlockDirection::Down, air, air));
+        assert!(!can_pass_through_wall(BlockDirection::Down, air, stone));
+        assert!(!can_pass_through_wall(BlockDirection::North, stone, air));
+    }
 }

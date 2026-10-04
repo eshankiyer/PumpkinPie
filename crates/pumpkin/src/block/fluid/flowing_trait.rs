@@ -163,7 +163,7 @@ pub trait FlowingFluid: Send + Sync {
     /// 1. Down - if space below, create falling fluid (level 8)
     /// 2. Sides - spread horizontally using pathfinding
     ///
-    /// Sources with 3+ adjacent sources also spread to sides when flowing down.
+    /// Fluid with 3+ adjacent sources also spreads to sides when flowing down.
     fn try_flow<'a>(
         &'a self,
         world: &'a Arc<World>,
@@ -177,8 +177,14 @@ pub trait FlowingFluid: Send + Sync {
             let below_block = Block::from_state_id(below_state.id);
             let (below_fluid, below_fluid_state) = world.get_fluid_and_fluid_state(&below_pos);
             // `FlowingFluid.spread` (`FlowingFluid.java:123-128`) first asks the target fluid
-            // state whether this downward fluid may replace it.
-            let is_hole = if below_block.is_waterlogged(below_state.id) {
+            // state whether this downward fluid may replace it. `canMaybePassThrough` also
+            // stops it at a sturdy face, such as a top slab below or a bottom slab holding it.
+            let is_hole = if !pathfinder::can_pass_through_wall(
+                BlockDirection::Down,
+                world.get_block_state(block_pos),
+                below_state,
+            ) || below_block.is_waterlogged(below_state.id)
+            {
                 false
             } else if below_fluid != &Fluid::EMPTY {
                 physics::can_be_replaced_with(
@@ -197,18 +203,20 @@ pub trait FlowingFluid: Send + Sync {
                 self.spread_to(world, fluid, &below_pos, falling_props.to_state_id(fluid))
                     .await;
 
-                // Check if we should also spread to sides
-                if props.level == Level::L8 && props.falling == Falling::False {
-                    let source_count = self.count_source_neighbors(world, fluid, block_pos).await;
-                    if source_count >= 3 {
-                        self.flow_to_sides(world, fluid, block_pos, props).await;
-                    }
+                // `FlowingFluid.spread` (`FlowingFluid.java:129-131`) also spreads sideways
+                // next to 3+ sources, whether or not this block is itself a source.
+                if self.count_source_neighbors(world, fluid, block_pos).await >= 3 {
+                    self.flow_to_sides(world, fluid, block_pos, props).await;
                 }
                 return;
             }
 
-            // Check if fluid should flow to the side(s)
-            self.flow_to_sides(world, fluid, block_pos, props).await;
+            // `FlowingFluid.java:136-138`: non-source fluid over a hole (such as the bottom of
+            // a waterfall landing in a pool) does not spread sideways.
+            let is_source = props.level == Level::L8 && props.falling == Falling::False;
+            if is_source || !pathfinder::is_water_hole(world, fluid, block_pos) {
+                self.flow_to_sides(world, fluid, block_pos, props).await;
+            }
         }
     }
 
