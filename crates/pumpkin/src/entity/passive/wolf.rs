@@ -18,6 +18,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::block::entities::sign::DyeColor;
+use crate::entity::ai::goal::escape_danger::PanicCauses;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
@@ -110,8 +111,11 @@ impl WolfEntity {
 
             // Wolf.java:129-140.
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
-            // 1: TamableAnimalPanicGoal
-            goal_selector.add_goal(1, EscapeDangerGoal::new_tamable(1.5));
+            // 1: TamableAnimalPanicGoal(1.5, PANIC_ENVIRONMENTAL_CAUSES) (Wolf.java:130)
+            goal_selector.add_goal(
+                1,
+                EscapeDangerGoal::new_tamable(1.5).with_panic_causes(PanicCauses::Environmental),
+            );
             goal_selector.add_goal(2, SitGoal::new());
             // 3: WolfAvoidEntityGoal<Llama>
             goal_selector.add_goal(

@@ -29,8 +29,10 @@ use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        interact_with_door::InteractWithDoorGoal, look_at_entity::LookAtEntityGoal,
-        transport_items::TransportItemsGoal, wander_around::{BrainStroll, WanderAroundGoal},
+        brain_interact_with_door::BrainInteractWithDoorGoal,
+        look_at_entity::LookAtEntityGoal,
+        transport_items::TransportItemsGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
 };
@@ -227,7 +229,8 @@ impl CopperGolemEntity {
         )]
         {
             let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            goal_selector.add_goal(1, Box::new(InteractWithDoorGoal::new(true)));
+            // `CopperGolemAi.java:62`: `InteractWithDoor.create()` in the core activity.
+            goal_selector.add_goal(1, BrainInteractWithDoorGoal::new());
             goal_selector.add_goal(2, Box::new(TransportItemsGoal::new(1.0)));
             goal_selector.add_goal(
                 3,

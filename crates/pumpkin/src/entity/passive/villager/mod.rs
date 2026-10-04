@@ -44,7 +44,7 @@ use crate::entity::{
     ai::{
         goal::{
             avoid_entity::AvoidEntityGoal,
-            interact_with_door::InteractWithDoorGoal,
+            brain_interact_with_door::BrainInteractWithDoorGoal,
             look_around::RandomLookAroundGoal,
             look_at_entity::LookAtEntityGoal,
             ring_bell::RingBellGoal,
@@ -429,11 +429,9 @@ impl VillagerEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            // Approximates vanilla's brain-based `InteractWithDoor` behavior
-            // (`VillagerGoalPackages.java:37`, `Pair.of(0, InteractWithDoor.create())`) with the
-            // goal-based port, same as `CopperGolemEntity` does for its own `InteractWithDoor`
-            // core-activity entry.
-            goal_selector.add_goal(0, Box::new(InteractWithDoorGoal::new(true)));
+            // Vanilla's brain-based `InteractWithDoor` behavior
+            // (`VillagerGoalPackages.java:37`, `Pair.of(0, InteractWithDoor.create())`).
+            goal_selector.add_goal(0, BrainInteractWithDoorGoal::new());
             // `VillagerGoalPackages.java:39`, `Pair.of(0, new VillagerPanicTrigger())`: the
             // panic-state holder (hurt/hostile gate + 100-tick golem-summon cadence). Runs
             // alongside the flee goals below; see `villager_panic.rs` for the split.

@@ -10,6 +10,7 @@ pub mod back_up_if_too_close;
 pub mod beg;
 pub mod blaze_attack;
 pub mod bow_attack;
+pub mod brain_interact_with_door;
 pub mod break_door;
 pub mod breath_air;
 pub mod breed;

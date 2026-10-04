@@ -148,7 +148,15 @@ impl ShulkerEntity {
             goal_selector.add_goal(7, Box::new(ShulkerPeekGoal::new(mob_arc.clone())));
             goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `Shulker.java:100`: `HurtByTargetGoal(this, this.getClass()).setAlertOthers()`.
+            target_selector.add_goal(
+                1,
+                Box::new(
+                    RevengeGoal::new(true)
+                        .ignore_damage_from(&[&EntityType::SHULKER])
+                        .alert_others(),
+                ),
+            );
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
@@ -720,10 +728,8 @@ impl Goal for ShulkerPeekGoal {
 /// `nearest_hostile_target.rs`/`armadillo_curl_up.rs`; unlike `NearestHostileTargetGoal` this
 /// does **not** exclude Creeper, matching vanilla's plain `instanceof Enemy` predicate here).
 ///
-/// Scope reduction: vanilla replaces the search area with an attach-face-flattened box
-/// (`getTargetSearchArea`, inflating only 4 blocks along the shulker's attach axis instead of
-/// the full follow range); that flattening is not ported, the search below is a plain
-/// follow-range radius.
+/// The search area is vanilla's `getTargetSearchArea` override (`Shulker.java:664-673`): the
+/// bounding box inflated by the follow range, except only 4 blocks along the attach axis.
 struct ShulkerDefenseAttackGoal {
     track_target_goal: TrackTargetGoal,
     target: Option<Arc<dyn EntityBase>>,
@@ -749,16 +755,12 @@ impl ShulkerDefenseAttackGoal {
 impl Goal for ShulkerDefenseAttackGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            if self.reciprocal_chance > 0
-                && mob.get_random().random_range(0..self.reciprocal_chance) != 0
-            {
-                return false;
-            }
-
             let mob_entity = mob.get_mob_entity();
             let entity = &mob_entity.living_entity.entity;
             let world = entity.world.load();
 
+            // `Shulker.java:658-660`: the team check runs before `super.canUse` rolls
+            // `randomInterval`.
             let scoreboard = world.scoreboard.lock().await;
             if scoreboard.get_teams().is_empty() {
                 return false;
@@ -772,6 +774,12 @@ impl Goal for ShulkerDefenseAttackGoal {
             }
             drop(scoreboard);
 
+            if self.reciprocal_chance > 0
+                && mob.get_random().random_range(0..self.reciprocal_chance) != 0
+            {
+                return false;
+            }
+
             let follow_range = mob_entity
                 .living_entity
                 .get_attribute_value(&Attributes::FOLLOW_RANGE);
@@ -780,9 +788,19 @@ impl Goal for ShulkerDefenseAttackGoal {
             let mut search_pos = entity.pos.load();
             search_pos.y += entity.get_eye_height();
 
+            let Some(shulker) = mob.cast_any().downcast_ref::<ShulkerEntity>() else {
+                return false;
+            };
+            let bounding_box = entity.bounding_box.load();
+            let search_box = match shulker.get_attach_face().axis_of() {
+                Axis::X => bounding_box.expand(4.0, follow_range, follow_range),
+                Axis::Z => bounding_box.expand(follow_range, follow_range, 4.0),
+                Axis::Y => bounding_box.expand(follow_range, 4.0, follow_range),
+            };
+
             let mut candidates: Vec<Arc<dyn EntityBase>> = world
-                .get_nearby_entities(search_pos, follow_range)
-                .into_values()
+                .get_entities_at_box(&search_box)
+                .into_iter()
                 .filter(|candidate| {
                     candidate.get_entity().entity_type.category == &MobCategory::MONSTER
                 })
@@ -799,7 +817,11 @@ impl Goal for ShulkerDefenseAttackGoal {
 
             self.target = None;
             for candidate in candidates {
+                // `TargetingConditions.test` (combat branch, `TargetingConditions.java:76-79`)
+                // rejects targets the shulker cannot attack or is allied to.
                 if let Some(living) = candidate.get_living_entity()
+                    && mob.can_attack(candidate.get_entity())
+                    && !TrackTargetGoal::is_allied(mob, candidate.as_ref()).await
                     && self
                         .target_predicate
                         .test(&world, Some(&mob_entity.living_entity), living)

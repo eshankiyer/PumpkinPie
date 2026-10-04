@@ -97,7 +97,8 @@ impl TurtleEntity {
 
             // Priorities follow `Turtle.registerGoals` (`Turtle.java:151-160`). No float/swim
             // goal: vanilla doesn't register one for Turtle either.
-            goal_selector.add_goal(0, EscapeDangerGoal::new(1.2));
+            // `Turtle.TurtlePanicGoal` (`Turtle.java:532-546`) always looks for water within 7.
+            goal_selector.add_goal(0, EscapeDangerGoal::new(1.2).water_always(7));
             goal_selector.add_goal(1, BreedGoal::new(1.0));
             goal_selector.add_goal(1, TurtleLayEggGoal::new(turtle_weak.clone(), 1.0));
             goal_selector.add_goal(2, Box::new(TemptGoal::new(1.1, TEMPT_ITEMS, false)));

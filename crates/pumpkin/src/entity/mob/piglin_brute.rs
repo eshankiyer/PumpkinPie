@@ -12,8 +12,12 @@ use pumpkin_util::Difficulty;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
+        active_target::ActiveTargetGoal,
+        brain_interact_with_door::BrainInteractWithDoorGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal,
+        swim::SwimGoal,
         wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{
@@ -43,6 +47,13 @@ impl PiglinBruteEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        // `AbstractPiglin.applyOpenDoorsAbility` (`AbstractPiglin.java:43-47`).
+        mob_arc
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_can_open_doors(true);
 
         {
             let mut goal_selector = mob_arc
@@ -52,6 +63,8 @@ impl PiglinBruteEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // `PiglinBruteAi.java:58`: `InteractWithDoor.create()` in the core activity.
+            goal_selector.add_goal(0, BrainInteractWithDoorGoal::new());
             goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, true)));
             // `PiglinBruteAi.java:103`: `RandomStroll.stroll(0.6F)`.
             goal_selector.add_goal(

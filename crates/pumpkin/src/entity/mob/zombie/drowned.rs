@@ -162,10 +162,16 @@ impl DrownedEntity {
 
             // `Drowned.java:98` calls
             // `HurtByTargetGoal(this, Drowned.class).setAlertOthers(ZombifiedPiglin.class)`:
-            // `RevengeGoal` here has no equivalent of vanilla's "ignore damage from own type" /
-            // "also alert this other type" parameters, so it only alerts other `Drowned`
-            // (matching `ZombieEntityBase`'s existing same-type-only alert simplification).
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
+            // damage from other drowned is ignored, and only other drowned are alerted
+            // (`Drowned` has no subclasses).
+            target_selector.add_goal(
+                1,
+                Box::new(
+                    RevengeGoal::new(true)
+                        .ignore_damage_from(&[&EntityType::DROWNED])
+                        .alert_others(),
+                ),
+            );
             target_selector.add_goal(
                 2,
                 Box::new(ActiveTargetGoal::new(

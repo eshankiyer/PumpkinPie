@@ -1,4 +1,4 @@
-use super::escape_danger::EscapeDangerGoal;
+use super::escape_danger::{EscapeDangerGoal, PanicCauses};
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
 use crate::entity::passive::panda::PandaEntity;
@@ -13,7 +13,8 @@ impl PandaPanicGoal {
     #[must_use]
     pub fn new(speed: f64) -> Box<Self> {
         Box::new(Self {
-            inner: EscapeDangerGoal::new(speed),
+            // `Panda.java:980`: `PANIC_ENVIRONMENTAL_CAUSES`.
+            inner: EscapeDangerGoal::new(speed).with_panic_causes(PanicCauses::Environmental),
         })
     }
 }

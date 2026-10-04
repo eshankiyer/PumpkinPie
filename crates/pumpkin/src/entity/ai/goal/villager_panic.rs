@@ -76,10 +76,13 @@ impl VillagerPanicGoal {
     /// presence; see `RECENT_DAMAGE_TICKS` for the documented stand-in used here.
     async fn is_hurt(mob: &dyn Mob) -> bool {
         let living = &mob.get_mob_entity().living_entity;
-        // `(sequence, damage tick, causes panic)`; the sequence only orders concurrent
-        // writers, so read the tick and the flag like `escape_danger.rs` does.
-        let (_, last_damage, causes_panic) = living.last_damage_state.load();
-        if !causes_panic {
+        // `(sequence, damage tick, damage type id)`; the sequence only orders concurrent
+        // writers, so read the tick and the damage type like `escape_danger.rs` does.
+        let (_, last_damage, damage_type_id) = living.last_damage_state.load();
+        if !damage_type_id
+            .and_then(pumpkin_data::damage::DamageType::from_id)
+            .is_some_and(crate::entity::living::damage_causes_panic)
+        {
             return false;
         }
         let world = living.entity.world.load();

@@ -1,7 +1,8 @@
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal, GoalFuture, to_goal_ticks};
 use crate::entity::mob::Mob;
 use pumpkin_data::Block;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::world::WorldEvent;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
@@ -81,11 +82,17 @@ impl Goal for EatGrassGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
             let entity = &mob.get_mob_entity().living_entity.entity;
-            let bound = if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
-                50
-            } else {
-                1000
-            };
+            // `EatBlockGoal.canUse` (`EatBlockGoal.java:29`) rolls
+            // `nextInt(adjustedTickDelay(isBaby ? 50 : 1000))`. The goal does not override
+            // `requiresUpdateEveryTick`, so the bound is halved (`Goal.java:49-55`); this port
+            // only sets `should_run_every_tick` to keep its 40-tick timer in server ticks.
+            let bound = to_goal_ticks(
+                if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
+                    50
+                } else {
+                    1000
+                },
+            );
             if mob.get_random().random_range(0..bound) != 0 {
                 return false;
             }
@@ -144,20 +151,29 @@ impl Goal for EatGrassGoal {
 
                 match outcome.destroy {
                     Some(Destroy::EdibleBlock) => {
+                        // `level.destroyBlock(pos, false)`: break particles/sound (2001),
+                        // `BLOCK_DESTROY`, no drops, flags 3.
                         world
-                            .set_block_state(
+                            .break_block(
                                 &block_pos,
-                                Block::AIR.default_state.id,
-                                BlockFlags::NOTIFY_ALL,
+                                None,
+                                BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL,
                             )
                             .await;
                     }
                     Some(Destroy::GrassBlockBelow) => {
+                        // `EatBlockGoal.java:73-74`: level event 2001 with the default grass
+                        // block state, then `setBlock(below, DIRT, 2)`.
+                        world.sync_world_event(
+                            WorldEvent::ParticlesDestroyBlock,
+                            below_pos,
+                            Block::GRASS_BLOCK.default_state.id.as_u16().into(),
+                        );
                         world
                             .set_block_state(
                                 &below_pos,
                                 Block::DIRT.default_state.id,
-                                BlockFlags::NOTIFY_ALL,
+                                BlockFlags::NOTIFY_LISTENERS,
                             )
                             .await;
                     }

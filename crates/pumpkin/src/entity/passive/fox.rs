@@ -205,9 +205,15 @@ impl FoxEntity {
             // `Fox.FaceplantGoal` (Fox.java:182).
             goal_selector.add_goal(1, FoxFaceplantGoal::new());
             // `Fox.FoxPanicGoal(2.2)` (Fox.java:183). The subclass additionally requires
-            // `!isDefending()` (Fox.java:1124-1127), which this codebase's `EscapeDangerGoal`
-            // does not model.
-            goal_selector.add_goal(2, EscapeDangerGoal::new(2.2));
+            // `!isDefending()` (Fox.java:1124-1127).
+            goal_selector.add_goal(
+                2,
+                EscapeDangerGoal::new(2.2).with_extra_gate(|mob| {
+                    mob.cast_any()
+                        .downcast_ref::<Self>()
+                        .is_none_or(|fox| !fox.is_defending())
+                }),
+            );
             // `Fox.FoxBreedGoal(1.0)` (Fox.java:184).
             goal_selector.add_goal(3, BreedGoal::new(1.0));
             // The three `AvoidEntityGoal`s at priority 4 (Fox.java:185-190).

@@ -9,6 +9,7 @@ use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
+use crate::entity::ai::goal::escape_danger::PanicCauses;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
@@ -68,7 +69,13 @@ impl PolarBearEntity {
             // Priorities follow vanilla `PolarBear.registerGoals`.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, PolarBearMeleeAttackGoal::new());
-            goal_selector.add_goal(1, EscapeDangerGoal::new(2.0));
+            // `PolarBear.java:90`: babies panic from `PANIC_CAUSES`, adults only from
+            // `PANIC_ENVIRONMENTAL_CAUSES`.
+            goal_selector.add_goal(
+                1,
+                EscapeDangerGoal::new(2.0)
+                    .with_panic_causes(PanicCauses::BabyDefaultElseEnvironmental),
+            );
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.25)));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(

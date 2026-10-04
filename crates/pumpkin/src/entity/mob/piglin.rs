@@ -9,6 +9,7 @@ use crate::entity::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
         back_up_if_too_close::BackUpIfTooCloseGoal,
+        brain_interact_with_door::BrainInteractWithDoorGoal,
         go_to_wanted_item::GoToWantedItemGoal,
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
@@ -218,6 +219,13 @@ impl PiglinEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        // `AbstractPiglin.applyOpenDoorsAbility` (`AbstractPiglin.java:43-47`).
+        mob_arc
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_can_open_doors(true);
         // `Piglin.isBaby`, shared by the baby-flees-nemesis goal and the adult-only target
         // goals. A `Weak` keeps a goal from holding its own mob alive.
         let is_baby = {
@@ -247,6 +255,8 @@ impl PiglinEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+        // `PiglinAi.java:143`: `InteractWithDoor.create()` in the core activity.
+        goal_selector.add_goal(0, BrainInteractWithDoorGoal::new());
         goal_selector.add_goal(1, PiglinAdmireGoal::new(admiring_ticks));
         // `PiglinAi.avoidZombified` (`PiglinAi.java:298-302`). Note FIGHT actually outranks
         // AVOID in `updateActivity`'s first-valid list (`PiglinAi.java:307-309`); fleeing wins

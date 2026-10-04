@@ -2,12 +2,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering::Relaxed;
 
+use pumpkin_data::BlockStateId;
+use pumpkin_data::world::WorldEvent;
 use pumpkin_util::Difficulty;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
+use rand::RngExt;
 
 use super::interact_with_door::InteractWithDoorGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal, GoalFuture, to_goal_ticks};
 use crate::entity::mob::Mob;
 use crate::world::BlockBreakingProgress;
 
@@ -22,10 +25,11 @@ use crate::world::BlockBreakingProgress;
 ///
 /// The base `BreakDoorGoal.canUse`/`canContinueToUse` (`BreakDoorGoal.java:30-53`) has no raid
 /// check at all -- that's added only by Vindicator's private `VindicatorBreakDoorGoal` inner
-/// class, and only as an extra `canContinueToUse` clause (`Vindicator.java:188-192`:
-/// `vindicator.hasActiveRaid() && super.canContinueToUse()`), not `canUse`. `raid_gated` opts a
-/// caller into that same extra clause; other users (e.g. `Zombie`, whose `DOOR_BREAKING_PREDICATE`
-/// is plain `d == Difficulty.HARD` with no raid involvement) leave it off.
+/// class (`Vindicator.java:188-197`): `canUse` requires `hasActiveRaid()` and a
+/// `nextInt(reducedTickDelay(10)) == 0` roll before `super.canUse()`, and `canContinueToUse`
+/// requires `hasActiveRaid()`. `raid_gated` opts a caller into both; other users (e.g. `Zombie`,
+/// whose `DOOR_BREAKING_PREDICATE` is plain `d == Difficulty.HARD` with no raid involvement)
+/// leave it off.
 pub struct BreakDoorGoal {
     only_during_raid: bool,
     door_pos: Option<BlockPos>,
@@ -48,7 +52,7 @@ impl BreakDoorGoal {
         }
     }
 
-    /// Vanilla: `Vindicator.VindicatorBreakDoorGoal.canContinueToUse` -- gates continued use on
+    /// Vanilla: `Vindicator.VindicatorBreakDoorGoal.canUse`/`canContinueToUse` -- gates on
     /// `hasActiveRaid()`. See the struct doc for why this is a builder rather than baked in.
     #[must_use]
     pub const fn raid_gated(mut self, only_during_raid: bool) -> Self {
@@ -66,6 +70,15 @@ impl Goal for BreakDoorGoal {
         Box::pin(async move {
             let mob_entity = mob.get_mob_entity();
             let entity = &mob_entity.living_entity.entity;
+
+            // `VindicatorBreakDoorGoal.canUse`: raid check, then `nextInt(reducedTickDelay(10))`,
+            // then `super.canUse()`.
+            if self.only_during_raid
+                && (!mob_entity.living_entity.has_active_raid()
+                    || mob.get_random().random_range(0..to_goal_ticks(10)) != 0)
+            {
+                return false;
+            }
 
             if !entity.horizontal_collision.load(Relaxed) {
                 return false;
@@ -88,35 +101,45 @@ impl Goal for BreakDoorGoal {
                 return false;
             }
 
+            // `DoorInteractGoal.canUse` (`DoorInteractGoal.java:59-74`): the first wooden door
+            // among nodes `0..min(nextNodeIndex + 2, nodeCount)` within horizontal distance 1.5
+            // of the door block's integer corner (`distanceToSqr(doorPos.getX(), getY(),
+            // doorPos.getZ())`), else the block above the mob.
             let next_index = path.get_next_node_index();
             let node_count = path.get_node_count();
             let scan_end = std::cmp::min(next_index + 2, node_count);
+            let mob_pos = entity.pos.load();
 
-            for i in next_index..scan_end {
+            let mut door_pos = None;
+            for i in 0..scan_end {
                 if let Some(node) = path.get_node(i) {
                     let check_pos = BlockPos::new(node.pos.0.x, node.pos.0.y + 1, node.pos.0.z);
-                    let dx = check_pos.0.x as f64 + 0.5 - entity.pos.load().x;
-                    let dz = check_pos.0.z as f64 + 0.5 - entity.pos.load().z;
+                    let dx = f64::from(check_pos.0.x) - mob_pos.x;
+                    let dz = f64::from(check_pos.0.z) - mob_pos.z;
                     if dx * dx + dz * dz <= 2.25
                         && InteractWithDoorGoal::is_mob_interactable_door(&world, &check_pos)
-                        && !InteractWithDoorGoal::is_door_open(&world, &check_pos)
                     {
-                        self.door_pos = Some(check_pos);
-                        return true;
+                        door_pos = Some(check_pos);
+                        break;
                     }
                 }
             }
+            let door_pos = door_pos.or_else(|| {
+                let check_pos = entity.block_pos.load().up();
+                InteractWithDoorGoal::is_mob_interactable_door(&world, &check_pos)
+                    .then_some(check_pos)
+            });
 
-            let mob_pos = entity.block_pos.load();
-            let check_pos = BlockPos::new(mob_pos.0.x, mob_pos.0.y + 1, mob_pos.0.z);
-            if InteractWithDoorGoal::is_mob_interactable_door(&world, &check_pos)
-                && !InteractWithDoorGoal::is_door_open(&world, &check_pos)
-            {
-                self.door_pos = Some(check_pos);
-                return true;
+            // `BreakDoorGoal.canUse` (`BreakDoorGoal.java:37`) rejects the chosen door if it is
+            // already open rather than searching on.
+            let Some(door_pos) = door_pos else {
+                return false;
+            };
+            if InteractWithDoorGoal::is_door_open(&world, &door_pos) {
+                return false;
             }
-
-            false
+            self.door_pos = Some(door_pos);
+            true
         })
     }
 
@@ -140,7 +163,8 @@ impl Goal for BreakDoorGoal {
             let dist_sq = door_pos
                 .to_centered_f64()
                 .squared_distance_to_vec(&entity.pos.load());
-            if dist_sq > 4.0 {
+            // `closerToCenterThan(position, 2.0)` is strict.
+            if dist_sq >= 4.0 {
                 return false;
             }
             self.is_valid_difficulty(world.level_info.load().difficulty)
@@ -165,8 +189,6 @@ impl Goal for BreakDoorGoal {
         })
     }
 
-    // Scope reduction: vanilla's 1-in-20-per-tick `levelEvent(1019, ...)` door-hit sound plus
-    // arm swing is a pure client/animation effect and is not ported here.
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             let Some(door_pos) = self.door_pos else {
@@ -174,6 +196,12 @@ impl Goal for BreakDoorGoal {
             };
             let entity = &mob.get_mob_entity().living_entity.entity;
             let world = entity.world.load_full();
+
+            // `BreakDoorGoal.java:64-69`: door-bang sound and arm swing.
+            if mob.get_random().random_range(0..20) == 0 {
+                world.sync_world_event(WorldEvent::SoundZombieWoodenDoor, door_pos, 0);
+                mob.get_mob_entity().living_entity.swing_hand().await;
+            }
 
             self.break_time += 1;
             let progress = ((self.break_time as f32 / Self::DOOR_BREAK_TIME as f32) * 10.0) as i32;
@@ -194,9 +222,18 @@ impl Goal for BreakDoorGoal {
             if self.break_time == Self::DOOR_BREAK_TIME
                 && self.is_valid_difficulty(world.level_info.load().difficulty)
             {
+                // `level.removeBlock(doorPos, false)` with flags 3. The upper half drops nothing
+                // itself; the neighbour update then destroys the lower half with drops, as in
+                // vanilla (`Level.setBlock` clears `UPDATE_SUPPRESS_DROPS` for neighbours).
                 world
-                    .break_block(&door_pos, None, BlockFlags::SKIP_DROPS)
+                    .set_block_state(&door_pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
                     .await;
+                world.sync_world_event(WorldEvent::SoundZombieDoorCrash, door_pos, 0);
+                world.sync_world_event(
+                    WorldEvent::ParticlesDestroyBlock,
+                    door_pos,
+                    world.get_block_state_id(&door_pos).as_u16().into(),
+                );
             }
         })
     }

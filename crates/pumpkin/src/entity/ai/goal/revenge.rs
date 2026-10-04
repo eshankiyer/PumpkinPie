@@ -11,12 +11,30 @@ use crate::entity::passive::panda::PandaEntity;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_util::math::boundingbox::BoundingBox;
+use pumpkin_util::math::vector3::Vector3;
 
 /// Vanilla `Raider.class` membership check, approximated via the `#minecraft:raiders` tag
 /// (Witch, Pillager, Vindicator, Evoker, Illusioner, Ravager, Ravager rider Pillager, etc.).
 #[must_use]
 pub fn is_raider(entity_type: &EntityType) -> bool {
     entity_type.has_tag(&tag::EntityType::MINECRAFT_RAIDERS)
+}
+
+/// `HurtByTargetGoal.alertOthers` (`HurtByTargetGoal.java:75`) collects
+/// `getEntitiesOfClass(this.mob.getClass(), ...)`, which includes subclasses. Of the alerting
+/// mobs only `Zombie` has subclasses (`Husk`, `Drowned`, `ZombieVillager`, `ZombifiedPiglin`);
+/// `ZombifiedPiglin` is excluded again by `setAlertOthers(ZombifiedPiglin.class)`
+/// (`Zombie.java:124`), so a plain zombie alerts zombies, husks, drowned and zombie villagers.
+fn alert_class_includes(own: &EntityType, other: &EntityType) -> bool {
+    other == own
+        || (own == &EntityType::ZOMBIE
+            && [
+                &EntityType::HUSK,
+                &EntityType::DROWNED,
+                &EntityType::ZOMBIE_VILLAGER,
+            ]
+            .contains(&other))
 }
 
 pub struct RevengeGoal {
@@ -39,6 +57,13 @@ pub struct RevengeGoal {
     alert_others: bool,
     /// `PandaHurtByTargetGoal.alertOther` (`Panda.java:868-871`) only alerts aggressive pandas.
     alert_only_aggressive: bool,
+    /// `HurtByTargetGoal(mob, ignoreDamageFromTheseTypes...)`: attackers of these exact types are
+    /// ignored (`HurtByTargetGoal.java:41-45`). Shulker and Drowned pass their own class, which
+    /// has no subclasses, so an exact type match is the vanilla `isAssignableFrom` test.
+    ignore_damage_from: &'static [&'static EntityType],
+    /// `Bee.BeeHurtByOtherGoal.alertOther` (`Bee.java:1010-1014`) only alerts when the hurt bee
+    /// itself can see the attacker.
+    alert_requires_line_of_sight: bool,
 }
 
 impl RevengeGoal {
@@ -57,6 +82,8 @@ impl RevengeGoal {
             alert_only_when_self_is_baby: false,
             alert_others: false,
             alert_only_aggressive: false,
+            ignore_damage_from: &[],
+            alert_requires_line_of_sight: false,
         }
     }
 
@@ -92,6 +119,20 @@ impl RevengeGoal {
     #[must_use]
     pub const fn alert_others(mut self) -> Self {
         self.alert_others = true;
+        self
+    }
+
+    /// Mirrors the `ignoreDamageFromTheseTypes` constructor varargs.
+    #[must_use]
+    pub const fn ignore_damage_from(mut self, types: &'static [&'static EntityType]) -> Self {
+        self.ignore_damage_from = types;
+        self
+    }
+
+    /// Mirrors Bee's `alertOther` line-of-sight requirement (`Bee.java:1010-1014`).
+    #[must_use]
+    pub const fn alert_requires_line_of_sight(mut self) -> Self {
+        self.alert_requires_line_of_sight = true;
         self
     }
 
@@ -141,6 +182,12 @@ impl Goal for RevengeGoal {
             };
 
             if self.exclude_raiders && is_raider(attacker.get_entity().entity_type) {
+                return false;
+            }
+            if self
+                .ignore_damage_from
+                .contains(&attacker.get_entity().entity_type)
+            {
                 return false;
             }
 
@@ -207,12 +254,38 @@ impl Goal for RevengeGoal {
             if !self.alert_others {
                 return;
             }
-            for nearby in world
-                .get_nearby_entities(position, follow_range)
-                .into_values()
+            // `BeeHurtByOtherGoal.alertOther` tests the hurt bee's own line of sight to the
+            // attacker, which is the same for every candidate.
+            if self.alert_requires_line_of_sight
+                && !mob_entity.has_line_of_sight(target.as_ref()).await
             {
+                return;
+            }
+            // `TamableAnimal.getOwner` resolves the owner entity, so an owner that is not loaded
+            // compares as `null` (`HurtByTargetGoal.java:88`).
+            let resolved_owner = |owner: Option<uuid::Uuid>| {
+                owner.filter(|uuid| world.get_player_by_uuid(*uuid).is_some())
+            };
+            let own_owner = mob
+                .as_tamable()
+                .map(|_| resolved_owner(mob.get_owner_uuid()));
+            // `AABB.unitCubeFromLowerCorner(position).inflate(within, 10.0, within)`
+            // (`HurtByTargetGoal.java:74`).
+            let search_box = BoundingBox::new(
+                Vector3::new(
+                    position.x - follow_range,
+                    position.y - 10.0,
+                    position.z - follow_range,
+                ),
+                Vector3::new(
+                    position.x + 1.0 + follow_range,
+                    position.y + 11.0,
+                    position.z + 1.0 + follow_range,
+                ),
+            );
+            for nearby in world.get_entities_at_box(&search_box) {
                 if nearby.get_entity().entity_id == entity.entity_id
-                    || nearby.get_entity().entity_type != entity_type
+                    || !alert_class_includes(entity_type, nearby.get_entity().entity_type)
                 {
                     continue;
                 }
@@ -236,6 +309,14 @@ impl Goal for RevengeGoal {
                 if nearby_mob.get_mob_entity().target.lock().await.is_some() {
                     continue;
                 }
+                if own_owner
+                    .is_some_and(|owner| owner != resolved_owner(nearby_mob.get_owner_uuid()))
+                {
+                    continue;
+                }
+                if TrackTargetGoal::entities_allied(nearby.as_ref(), target.as_ref()).await {
+                    continue;
+                }
                 nearby_mob.set_mob_target(Some(target.clone())).await;
             }
         })
@@ -255,8 +336,20 @@ impl Goal for RevengeGoal {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_raider, should_alert_other};
+    use super::{alert_class_includes, is_raider, should_alert_other};
     use pumpkin_data::entity::EntityType;
+
+    #[test]
+    fn zombie_alerts_its_subclasses_except_zombified_piglin() {
+        let zombie = &EntityType::ZOMBIE;
+        assert!(alert_class_includes(zombie, &EntityType::ZOMBIE));
+        assert!(alert_class_includes(zombie, &EntityType::HUSK));
+        assert!(alert_class_includes(zombie, &EntityType::DROWNED));
+        assert!(alert_class_includes(zombie, &EntityType::ZOMBIE_VILLAGER));
+        assert!(!alert_class_includes(zombie, &EntityType::ZOMBIFIED_PIGLIN));
+        assert!(!alert_class_includes(&EntityType::HUSK, zombie));
+        assert!(alert_class_includes(&EntityType::HUSK, &EntityType::HUSK));
+    }
 
     #[test]
     fn raid_mates_are_raiders() {

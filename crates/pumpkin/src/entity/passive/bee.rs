@@ -238,7 +238,15 @@ impl BeeEntity {
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             // `new Bee.BeeHurtByOtherGoal(this).setAlertOthers()` (`Bee.java:192`).
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
+            // `Bee.BeeHurtByOtherGoal(this).setAlertOthers()` (`Bee.java:192, 999-1015`).
+            target_selector.add_goal(
+                1,
+                Box::new(
+                    RevengeGoal::new(true)
+                        .alert_others()
+                        .alert_requires_line_of_sight(),
+                ),
+            );
             // `new Bee.BeeBecomeAngryTargetGoal(this)` (`Bee.java:193`), which is
             // `NearestAttackableTargetGoal<Player>(bee, Player.class, 10, true, false,
             // bee::isAngryAt)` (`Bee.java:714-717`). The predicate only sees the candidate, so

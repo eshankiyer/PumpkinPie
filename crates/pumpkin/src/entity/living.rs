@@ -422,8 +422,9 @@ pub struct LivingEntity {
     pub last_attacker_id: AtomicI32,
     /// The tick at which this entity was last attacked (entity age).
     pub last_attacked_time: AtomicI32,
-    /// Packed tick and panic-causing flag for vanilla's last damage source.
-    pub last_damage_state: AtomicCell<(u64, i64, bool)>,
+    /// Packed write sequence, tick and damage type id of vanilla's last damage source. The id
+    /// is an `Option` because registry id 0 (`arrow`) is a real damage type.
+    pub last_damage_state: AtomicCell<(u64, i64, Option<u8>)>,
     last_damage_sequence: AtomicU64,
 
     /// The entity ID of the entity this living entity last attacked.
@@ -686,7 +687,7 @@ impl LivingEntity {
             climbing_pos: AtomicCell::new(None),
             last_attacker_id: AtomicI32::new(0),
             last_attacked_time: AtomicI32::new(0),
-            last_damage_state: AtomicCell::new((0, 0, false)),
+            last_damage_state: AtomicCell::new((0, 0, None)),
             last_damage_sequence: AtomicU64::new(0),
             last_attacking_id: AtomicI32::new(0),
             last_attack_time: AtomicI32::new(0),
@@ -6470,14 +6471,10 @@ impl EntityBase for LivingEntity {
             };
 
             // Vanilla stores the last damage source for every successful, non-blocked hit,
-            // including environmental damage. Pack its world tick and panic-causing tag
-            // together so EscapeDangerGoal reads one consistent state.
+            // including environmental damage. Pack its world tick and damage type together so
+            // EscapeDangerGoal reads one consistent state and tests its own panic tag.
             let damage_tick = world.get_world_age().await;
-            let damage_state = (
-                damage_sequence,
-                damage_tick,
-                damage_causes_panic(damage_type),
-            );
+            let damage_state = (damage_sequence, damage_tick, Some(damage_type.id));
             let mut observed = self.last_damage_state.load();
             while observed.0 < damage_state.0 {
                 match self
@@ -8329,7 +8326,8 @@ fn next_damage_will_break(stack: &ItemStack) -> bool {
             .is_some_and(|max_damage| stack.get_damage() >= max_damage - 1)
 }
 
-fn damage_causes_panic(damage_type: DamageType) -> bool {
+/// `DamageTypeTags.PANIC_CAUSES`, the default `PanicGoal` tag and `VillagerPanicTrigger`'s.
+pub(crate) fn damage_causes_panic(damage_type: DamageType) -> bool {
     damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES)
 }
 

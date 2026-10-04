@@ -36,7 +36,9 @@ impl FollowFlockLeaderGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
-            goal_control: Controls::MOVE,
+            // `FollowFlockLeaderGoal` never calls `setFlags` (`FollowFlockLeaderGoal.java:14-17`),
+            // so it runs alongside flee/avoid goals instead of being preempted by them.
+            goal_control: Controls::empty(),
             // `new()` is kept for existing registrations. The first can_start call seeds the
             // same randomized delay that vanilla creates in the goal constructor.
             next_start_tick: AtomicI32::new(-1),

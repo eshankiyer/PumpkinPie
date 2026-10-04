@@ -19,9 +19,14 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        armadillo_curl_up::ArmadilloCurlUpGoal, breed::BreedGoal, escape_danger::EscapeDangerGoal,
-        follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, swim::SwimGoal, tempt::TemptGoal,
+        armadillo_curl_up::ArmadilloCurlUpGoal,
+        breed::BreedGoal,
+        escape_danger::{EscapeDangerGoal, PanicCauses},
+        follow_parent::FollowParentGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        swim::SwimGoal,
+        tempt::TemptGoal,
         wander_around::{BrainStroll, WanderAroundGoal},
     },
     item::ItemEntity,
@@ -159,9 +164,17 @@ impl ArmadilloEntity {
             // The ball-up behaviour outranks panic in vanilla's `ArmadilloAi`, so it sits
             // above the ordinary animal goals.
             goal_selector.add_goal(1, Box::new(ArmadilloCurlUpGoal::new()));
-            goal_selector.add_goal(2, EscapeDangerGoal::new(2.0));
+            // `ArmadilloAi.ArmadilloPanic` (`ArmadilloAi.java:196-199`) only panics from
+            // `PANIC_ENVIRONMENTAL_CAUSES`.
+            goal_selector.add_goal(
+                2,
+                EscapeDangerGoal::new(2.0).with_panic_causes(PanicCauses::Environmental),
+            );
             goal_selector.add_goal(3, BreedGoal::new(1.0));
-            goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, ARMADILLO_FOOD, false).as_brain_follow_temptation()));
+            goal_selector.add_goal(
+                4,
+                Box::new(TemptGoal::new(1.25, ARMADILLO_FOOD, false).as_brain_follow_temptation()),
+            );
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.1)));
             // `ArmadilloAi.java:104`: `RandomStroll.stroll(1.0F)`.
             goal_selector.add_goal(

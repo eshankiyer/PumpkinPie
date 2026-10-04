@@ -87,20 +87,23 @@ impl Goal for InteractWithDoorGoal {
                 return false;
             }
 
-            // Scan through upcoming path nodes looking for doors
+            // Scan the path from its first node up to two past the next one
+            // (`DoorInteractGoal.java:61`: `i < min(nextNodeIndex + 2, nodeCount)` from 0).
             let next_index = path.get_next_node_index();
             let node_count = path.get_node_count();
             let scan_end = std::cmp::min(next_index + 2, node_count);
 
             let world = entity.world.load_full();
-            for i in next_index..scan_end {
+            for i in 0..scan_end {
                 if let Some(node) = path.get_node(i) {
                     // Check at y + 1 as per vanilla (doors are two blocks tall)
                     let check_pos = BlockPos::new(node.pos.0.x, node.pos.0.y + 1, node.pos.0.z);
 
-                    // Door must be within 1.5 blocks (2.25 squared distance)
-                    let dx = check_pos.0.x as f64 + 0.5 - entity.pos.load().x;
-                    let dz = check_pos.0.z as f64 + 0.5 - entity.pos.load().z;
+                    // Door must be within 1.5 blocks (2.25 squared distance), measured to the
+                    // block's integer corner as `distanceToSqr(doorPos.getX(), getY(),
+                    // doorPos.getZ())` does.
+                    let dx = f64::from(check_pos.0.x) - entity.pos.load().x;
+                    let dz = f64::from(check_pos.0.z) - entity.pos.load().z;
                     let dist_sq = dx * dx + dz * dz;
 
                     if dist_sq <= 2.25 && Self::is_mob_interactable_door(&world, &check_pos) {
