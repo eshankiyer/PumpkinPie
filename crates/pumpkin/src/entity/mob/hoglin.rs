@@ -14,6 +14,7 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    ai::brain::sensor::is_entity_attackable,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -400,21 +401,21 @@ impl Mob for HoglinEntity {
             let pos = entity.pos.load();
             let source_pos = source.get_entity().pos.load();
 
-            // L198: don't switch away from a current target already meaningfully closer
-            // than the attacker.
+            // L198: `BehaviorUtils.isOtherTargetMuchFurtherAwayThanCurrentAttackTarget`
+            // (`BehaviorUtils.java:128-135`), compared in squared form.
             let source_dist_sq = pos.squared_distance_to_vec(&source_pos);
             let current = self.mob_entity.target.lock().await.clone();
             if let Some(current) = current.as_ref() {
-                let current_dist = pos
-                    .squared_distance_to_vec(&current.get_entity().pos.load())
-                    .sqrt();
-                if source_dist_sq.sqrt() > current_dist + RETALIATE_DISTANCE_MARGIN {
+                let current_dist_sq = pos.squared_distance_to_vec(&current.get_entity().pos.load());
+                if source_dist_sq
+                    > RETALIATE_DISTANCE_MARGIN.mul_add(RETALIATE_DISTANCE_MARGIN, current_dist_sq)
+                {
                     return;
                 }
             }
 
-            // L199: `Sensor.isEntityAttackable` ≈ `Mob.can_attack`.
-            if !self.can_attack(source.get_entity()) {
+            // L199: `Sensor.isEntityAttackable`.
+            if !is_entity_attackable(self, source, true).await {
                 return;
             }
 

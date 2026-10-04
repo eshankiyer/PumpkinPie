@@ -60,6 +60,15 @@ impl RevengeGoal {
         }
     }
 
+    /// Passthrough for [`TrackTargetGoal::set_attackable_grace_ticks`].
+    #[must_use]
+    pub fn set_attackable_grace_ticks(mut self, server_ticks: i32) -> Self {
+        self.track_target_goal = self
+            .track_target_goal
+            .set_attackable_grace_ticks(server_ticks);
+        self
+    }
+
     #[must_use]
     pub const fn exclude_raiders(mut self) -> Self {
         self.exclude_raiders = true;

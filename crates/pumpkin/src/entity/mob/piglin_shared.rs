@@ -1,3 +1,4 @@
+use crate::entity::ai::brain::sensor::is_entity_attackable;
 use crate::entity::player::Player;
 use crate::entity::{
     EntityBase,
@@ -29,6 +30,12 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
         return;
     };
 
+    // `PiglinAi.maybeRetaliate` (`PiglinAi.java:599`): the hurt piglin's own
+    // `isEntityAttackableIgnoringLineOfSight` gate wraps both its anger and the broadcast.
+    if !is_entity_attackable(mob, source_arc.as_ref(), false).await {
+        return;
+    }
+
     mob.set_mob_target(Some(source_arc.clone())).await;
 
     let source_hoglin = source.cast_any().downcast_ref::<HoglinEntity>();
@@ -57,6 +64,10 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
             continue;
         }
         if nearby_mob.get_mob_entity().target.lock().await.is_some() {
+            continue;
+        }
+        // `PiglinAi.setAngerTarget` (`PiglinAi.java:685-686`) re-tests each recipient.
+        if !is_entity_attackable(nearby_mob, source_arc.as_ref(), false).await {
             continue;
         }
         nearby_mob.set_mob_target(Some(source_arc.clone())).await;
@@ -129,6 +140,10 @@ pub async fn anger_nearby_piglins(world: &Arc<crate::world::World>, player: &Arc
             player.clone() as Arc<dyn EntityBase>
         };
 
+        // `PiglinAi.setAngerTarget` (`PiglinAi.java:685-686`).
+        if !is_entity_attackable(nearby_mob, target.as_ref(), false).await {
+            continue;
+        }
         nearby_mob.set_mob_target(Some(target)).await;
     }
 }

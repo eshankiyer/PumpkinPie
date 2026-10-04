@@ -172,6 +172,15 @@ impl ActiveTargetGoal {
         self
     }
 
+    /// Passthrough for [`TrackTargetGoal::set_attackable_grace_ticks`].
+    #[must_use]
+    pub fn set_attackable_grace_ticks(mut self, server_ticks: i32) -> Self {
+        self.track_target_goal = self
+            .track_target_goal
+            .set_attackable_grace_ticks(server_ticks);
+        self
+    }
+
     pub fn set_target(&mut self, target: Option<Arc<dyn EntityBase>>) {
         self.target = target;
     }

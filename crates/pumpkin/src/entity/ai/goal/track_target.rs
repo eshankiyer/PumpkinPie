@@ -2,6 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
+use crate::entity::ai::brain::sensor::is_entity_attackable;
 use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::living::LivingEntity;
@@ -9,9 +10,12 @@ use crate::entity::mob::Mob;
 use crate::world::World;
 use crate::world::scoreboard::entity_scoreboard_name;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::Taggable;
+use pumpkin_util::Difficulty;
 use rand::RngExt;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use uuid::Uuid;
 
@@ -95,6 +99,12 @@ pub struct TrackTargetGoal {
     pub max_time_without_visibility: i32,
     target_predicate: TargetPredicate,
     follow_distance_multiplier: f64,
+    /// `Sensor.wasEntityAttackableLastNTicks` window in goal invocations; `None` keeps the
+    /// plain `TargetGoal.canContinueToUse` checks.
+    attackable_grace: Option<i32>,
+    /// `Sensor.rememberPositives`' `positivesLeft` (`sensing/Sensor.java:88-97`). Like the
+    /// per-brain counter it starts at 0 and is never reset when the goal restarts.
+    attackable_positives_left: AtomicI32,
 }
 
 impl TrackTargetGoal {
@@ -110,6 +120,8 @@ impl TrackTargetGoal {
             max_time_without_visibility: 60,
             target_predicate: TargetPredicate::create_attackable().ignore_visibility(),
             follow_distance_multiplier: 1.0,
+            attackable_grace: None,
+            attackable_positives_left: AtomicI32::new(0),
         }
     }
 
@@ -158,6 +170,57 @@ impl TrackTargetGoal {
     pub const fn set_unseen_memory_ticks(mut self, ticks: i32) -> Self {
         self.max_time_without_visibility = ticks;
         self
+    }
+
+    /// Replaces the continuation checks with the Breeze FIGHT activity's
+    /// `StopAttackingIfTargetInvalid.create(wasEntityAttackableLastNTicks(body, n).negate())`
+    /// (`BreezeAi.java:69`, `sensing/Sensor.java:78-97`): the target is kept until it has
+    /// failed `Sensor.isEntityAttackable` for `server_ticks` ticks in a row.
+    ///
+    /// DEVIATIONS: the counter lives per target goal rather than per brain; the countdown does
+    /// not pause while a `WALK_TARGET` exists (no activity system); and
+    /// `CANT_REACH_WALK_TARGET_SINCE` tiredness (200 ticks) is not modelled.
+    #[must_use]
+    pub const fn set_attackable_grace_ticks(mut self, server_ticks: i32) -> Self {
+        // `should_continue` runs on every other server tick.
+        self.attackable_grace = Some(to_goal_ticks(server_ticks));
+        self
+    }
+
+    /// `StopAttackingIfTargetInvalid` (`StopAttackingIfTargetInvalid.java:30-49`) with the
+    /// `wasEntityAttackableLastNTicks` stop condition: `canAttack`, alive and same-level
+    /// failures drop the target at once; only the attackability test is remembered.
+    async fn continues_with_grace(
+        &self,
+        grace: i32,
+        mob: &dyn Mob,
+        target_base: &dyn EntityBase,
+        target: &LivingEntity,
+    ) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        let world = mob_entity.living_entity.entity.world.load_full();
+        // `body.canAttack(target)`: `Mob.canAttack` (`Mob.java:256-258`) plus
+        // `LivingEntity.canAttack` (`LivingEntity.java:948-950`) and the species override.
+        if target.entity.entity_type.id == EntityType::GHAST.id
+            || !mob.can_attack(&target.entity)
+            || (target.entity.entity_type.id == EntityType::PLAYER.id
+                && world.level_info.load().difficulty == Difficulty::Peaceful)
+            || !target.can_be_seen_as_enemy()
+            || !Arc::ptr_eq(&world, &target.entity.world.load_full())
+        {
+            return false;
+        }
+
+        // `rememberPositives` (`Sensor.java:88-97`).
+        if is_entity_attackable(mob, target_base, true).await {
+            self.attackable_positives_left
+                .store(grace, Ordering::Relaxed);
+            return true;
+        }
+        // `--positivesLeft >= 0`, i.e. the pre-decrement value was positive.
+        self.attackable_positives_left
+            .fetch_sub(1, Ordering::Relaxed)
+            > 0
     }
 
     /// Vanilla `PolarBearAttackPlayersGoal.getFollowDistance`: the target goal's follow
@@ -270,6 +333,17 @@ impl Goal for TrackTargetGoal {
 
             if !target.entity.is_alive() {
                 return false;
+            }
+
+            if let Some(grace) = self.attackable_grace {
+                if !self
+                    .continues_with_grace(grace, mob, target_base.as_ref(), target)
+                    .await
+                {
+                    return false;
+                }
+                mob.set_mob_target(Some(target_base.clone())).await;
+                return true;
             }
 
             if !self.can_track(mob, Some(target)).await {

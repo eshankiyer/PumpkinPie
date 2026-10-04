@@ -17,6 +17,9 @@ use crate::entity::{
     projectile_deflection::ProjectileDeflectionType,
 };
 
+/// `Sensor.wasEntityAttackableLastNTicks(body, 100)` (`BreezeAi.java:69`).
+const FIGHT_TARGET_GRACE_TICKS: i32 = 100;
+
 pub struct BreezeEntity {
     pub mob_entity: MobEntity,
     /// Mirrors vanilla's `BREEZE_SHOOT` memory: ticks remaining in the shoot-permission
@@ -78,15 +81,25 @@ impl BreezeEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // BreezeAi IDLE: NEAREST_ATTACKABLE (nearest of players and iron golems, see
             // `can_attack`) then HURT_BY attacker.
+            // BreezeAi FIGHT keeps the target until it has failed `isEntityAttackable` for
+            // 100 ticks (`BreezeAi.java:69`).
             target_selector.add_goal(
                 1,
-                ActiveTargetGoal::with_default_types(
-                    &mob_arc.mob_entity,
-                    &[&EntityType::PLAYER, &EntityType::IRON_GOLEM],
-                    true,
+                Box::new(
+                    (*ActiveTargetGoal::with_default_types(
+                        &mob_arc.mob_entity,
+                        &[&EntityType::PLAYER, &EntityType::IRON_GOLEM],
+                        true,
+                    ))
+                    .set_attackable_grace_ticks(FIGHT_TARGET_GRACE_TICKS),
                 ),
             );
-            target_selector.add_goal(2, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                2,
+                Box::new(
+                    RevengeGoal::new(true).set_attackable_grace_ticks(FIGHT_TARGET_GRACE_TICKS),
+                ),
+            );
         };
 
         mob_arc
