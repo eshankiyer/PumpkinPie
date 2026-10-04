@@ -112,15 +112,11 @@ impl JavaClient {
         hand: Hand,
         held: &mut ItemStack,
     ) {
-        let inventory = player.inventory();
-
-        // Vanilla `Item.use` starts consumables, shields, and kinetic weapons
-        // (`Item.java:189-209`); all three use the stack's long-use duration
-        // (`Item.java:310-316`).
-        if held.get_data_component::<ConsumableImpl>().is_some()
-            || held.get_data_component::<BlocksAttacksImpl>().is_some()
-            || held.get_data_component::<KineticWeaponImpl>().is_some()
-        {
+        // Vanilla `Item.use` (`Item.java:189-210`) is an exclusive chain: a consumable
+        // starts consuming, else a swappable equippable swaps into its slot, else a
+        // shield or kinetic weapon starts being used. All three uses take the stack's
+        // long-use duration (`Item.java:310-316`).
+        if held.get_data_component::<ConsumableImpl>().is_some() {
             // If its food we want to make sure we can actually consume it
             if let Some(food) = held.get_data_component::<FoodImpl>() {
                 if player.abilities.lock().await.invulnerable
@@ -138,29 +134,24 @@ impl JavaClient {
                     .set_active_hand(hand, held.clone(), held.get_max_use_time())
                     .await;
             }
-        }
-        let equipment_slot = held
+        } else if let Some(equippable) = held
             .get_data_component::<EquippableImpl>()
-            .map(|equippable| equippable.slot.clone());
-        if let Some(slot) = equipment_slot {
-            // The equipment lock has to be released before touching the hand again:
-            // the off hand lives in the same map, so holding it here would deadlock.
-            let current_equipped = inventory.entity_equipment.lock().await.get(&slot);
-            if current_equipped.are_items_and_components_equal(held) {
-                return;
+            .filter(|equippable| equippable.swappable)
+            .cloned()
+        {
+            if swap_with_equipment_slot(player, held, &equippable).await {
+                player
+                    .inventory()
+                    .set_stack_in_hand(hand, held.clone())
+                    .await;
             }
-
-            player.enqueue_equipment_change(&slot, held).await;
-
-            let equipped = if current_equipped.is_empty() {
-                let equipped = held.clone();
-                held.decrement_unless_creative(player.gamemode.load(), 1);
-                equipped
-            } else {
-                std::mem::replace(held, current_equipped)
-            };
-            inventory.entity_equipment.lock().await.put(&slot, equipped);
-            inventory.set_stack_in_hand(hand, held.clone()).await;
+        } else if held.get_data_component::<BlocksAttacksImpl>().is_some()
+            || held.get_data_component::<KineticWeaponImpl>().is_some()
+        {
+            player
+                .living_entity
+                .set_active_hand(hand, held.clone(), held.get_max_use_time())
+                .await;
         }
     }
 
@@ -188,4 +179,83 @@ impl JavaClient {
         server.plugin_manager.fire(server, &mut fish_event).await;
         !fish_event.cancelled
     }
+}
+
+/// Vanilla `Equippable.swapWithEquipmentSlot` (`Equippable.java:128-158`). Mutates `held` into
+/// the stack the hand should hold afterwards and returns whether a swap happened; the caller
+/// writes `held` back to the hand.
+pub(crate) async fn swap_with_equipment_slot(
+    player: &Arc<Player>,
+    held: &mut ItemStack,
+    equippable: &EquippableImpl,
+) -> bool {
+    // `canBeEquippedBy` (`Equippable.java:175-177`); `Player.canUseSlot` is always true.
+    let entity_type = player.living_entity.entity.entity_type;
+    let allowed = equippable
+        .allowed_entities
+        .as_ref()
+        .is_none_or(|allowed| match allowed {
+            pumpkin_data::data_component_impl::IDSet::IDs(ids) => {
+                ids.iter().any(|ty| ty.id == entity_type.id)
+            }
+            pumpkin_data::data_component_impl::IDSet::Tag(tag) => {
+                pumpkin_data::tag::Taggable::is_tagged_with(entity_type, tag).unwrap_or(false)
+            }
+        });
+    if !allowed {
+        return false;
+    }
+
+    let slot = equippable.slot;
+    let inventory = player.inventory();
+    // The equipment lock has to be released before touching the hand again: the off hand
+    // lives in the same map, so holding it here would deadlock.
+    let mut in_equipment_slot = inventory.entity_equipment.lock().await.get(slot);
+    let creative = player.is_creative();
+    // Only the binding curse carries `PREVENT_ARMOR_CHANGE`.
+    if (!creative
+        && in_equipment_slot
+            .get_enchantment_level(&pumpkin_data::enchantment::Enchantment::BINDING_CURSE)
+            != 0)
+        || held.are_items_and_components_equal(&in_equipment_slot)
+    {
+        return false;
+    }
+
+    player
+        .increment_stat(StatisticCategory::Used, i32::from(held.item.id), 1)
+        .await;
+
+    if held.item_count <= 1 {
+        let to_equipment = if creative {
+            held.clone()
+        } else {
+            held.copy_and_clear()
+        };
+        if !in_equipment_slot.is_empty() {
+            *held = in_equipment_slot.copy_and_clear();
+        }
+        player.enqueue_equipment_change(slot, &to_equipment).await;
+        inventory
+            .entity_equipment
+            .lock()
+            .await
+            .put(slot, to_equipment);
+        return true;
+    }
+
+    let to_inventory = in_equipment_slot.copy_and_clear();
+    let to_equipment = held.consume_and_return(1, creative);
+    player.enqueue_equipment_change(slot, &to_equipment).await;
+    inventory
+        .entity_equipment
+        .lock()
+        .await
+        .put(slot, to_equipment);
+    if !to_inventory.is_empty() {
+        inventory
+            .offer_or_drop_stack(to_inventory, player.as_ref())
+            .await;
+    }
+    true
 }

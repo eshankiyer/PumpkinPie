@@ -352,12 +352,10 @@ impl BedrockClient {
                         }
 
                         if !cooldown_active {
-                            // Vanilla `Item.use` starts consumables, shields, and kinetic weapons
-                            // (`Item.java:189-209`), with the long duration from `Item.java:310-316`.
-                            if held.get_data_component::<ConsumableImpl>().is_some()
-                                || held.get_data_component::<BlocksAttacksImpl>().is_some()
-                                || held.get_data_component::<KineticWeaponImpl>().is_some()
-                            {
+                            // Vanilla `Item.use` (`Item.java:189-210`) is an exclusive chain:
+                            // consumable, else swappable equippable, else shield or kinetic
+                            // weapon, with the long duration from `Item.java:310-316`.
+                            if held.get_data_component::<ConsumableImpl>().is_some() {
                                 if let Some(food) = held.get_data_component::<FoodImpl>() {
                                     if player.abilities.lock().await.invulnerable
                                         || food.can_always_eat
@@ -382,30 +380,31 @@ impl BedrockClient {
                                         )
                                         .await;
                                 }
-                            }
-                            if let Some(equippable) = held.get_data_component::<EquippableImpl>() {
-                                let inventory = player.inventory();
-                                let mut equipment_guard = inventory.entity_equipment.lock().await;
-                                let current_equipped = equipment_guard.get(equippable.slot);
-                                if !current_equipped.are_items_and_components_equal(&held) {
-                                    player
-                                        .enqueue_equipment_change(equippable.slot, &held)
-                                        .await;
-
-                                    let equip_item = equipment_guard
-                                        .equipment
-                                        .entry(equippable.slot.clone())
-                                        .or_insert_with(|| ItemStack::EMPTY.clone());
-                                    if equip_item.is_empty() {
-                                        *equip_item = held.clone();
-                                        held.decrement_unless_creative(player.gamemode.load(), 1);
-                                    } else {
-                                        let old_held = held.clone();
-                                        held = equip_item.clone();
-                                        *equip_item = old_held;
-                                    }
+                            } else if let Some(equippable) = held
+                                .get_data_component::<EquippableImpl>()
+                                .filter(|equippable| equippable.swappable)
+                                .cloned()
+                            {
+                                if crate::net::java::play::use_item::swap_with_equipment_slot(
+                                    player,
+                                    &mut held,
+                                    &equippable,
+                                )
+                                .await
+                                {
                                     player.inventory().set_held_item(held.clone()).await;
                                 }
+                            } else if held.get_data_component::<BlocksAttacksImpl>().is_some()
+                                || held.get_data_component::<KineticWeaponImpl>().is_some()
+                            {
+                                player
+                                    .living_entity
+                                    .set_active_hand(
+                                        Hand::Left,
+                                        held.clone(),
+                                        held.get_max_use_time(),
+                                    )
+                                    .await;
                             }
                         }
                     }
