@@ -145,6 +145,13 @@ impl StructurePieceBase for RuinedPortalPiece {
             pumpkin_data::structures::StructureKeys::RuinedPortalOcean => {
                 (pumpkin_util::HeightMap::OceanFloorWg, -2)
             }
+            // The swamp variant also uses the `on_ocean_floor` placement, which samples
+            // `OCEAN_FLOOR_WG` (`RuinedPortalPiece.getHeightMapType`; `ruined_portal_swamp.json`).
+            // Vanilla starts at `surfaceY = getBaseHeight - 1` (`RuinedPortalStructure.findSuitableY`);
+            // the corner scan that may lower it further is not ported.
+            pumpkin_data::structures::StructureKeys::RuinedPortalSwamp => {
+                (pumpkin_util::HeightMap::OceanFloorWg, -1)
+            }
             pumpkin_data::structures::StructureKeys::RuinedPortalDesert => {
                 (pumpkin_util::HeightMap::WorldSurfaceWg, -3) // partly buried
             }
