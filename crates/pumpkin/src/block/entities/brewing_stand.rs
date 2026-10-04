@@ -9,7 +9,8 @@ use std::sync::{
 
 use crate::block::entities::PropertyDelegate;
 use pumpkin_data::block_properties::BlockProperties;
-use pumpkin_data::data_component_impl::DataComponentImpl;
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{DataComponentImpl, PotionContentsImpl};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion_brewing::{ITEM_RECIPES, POTION_RECIPES};
@@ -70,6 +71,63 @@ impl BrewingStandBlockEntity {
             .is_some_and(|stored| !ingredient.is_empty() && ingredient.get_item().id == stored.id)
     }
 
+    /// Vanilla `PotionBrewing.isContainer`: only the items registered through
+    /// `addContainer` (`PotionBrewing.java:136-138`) can be brewed from.
+    const fn is_potion_container(stack: &ItemStack) -> bool {
+        let id = stack.get_item().id;
+        id == Item::POTION.id || id == Item::SPLASH_POTION.id || id == Item::LINGERING_POTION.id
+    }
+
+    /// Vanilla `PotionBrewing.mix` (`PotionBrewing.java:104-127`); `None` means the source
+    /// stack is left unchanged. Like vanilla this is not gated by `isContainer`, and the
+    /// result is a fresh count-1 stack carrying only the potion id.
+    fn mix(ingredient: &ItemStack, source: &ItemStack) -> Option<ItemStack> {
+        if source.is_empty() {
+            return None;
+        }
+
+        // A stack without a potion is never converted, not even by a container mix.
+        let potion_id = source
+            .get_data_component::<PotionContentsImpl>()
+            .and_then(|pc| pc.potion_id)?;
+        let ingredient_id = ingredient.get_item().id;
+
+        let create_item_stack = |item: &'static Item, potion_id: i32| {
+            let contents = PotionContentsImpl {
+                potion_id: Some(potion_id),
+                custom_color: None,
+                custom_effects: Vec::new(),
+                custom_name: None,
+            };
+            ItemStack::new_with_component(
+                1,
+                item,
+                vec![(DataComponent::PotionContents, Some(contents.to_dyn()))],
+            )
+        };
+
+        for recipe in &ITEM_RECIPES {
+            if source.get_item().id == recipe.from().id
+                && recipe.ingredient().iter().any(|i| i.id == ingredient_id)
+            {
+                return Some(create_item_stack(recipe.to(), potion_id));
+            }
+        }
+
+        for recipe in &POTION_RECIPES {
+            if i32::from(recipe.from().id) == potion_id
+                && recipe.ingredient().iter().any(|i| i.id == ingredient_id)
+            {
+                return Some(create_item_stack(
+                    source.get_item(),
+                    i32::from(recipe.to().id),
+                ));
+            }
+        }
+
+        None
+    }
+
     /// Check if any potion slot has a valid recipe with the ingredient
     async fn is_brewable(&self, ingredient: &ItemStack) -> bool {
         if ingredient.is_empty() {
@@ -85,6 +143,10 @@ impl BrewingStandBlockEntity {
             if slot.is_empty() {
                 continue;
             }
+            // Vanilla `PotionBrewing.hasMix` rejects non-containers before either mix check.
+            if !Self::is_potion_container(slot) {
+                continue;
+            }
 
             // Check item recipes first (potion -> splash potion, splash -> lingering)
             for recipe in &ITEM_RECIPES {
@@ -96,8 +158,7 @@ impl BrewingStandBlockEntity {
             }
 
             // Check potion recipes (modify potion type)
-            if let Some(pc) =
-                slot.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+            if let Some(pc) = slot.get_data_component::<PotionContentsImpl>()
                 && let Some(potion_id) = pc.potion_id
             {
                 for recipe in &POTION_RECIPES {
@@ -142,73 +203,10 @@ impl BrewingStandBlockEntity {
 
     /// Perform brewing on all valid potion slots
     async fn do_brew(&self, world: &Arc<crate::world::World>, ingredient: &ItemStack) {
-        let ingredient_id = ingredient.get_item().id;
-
         // Apply recipes to each slot
         for slot_idx in 0..3usize {
             let items = self.items.read().await;
-            let slot = &items[slot_idx];
-            if slot.is_empty() {
-                continue;
-            }
-
-            let mut new_stack_opt: Option<ItemStack> = None;
-
-            // Try item recipes first (potion -> splash/lingering)
-            for recipe in &ITEM_RECIPES {
-                if slot.get_item().id == recipe.from().id
-                    && recipe.ingredient().iter().any(|i| i.id == ingredient_id)
-                {
-                    let new_item = recipe.to();
-                    let potion_comp = slot.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>().cloned();
-                    let new_stack = potion_comp.map_or_else(
-                        || ItemStack::new(slot.item_count, new_item),
-                        |pc| {
-                            ItemStack::new_with_component(
-                                slot.item_count,
-                                new_item,
-                                vec![(
-                                    pumpkin_data::data_component::DataComponent::PotionContents,
-                                    Some(pc.to_dyn()),
-                                )],
-                            )
-                        },
-                    );
-                    new_stack_opt = Some(new_stack);
-                    break;
-                }
-            }
-
-            // Try potion recipes (modify potion type) if item recipe didn't apply
-            if new_stack_opt.is_none()
-                && let Some(pc) = slot
-                    .get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
-                && let Some(potion_id) = pc.potion_id
-            {
-                for recipe in &POTION_RECIPES {
-                    if recipe.from().id as i32 == potion_id
-                        && recipe.ingredient().iter().any(|i| i.id == ingredient_id)
-                    {
-                        let new_pc = pumpkin_data::data_component_impl::PotionContentsImpl {
-                            potion_id: Some(recipe.to().id as i32),
-                            custom_color: pc.custom_color,
-                            custom_effects: pc.custom_effects.clone(),
-                            custom_name: pc.custom_name.clone(),
-                        };
-                        let new_stack = ItemStack::new_with_component(
-                            slot.item_count,
-                            slot.get_item(),
-                            vec![(
-                                pumpkin_data::data_component::DataComponent::PotionContents,
-                                Some(new_pc.to_dyn()),
-                            )],
-                        );
-                        new_stack_opt = Some(new_stack);
-                        break;
-                    }
-                }
-            }
-
+            let new_stack_opt = Self::mix(ingredient, &items[slot_idx]);
             drop(items);
 
             // Update the slot using set_stack if a recipe was applied
@@ -662,8 +660,115 @@ impl PropertyDelegate for BrewingStandBlockEntity {
 #[cfg(test)]
 mod tests {
     use super::BrewingStandBlockEntity;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::{
+        DataComponentImpl, PotionContentsImpl, StatusEffectInstance,
+    };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_data::potion::Potion;
+
+    fn potion_stack(count: u8, item: &'static Item, contents: PotionContentsImpl) -> ItemStack {
+        ItemStack::new_with_component(
+            count,
+            item,
+            vec![(DataComponent::PotionContents, Some(contents.to_dyn()))],
+        )
+    }
+
+    fn plain_contents(potion: &Potion) -> PotionContentsImpl {
+        PotionContentsImpl {
+            potion_id: Some(i32::from(potion.id)),
+            custom_color: None,
+            custom_effects: Vec::new(),
+            custom_name: None,
+        }
+    }
+
+    fn potion_id_of(stack: &ItemStack) -> Option<i32> {
+        stack
+            .get_data_component::<PotionContentsImpl>()
+            .and_then(|pc| pc.potion_id)
+    }
+
+    #[test]
+    fn survival_mixes_produce_plain_potions() {
+        let water = potion_stack(1, &Item::POTION, plain_contents(&Potion::WATER));
+        let awkward = BrewingStandBlockEntity::mix(&ItemStack::new(1, &Item::NETHER_WART), &water)
+            .expect("water + nether wart is a potion mix");
+        assert_eq!(awkward.get_item().id, Item::POTION.id);
+        assert_eq!(potion_id_of(&awkward), Some(i32::from(Potion::AWKWARD.id)));
+
+        let splash = BrewingStandBlockEntity::mix(&ItemStack::new(1, &Item::GUNPOWDER), &awkward)
+            .expect("potion + gunpowder is a container mix");
+        assert_eq!(splash.get_item().id, Item::SPLASH_POTION.id);
+        assert_eq!(potion_id_of(&splash), Some(i32::from(Potion::AWKWARD.id)));
+    }
+
+    #[test]
+    fn mix_drops_custom_contents_and_resets_count() {
+        let mut contents = plain_contents(&Potion::WATER);
+        contents.custom_color = Some(0x00FF_0000);
+        contents.custom_name = Some("named".to_string());
+        contents.custom_effects.push(StatusEffectInstance {
+            effect_id: "minecraft:speed".into(),
+            amplifier: 0,
+            duration: 100,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+        });
+        let source = potion_stack(3, &Item::POTION, contents);
+
+        let result = BrewingStandBlockEntity::mix(&ItemStack::new(1, &Item::NETHER_WART), &source)
+            .expect("water + nether wart is a potion mix");
+        assert_eq!(result.item_count, 1);
+        let pc = result
+            .get_data_component::<PotionContentsImpl>()
+            .expect("mix result carries potion contents");
+        assert_eq!(pc.potion_id, Some(i32::from(Potion::AWKWARD.id)));
+        assert!(pc.custom_effects.is_empty());
+        assert_eq!(pc.custom_color, None);
+        assert_eq!(pc.custom_name, None);
+    }
+
+    #[test]
+    fn mix_leaves_potionless_stack_unchanged() {
+        let source = potion_stack(
+            1,
+            &Item::POTION,
+            PotionContentsImpl {
+                potion_id: None,
+                custom_color: Some(1),
+                custom_effects: Vec::new(),
+                custom_name: None,
+            },
+        );
+        assert!(
+            BrewingStandBlockEntity::mix(&ItemStack::new(1, &Item::GUNPOWDER), &source).is_none()
+        );
+        assert!(
+            BrewingStandBlockEntity::mix(
+                &ItemStack::new(1, &Item::GUNPOWDER),
+                &ItemStack::EMPTY.clone()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn only_potion_items_are_containers() {
+        let bottle = potion_stack(1, &Item::GLASS_BOTTLE, plain_contents(&Potion::WATER));
+        assert!(!BrewingStandBlockEntity::is_potion_container(&bottle));
+        assert!(!BrewingStandBlockEntity::is_potion_container(
+            &ItemStack::new(1, &Item::GLASS_BOTTLE)
+        ));
+        for item in [&Item::POTION, &Item::SPLASH_POTION, &Item::LINGERING_POTION] {
+            assert!(BrewingStandBlockEntity::is_potion_container(
+                &ItemStack::new(1, item)
+            ));
+        }
+    }
 
     #[test]
     fn only_brewing_mix_ingredients_are_accepted() {
