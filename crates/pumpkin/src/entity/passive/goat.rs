@@ -10,7 +10,7 @@ use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 use rand::RngExt;
 
 use crate::entity::{
@@ -32,6 +32,7 @@ const TEMPT_ITEMS: &[&Item] = &[&Item::WHEAT];
 /// height used by `Goat.getDefaultDimensions` (`Goat.java:250-254`).
 const fn goat_baby_dimensions() -> EntityDimensions {
     EntityDimensions::new(0.45, 0.65, 0.59375)
+        .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.53125))
 }
 
 /// `GoatAi.TIME_BETWEEN_LONG_JUMPS = UniformInt.of(600, 1200)` (`GoatAi.java:45`).

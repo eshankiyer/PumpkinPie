@@ -7,7 +7,7 @@ use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::boundingbox::BoundingBox;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -132,14 +132,9 @@ impl SalmonEntity {
     /// `Salmon.getDefaultDimensions`: base dimensions scaled by `getSalmonScale()`.
     fn refresh_dimensions(&self, variant: SalmonVariant) {
         let entity = &self.mob_entity.living_entity.entity;
-        let base = entity.entity_type.dimension;
         let scale = variant.bounding_box_scale();
-        let dimensions = EntityDimensions {
-            width: base[0] * scale,
-            height: base[1] * scale,
-            eye_height: entity.entity_type.eye_height * scale,
-            fixed: false,
-        };
+        let dimensions =
+            crate::entity::attachments::type_dimensions(entity.entity_type).scale(scale, scale);
         entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);
         let pos = entity.pos.load();

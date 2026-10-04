@@ -11,12 +11,12 @@ use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::{codec::var_int::VarInt, java::client::play::Metadata};
 use pumpkin_util::Difficulty;
-use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::control::{Control, MoveControlTrait},
     ai::goal::{Goal, GoalFuture, active_target::ActiveTargetGoal},
     mob::{Mob, MobEntity},
@@ -179,12 +179,9 @@ impl SlimeEntity {
         }
 
         // Refresh dimensions
-        let scaled_dimensions = EntityDimensions {
-            width: entity.entity_type.dimension[0] * actual_size as f32,
-            height: entity.entity_type.dimension[1] * actual_size as f32,
-            eye_height: entity.entity_type.eye_height * actual_size as f32,
-            fixed: false,
-        };
+        // `AbstractCubeMob.getDefaultDimensions` (`AbstractCubeMob.java:258-260`).
+        let scaled_dimensions = crate::entity::attachments::type_dimensions(entity.entity_type)
+            .scale(actual_size as f32, actual_size as f32);
         entity.base_dimension.store(scaled_dimensions);
         entity.entity_dimension.store(scaled_dimensions);
 
@@ -407,6 +404,28 @@ impl NBTStorage for SlimeEntity {
 impl Mob for SlimeEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity
+    }
+
+    /// `AbstractCubeMob.getPassengerAttachmentPoint` (`AbstractCubeMob.java:244-247`): the seat
+    /// sits `0.015625 * size * scale` below the top of the box, with
+    /// `scale = getScale() * getAgeScale()` (`LivingEntity.java:3980-3982`, `555-557`).
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        _passenger: &'a dyn EntityBase,
+        _passenger_index: i32,
+        _passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            let living = &self.entity.living_entity;
+            // Slimes and magma cubes are never babies, so `getAgeScale()` is 1.
+            let scale = living.get_attribute_value(&Attributes::SCALE) as f32;
+            let height = f64::from(living.entity.entity_dimension.load().height);
+            Vector3::new(
+                0.0,
+                height - 0.015625 * f64::from(self.get_size()) * f64::from(scale),
+                0.0,
+            )
+        })
     }
 
     /// `AbstractCubeMob.getMaxHeadXRot` (`AbstractCubeMob.java:279-282`).

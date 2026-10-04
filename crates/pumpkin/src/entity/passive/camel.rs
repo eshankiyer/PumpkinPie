@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::{Block, BlockState};
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::{EntityPose, EntityType};
@@ -12,7 +13,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::BoundingBox;
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityAttachments};
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::math::wrap_degrees;
 
@@ -25,7 +26,7 @@ use crate::entity::{
         swim::SwimGoal,
         wander_around::{BrainStroll, WanderAroundGoal},
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, is_animal_entity},
     passive::equine::{
         equip_saddle_item, is_valid_saddle_item, mount_player, saddle_equip_on_interact,
     },
@@ -65,6 +66,87 @@ const fn is_in_pose_transition_for(pose_time: i64, sitting: bool) -> bool {
 /// `Camel.resetLastPoseChangeTickToFullStand` (`Camel.java:626-628`).
 fn full_stand_tick(game_time: i64) -> i64 {
     (game_time - STANDUP_DURATION_TICKS - 1).max(0)
+}
+
+/// `Camel.getBodyAnchorAnimationYOffset` (`Camel.java:519-552`) at partial tick 0: the seat
+/// height for the front (`is_front`) or back rider, following the sit-down and stand-up
+/// animation through its flex point.
+#[expect(clippy::fn_params_excessive_bools)]
+fn body_anchor_y_offset(
+    is_front: bool,
+    height: f32,
+    is_baby: bool,
+    scale: f32,
+    pose_time: i64,
+    is_sitting: bool,
+    is_in_transition: bool,
+) -> f64 {
+    let age_sit_y_offset = if is_baby { 0.09375 } else { 0.375 };
+    let mut base_sit_offset = f64::from(height) - age_sit_y_offset;
+    let sitting_height_difference = scale * 1.43;
+    let vertical_drop = sitting_height_difference - scale * 0.2;
+    let bottom_point = sitting_height_difference - vertical_drop;
+    if is_in_transition {
+        let animation_duration: f32 = if is_sitting { 40.0 } else { 52.0 };
+        let (half_point, flex_point_offset): (f32, f32) = if is_sitting {
+            (28.0, if is_front { 0.5 } else { 0.1 })
+        } else if is_front {
+            (24.0, 0.6)
+        } else {
+            (32.0, 0.35)
+        };
+        let pose_time = (pose_time as f32).clamp(0.0, animation_duration);
+        let is_first_part = pose_time < half_point;
+        let part = if is_first_part {
+            pose_time / half_point
+        } else {
+            (pose_time - half_point) / (animation_duration - half_point)
+        };
+        let flex_point = sitting_height_difference - flex_point_offset * vertical_drop;
+        let (from, to) = match (is_sitting, is_first_part) {
+            (true, true) => (sitting_height_difference, flex_point),
+            (true, false) => (flex_point, bottom_point),
+            (false, true) => (
+                bottom_point - sitting_height_difference,
+                bottom_point - flex_point,
+            ),
+            (false, false) => (bottom_point - flex_point, 0.0),
+        };
+        // `Mth.lerp(float, float, float)` (`Mth.java:550-552`).
+        base_sit_offset += f64::from(from + part * (to - from));
+    }
+
+    if is_sitting && !is_in_transition {
+        base_sit_offset += f64::from(bottom_point);
+    }
+
+    base_sit_offset
+}
+
+/// `Camel.getPassengerAttachmentPoint` (`Camel.java:495-512`) once the anchor height is known:
+/// the driver sits 0.5 forward, a second rider -0.7 behind (an `Animal` 0.2 further forward),
+/// the float offset scaled and the point rotated by the camel's yaw.
+fn camel_passenger_point(
+    anchor_height: f32,
+    driver: bool,
+    passenger_count: usize,
+    passenger_is_animal: bool,
+    scale: f32,
+    camel_yaw: f32,
+) -> Vector3<f64> {
+    let mut offset: f32 = 0.5;
+    if passenger_count > 1 {
+        if !driver {
+            offset = -0.7;
+        }
+        if passenger_is_animal {
+            offset += 0.2;
+        }
+    }
+    EntityAttachments::rotate_y(
+        Vector3::new(0.0, f64::from(anchor_height), f64::from(offset * scale)),
+        camel_yaw,
+    )
 }
 
 /// Represents a Camel, a passive mount that can carry two players and dash.
@@ -336,6 +418,50 @@ impl Mob for CamelEntity {
         &self.mob_entity
     }
 
+    /// `Camel.getPassengerAttachmentPoint` (`Camel.java:495-512`) with
+    /// `LivingEntity.getPassengerRidingPosition`'s current dimensions and
+    /// `getScale() * getAgeScale()` (`LivingEntity.java:3980-3982`; `Camel.java:514-517`).
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        passenger: &'a dyn EntityBase,
+        passenger_index: i32,
+        passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let driver = passenger_index.max(0) == 0;
+            let is_baby = self.is_baby();
+            let scale = self
+                .mob_entity
+                .living_entity
+                .get_attribute_value(&Attributes::SCALE) as f32
+                * if is_baby { 0.6 } else { 1.0 };
+            let anchor_height = if entity.is_removed() {
+                0.01
+            } else {
+                let pose_time = self.get_pose_time().await;
+                let is_sitting = self.is_camel_sitting();
+                body_anchor_y_offset(
+                    driver,
+                    entity.entity_dimension.load().height,
+                    is_baby,
+                    scale,
+                    pose_time,
+                    is_sitting,
+                    is_in_pose_transition_for(pose_time, is_sitting),
+                ) as f32
+            };
+            camel_passenger_point(
+                anchor_height,
+                driver,
+                passenger_count,
+                is_animal_entity(passenger.get_entity().entity_type.id),
+                scale,
+                entity.yaw.load(),
+            )
+        })
+    }
+
     /// `AbstractHorse.getControllingPassenger` (`AbstractHorse.java:961-962`), which Camel
     /// inherits unchanged: a saddled camel is controlled by its first player passenger.
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
@@ -577,7 +703,35 @@ impl Mob for CamelEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{full_stand_tick, is_in_pose_transition_for, pose_time};
+    use super::{
+        body_anchor_y_offset, camel_passenger_point, full_stand_tick, is_in_pose_transition_for,
+        pose_time,
+    };
+
+    #[test]
+    fn standing_adult_seat_is_height_minus_three_eighths() {
+        let y = body_anchor_y_offset(true, 2.375, false, 1.0, 1000, false, false);
+        assert_eq!(y, f64::from(2.375f32) - 0.375);
+    }
+
+    #[test]
+    fn sitting_adult_seat_adds_the_bottom_point() {
+        let height = 2.375f32 - 1.43;
+        let y = body_anchor_y_offset(true, height, false, 1.0, 1000, true, false);
+        let shd = 1.43f32;
+        let bottom = shd - (shd - 0.2f32);
+        assert_eq!(y, f64::from(height) - 0.375 + f64::from(bottom));
+    }
+
+    #[test]
+    fn second_rider_sits_behind() {
+        let driver = camel_passenger_point(2.0, true, 2, false, 1.0, 0.0);
+        assert_eq!(driver.z, 0.5);
+        let back = camel_passenger_point(2.0, false, 2, false, 1.0, 0.0);
+        assert_eq!(back.z, f64::from(-0.7f32));
+        let animal = camel_passenger_point(2.0, false, 2, true, 1.0, 0.0);
+        assert_eq!(animal.z, f64::from(-0.7f32 + 0.2f32));
+    }
 
     #[test]
     fn pose_time_ignores_the_sign_of_the_synced_tick() {

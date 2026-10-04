@@ -21,7 +21,9 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 
+use crate::entity::mob::is_animal_entity;
 use crate::entity::player::Player;
+use crate::entity::vehicle::boat::boat_passenger_attachment_point;
 use crate::entity::vehicle::minecart::container::{self, MinecartInventory};
 use crate::entity::vehicle::vehicle::VehicleEntity;
 use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity};
@@ -265,17 +267,33 @@ impl EntityBase for ChestBoatEntity {
         true
     }
 
-    /// Same ride-height rule as [`crate::entity::vehicle::boat::BoatEntity`]: chest rafts use
-    /// the raft ratio (`ChestRaft.java:14-17`) while chest boats keep `height / 3.0`
+    /// `AbstractBoat.getPassengerAttachmentPoint` (`AbstractBoat.java:135-151`) with the chest
+    /// boat's 0.15 lone-rider offset (`AbstractChestBoat.java:43-45`). Chest rafts use the raft
+    /// ride height (`ChestRaft.java:14-17`) while chest boats keep `height / 3.0F`
     /// (`ChestBoat.java:14-17`).
-    fn get_passengers_riding_offset(&self) -> f64 {
-        let height = f64::from(self.vehicle.entity.entity_dimension.load().height);
-        let entity_type = self.vehicle.entity.entity_type;
-        if entity_type == &EntityType::BAMBOO_CHEST_RAFT {
-            height * 0.888_888_9
-        } else {
-            height / 3.0
-        }
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        passenger: &'a dyn EntityBase,
+        passenger_index: i32,
+        passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            let entity = &self.vehicle.entity;
+            let height = entity.entity_dimension.load().height;
+            let ride_height = if entity.entity_type == &EntityType::BAMBOO_CHEST_RAFT {
+                height * 0.888_888_9
+            } else {
+                height / 3.0
+            };
+            boat_passenger_attachment_point(
+                ride_height,
+                0.15,
+                is_animal_entity(passenger.get_entity().entity_type.id),
+                passenger_index,
+                passenger_count,
+                entity.yaw.load(),
+            )
+        })
     }
 
     /// Chest boats inherit `AbstractBoat.onPassengerTurned`'s 105-degree clamp

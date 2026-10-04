@@ -10,7 +10,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::boundingbox::BoundingBox;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -165,14 +165,9 @@ impl PufferfishEntity {
     /// Vanilla runs this from the constructor and `onSyncedDataUpdated(PUFF_STATE)`.
     fn refresh_dimensions(&self, state: u8) {
         let entity = &self.mob_entity.living_entity.entity;
-        let base = entity.entity_type.dimension;
         let scale = puff_scale(state);
-        let dimensions = EntityDimensions {
-            width: base[0] * scale,
-            height: base[1] * scale,
-            eye_height: entity.entity_type.eye_height * scale,
-            fixed: false,
-        };
+        let dimensions =
+            crate::entity::attachments::type_dimensions(entity.entity_type).scale(scale, scale);
         entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);
         let pos = entity.pos.load();

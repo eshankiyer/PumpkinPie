@@ -31,7 +31,7 @@ use pumpkin_data::world::WorldEvent;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::Difficulty;
-use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityAttachmentsBuilder, EntityDimensions};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -207,11 +207,7 @@ impl ZombieEntityBase {
         let dimensions = if baby {
             baby_dimensions(entity.entity_type)
         } else {
-            EntityDimensions::new(
-                entity.entity_type.dimension[0],
-                entity.entity_type.dimension[1],
-                entity.entity_type.eye_height,
-            )
+            crate::entity::attachments::type_dimensions(entity.entity_type)
         };
         entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);
@@ -372,8 +368,9 @@ pub fn voice_pitch(is_baby: bool, first: f32, second: f32) -> f32 {
 }
 
 /// The baby hitbox each variant declares as `BABY_DIMENSIONS`: 0.49 x 0.98 everywhere, with the
-/// eye height of `Zombie`/`Drowned` (`Zombie.java:90-92`, `Drowned.java:70-72`), `Husk`
-/// (`Husk.java` `BABY_DIMENSIONS`) or `ZombieVillager` (`ZombieVillager.java:80-82`).
+/// eye height and `VEHICLE` point of `Zombie`/`Drowned` (`Zombie.java:90-92`,
+/// `Drowned.java:70-72`), `Husk` (`Husk.java:32-34`), `ZombifiedPiglin`
+/// (`ZombifiedPiglin.java:49-51`) or `ZombieVillager` (`ZombieVillager.java:80-82`).
 const fn baby_dimensions(entity_type: &'static EntityType) -> EntityDimensions {
     let eye_height = if entity_type.id == EntityType::HUSK.id {
         0.825
@@ -382,7 +379,15 @@ const fn baby_dimensions(entity_type: &'static EntityType) -> EntityDimensions {
     } else {
         0.775
     };
-    EntityDimensions::new(0.49, 0.98, eye_height)
+    // `VEHICLE` at 0.125 for the zombie villager, 0.1875 for every other variant.
+    let vehicle_y: f32 = if entity_type.id == EntityType::ZOMBIE_VILLAGER.id {
+        0.125
+    } else {
+        0.1875
+    };
+    EntityDimensions::new(0.49, 0.98, eye_height).with_attachments(
+        EntityAttachmentsBuilder::new().vehicle(Vector3::new(0.0, vehicle_y as f64, 0.0)),
+    )
 }
 
 /// `Zombie.ZOMBIE_LEADER_CHANCE` (`Zombie.java:85`), rolled against the regional difficulty's

@@ -906,12 +906,11 @@ fn ocelot_contains_any_liquid(
         f64::from(pos.0.x) + 0.5,
         f64::from(pos.0.y),
         f64::from(pos.0.z) + 0.5,
-        &EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-            eye_height: entity_type.eye_height,
-            fixed: false,
-        },
+        &EntityDimensions::new(
+            entity_type.dimension[0],
+            entity_type.dimension[1],
+            entity_type.eye_height,
+        ),
     );
 
     for x in bounding_box.min.x.floor() as i32..bounding_box.max.x.ceil() as i32 {
@@ -941,12 +940,11 @@ fn ocelot_has_entity_collision(
         f64::from(pos.0.x) + 0.5,
         f64::from(pos.0.y),
         f64::from(pos.0.z) + 0.5,
-        &EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-            eye_height: entity_type.eye_height,
-            fixed: false,
-        },
+        &EntityDimensions::new(
+            entity_type.dimension[0],
+            entity_type.dimension[1],
+            entity_type.eye_height,
+        ),
     );
 
     world

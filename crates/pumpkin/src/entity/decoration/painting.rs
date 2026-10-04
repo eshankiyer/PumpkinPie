@@ -497,12 +497,8 @@ impl PaintingEntity {
             let width = width_quads as f32;
             let height = height_quads as f32;
 
-            let dimensions = pumpkin_util::math::boundingbox::EntityDimensions {
-                width,
-                height,
-                eye_height: 0.0,
-                fixed: false,
-            };
+            let dimensions =
+                pumpkin_util::math::boundingbox::EntityDimensions::new(width, height, 0.0);
             self.entity.base_dimension.store(dimensions);
             self.entity.entity_dimension.store(dimensions);
         }

@@ -66,7 +66,7 @@ use pumpkin_protocol::{
 };
 use pumpkin_util::math::vector3::Axis;
 use pumpkin_util::math::{
-    boundingbox::{BoundingBox, EntityDimensions},
+    boundingbox::{BoundingBox, EntityAttachmentsBuilder, EntityDimensions},
     get_section_cord,
     position::BlockPos,
     vector2::Vector2,
@@ -91,6 +91,7 @@ use uuid::Uuid;
 pub mod ageable;
 pub mod ai;
 pub mod area_effect_cloud;
+pub mod attachments;
 pub mod attributes;
 pub mod boss;
 pub mod breath;
@@ -429,17 +430,25 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         vec![EntityPose::Standing]
     }
 
-    /// Vanilla `AbstractBoat.rideHeight` (`AbstractBoat.java:132`): the Y offset at which a
-    /// passenger sits relative to the vehicle's base position (the Y component of
-    /// `AbstractBoat.getPassengerAttachmentPoint`, `AbstractBoat.java:135-151`). The generic
-    /// fallback matches `Entity.positionRider`'s existing top-surface attachment; vehicle types
-    /// override this (e.g. `Boat` returns `dimensions.height() / 3.0`, `Boat.java:14-17`).
-    fn get_passengers_riding_offset(&self) -> f64 {
-        f64::from(self.get_entity().entity_dimension.load().height)
+    /// Vanilla `Entity.getPassengerAttachmentPoint` (`Entity.java:2402-2409`): where
+    /// `passenger`, the `passenger_index`-th of `passenger_count` riders (`-1` when it is not in
+    /// the list, as `indexOf` reports), sits relative to this vehicle's position. The default is
+    /// the clamped `PASSENGER` point of the current dimensions, rotated by the vehicle's yaw;
+    /// boats and camels override it.
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        _passenger: &'a dyn EntityBase,
+        passenger_index: i32,
+        _passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            self.get_entity()
+                .default_passenger_attachment_point(passenger_index)
+        })
     }
 
-    /// Vanilla `Entity.positionRider` asks the passenger for this override
-    /// (`Entity.java:2387-2394`). `None` keeps the existing shared attachment fallback.
+    /// Vanilla `Entity.getVehicleAttachmentPoint` override hook (`Entity.java:2394-2396`).
+    /// `None` uses the default: this entity's own `VEHICLE` point rotated by its yaw.
     fn get_vehicle_attachment_point(&self, _vehicle: &Entity) -> Option<Vector3<f64>> {
         None
     }
@@ -2433,12 +2442,7 @@ impl Entity {
         let floor_y = position.y.floor() as i32;
         let floor_z = position.z.floor() as i32;
 
-        let bounding_box_size = EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-            eye_height: entity_type.eye_height,
-            fixed: false,
-        };
+        let bounding_box_size = attachments::type_dimensions(entity_type);
 
         Self {
             entity_id,
@@ -2857,14 +2861,20 @@ impl Entity {
     /// entity types, which keep their own type dimensions in every pose.
     #[must_use]
     pub const fn get_entity_dimensions(pose: EntityPose) -> EntityDimensions {
+        // `Avatar.DEFAULT_VEHICLE_ATTACHMENT` (`Avatar.java:17`), carried only by the standing
+        // and crouching boxes; `POSES.getOrDefault` hands every unlisted pose the standing one.
+        const VEHICLE: EntityAttachmentsBuilder =
+            EntityAttachmentsBuilder::new().vehicle(Vector3::new(0.0, 0.6, 0.0));
         match pose {
             EntityPose::Sleeping => EntityDimensions::new(0.2, 0.2, 0.2),
             EntityPose::FallFlying | EntityPose::Swimming | EntityPose::SpinAttack => {
                 EntityDimensions::new(0.6, 0.6, 0.4)
             }
-            EntityPose::Crouching => EntityDimensions::new(0.6, 1.5, 1.27),
+            EntityPose::Crouching => {
+                EntityDimensions::new(0.6, 1.5, 1.27).with_attachments(VEHICLE)
+            }
             EntityPose::Dying => EntityDimensions::new(0.2, 0.2, 1.62),
-            _ => EntityDimensions::new(0.6, 1.8, 1.62),
+            _ => EntityDimensions::new(0.6, 1.8, 1.62).with_attachments(VEHICLE),
         }
     }
 
@@ -6081,34 +6091,98 @@ impl Entity {
         )
     }
 
-    /// Vanilla `Entity.positionRider` with Pumpkin's shared fallback attachment geometry.
-    ///
-    /// Vanilla stores entity-specific attachment points in generated entity data. That data is
-    /// not yet exposed by Pumpkin, so keep every rider attached to the vehicle's top surface and
-    /// fan multiple riders out sideways in vehicle-local space. Crucially, this is a server-side
-    /// position update: rider collision, interaction, fall, and nested-vehicle state now move
-    /// with the vehicle even before individual boat/minecart/mob seat data is ported.
+    /// Vanilla `Entity.getPassengerRidingPosition` (`Entity.java:2398-2400`;
+    /// `LivingEntity.java:3980-3982`): the vehicle position plus the seat it gives `passenger`.
+    /// The seat hook is dispatched on `vehicle`, the passenger's own `dyn` vehicle handle, so
+    /// boat and camel overrides apply.
+    pub async fn passenger_riding_position(
+        vehicle: &dyn EntityBase,
+        passenger: &dyn EntityBase,
+    ) -> Vector3<f64> {
+        let vehicle_entity = vehicle.get_entity();
+        let passenger_id = passenger.get_entity().entity_id;
+        let (index, count) = {
+            let passengers = vehicle_entity.passengers.lock().await;
+            let index = passengers
+                .iter()
+                .position(|p| p.get_entity().entity_id == passenger_id)
+                .map_or(-1, |index| index as i32);
+            (index, passengers.len())
+        };
+        vehicle_entity.pos.load()
+            + vehicle
+                .get_passenger_attachment_point(passenger, index, count)
+                .await
+    }
+
+    /// Vanilla `Entity.spawnAtLocation(ServerLevel, ItemStack, Vec3)` (`Entity.java:2221-2230`):
+    /// a fresh item entity at this position plus `offset`, with the default pickup delay. An
+    /// empty stack spawns nothing.
+    pub async fn spawn_at_location_with_offset(&self, item_stack: ItemStack, offset: Vector3<f64>) {
+        if item_stack.is_empty() {
+            return;
+        }
+        let world = self.world.load_full();
+        let item_entity = ItemEntity::new(
+            Self::new(world.clone(), self.pos.load() + offset, &EntityType::ITEM),
+            item_stack,
+        );
+        world.spawn_entity(Arc::new(item_entity)).await;
+    }
+
+    /// Vanilla `Entity.getDefaultPassengerAttachmentPoint` (`Entity.java:2406-2409`): the
+    /// clamped `PASSENGER` point of the current dimensions, rotated by this vehicle's yaw.
+    #[must_use]
+    pub fn default_passenger_attachment_point(&self, passenger_index: i32) -> Vector3<f64> {
+        self.entity_dimension
+            .load()
+            .attachments
+            .passenger_clamped(passenger_index, self.yaw.load())
+    }
+
+    /// Vanilla `Entity.getVehicleAttachmentPoint` (`Entity.java:2394-2396`) with the passenger's
+    /// override applied.
+    fn vehicle_attachment_point(passenger: &dyn EntityBase, vehicle: &Self) -> Vector3<f64> {
+        passenger
+            .get_vehicle_attachment_point(vehicle)
+            .unwrap_or_else(|| {
+                let entity = passenger.get_entity();
+                entity
+                    .entity_dimension
+                    .load()
+                    .attachments
+                    .vehicle_point(entity.yaw.load())
+            })
+    }
+
+    /// Vanilla `Entity.positionRider` (`Entity.java:2385-2389`): the passenger is moved to the
+    /// vehicle's riding position minus its own vehicle attachment point, on all three axes.
+    /// This is a server-side position update: rider collision, interaction, fall, and
+    /// nested-vehicle state move with the vehicle.
     async fn position_rider(
         &self,
         passenger: &Arc<dyn EntityBase>,
         passenger_index: usize,
         passenger_count: usize,
     ) {
-        let vehicle_position = self.pos.load();
-        let attachment = passenger.get_vehicle_attachment_point(self);
-        // `Entity.positionRider` subtracts the passenger attachment point from the vehicle
-        // riding position (`Entity.java:2385-2389`).
-        let vehicle_height =
-            self.get_passengers_riding_offset() - attachment.map_or(0.0, |offset| offset.y);
-        let passenger_width = f64::from(passenger.get_entity().entity_dimension.load().width);
-        let yaw = f64::from(self.yaw.load().to_radians());
-        let lateral =
-            passenger_width * (passenger_index as f64 - (passenger_count as f64 - 1.0) / 2.0);
-        let position = Vector3::new(
-            vehicle_position.x + lateral * yaw.cos(),
-            vehicle_position.y + vehicle_height,
-            vehicle_position.z + lateral * yaw.sin(),
-        );
+        // Dispatch the seat hook on the passenger's `dyn` vehicle handle when it is this
+        // entity: calling it on `&Entity` would resolve to `impl EntityBase for Entity` and skip
+        // every vehicle override.
+        let vehicle = passenger.get_entity().vehicle.lock().await.clone();
+        let index = passenger_index as i32;
+        let seat = match vehicle {
+            Some(vehicle) if vehicle.get_entity().entity_id == self.entity_id => {
+                vehicle
+                    .get_passenger_attachment_point(passenger.as_ref(), index, passenger_count)
+                    .await
+            }
+            _ => {
+                self.get_passenger_attachment_point(passenger.as_ref(), index, passenger_count)
+                    .await
+            }
+        };
+        let offset = Self::vehicle_attachment_point(passenger.as_ref(), self);
+        let position = self.pos.load() + seat - offset;
         passenger.get_entity().set_pos(position);
         passenger.get_entity().sync_passenger_positions().await;
     }

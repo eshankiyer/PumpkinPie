@@ -8,7 +8,9 @@ use pumpkin_util::math::{
 use rand::RngExt;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 
+use crate::entity::attachments::type_dimensions;
 use crate::entity::mob::Mob;
+use pumpkin_data::entity::EntityType;
 
 pub const BABY_START_AGE: i32 = -24000;
 pub const FORCED_AGE_PARTICLE_TICKS: i32 = 40;
@@ -101,11 +103,7 @@ pub trait AgeableMob: Mob {
     /// 0.5 unless the concrete entity supplies a different baby dimension.
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
         let entity = &self.get_mob_entity().living_entity.entity;
-        Some(default_baby_dimensions(
-            entity.entity_type.dimension[0],
-            entity.entity_type.dimension[1],
-            entity.entity_type.eye_height,
-        ))
+        Some(default_baby_dimensions(entity.entity_type))
     }
 
     fn get_baby_start_age(&self) -> i32 {
@@ -134,11 +132,7 @@ pub trait AgeableMob: Mob {
             && let Some(dimensions) = if new_age < 0 {
                 self.baby_dimensions()
             } else {
-                Some(EntityDimensions::new(
-                    entity.entity_type.dimension[0],
-                    entity.entity_type.dimension[1],
-                    entity.entity_type.eye_height,
-                ))
+                Some(type_dimensions(entity.entity_type))
             }
         {
             let position = entity.pos.load();
@@ -327,9 +321,9 @@ pub trait AgeableMob: Mob {
 }
 
 /// The default `LivingEntity.getAgeScale` result is 0.5 for a baby
-/// (`LivingEntity.java:555-557`).
-fn default_baby_dimensions(width: f32, height: f32, eye_height: f32) -> EntityDimensions {
-    EntityDimensions::new(width * 0.5, height * 0.5, eye_height * 0.5)
+/// (`LivingEntity.java:555-557`); `EntityDimensions.scale` scales the attachments with the box.
+fn default_baby_dimensions(entity_type: &EntityType) -> EntityDimensions {
+    type_dimensions(entity_type).scale(0.5, 0.5)
 }
 
 const fn age_locked_particle_timer_step(timer: i32) -> i32 {
@@ -341,6 +335,7 @@ mod tests {
     use super::{
         age_locked_particle_timer_step, default_baby_dimensions, speed_up_seconds_when_feeding,
     };
+    use pumpkin_data::entity::EntityType;
 
     #[test]
     fn feeding_speed_up_divides_ticks_as_integer_first() {
@@ -355,10 +350,15 @@ mod tests {
     #[test]
     fn default_baby_dimensions_use_vanilla_age_scale() {
         // Vanilla `LivingEntity.getAgeScale` (`LivingEntity.java:555-557`) returns 0.5 for babies.
-        let dimensions = default_baby_dimensions(0.9, 1.4, 1.3);
+        let dimensions = default_baby_dimensions(&EntityType::COW);
         assert!((dimensions.width - 0.45).abs() < f32::EPSILON);
         assert!((dimensions.height - 0.7).abs() < f32::EPSILON);
         assert!((dimensions.eye_height - 0.65).abs() < f32::EPSILON);
+        // The type's `PASSENGER` point scales with the box (`EntityDimensions.java:29-38`).
+        assert_eq!(
+            dimensions.attachments.passenger_clamped(0, 0.0).y,
+            f64::from(1.36875f32) * 0.5
+        );
     }
 
     #[test]

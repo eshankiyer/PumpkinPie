@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam::atomic::AtomicCell;
 
+use crate::entity::mob::is_animal_entity;
 use crate::entity::player::Player;
 use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity};
 use crate::server::Server;
@@ -13,7 +14,7 @@ use pumpkin_data::item_stack::ItemStack;
 
 use pumpkin_protocol::java::client::play::Metadata;
 
-use pumpkin_util::math::{vector3::Vector3, wrap_degrees};
+use pumpkin_util::math::{boundingbox::EntityAttachments, vector3::Vector3, wrap_degrees};
 
 use crate::entity::vehicle::vehicle::VehicleEntity;
 
@@ -30,6 +31,32 @@ pub(crate) fn clamp_passenger_yaw(boat_yaw: f32, passenger_yaw: f32) -> f32 {
     let delta = wrap_degrees(passenger_yaw - boat_yaw);
     let target_delta = delta.clamp(-105.0, 105.0);
     passenger_yaw + target_delta - delta
+}
+
+/// `AbstractBoat.getPassengerAttachmentPoint` (`AbstractBoat.java:135-151`): a lone rider sits
+/// at `single_offset` (`getSinglePassengerXOffset`, 0 for boats and 0.15 for chest boats,
+/// `AbstractBoat.java:611-613`; `AbstractChestBoat.java:43-45`); with two, the first sits at 0.2
+/// and the other at -0.6, an `Animal` 0.2 further forward. The float offset is rotated by the
+/// boat's yaw.
+pub(crate) fn boat_passenger_attachment_point(
+    ride_height: f32,
+    single_offset: f32,
+    passenger_is_animal: bool,
+    passenger_index: i32,
+    passenger_count: usize,
+    boat_yaw: f32,
+) -> Vector3<f64> {
+    let mut offset = single_offset;
+    if passenger_count > 1 {
+        offset = if passenger_index == 0 { 0.2 } else { -0.6 };
+        if passenger_is_animal {
+            offset += 0.2;
+        }
+    }
+    EntityAttachments::rotate_y(
+        Vector3::new(0.0, f64::from(ride_height), f64::from(offset)),
+        boat_yaw,
+    )
 }
 
 impl BoatEntity {
@@ -176,20 +203,36 @@ impl EntityBase for BoatEntity {
         true
     }
 
-    /// `Boat.rideHeight` (`Boat.java:14-17`): passengers sit at `dimensions.height() / 3.0`
-    /// above the boat's base, not on its full top surface. Both raft variants override this to
-    /// `dimensions.height() * 0.8888889` instead (`Raft.rideHeight`, `Raft.java:14-17`;
-    /// `ChestRaft.rideHeight`, `ChestRaft.java:14-17`) -- `ChestBoat` keeps the plain-boat ratio
-    /// (`ChestBoat.java:14-17`), so only the raft family needs the special case.
-    fn get_passengers_riding_offset(&self) -> f64 {
-        let height = f64::from(self.vehicle.entity.entity_dimension.load().height);
-        let entity_type = self.vehicle.entity.entity_type;
-        if entity_type == &EntityType::BAMBOO_RAFT || entity_type == &EntityType::BAMBOO_CHEST_RAFT
-        {
-            height * 0.888_888_9
-        } else {
-            height / 3.0
-        }
+    /// `AbstractBoat.getPassengerAttachmentPoint` (`AbstractBoat.java:135-151`) with
+    /// `Boat.rideHeight` = `dimensions.height() / 3.0F` (`Boat.java:14-17`), or
+    /// `Raft.rideHeight` = `dimensions.height() * 0.8888889F` for both raft variants
+    /// (`Raft.java:14-17`; `ChestRaft.java:14-17`).
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        passenger: &'a dyn EntityBase,
+        passenger_index: i32,
+        passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            let entity = &self.vehicle.entity;
+            let height = entity.entity_dimension.load().height;
+            let entity_type = entity.entity_type;
+            let ride_height = if entity_type == &EntityType::BAMBOO_RAFT
+                || entity_type == &EntityType::BAMBOO_CHEST_RAFT
+            {
+                height * 0.888_888_9
+            } else {
+                height / 3.0
+            };
+            boat_passenger_attachment_point(
+                ride_height,
+                0.0,
+                is_animal_entity(passenger.get_entity().entity_type.id),
+                passenger_index,
+                passenger_count,
+                entity.yaw.load(),
+            )
+        })
     }
 
     /// `AbstractBoat.onPassengerTurned` clamps a rider to 105 degrees from the boat
@@ -206,7 +249,23 @@ impl EntityBase for BoatEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::clamp_passenger_yaw;
+    use super::{boat_passenger_attachment_point, clamp_passenger_yaw};
+
+    #[test]
+    fn two_riders_sit_fore_and_aft() {
+        let height = 0.5625f32 / 3.0;
+        let lone = boat_passenger_attachment_point(height, 0.0, false, 0, 1, 0.0);
+        assert_eq!(lone.y, f64::from(height));
+        assert_eq!(lone.z, 0.0);
+        let driver = boat_passenger_attachment_point(height, 0.0, false, 0, 2, 0.0);
+        assert_eq!(driver.z, f64::from(0.2f32));
+        let back = boat_passenger_attachment_point(height, 0.0, false, 1, 2, 0.0);
+        assert_eq!(back.z, f64::from(-0.6f32));
+        let animal = boat_passenger_attachment_point(height, 0.0, true, 1, 2, 0.0);
+        assert_eq!(animal.z, f64::from(-0.6f32 + 0.2f32));
+        let chest = boat_passenger_attachment_point(height, 0.15, false, 0, 1, 0.0);
+        assert_eq!(chest.z, f64::from(0.15f32));
+    }
 
     #[test]
     fn passenger_yaw_is_clamped_to_boat() {

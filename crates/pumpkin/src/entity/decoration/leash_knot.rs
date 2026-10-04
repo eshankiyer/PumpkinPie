@@ -40,12 +40,7 @@ impl LeashKnotEntity {
             f64::from(pos.0.z) + 0.5,
         );
 
-        let search_dim = EntityDimensions {
-            width: 2.0,
-            height: 2.0,
-            eye_height: 1.0,
-            fixed: false,
-        };
+        let search_dim = EntityDimensions::new(2.0, 2.0, 1.0);
 
         let search_box = BoundingBox::new_from_pos(center.x, center.y, center.z, &search_dim);
         let entities = world.get_entities_at_box(&search_box);
@@ -146,12 +141,7 @@ impl EntityBase for LeashKnotEntity {
             let block = world.get_block(&self.pos);
             if !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_FENCES) {
                 let knot_id = self.entity.entity_id;
-                let search_dim = EntityDimensions {
-                    width: 32.0,
-                    height: 32.0,
-                    eye_height: 16.0,
-                    fixed: false,
-                };
+                let search_dim = EntityDimensions::new(32.0, 32.0, 16.0);
                 let pos = self.entity.pos.load();
                 let search_box = BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &search_dim);
                 let entities = world.get_entities_at_box(&search_box);
@@ -196,12 +186,7 @@ impl EntityBase for LeashKnotEntity {
             let knot_id = self.entity.entity_id;
             let player_id = player.entity_id();
 
-            let search_dim = EntityDimensions {
-                width: 32.0,
-                height: 32.0,
-                eye_height: 16.0,
-                fixed: false,
-            };
+            let search_dim = EntityDimensions::new(32.0, 32.0, 16.0);
             let pos = self.entity.pos.load();
             let search_box = BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &search_dim);
             let entities = world.get_entities_at_box(&search_box);

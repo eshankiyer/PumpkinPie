@@ -12,7 +12,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 use rand::{RngExt, rng};
 use uuid::Uuid;
 
@@ -547,7 +547,10 @@ impl AgeableMob for FoxEntity {
     }
 
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.36, 0.42, 0.34375))
+        Some(
+            EntityDimensions::new(0.36, 0.42, 0.34375)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.375)),
+        )
     }
 }
 

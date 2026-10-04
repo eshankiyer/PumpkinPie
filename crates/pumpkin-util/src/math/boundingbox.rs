@@ -433,6 +433,187 @@ impl BoundingBox {
     }
 }
 
+/// The most `PASSENGER` points any vanilla type declares (`HAPPY_GHAST`, `EntityTypes.java:488`).
+const MAX_PASSENGER_POINTS: usize = 4;
+
+/// Vanilla `EntityAttachments` (`EntityAttachments.java`): the per-kind attachment points of an
+/// entity, in entity-local space. The client-only `NAME_TAG` kind is not kept.
+#[derive(Clone, Copy, Debug)]
+pub struct EntityAttachments {
+    /// `EntityAttachment.PASSENGER` seats; only the first `passenger_len` are meaningful.
+    passenger: [Vector3<f64>; MAX_PASSENGER_POINTS],
+    /// How many `passenger` points are set (at least one).
+    passenger_len: u8,
+    /// `EntityAttachment.VEHICLE`: where this entity attaches to the seat it rides.
+    vehicle: Vector3<f64>,
+    /// `EntityAttachment.WARDEN_CHEST`: the sonic boom origin.
+    warden_chest: Vector3<f64>,
+}
+
+impl EntityAttachments {
+    /// `EntityAttachments.createDefault` (`EntityAttachments.java:19-21`): every kind uses its
+    /// fallback (`EntityAttachment.java`): `PASSENGER` at the top, `VEHICLE` at the feet and
+    /// `WARDEN_CHEST` at the centre.
+    #[must_use]
+    pub const fn fallback(width: f32, height: f32) -> Self {
+        EntityAttachmentsBuilder::new().build(width, height)
+    }
+
+    /// `EntityAttachments.scale` (`EntityAttachments.java:27-37`): every point multiplied
+    /// component-wise.
+    #[must_use]
+    pub fn scale(self, x: f32, y: f32, z: f32) -> Self {
+        let (x, y, z) = (f64::from(x), f64::from(y), f64::from(z));
+        Self {
+            passenger: self.passenger.map(|point| point.multiply(x, y, z)),
+            passenger_len: self.passenger_len,
+            vehicle: self.vehicle.multiply(x, y, z),
+            warden_chest: self.warden_chest.multiply(x, y, z),
+        }
+    }
+
+    /// `EntityAttachments.transformPoint` (`EntityAttachments.java:78-80`) with `Vec3.yRot`
+    /// (`Vec3.java:241-248`), which reads the float sine table.
+    #[must_use]
+    pub fn rotate_y(point: Vector3<f64>, rot_y: f32) -> Vector3<f64> {
+        let radians = -rot_y * (std::f64::consts::PI / 180.0) as f32;
+        let cos = f64::from(super::cos(radians));
+        let sin = f64::from(super::sin(radians));
+        Vector3::new(
+            point.x * cos + point.z * sin,
+            point.y,
+            point.z * cos - point.x * sin,
+        )
+    }
+
+    /// `EntityAttachments.getClamped(PASSENGER, index, rotY)` (`EntityAttachments.java:68-76`):
+    /// an index past either end of the list uses the nearest seat.
+    #[must_use]
+    pub fn passenger_clamped(&self, index: i32, rot_y: f32) -> Vector3<f64> {
+        let last = i32::from(self.passenger_len.max(1)) - 1;
+        let index = index.clamp(0, last) as usize;
+        Self::rotate_y(self.passenger[index], rot_y)
+    }
+
+    /// `EntityAttachments.get(VEHICLE, 0, rotY)` (`EntityAttachments.java:44-51`).
+    #[must_use]
+    pub fn vehicle_point(&self, rot_y: f32) -> Vector3<f64> {
+        Self::rotate_y(self.vehicle, rot_y)
+    }
+
+    /// `EntityAttachments.get(WARDEN_CHEST, 0, rotY)` (`EntityAttachments.java:44-51`).
+    #[must_use]
+    pub fn warden_chest_point(&self, rot_y: f32) -> Vector3<f64> {
+        Self::rotate_y(self.warden_chest, rot_y)
+    }
+
+    /// `EntityAttachments.getAverage(PASSENGER)` (`EntityAttachments.java:53-66`): the mean of
+    /// the unrotated seats, scaled by the float `1.0F / size`.
+    #[must_use]
+    pub fn average_passenger(&self) -> Vector3<f64> {
+        let len = usize::from(self.passenger_len.max(1));
+        let mut sum = Vector3::new(0.0, 0.0, 0.0);
+        for point in &self.passenger[..len] {
+            sum += *point;
+        }
+        let factor = f64::from(1.0f32 / len as f32);
+        sum.multiply(factor, factor, factor)
+    }
+}
+
+/// Vanilla `EntityAttachments.Builder` (`EntityAttachments.java:82-103`): the kinds left unset
+/// get their fallback from the dimensions the builder is finally applied to.
+#[derive(Clone, Copy, Debug)]
+pub struct EntityAttachmentsBuilder {
+    passenger: [Vector3<f64>; MAX_PASSENGER_POINTS],
+    passenger_len: u8,
+    vehicle: Option<Vector3<f64>>,
+    warden_chest: Option<Vector3<f64>>,
+}
+
+impl Default for EntityAttachmentsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EntityAttachmentsBuilder {
+    const ZERO: Vector3<f64> = Vector3::new(0.0, 0.0, 0.0);
+
+    /// `EntityAttachments.builder()`: nothing attached yet.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            passenger: [Self::ZERO; MAX_PASSENGER_POINTS],
+            passenger_len: 0,
+            vehicle: None,
+            warden_chest: None,
+        }
+    }
+
+    /// `attach(PASSENGER, point)`. A point past the fourth is ignored: no vanilla type has one.
+    #[must_use]
+    pub const fn passenger(mut self, point: Vector3<f64>) -> Self {
+        if (self.passenger_len as usize) < MAX_PASSENGER_POINTS {
+            self.passenger[self.passenger_len as usize] = point;
+            self.passenger_len += 1;
+        }
+        self
+    }
+
+    /// `EntityType.Builder.passengerAttachments(float)` (`EntityType.java:516-522`): a seat at
+    /// `(0, y, 0)` with the float widened.
+    #[must_use]
+    pub const fn passenger_y(self, y: f32) -> Self {
+        self.passenger(Vector3::new(0.0, y as f64, 0.0))
+    }
+
+    /// `attach(VEHICLE, point)` (`EntityType.Builder.vehicleAttachment`, `EntityType.java:532-534`).
+    #[must_use]
+    pub const fn vehicle(mut self, point: Vector3<f64>) -> Self {
+        self.vehicle = Some(point);
+        self
+    }
+
+    /// `EntityType.Builder.ridingOffset` (`EntityType.java:536-538`): `VEHICLE` at
+    /// `(0, -ridingOffset, 0)`.
+    #[must_use]
+    pub const fn riding_offset(self, riding_offset: f32) -> Self {
+        self.vehicle(Vector3::new(0.0, -riding_offset as f64, 0.0))
+    }
+
+    /// `attach(WARDEN_CHEST, point)`.
+    #[must_use]
+    pub const fn warden_chest(mut self, point: Vector3<f64>) -> Self {
+        self.warden_chest = Some(point);
+        self
+    }
+
+    /// `EntityAttachments.Builder.build` (`EntityAttachments.java:97-103`) with the
+    /// `EntityAttachment.Fallback` shapes (`EntityAttachment.java`).
+    #[must_use]
+    pub const fn build(self, _width: f32, height: f32) -> EntityAttachments {
+        let mut passenger = self.passenger;
+        let mut passenger_len = self.passenger_len;
+        if passenger_len == 0 {
+            passenger[0] = Vector3::new(0.0, height as f64, 0.0);
+            passenger_len = 1;
+        }
+        EntityAttachments {
+            passenger,
+            passenger_len,
+            vehicle: match self.vehicle {
+                Some(point) => point,
+                None => Self::ZERO,
+            },
+            warden_chest: match self.warden_chest {
+                Some(point) => point,
+                None => Vector3::new(0.0, height as f64 / 2.0, 0.0),
+            },
+        }
+    }
+}
+
 /// Represents the dimensions of an entity.
 #[derive(Clone, Copy, Debug)]
 pub struct EntityDimensions {
@@ -442,6 +623,8 @@ pub struct EntityDimensions {
     pub height: f32,
     /// Eye height relative to the bottom of the entity.
     pub eye_height: f32,
+    /// The entity's attachment points (`EntityDimensions.attachments`).
+    pub attachments: EntityAttachments,
     /// Whether this dimension set ignores non-uniform scaling.
     pub fixed: bool,
 }
@@ -459,6 +642,7 @@ impl EntityDimensions {
             width,
             height,
             eye_height,
+            attachments: EntityAttachments::fallback(width, height),
             fixed: false,
         }
     }
@@ -476,6 +660,7 @@ impl EntityDimensions {
             width,
             height,
             eye_height: height * 0.85,
+            attachments: EntityAttachments::fallback(width, height),
             fixed: true,
         }
     }
@@ -492,6 +677,16 @@ impl EntityDimensions {
         Self { eye_height, ..self }
     }
 
+    /// `EntityDimensions.withAttachments` (`EntityDimensions.java:53-55`): replaces every
+    /// attachment, the unset kinds falling back to this box's own size.
+    #[must_use]
+    pub const fn with_attachments(self, attachments: EntityAttachmentsBuilder) -> Self {
+        Self {
+            attachments: attachments.build(self.width, self.height),
+            ..self
+        }
+    }
+
     /// `EntityDimensions.scale` (`EntityDimensions.java:27-37`).
     #[must_use]
     pub fn scale(self, width_scale: f32, height_scale: f32) -> Self {
@@ -502,7 +697,75 @@ impl EntityDimensions {
             width: self.width * width_scale,
             height: self.height * height_scale,
             eye_height: self.eye_height * height_scale,
+            attachments: self
+                .attachments
+                .scale(width_scale, height_scale, width_scale),
             fixed: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EntityAttachmentsBuilder, EntityDimensions, Vector3};
+
+    #[test]
+    fn fallback_points_follow_the_box() {
+        let dims = EntityDimensions::new(0.6, 1.8, 1.62);
+        let attachments = dims.attachments;
+        assert_eq!(attachments.passenger_clamped(0, 0.0).y, f64::from(1.8f32));
+        assert_eq!(attachments.vehicle_point(0.0), Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(
+            attachments.warden_chest_point(0.0).y,
+            f64::from(1.8f32) / 2.0
+        );
+    }
+
+    #[test]
+    fn scale_multiplies_explicit_points() {
+        let dims = EntityDimensions::new(1.2, 0.4, 0.34)
+            .with_attachments(EntityAttachmentsBuilder::new().passenger(Vector3::new(
+                0.0,
+                f64::from(0.4f32),
+                f64::from(-0.25f32),
+            )))
+            .scale(0.3, 0.3);
+        let seat = dims.attachments.passenger_clamped(0, 0.0);
+        assert_eq!(seat.y, f64::from(0.4f32) * f64::from(0.3f32));
+        assert_eq!(seat.z, -0.25 * f64::from(0.3f32));
+    }
+
+    #[test]
+    fn passenger_index_is_clamped_and_rotated() {
+        let ghast = EntityDimensions::new(4.0, 4.0, 3.6).with_attachments(
+            EntityAttachmentsBuilder::new()
+                .passenger(Vector3::new(0.0, 4.0, 1.7))
+                .passenger(Vector3::new(-1.7, 4.0, 0.0))
+                .passenger(Vector3::new(0.0, 4.0, -1.7))
+                .passenger(Vector3::new(1.7, 4.0, 0.0)),
+        );
+        let attachments = ghast.attachments;
+        assert_eq!(
+            attachments.passenger_clamped(7, 0.0),
+            Vector3::new(1.7, 4.0, 0.0)
+        );
+        assert_eq!(attachments.passenger_clamped(-1, 0.0).z, 1.7);
+        // yaw 90: radians -PI/2, table cos 0 and sin -1, so (0, 4, 1.7) -> (-1.7, 4, 0).
+        assert_eq!(
+            attachments.passenger_clamped(0, 90.0),
+            Vector3::new(-1.7, 4.0, 0.0)
+        );
+        assert_eq!(attachments.average_passenger(), Vector3::new(0.0, 4.0, 0.0));
+    }
+
+    #[test]
+    fn riding_offset_negates_into_the_vehicle_point() {
+        let skeleton = EntityDimensions::new(0.6, 1.99, 1.74)
+            .with_attachments(EntityAttachmentsBuilder::new().riding_offset(-0.7));
+        assert_eq!(skeleton.attachments.vehicle_point(0.0).y, f64::from(0.7f32));
+        assert_eq!(
+            skeleton.attachments.passenger_clamped(0, 0.0).y,
+            f64::from(1.99f32)
+        );
     }
 }

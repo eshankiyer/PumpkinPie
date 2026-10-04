@@ -171,11 +171,12 @@ const fn is_abstract_horse_entity(id: u16) -> bool {
 /// Vanilla `Animal.getAmbientSoundInterval` (`Animal.java:121-124`). The Java method is
 /// inherited by every animal, while Pumpkin dispatches the sound cadence through `Mob`; keep
 /// the inherited 120-tick value here for the concrete types implementing `passive::animal::Animal`.
-const fn is_animal_entity(id: u16) -> bool {
+pub(crate) const fn is_animal_entity(id: u16) -> bool {
     id == EntityType::ARMADILLO.id
         || id == EntityType::AXOLOTL.id
         || id == EntityType::BEE.id
         || id == EntityType::CAMEL.id
+        || id == EntityType::CAMEL_HUSK.id
         || id == EntityType::CAT.id
         || id == EntityType::CHICKEN.id
         || id == EntityType::COW.id
@@ -625,7 +626,13 @@ impl MobEntity {
             event_context,
         )
         .await;
-        world.drop_stack(&entity.block_pos.load(), item).await;
+        // `Mob.shearItem` (`Mob.java:589-599`) drops it at the average passenger point.
+        let offset = entity
+            .entity_dimension
+            .load()
+            .attachments
+            .average_passenger();
+        entity.spawn_at_location_with_offset(item, offset).await;
         world.play_sound_event(&shearing_sound, SoundCategory::Neutral, &entity.pos.load());
         true
     }
@@ -1942,6 +1949,22 @@ pub trait Mob: EntityBase + Send + Sync {
     /// update, matching `Entity.positionRider` (`Entity.java:2387-2394`).
     fn get_vehicle_attachment_point(&self, _vehicle: &Entity) -> Option<Vector3<f64>> {
         None
+    }
+
+    /// Mob-side `Entity.getPassengerAttachmentPoint` (`Entity.java:2402-2409`); see
+    /// [`EntityBase::get_passenger_attachment_point`]. Camels override it.
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        _passenger: &'a dyn EntityBase,
+        passenger_index: i32,
+        _passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            self.get_mob_entity()
+                .living_entity
+                .entity
+                .default_passenger_attachment_point(passenger_index)
+        })
     }
 
     /// Vanilla `Mob.sunProtectionSlot`; zombie horses use their body slot.
@@ -3439,6 +3462,15 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
     fn get_vehicle_attachment_point(&self, vehicle: &Entity) -> Option<Vector3<f64>> {
         Mob::get_vehicle_attachment_point(self, vehicle)
+    }
+
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        passenger: &'a dyn EntityBase,
+        passenger_index: i32,
+        passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Mob::get_passenger_attachment_point(self, passenger, passenger_index, passenger_count)
     }
 
     fn get_mob(&self) -> Option<&dyn Mob> {

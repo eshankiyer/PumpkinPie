@@ -13,7 +13,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 use uuid::Uuid;
@@ -762,7 +762,10 @@ impl AgeableMob for PandaEntity {
     /// `Panda.BABY_DIMENSIONS`: the adult box (1.3 x 1.25) scaled by 0.5, with a 0.28125 eye
     /// height.
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.65, 0.625, 0.28125))
+        Some(
+            EntityDimensions::new(0.65, 0.625, 0.28125)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.5625)),
+        )
     }
 }
 

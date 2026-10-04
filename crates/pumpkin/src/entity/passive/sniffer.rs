@@ -291,12 +291,8 @@ impl SnifferEntity {
                 1.0
             };
             let [width, height] = entity.entity_type.dimension;
-            EntityDimensions {
-                width: width * scale,
-                height: (height - DIGGING_BB_HEIGHT_OFFSET) * scale,
-                eye_height: DIGGING_EYE_HEIGHT * scale,
-                fixed: false,
-            }
+            EntityDimensions::new(width, height - DIGGING_BB_HEIGHT_OFFSET, DIGGING_EYE_HEIGHT)
+                .scale(scale, scale)
         } else {
             entity.base_dimension.load()
         };

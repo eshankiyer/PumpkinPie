@@ -514,7 +514,13 @@ impl AgeableMob for HappyGhastEntity {
     }
 
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.95, 0.95, 0.46875))
+        // `HappyGhast.BABY_DIMENSIONS` (`HappyGhast.java:79`): the type box, seats included,
+        // scaled by 0.2375 with its own eye height.
+        Some(
+            crate::entity::attachments::type_dimensions(&EntityType::HAPPY_GHAST)
+                .scale(0.2375, 0.2375)
+                .with_eye_height(0.46875),
+        )
     }
 }
 

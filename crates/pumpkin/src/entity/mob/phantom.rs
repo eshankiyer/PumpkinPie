@@ -8,7 +8,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_protocol::{codec::var_int::VarInt, java::client::play::Metadata};
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -130,14 +130,11 @@ impl PhantomEntity {
             attack_damage.dirty.store(true, Ordering::Relaxed);
         }
 
-        let original = entity.entity_type.dimension;
+        // `Phantom.getDefaultDimensions` (`Phantom.java:201-205`): the type box, seat and
+        // vehicle point included, scaled by `1 + 0.15 * size`.
         let scale = 1.0 + 0.15 * size as f32;
-        let dimensions = EntityDimensions {
-            width: original[0] * scale,
-            height: original[1] * scale,
-            eye_height: entity.entity_type.eye_height * scale,
-            fixed: false,
-        };
+        let dimensions =
+            crate::entity::attachments::type_dimensions(entity.entity_type).scale(scale, scale);
         entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);
         let position = entity.pos.load();

@@ -14,7 +14,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 use rand::RngExt;
 
 use crate::entity::{
@@ -340,7 +340,10 @@ impl AgeableMob for AxolotlEntity {
 
     /// `Axolotl.BABY_DIMENSIONS` (`Axolotl.java:113-115`).
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.375, 0.21, 0.09375))
+        Some(
+            EntityDimensions::new(0.375, 0.21, 0.09375)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.1875)),
+        )
     }
 }
 

@@ -11,7 +11,7 @@ use pumpkin_data::Block;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::{data_component_impl::EquipmentSlot, entity::EntityType, item::Item};
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 
 use crate::entity::ai::pathfinder::node::PathType;
 use crate::entity::attributes::{Modifier, ModifierOperation};
@@ -186,7 +186,10 @@ impl AgeableMob for StriderEntity {
     }
 
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.45, 0.85, 0.4375))
+        Some(
+            EntityDimensions::new(0.45, 0.85, 0.4375)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.65625)),
+        )
     }
 }
 

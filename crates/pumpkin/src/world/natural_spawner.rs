@@ -1146,14 +1146,13 @@ pub(crate) fn spawn_dimensions(entity_type: &'static EntityType) -> EntityDimens
         _ => 1.0,
     };
 
-    EntityDimensions {
-        width: entity_type.dimension[0] * scale,
-        height: entity_type.dimension[1] * scale,
+    EntityDimensions::new(
+        entity_type.dimension[0] * scale,
+        entity_type.dimension[1] * scale,
         // `getSpawnAABB` does not use eye height, but preserving it keeps this
         // value suitable for callers that carry the complete dimensions.
-        eye_height: entity_type.eye_height,
-        fixed: false,
-    }
+        entity_type.eye_height,
+    )
 }
 
 pub fn is_spawn_position_ok(

@@ -911,6 +911,16 @@ impl WardenEntity {
             )
             .await;
         if damaged {
+            // `SonicBoom.java:68-70`: the beam starts at the `WARDEN_CHEST` attachment, so the
+            // push direction is measured from the chest to the target's eyes.
+            let entity = &self.mob_entity.living_entity.entity;
+            let chest = source
+                + entity
+                    .entity_dimension
+                    .load()
+                    .attachments
+                    .warden_chest_point(entity.yaw.load());
+            let delta = target_eye - chest;
             let normalize = if delta.length_squared() > 1.0e-6 {
                 delta.normalize()
             } else {

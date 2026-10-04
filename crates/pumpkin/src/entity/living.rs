@@ -527,11 +527,10 @@ impl LivingEntity {
             return bounding_box;
         };
 
-        let vehicle_entity = vehicle.get_entity();
-        let riding_position = vehicle_entity.pos.load().y + vehicle.get_passengers_riding_offset()
-            - self
-                .get_vehicle_attachment_point(vehicle_entity)
-                .map_or(0.0, |offset| offset.y);
+        // The seat itself, without the passenger's own vehicle attachment point.
+        let riding_position = Entity::passenger_riding_position(vehicle.as_ref(), self)
+            .await
+            .y;
         hitbox_with_riding_floor(bounding_box, Some(riding_position))
     }
 

@@ -10,8 +10,9 @@ use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -157,12 +158,18 @@ impl AgeableMob for TurtleEntity {
     }
 
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        let entity = self.get_entity();
-        Some(EntityDimensions::new(
-            entity.entity_type.dimension[0] * 0.3,
-            entity.entity_type.dimension[1] * 0.3,
-            entity.entity_type.eye_height * 0.3,
-        ))
+        // `Turtle.BABY_DIMENSIONS` (`Turtle.java:70-73`): the seat is attached to the adult box
+        // at `(0, height, -0.25)` and then scaled with it.
+        let entity_type = self.get_entity().entity_type;
+        Some(
+            crate::entity::attachments::type_dimensions(entity_type)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger(Vector3::new(
+                    0.0,
+                    f64::from(entity_type.dimension[1]),
+                    -0.25,
+                )))
+                .scale(0.3, 0.3),
+        )
     }
 }
 

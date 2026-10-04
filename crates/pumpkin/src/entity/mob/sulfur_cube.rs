@@ -14,11 +14,11 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::{codec::var_int::VarInt, java::client::play::Metadata};
-use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
     ai::control::{Control, MoveControlTrait},
     ai::goal::{Controls, Goal, GoalFuture, to_goal_ticks},
@@ -138,12 +138,9 @@ impl SulfurCubeEntity {
             living_entity.health.store(max_health);
         }
 
-        let scaled_dimensions = EntityDimensions {
-            width: entity.entity_type.dimension[0] * actual_size as f32,
-            height: entity.entity_type.dimension[1] * actual_size as f32,
-            eye_height: entity.entity_type.eye_height * actual_size as f32,
-            fixed: false,
-        };
+        // `AbstractCubeMob.getDefaultDimensions` (`AbstractCubeMob.java:258-260`).
+        let scaled_dimensions = crate::entity::attachments::type_dimensions(entity.entity_type)
+            .scale(actual_size as f32, actual_size as f32);
         entity.base_dimension.store(scaled_dimensions);
         entity.entity_dimension.store(scaled_dimensions);
 
@@ -265,9 +262,14 @@ impl SulfurCubeEntity {
         };
 
         if !previous.is_empty() {
+            // `SulfurCube.java:504-507`: dropped at the average passenger point.
             let entity = &self.entity.living_entity.entity;
-            let world = entity.world.load();
-            world.drop_stack(&entity.block_pos.load(), previous).await;
+            let offset = entity
+                .entity_dimension
+                .load()
+                .attachments
+                .average_passenger();
+            entity.spawn_at_location_with_offset(previous, offset).await;
         }
 
         let new_body = equipment.lock().await.get(&EquipmentSlot::BODY);
@@ -293,9 +295,14 @@ impl SulfurCubeEntity {
         }
         self.has_body_item_cached.store(false, Ordering::Relaxed);
 
+        // `SulfurCube.java:608-611`: dropped at the average passenger point.
         let entity = &self.entity.living_entity.entity;
-        let world = entity.world.load();
-        world.drop_stack(&entity.block_pos.load(), ejected).await;
+        let offset = entity
+            .entity_dimension
+            .load()
+            .attachments
+            .average_passenger();
+        entity.spawn_at_location_with_offset(ejected, offset).await;
 
         self.entity
             .living_entity
@@ -556,6 +563,28 @@ impl NBTStorage for SulfurCubeEntity {
 impl Mob for SulfurCubeEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity
+    }
+
+    /// `AbstractCubeMob.getPassengerAttachmentPoint` (`AbstractCubeMob.java:244-247`): the seat
+    /// sits `0.015625 * size * scale` below the top of the box, with
+    /// `scale = getScale() * getAgeScale()` (`LivingEntity.java:3980-3982`, `555-557`).
+    fn get_passenger_attachment_point<'a>(
+        &'a self,
+        _passenger: &'a dyn EntityBase,
+        _passenger_index: i32,
+        _passenger_count: usize,
+    ) -> EntityBaseFuture<'a, Vector3<f64>> {
+        Box::pin(async move {
+            let living = &self.entity.living_entity;
+            let scale = living.get_attribute_value(&Attributes::SCALE) as f32
+                * if self.is_baby() { 0.5 } else { 1.0 };
+            let height = f64::from(living.entity.entity_dimension.load().height);
+            Vector3::new(
+                0.0,
+                height - 0.015625 * f64::from(self.get_size()) * f64::from(scale),
+                0.0,
+            )
+        })
     }
 
     /// `AbstractCubeMob.getMaxHeadXRot` (`AbstractCubeMob.java:279-282`).

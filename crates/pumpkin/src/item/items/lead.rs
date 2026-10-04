@@ -59,12 +59,7 @@ pub(crate) async fn bind_player_mobs(player: &Player, location: BlockPos) -> boo
         f64::from(location.0.z) + 0.5,
     );
 
-    let search_dim = EntityDimensions {
-        width: 32.0,
-        height: 32.0,
-        eye_height: 16.0,
-        fixed: false,
-    };
+    let search_dim = EntityDimensions::new(32.0, 32.0, 16.0);
     let search_box = BoundingBox::new_from_pos(center.x, center.y, center.z, &search_dim);
     let player_id = player.entity_id();
     let entities = world.get_entities_at_box(&search_box);

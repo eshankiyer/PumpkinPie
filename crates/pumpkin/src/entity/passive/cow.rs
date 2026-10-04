@@ -8,7 +8,7 @@ use pumpkin_data::sound::Sound;
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 use rand::RngExt;
 
 use crate::entity::{
@@ -220,7 +220,10 @@ impl crate::entity::ageable::AgeableMob for CowEntity {
     }
 
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.45, 0.7, 0.69))
+        Some(
+            EntityDimensions::new(0.45, 0.7, 0.69)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.75)),
+        )
     }
 }
 

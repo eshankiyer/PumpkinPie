@@ -26,7 +26,7 @@ use crate::entity::{
     persistent_anger::PersistentAnger,
 };
 use crate::world::World;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{EntityAttachmentsBuilder, EntityDimensions};
 
 /// Represents a Polar Bear, a neutral mob found in cold biomes.
 ///
@@ -210,7 +210,10 @@ impl AgeableMob for PolarBearEntity {
 
     /// `PolarBear.BABY_DIMENSIONS` (`PolarBear.java:67-69`).
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        Some(EntityDimensions::new(0.7, 0.7, 0.34375))
+        Some(
+            EntityDimensions::new(0.7, 0.7, 0.34375)
+                .with_attachments(EntityAttachmentsBuilder::new().passenger_y(0.625)),
+        )
     }
 }
 
