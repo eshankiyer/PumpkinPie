@@ -211,6 +211,18 @@ impl NBTStorage for StriderEntity {
             if let Some(saddle) = nbt.get_byte("Saddle") {
                 self.set_saddled(saddle == 1);
             }
+            // Vanilla keeps the saddle only as the SADDLE equipment item (no `Saddle` tag), so a
+            // world saved by vanilla restores the flag from the loaded item.
+            let saddle = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .await
+                .get(&EquipmentSlot::SADDLE);
+            if !saddle.is_empty() {
+                self.set_saddled(true);
+            }
         })
     }
 }

@@ -5612,33 +5612,12 @@ impl NBTStorage for LivingEntity {
                     nbt.put("active_effects", NbtTag::List(effects_list));
                 }
             }
-            let equipment = self.entity_equipment.lock().await;
-            let mut hand_items = Vec::with_capacity(2);
-            for slot in [EquipmentSlot::MAIN_HAND, EquipmentSlot::OFF_HAND] {
-                let stack = equipment.get(&slot);
-                let mut item_nbt = NbtCompound::new();
-                if !stack.is_empty() {
-                    stack.write_item_stack(&mut item_nbt);
-                }
-                hand_items.push(NbtTag::Compound(item_nbt));
+            // `LivingEntity.addAdditionalSaveData` (`LivingEntity.java:771-773`): one `equipment`
+            // compound keyed by slot name, written only when some slot holds an item.
+            let equipment = write_equipment_nbt(&*self.entity_equipment.lock().await);
+            if let Some(equipment) = equipment {
+                nbt.put_compound("equipment", equipment);
             }
-            nbt.put("HandItems", NbtTag::List(hand_items));
-
-            let mut armor_items = Vec::with_capacity(4);
-            for slot in [
-                EquipmentSlot::FEET,
-                EquipmentSlot::LEGS,
-                EquipmentSlot::CHEST,
-                EquipmentSlot::HEAD,
-            ] {
-                let stack = equipment.get(&slot);
-                let mut item_nbt = NbtCompound::new();
-                if !stack.is_empty() {
-                    stack.write_item_stack(&mut item_nbt);
-                }
-                armor_items.push(NbtTag::Compound(item_nbt));
-            }
-            nbt.put("ArmorItems", NbtTag::List(armor_items));
             // todo more...
         })
     }
@@ -5805,10 +5784,18 @@ impl LivingEntity {
         }
     }
 
-    /// Restores the `HandItems` / `ArmorItems` lists written by `write_nbt`. Split out of
+    /// Restores equipment: vanilla `LivingEntity.readAdditionalSaveData` replaces every slot with
+    /// the `equipment` compound, or clears them all when it is absent (`LivingEntity.java:837`).
+    /// The legacy `HandItems` / `ArmorItems` lists that Pumpkin wrote before are still read when
+    /// no `equipment` compound exists, so older Pumpkin saves keep their gear. Split out of
     /// `read_nbt_non_mut` purely to keep that function within its line budget.
     async fn load_equipment_from_nbt(&self, nbt: &NbtCompound) {
         let mut equipment = self.entity_equipment.lock().await;
+        if let Some(compound) = nbt.get_compound("equipment") {
+            equipment.set_all(read_equipment_nbt(compound));
+            return;
+        }
+        equipment.clear();
         for (key, slots) in [
             (
                 "HandItems",
@@ -5839,6 +5826,42 @@ impl LivingEntity {
             }
         }
     }
+}
+
+/// Encodes equipment as vanilla `EntityEquipment.CODEC` does (`EntityEquipment.java:15-18`):
+/// slot serialized name -> item stack, empty stacks omitted. `None` when every slot is empty.
+fn write_equipment_nbt(equipment: &EntityEquipment) -> Option<NbtCompound> {
+    if equipment.is_empty() {
+        return None;
+    }
+    let mut compound = NbtCompound::new();
+    for (slot, stack) in &equipment.equipment {
+        if stack.is_empty() {
+            continue;
+        }
+        let mut item = NbtCompound::new();
+        stack.write_item_stack(&mut item);
+        compound.put_compound(slot.get_serialized_name(), item);
+    }
+    Some(compound)
+}
+
+/// Decodes an `equipment` compound written by [`write_equipment_nbt`] or vanilla; unknown slot
+/// names and unreadable stacks are skipped.
+fn read_equipment_nbt(compound: &NbtCompound) -> HashMap<EquipmentSlot, ItemStack> {
+    let mut items = HashMap::new();
+    for (name, tag) in &compound.child_tags {
+        let Some(slot) = EquipmentSlot::get_from_name(name) else {
+            continue;
+        };
+        let Some(stack) = tag.extract_compound().and_then(ItemStack::read_item_stack) else {
+            continue;
+        };
+        if !stack.is_empty() {
+            items.insert(slot.clone(), stack);
+        }
+    }
+    items
 }
 
 impl EntityBase for LivingEntity {
@@ -8343,6 +8366,38 @@ fn skeleton_swim_sound_volume(on_ground: bool, water_volume: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `EntityEquipment.CODEC` keys stacks by slot name, covers BODY and SADDLE, and omits empty
+    /// slots (`EntityEquipment.java:15-18`); `setAll` replaces the whole map.
+    #[test]
+    fn equipment_nbt_round_trips_all_slots() {
+        let mut equipment = EntityEquipment::new();
+        equipment.put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::IRON_HELMET));
+        equipment.put(&EquipmentSlot::BODY, ItemStack::new(1, &Item::IRON_HORSE_ARMOR));
+        equipment.put(&EquipmentSlot::SADDLE, ItemStack::new(1, &Item::SADDLE));
+        equipment.put(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone());
+
+        let Some(compound) = write_equipment_nbt(&equipment) else {
+            panic!("non-empty equipment must be written");
+        };
+        assert!(compound.get_compound("head").is_some());
+        assert!(compound.get_compound("body").is_some());
+        assert!(compound.get_compound("saddle").is_some());
+        assert!(compound.get_compound("mainhand").is_none());
+
+        let mut loaded = EntityEquipment::new();
+        loaded.put(&EquipmentSlot::FEET, ItemStack::new(1, &Item::IRON_BOOTS));
+        loaded.set_all(read_equipment_nbt(&compound));
+        assert!(loaded.get(&EquipmentSlot::FEET).is_empty());
+        assert_eq!(loaded.get(&EquipmentSlot::HEAD).item.id, Item::IRON_HELMET.id);
+        assert_eq!(
+            loaded.get(&EquipmentSlot::BODY).item.id,
+            Item::IRON_HORSE_ARMOR.id
+        );
+        assert_eq!(loaded.get(&EquipmentSlot::SADDLE).item.id, Item::SADDLE.id);
+
+        assert!(write_equipment_nbt(&EntityEquipment::new()).is_none());
+    }
 
     /// `FallLocation.blockToFallLocation` preserves the ladder, vine, and scaffolding variants
     /// used by fall-death translation keys (`FallLocation.java:12-29`).

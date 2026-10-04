@@ -73,5 +73,13 @@ impl EntityEquipment {
         self.equipment.clear();
     }
 
+    /// Replaces every slot with `items`; slots absent from `items` end up empty.
+    ///
+    /// Vanilla `EntityEquipment.setAll` (`EntityEquipment.java:57-60`).
+    pub fn set_all(&mut self, items: HashMap<EquipmentSlot, ItemStack>) {
+        self.equipment.clear();
+        self.equipment.extend(items);
+    }
+
     // TODO: tick - Equipment updates, durability damage, etc.
 }

@@ -15,6 +15,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
 use pumpkin_data::smithing;
 use pumpkin_data::statistic::StatisticCategory;
+use pumpkin_data::world::WorldEvent;
 use pumpkin_protocol::java::server::play::SlotActionType;
 use pumpkin_world::block::entities::PropertyDelegate;
 use pumpkin_world::inventory::Inventory;
@@ -246,9 +247,13 @@ impl ScreenHandler for SmithingScreenHandler {
                 self.update_output().await;
                 return;
             }
+            let is_drag = action_type == SlotActionType::QuickCraft;
             self.internal_on_slot_click(slot_index, button, action_type, player)
                 .await;
-            if (0..4).contains(&slot_index) {
+            // Vanilla recomputes via `SimpleContainer.setChanged -> slotsChanged` after any
+            // input change (`ItemCombinerMenu.java:85-101`, `SmithingMenu.java:96-106`); a drag
+            // ends with slot -999 (`AbstractContainerMenu.java:360-367`) yet may fill inputs.
+            if (0..4).contains(&slot_index) || is_drag {
                 self.update_output().await;
             }
         })
@@ -433,6 +438,11 @@ impl Slot for SmithingOutputSlot {
                 }
                 self.input_inventory.set_stack(index, input_stack).await;
             }
+            // `access.execute((level, pos) -> level.levelEvent(1044, pos, 0))`
+            // (`SmithingMenu.java:77`): the smithing-table sound at the table.
+            player
+                .container_world_event(WorldEvent::SoundSmithingTableUsed, 0)
+                .await;
             self.mark_dirty().await;
         })
     }
@@ -689,6 +699,187 @@ mod tests {
             addition_slot
                 .can_insert(&ItemStack::new(1, &Item::QUARTZ))
                 .await
+        );
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::screen_handler::PlayerFuture;
+
+    /// Counts smithing-table world events.
+    struct TestPlayer {
+        inventory: Arc<PlayerInventory>,
+        world_events: AtomicUsize,
+    }
+
+    impl TestPlayer {
+        fn new() -> Self {
+            Self {
+                inventory: Arc::new(PlayerInventory::new(
+                    Arc::new(Mutex::new(EntityEquipment::new())),
+                    Arc::new(build_equipment_slots()),
+                )),
+                world_events: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl InventoryPlayer for TestPlayer {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn get_inventory(&self) -> Arc<PlayerInventory> {
+            self.inventory.clone()
+        }
+        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn has_infinite_materials(&self) -> bool {
+            false
+        }
+        fn is_creative(&self) -> bool {
+            false
+        }
+        fn experience_level(&self) -> i32 {
+            0
+        }
+        fn add_experience_levels(&self, _levels: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn enchantment_seed(&self) -> i32 {
+            0
+        }
+        fn set_enchantment_seed(&self, _seed: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_inventory_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerContent,
+            _window_type: Option<WindowType>,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_slot_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerSlot,
+            _window_type: Option<WindowType>,
+            _total_slots: usize,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_cursor_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetCursorItem,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_property_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerProperty,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_slot_set_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetPlayerInventory,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_set_held_item_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetSelectedSlot,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_equipment_change<'a>(
+            &'a self,
+            _slot: &'a pumpkin_data::data_component_impl::EquipmentSlot,
+            _stack: &'a ItemStack,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn award_experience(&self, _amount: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn container_world_event(&self, event: WorldEvent, _data: i32) -> PlayerFuture<'_, ()> {
+            if matches!(event, WorldEvent::SoundSmithingTableUsed) {
+                self.world_events.fetch_add(1, Ordering::Relaxed);
+            }
+            Box::pin(async {})
+        }
+        fn increment_stat(
+            &self,
+            _category: pumpkin_data::statistic::StatisticCategory,
+            _stat_id: i32,
+            _amount: i32,
+        ) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    async fn place_netherite_upgrade_inputs(handler: &SmithingScreenHandler) {
+        handler
+            .input_inventory
+            .set_stack(
+                TEMPLATE_SLOT,
+                ItemStack::new(1, &Item::NETHERITE_UPGRADE_SMITHING_TEMPLATE),
+            )
+            .await;
+        handler
+            .input_inventory
+            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD))
+            .await;
+    }
+
+    /// A drag ends with slot -999 (`AbstractContainerMenu.java:360-367`) but still changes the
+    /// inputs, so `slotsChanged` must recompute the result (`ItemCombinerMenu.java:96-101`).
+    #[tokio::test]
+    async fn drag_into_addition_slot_recomputes_result() {
+        let player = TestPlayer::new();
+        let mut handler = SmithingScreenHandler::new(0, &player.inventory);
+        place_netherite_upgrade_inputs(&handler).await;
+        *handler.get_behaviour().cursor_stack.lock().await =
+            ItemStack::new(2, &Item::NETHERITE_INGOT);
+
+        for (slot, button) in [(-999, 0), (2, 1), (4, 1), (-999, 2)] {
+            handler
+                .on_slot_click(slot, button, SlotActionType::QuickCraft, &player)
+                .await;
+        }
+
+        let addition = handler.input_inventory.get_stack(ADDITION_SLOT).await;
+        assert!(addition.item == &Item::NETHERITE_INGOT);
+        let output = handler.output_inventory.get_stack(0).await;
+        assert!(output.item == &Item::NETHERITE_SWORD);
+        assert!(!handler.recipe_error.has_recipe_error());
+    }
+
+    /// `SmithingMenu.onTake` ends with `levelEvent(1044, pos, 0)` (`SmithingMenu.java:77`).
+    #[tokio::test]
+    async fn taking_result_emits_smithing_table_event() {
+        let player = TestPlayer::new();
+        let mut handler = SmithingScreenHandler::new(0, &player.inventory);
+        place_netherite_upgrade_inputs(&handler).await;
+        handler
+            .input_inventory
+            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::NETHERITE_INGOT))
+            .await;
+        handler.update_output().await;
+
+        handler
+            .on_slot_click(3, 0, SlotActionType::QuickMove, &player)
+            .await;
+
+        assert_eq!(player.world_events.load(Ordering::Relaxed), 1);
+        assert!(
+            handler
+                .input_inventory
+                .get_stack(BASE_SLOT)
+                .await
+                .is_empty()
         );
     }
 }
