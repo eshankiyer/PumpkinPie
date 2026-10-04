@@ -49,3 +49,23 @@ fn entity_touching_detection_box_boundary_does_not_intersect() {
 
     assert!(!detection_box.intersects(&entity_box));
 }
+
+#[test]
+fn click_sound_follows_block_set_type() {
+    assert_eq!(
+        pressure_plate_click_sound(&Block::HEAVY_WEIGHTED_PRESSURE_PLATE, true),
+        Sound::BlockMetalPressurePlateClickOn
+    );
+    assert_eq!(
+        pressure_plate_click_sound(&Block::POLISHED_BLACKSTONE_PRESSURE_PLATE, false),
+        Sound::BlockStonePressurePlateClickOff
+    );
+    assert_eq!(
+        pressure_plate_click_sound(&Block::CRIMSON_PRESSURE_PLATE, true),
+        Sound::BlockNetherWoodPressurePlateClickOn
+    );
+    assert_eq!(
+        pressure_plate_click_sound(&Block::PALE_OAK_PRESSURE_PLATE, false),
+        Sound::BlockWoodenPressurePlateClickOff
+    );
+}

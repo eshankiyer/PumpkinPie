@@ -1,12 +1,20 @@
 use std::sync::Arc;
 
-use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId};
-use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos};
+use pumpkin_data::{
+    Block, BlockDirection, BlockState, BlockStateId,
+    game_event::GameEvent,
+    sound::{Sound, SoundCategory},
+};
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 use pumpkin_world::{tick::TickPriority, world::BlockFlags};
 
 use crate::{
     block::{OnEntityCollisionArgs, OnScheduledTickArgs, OnStateReplacedArgs},
-    world::World,
+    entity::EntityBase,
+    world::{
+        World,
+        game_event::{GameEventContext, emit_game_event},
+    },
 };
 
 pub mod plate;
@@ -25,12 +33,54 @@ fn detection_box_at(pos: &BlockPos) -> BoundingBox {
     PRESSURE_PLATE_DETECTION_BOX.at_pos(*pos)
 }
 
+/// Vanilla `BasePressurePlateBlock.checkPressed` plays the block-set type's
+/// `pressurePlateClickOn`/`pressurePlateClickOff` (`BlockSetType.java:22-23`). Gold and iron
+/// (the weighted plates) use the metal clicks, stone and polished blackstone the stone clicks;
+/// cherry, bamboo and crimson/warped (nether wood) register their own, and every plain wood set
+/// type uses the single-arg constructor's wooden clicks (`BlockSetType.java:200-216`).
+fn pressure_plate_click_sound(block: &Block, pressed: bool) -> Sound {
+    let (on, off) = match block.name {
+        "light_weighted_pressure_plate" | "heavy_weighted_pressure_plate" => (
+            Sound::BlockMetalPressurePlateClickOn,
+            Sound::BlockMetalPressurePlateClickOff,
+        ),
+        "stone_pressure_plate" | "polished_blackstone_pressure_plate" => (
+            Sound::BlockStonePressurePlateClickOn,
+            Sound::BlockStonePressurePlateClickOff,
+        ),
+        "cherry_pressure_plate" => (
+            Sound::BlockCherryWoodPressurePlateClickOn,
+            Sound::BlockCherryWoodPressurePlateClickOff,
+        ),
+        "bamboo_pressure_plate" => (
+            Sound::BlockBambooWoodPressurePlateClickOn,
+            Sound::BlockBambooWoodPressurePlateClickOff,
+        ),
+        "crimson_pressure_plate" | "warped_pressure_plate" => (
+            Sound::BlockNetherWoodPressurePlateClickOn,
+            Sound::BlockNetherWoodPressurePlateClickOff,
+        ),
+        _ => (
+            Sound::BlockWoodenPressurePlateClickOn,
+            Sound::BlockWoodenPressurePlateClickOff,
+        ),
+    };
+    if pressed { on } else { off }
+}
+
 pub(crate) trait PressurePlate {
     async fn on_entity_collision_pp(&self, args: OnEntityCollisionArgs<'_>) {
         let output = self.get_redstone_output(args.block, args.state.id);
         if output == 0 {
-            self.update_plate_state(args.world, args.position, args.block, args.state, output)
-                .await;
+            self.update_plate_state(
+                args.world,
+                args.position,
+                args.block,
+                args.state,
+                output,
+                Some(args.entity),
+            )
+            .await;
         }
     }
 
@@ -38,7 +88,7 @@ pub(crate) trait PressurePlate {
         let state = args.world.get_block_state(args.position);
         let output = self.get_redstone_output(args.block, state.id);
         if output > 0 {
-            self.update_plate_state(args.world, args.position, args.block, state, output)
+            self.update_plate_state(args.world, args.position, args.block, state, output, None)
                 .await;
         }
     }
@@ -59,10 +109,14 @@ pub(crate) trait PressurePlate {
         block: &Block,
         state: &BlockState,
         output: u8,
+        source: Option<&dyn EntityBase>,
     ) {
         let calc_output = self.calculate_redstone_output(world, block, pos).await;
-        let has_output = calc_output > 0;
-        if calc_output != output {
+        // Vanilla takes `isPressed` from the same signal it writes, so a plugin that rewrites
+        // the current also decides the click, game event and rescheduling below.
+        let new_output = if calc_output == output {
+            calc_output
+        } else {
             let next_output = if let Some(server) = world.server.upgrade() {
                 let mut event = crate::plugin::block::block_redstone::BlockRedstoneEvent::new(
                     world.clone(),
@@ -85,6 +139,40 @@ pub(crate) trait PressurePlate {
                 .await;
             world.update_neighbors(pos, None).await;
             world.update_neighbors(&pos.down(), None).await;
+            next_output
+        };
+        let has_output = new_output > 0;
+        // Vanilla `checkPressed` (BasePressurePlateBlock.java:108-114): the click sound and
+        // BLOCK_ACTIVATE/BLOCK_DEACTIVATE fire only when the pressed boolean flips, so a
+        // weighted plate going 5 -> 10 stays silent. The source is the colliding entity on
+        // the collision path and none on the scheduled-tick path.
+        let was_pressed = output > 0;
+        if was_pressed != has_output {
+            world.play_block_sound(
+                pressure_plate_click_sound(block, has_output),
+                SoundCategory::Blocks,
+                *pos,
+            );
+            // Resolve the Arc only here: the collision path runs every tick an entity rests
+            // on an unpowered plate, and `get_entity_by_id` is a scan.
+            let context = source
+                .and_then(|entity| world.get_entity_by_id(entity.get_entity().entity_id))
+                .map_or_else(GameEventContext::none, GameEventContext::of_entity);
+            emit_game_event(
+                world,
+                if has_output {
+                    GameEvent::BlockActivate
+                } else {
+                    GameEvent::BlockDeactivate
+                },
+                Vector3::new(
+                    f64::from(pos.0.x) + 0.5,
+                    f64::from(pos.0.y) + 0.5,
+                    f64::from(pos.0.z) + 0.5,
+                ),
+                context,
+            )
+            .await;
         }
         if has_output {
             world.schedule_block_tick(block, *pos, self.tick_rate(), TickPriority::Normal);
