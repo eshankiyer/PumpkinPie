@@ -72,22 +72,6 @@ impl ItemMetadata for MilkBucketItem {
     }
 }
 
-fn get_start_and_end_pos(player: &Player) -> (Vector3<f64>, Vector3<f64>) {
-    let start_pos = player.eye_position();
-    let (yaw, pitch) = player.rotation();
-    let (yaw_rad, pitch_rad) = (f64::from(yaw.to_radians()), f64::from(pitch.to_radians()));
-    let block_interaction_range = 4.5; // This is not the same as the block_interaction_range in the
-    // player entity.
-    let direction = Vector3::new(
-        -yaw_rad.sin() * pitch_rad.cos() * block_interaction_range,
-        -pitch_rad.sin() * block_interaction_range,
-        pitch_rad.cos() * yaw_rad.cos() * block_interaction_range,
-    );
-
-    let end_pos = start_pos.add(&direction);
-    (start_pos, end_pos)
-}
-
 pub(crate) fn waterlogged_check(block: &Block, state: BlockStateId) -> Option<bool> {
     if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SLABS)
         && !crate::block::blocks::slabs::can_place_liquid(block, state)
@@ -680,7 +664,7 @@ impl ItemBehaviour for EmptyBucketItem {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             let world = player.world();
-            let (start_pos, end_pos) = get_start_and_end_pos(player);
+            let (start_pos, end_pos) = self.get_start_and_end_pos(player);
 
             let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
                 let state_id = world_inner.get_block_state_id(pos);
@@ -931,7 +915,7 @@ impl ItemBehaviour for FilledBucketItem {
                 None
             };
 
-            let (start_pos, end_pos) = get_start_and_end_pos(player);
+            let (start_pos, end_pos) = self.get_start_and_end_pos(player);
             let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
                 let state_id = world_inner.get_block_state_id(pos);
                 if Fluid::from_state_id(state_id).is_some() {

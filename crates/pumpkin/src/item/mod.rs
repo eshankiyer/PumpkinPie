@@ -100,8 +100,9 @@ pub trait ItemBehaviour: Send + Sync {
         let start_pos = player.eye_position();
         let (yaw, pitch) = player.rotation();
         let (yaw_rad, pitch_rad) = (f64::from(yaw.to_radians()), f64::from(pitch.to_radians()));
-        let block_interaction_range = 4.5; // This is not the same as the block_interaction_range in the
-        // player entity.
+        // Vanilla `Item.getPlayerPOVHitResult` reaches `player.blockInteractionRange()`,
+        // which includes the creative +0.5 modifier.
+        let block_interaction_range = player.block_interaction_range();
         let direction = Vector3::new(
             -yaw_rad.sin() * pitch_rad.cos() * block_interaction_range,
             -pitch_rad.sin() * block_interaction_range,
