@@ -6899,7 +6899,11 @@ impl EntityBase for LivingEntity {
                 // dispatch dynamically, since `Mob`/`Player` `is_pushable` must not gate the pusher.
                 if self.entity.entity_type == &EntityType::ARMOR_STAND {
                     caller.push_entities(caller).await;
-                } else {
+                } else if self.entity.entity_type != &EntityType::PLAYER
+                    || server.tick_rate_manager.runs_normally()
+                {
+                    // `ServerPlayer.pushEntities` (`ServerPlayer.java:1312-1316`) only runs
+                    // while the tick rate manager runs normally.
                     self.push_entities(caller).await;
                 }
                 // The shared movement emission path emits sounds and STEP/SWIM events after

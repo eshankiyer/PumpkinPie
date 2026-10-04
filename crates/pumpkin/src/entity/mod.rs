@@ -246,6 +246,18 @@ async fn team_allows_push(
     collision_rule_permits_push(pusher_rule, other_rule, same_team)
 }
 
+/// The player half of `EntitySelector.pushableBy`: `NO_SPECTATORS`
+/// (`EntitySelector.java:17`) and `LivingEntity.isPushable` (`LivingEntity.java:3365-3367`),
+/// i.e. `isAlive` (`:1751-1753`) and not `onClimbable`, using the `Player.onClimbable`
+/// override that ignores climbables while flying (`Player.java:2023-2026`). Unlike
+/// [`Player::is_pushable`] this keeps creative players, as vanilla does.
+async fn player_is_push_candidate(player: &Player) -> bool {
+    !player.is_spectator()
+        && !player.living_entity.entity.is_removed()
+        && player.living_entity.health.load() > 0.0
+        && !player.on_climbable().await
+}
+
 /// Resolves the pusher's own collision rule/team name once per `push_entities` call, and whether
 /// any teams exist at all (so the common no-teams case can skip per-candidate locking entirely).
 async fn pusher_team_state(
@@ -1056,8 +1068,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 iron_golem.mob_entity.set_target(Some(entity.clone())).await;
             }
 
+            // `Entity.push` (`Entity.java:1868-1870`) is inert when either side has
+            // `noPhysics`, which `Player.tick` sets for spectators (`Player.java:233`).
             if self_entity.no_clip.load(Ordering::Relaxed)
                 || other_entity.no_clip.load(Ordering::Relaxed)
+                || self.is_spectator()
+                || entity.is_spectator()
             {
                 return;
             }
@@ -1134,7 +1150,10 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             let self_entity = self.get_entity();
             let entity_bb = self_entity.bounding_box.load();
 
-            if !self.can_push_others() {
+            // `Bat.pushEntities` (`Bat.java:95-96`) is empty. On the living tick path `self`
+            // is the `LivingEntity`, so the mob override must be asked through `dyn_self`.
+            if !self.can_push_others() || dyn_self.get_mob().is_some_and(|m| !m.mob_pushes_entities())
+            {
                 return false;
             }
 
@@ -1255,6 +1274,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 for player in players {
                     if player.get_entity().entity_id != self_entity.entity_id
                         && is_rideable_minecart
+                        && player_is_push_candidate(&player).await
                         && (!has_teams
                             || team_allows_push(
                                 &world,
@@ -1271,6 +1291,9 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                     }
                 }
             } else {
+                // `Level.getPushableEntities` (`pushableBy`): one candidate list of entities
+                // and players; cramming counts it before any `doPush` runs.
+                let mut candidates: Vec<Arc<dyn EntityBase>> = Vec::new();
                 let other_entities = world.get_entities_at_box(&entity_bb);
                 for other in other_entities {
                     if other.get_entity().entity_id != self_entity.entity_id
@@ -1285,16 +1308,15 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                             )
                             .await)
                     {
-                        dyn_self.push(&other).await;
-                        pushed = true;
+                        candidates.push(other);
                     }
                 }
+                let entity_count = candidates.len();
 
                 let players = world.get_players_at_box(&entity_bb);
                 for player in players {
                     if player.get_entity().entity_id != self_entity.entity_id
-                        // `Parrot.doPush` (`Parrot.java:389-394`) skips players.
-                        && self_entity.entity_type != &EntityType::PARROT
+                        && player_is_push_candidate(&player).await
                         && (!has_teams
                             || team_allows_push(
                                 &world,
@@ -1304,10 +1326,38 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                             )
                             .await)
                     {
-                        let player_base: Arc<dyn EntityBase> = player.clone();
-                        dyn_self.push(&player_base).await;
-                        pushed = true;
+                        candidates.push(player);
                     }
+                }
+
+                // `LivingEntity.pushEntities` (`LivingEntity.java:3221-3240`): with more than
+                // `maxEntityCramming - 1` candidates, a 1-in-4 roll counts the non-passengers
+                // and deals 6 cramming damage when they also exceed it.
+                let max_cramming = world.level_info.load().game_rules.max_entity_cramming;
+                if max_cramming > 0
+                    && i64::try_from(candidates.len()).unwrap_or(i64::MAX) > max_cramming - 1
+                    && rand::random_range(0..4) == 0
+                {
+                    let mut count: i64 = 0;
+                    for candidate in &candidates {
+                        if !candidate.is_passenger().await {
+                            count += 1;
+                        }
+                    }
+                    if count > max_cramming - 1 {
+                        dyn_self
+                            .damage(dyn_self.as_ref(), 6.0, DamageType::CRAMMING)
+                            .await;
+                    }
+                }
+
+                for (index, candidate) in candidates.iter().enumerate() {
+                    // `Parrot.doPush` (`Parrot.java:389-394`) skips players.
+                    if index >= entity_count && self_entity.entity_type == &EntityType::PARROT {
+                        continue;
+                    }
+                    dyn_self.push(candidate).await;
+                    pushed = true;
                 }
             }
 

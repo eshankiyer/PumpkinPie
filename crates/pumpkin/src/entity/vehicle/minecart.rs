@@ -606,8 +606,11 @@ impl EntityBase for MinecartEntity {
             let self_entity = self.get_entity();
             let other_entity = entity.get_entity();
 
+            // `Entity.push` noPhysics gate; `Player.tick` sets it for spectators
+            // (`Player.java:233`).
             if self_entity.no_clip.load(Ordering::Relaxed)
                 || other_entity.no_clip.load(Ordering::Relaxed)
+                || entity.is_spectator()
             {
                 return;
             }

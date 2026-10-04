@@ -68,9 +68,11 @@ impl EntityPredicate<'_> {
 
                     while let Some(vehicle_arc) = opt_vehicle_arc {
                         let vehicle_entity_base: &dyn EntityBase = &*vehicle_arc;
-                        let target_base: &dyn EntityBase = target;
 
-                        if std::ptr::eq(vehicle_entity_base, target_base) {
+                        // Compare the inner `Entity` identity: wide `&dyn` pointers
+                        // carry different vtables for the same entity, so `ptr::eq`
+                        // on them never matches (vanilla `input == entity`).
+                        if vehicle_entity_base.get_entity().entity_id == target.entity_id {
                             return false;
                         }
 

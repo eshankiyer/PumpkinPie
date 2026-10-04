@@ -667,11 +667,16 @@ impl DragonFight {
         let current: Vec<Uuid> = players
             .iter()
             .filter(|p| {
+                // Vanilla `validPlayer`: ENTITY_STILL_ALIVE (LivingEntity.isAlive)
+                // and `withinDistance`, whose bound is inclusive.
+                if p.living_entity.entity.is_removed() || p.living_entity.health.load() <= 0.0 {
+                    return false;
+                }
                 let pos = p.living_entity.entity.pos.load();
                 let dx = pos.x;
                 let dy = pos.y - DRAGON_SPAWN_Y;
                 let dz = pos.z;
-                dx * dx + dy * dy + dz * dz < ARENA_RADIUS * ARENA_RADIUS
+                dx * dx + dy * dy + dz * dz <= ARENA_RADIUS * ARENA_RADIUS
             })
             .map(|p| p.gameprofile.id)
             .collect();
