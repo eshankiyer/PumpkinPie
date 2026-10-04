@@ -21,6 +21,7 @@ impl CocoaTreeDecorator {
         chunk: &mut T,
         random: &mut RandomGenerator,
         log_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         // The probability roll happens before the empty check, as in vanilla.
         if random.next_f32() >= self.probability || log_positions.is_empty() {
@@ -47,6 +48,7 @@ impl CocoaTreeDecorator {
                 let mut props = CocoaLikeProperties::default(&Block::COCOA);
                 props.age = random.next_bounded_i32(3) as u8;
                 props.facing = direction.to_cardinal_direction();
+                decorations.push(cocoa_pos);
                 chunk.set_block_state(
                     &cocoa_pos.0,
                     BlockState::from_id(props.to_state_id(&Block::COCOA)),

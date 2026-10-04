@@ -1,12 +1,15 @@
 use decorator::TreeDecorator;
 use foliage::{FoliagePlacer, FoliageSetter};
-use pumpkin_data::BlockState;
-use pumpkin_data::{BlockId, tag};
-use pumpkin_util::{math::position::BlockPos, random::RandomGenerator};
+use pumpkin_data::block_properties::{BlockProperties, OakLeavesLikeProperties};
+use pumpkin_data::tag::Taggable;
+use pumpkin_data::{Block, BlockDirection, BlockId, BlockState, BlockStateId, tag};
+use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_util::random::RandomGenerator;
 use root::RootPlacer;
 
 use trunk::TrunkPlacer;
 
+use crate::generation::feature::java_set::{JavaHashSet, vanilla_hash_set_order};
 use crate::generation::proto_chunk::GenerationCache;
 use crate::generation::{block_state_provider::BlockStateProvider, feature::size::FeatureSize};
 use crate::world::WorldPortalExt;
@@ -55,7 +58,13 @@ impl TreeFeature {
             random,
             pos,
         );
+        // `TreeFeature.place` (`TreeFeature.java:153-167`): a failed or empty tree runs no
+        // decorator and reports failure, which is what makes a blocked sapling stay in place.
+        if log_positions.is_empty() && foliage_positions.is_empty() {
+            return false;
+        }
 
+        let mut decorations = Vec::new();
         for decorator in &self.decorators {
             decorator.generate(
                 chunk,
@@ -67,9 +76,123 @@ impl TreeFeature {
                 &root_positions,
                 &log_positions,
                 &foliage_positions,
+                &mut decorations,
             );
         }
+        Self::update_leaves(
+            chunk,
+            &root_positions,
+            &log_positions,
+            &foliage_positions,
+            &decorations,
+        );
         true
+    }
+
+    /// Vanilla `TreeFeature.updateLeaves` (`TreeFeature.java:170-232`): walks outwards from the
+    /// trunk through `getOptionalDistanceAt` blocks inside the tree's bounds and writes each
+    /// reached leaf's `distance`, so generated canopies do not decay.
+    fn update_leaves<T: GenerationCache>(
+        chunk: &mut T,
+        root_positions: &[BlockPos],
+        log_positions: &[BlockPos],
+        foliage_positions: &[BlockPos],
+        decorations: &[BlockPos],
+    ) {
+        const MAX_DISTANCE: usize = 7;
+
+        // `BoundingBox.encapsulatingPositions` over roots, trunks, foliage and decorations.
+        let mut all = root_positions
+            .iter()
+            .chain(log_positions)
+            .chain(foliage_positions)
+            .chain(decorations);
+        let Some(first) = all.next() else {
+            return;
+        };
+        let (mut min, mut max) = (first.0, first.0);
+        for pos in all {
+            min = Vector3::new(min.x.min(pos.0.x), min.y.min(pos.0.y), min.z.min(pos.0.z));
+            max = Vector3::new(max.x.max(pos.0.x), max.y.max(pos.0.y), max.z.max(pos.0.z));
+        }
+        let span = Vector3::new(max.x - min.x + 1, max.y - min.y + 1, max.z - min.z + 1);
+        let index = |pos: Vector3<i32>| -> Option<usize> {
+            let local = pos.sub(&min);
+            if local.x < 0
+                || local.y < 0
+                || local.z < 0
+                || local.x >= span.x
+                || local.y >= span.y
+                || local.z >= span.z
+            {
+                return None;
+            }
+            Some(((local.x * span.y + local.y) * span.z + local.z) as usize)
+        };
+        let mut shape = vec![false; (span.x * span.y * span.z) as usize];
+
+        for pos in decorations.iter().chain(root_positions) {
+            if let Some(i) = index(pos.0) {
+                shape[i] = true;
+            }
+        }
+
+        let mut to_check: [JavaHashSet; MAX_DISTANCE] = std::array::from_fn(|_| JavaHashSet::new());
+        // `toCheck[0].addAll(logs)` iterates the trunk `HashSet`.
+        for pos in vanilla_hash_set_order(log_positions) {
+            to_check[0].add(pos);
+        }
+
+        let mut smallest = 0;
+        while smallest < MAX_DISTANCE {
+            let Some(pos) = to_check[smallest].pop_first() else {
+                smallest += 1;
+                continue;
+            };
+            let Some(i) = index(pos.0) else {
+                continue;
+            };
+            if smallest != 0 {
+                let state_id = GenerationCache::get_block_state(chunk, &pos.0);
+                let block = Block::from_state_id(state_id);
+                if OakLeavesLikeProperties::handles_block_id(block.id) {
+                    let mut props = OakLeavesLikeProperties::from_state_id(state_id, block);
+                    props.distance = smallest as u8;
+                    chunk.set_block_state(&pos.0, BlockState::from_id(props.to_state_id(block)));
+                }
+            }
+            shape[i] = true;
+
+            for direction in BlockDirection::all() {
+                let neighbor = pos.0.add(&direction.to_offset());
+                let Some(n) = index(neighbor) else {
+                    continue;
+                };
+                if shape[n] {
+                    continue;
+                }
+                let state_id = GenerationCache::get_block_state(chunk, &neighbor);
+                if let Some(distance) = Self::optional_distance_at(state_id) {
+                    let new_distance = distance.min(smallest + 1);
+                    if new_distance < MAX_DISTANCE {
+                        to_check[new_distance].add(BlockPos(neighbor));
+                        smallest = smallest.min(new_distance);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Vanilla `LeavesBlock.getOptionalDistanceAt` (`LeavesBlock.java:129-135`).
+    fn optional_distance_at(state_id: BlockStateId) -> Option<usize> {
+        let block = Block::from_state_id(state_id);
+        if block.has_tag(&tag::Block::MINECRAFT_PREVENTS_NEARBY_LEAF_DECAY) {
+            Some(0)
+        } else if OakLeavesLikeProperties::handles_block_id(block.id) {
+            Some(OakLeavesLikeProperties::from_state_id(state_id, block).distance as usize)
+        } else {
+            None
+        }
     }
 
     pub fn can_replace_or_log(state: &BlockState, id: BlockId) -> bool {
@@ -89,8 +212,8 @@ impl TreeFeature {
         &self,
         block_registry: &dyn WorldPortalExt,
         chunk: &mut T,
-        _min_y: i8,
-        _height: u16,
+        min_y: i8,
+        world_height: u16,
         _feature_name: pumpkin_data::placed_feature::PlacedFeature, // This placed feature
         random: &mut RandomGenerator,
         pos: BlockPos,
@@ -109,6 +232,15 @@ impl TreeFeature {
             .root_placer
             .as_ref()
             .map_or(pos, |placer| placer.trunk_offset(pos, random));
+
+        // Build-height check (`TreeFeature.java:70-72`): `getMaxY` is the topmost buildable Y.
+        let bottom = i32::from(min_y);
+        let top_y = bottom + i32::from(world_height) - 1;
+        if pos.0.y.min(trunk_start.0.y) < bottom + 1
+            || pos.0.y.max(trunk_start.0.y) + height as i32 + 1 > top_y + 1
+        {
+            return (vec![], vec![], vec![]);
+        }
 
         let clipped_height = self.minimum_size.min_clipped_height;
         let top = self.get_top(height, chunk, trunk_start);
@@ -161,7 +293,7 @@ impl TreeFeature {
                     let pos = BlockPos(init_pos.0.add_raw(x, y as i32, z));
                     let rstate = GenerationCache::get_block_state(chunk, &pos.0);
                     let block = rstate.to_block_id();
-                    if Self::can_replace_or_log(rstate.to_state(), block)
+                    if self.trunk_placer.is_free(rstate.to_state(), block)
                         && (self.ignore_vines || block != BlockId::VINE)
                     {
                         continue;

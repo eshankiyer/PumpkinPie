@@ -1,5 +1,4 @@
-use std::borrow::Cow;
-
+use crate::generation::feature::java_set::vanilla_hash_set_order;
 use crate::{generation::proto_chunk::GenerationCache, world::WorldPortalExt};
 use alter_ground::AlterGroundTreeDecorator;
 use attached_to_leaves::AttachedToLeavesTreeDecorator;
@@ -51,12 +50,15 @@ impl TreeDecorator {
         root_positions: &[BlockPos],
         log_positions: &[BlockPos],
         foliage_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         match self {
             Self::TrunkVine(_decorator) => {
-                TrunkVineTreeDecorator::generate(chunk, random, log_positions);
+                TrunkVineTreeDecorator::generate(chunk, random, log_positions, decorations);
             }
-            Self::LeaveVine(decorator) => decorator.generate(chunk, random, foliage_positions),
+            Self::LeaveVine(decorator) => {
+                decorator.generate(chunk, random, foliage_positions, decorations);
+            }
             Self::PaleMoss(decorator) => decorator.generate(
                 chunk,
                 block_registry,
@@ -66,47 +68,72 @@ impl TreeDecorator {
                 random,
                 log_positions,
                 foliage_positions,
+                decorations,
             ),
             Self::CreakingHeart(decorator) => {
-                decorator.generate(chunk, random, log_positions);
+                decorator.generate(chunk, random, log_positions, decorations);
             }
-            Self::Cocoa(decorator) => decorator.generate(chunk, random, log_positions),
+            Self::Cocoa(decorator) => decorator.generate(chunk, random, log_positions, decorations),
             Self::Beehive(decorator) => {
-                decorator.generate(chunk, random, log_positions, foliage_positions);
+                decorator.generate(
+                    chunk,
+                    random,
+                    log_positions,
+                    foliage_positions,
+                    decorations,
+                );
             }
-            Self::AlterGround(decorator) => {
-                decorator.generate(chunk, block_registry, random, root_positions, log_positions);
-            }
-            Self::PlaceOnGround(decorator) => {
-                decorator.generate(chunk, block_registry, random, root_positions, log_positions);
-            }
+            Self::AlterGround(decorator) => decorator.generate(
+                chunk,
+                block_registry,
+                random,
+                root_positions,
+                log_positions,
+                decorations,
+            ),
+            Self::PlaceOnGround(decorator) => decorator.generate(
+                chunk,
+                block_registry,
+                random,
+                root_positions,
+                log_positions,
+                decorations,
+            ),
             Self::AttachedToLeaves(decorator) => {
-                decorator.generate(chunk, block_registry, random, foliage_positions);
+                decorator.generate(chunk, block_registry, random, foliage_positions, decorations);
             }
             Self::AttachedToLogs(decorator) => {
-                decorator.generate(chunk, block_registry, random, log_positions);
+                decorator.generate(chunk, block_registry, random, log_positions, decorations);
             }
         }
     }
 
-    pub(super) fn get_leaf_litter_positions<'a>(
-        root_positions: &'a [BlockPos],
-        log_positions: &'a [BlockPos],
-    ) -> Cow<'a, [BlockPos]> {
-        if root_positions.is_empty() {
-            return Cow::Borrowed(log_positions);
+    /// Vanilla `TreeFeature.getLowestTrunkOrRootOfTree` (`TreeFeature.java:234-248`) over the
+    /// lists `TreeDecorator.Context` builds (`TreeDecorator.java:45-50`): each `HashSet` copied in
+    /// Java iteration order, then stable-sorted by Y.
+    pub(super) fn get_leaf_litter_positions(
+        root_positions: &[BlockPos],
+        log_positions: &[BlockPos],
+    ) -> Vec<BlockPos> {
+        let mut logs = vanilla_hash_set_order(log_positions);
+        logs.sort_by_key(|pos| pos.0.y);
+        // The root set ignores re-adds, but the mangrove root placer can report a position twice.
+        let mut unique_roots: Vec<BlockPos> = Vec::with_capacity(root_positions.len());
+        for pos in root_positions {
+            if !unique_roots.contains(pos) {
+                unique_roots.push(*pos);
+            }
         }
+        let mut roots = vanilla_hash_set_order(&unique_roots);
+        roots.sort_by_key(|pos| pos.0.y);
 
-        if log_positions
-            .first()
-            .is_some_and(|log| root_positions[0].0.y == log.0.y)
-        {
-            let mut list = Vec::with_capacity(root_positions.len() + log_positions.len());
-            list.extend_from_slice(log_positions);
-            list.extend_from_slice(root_positions);
-            return Cow::Owned(list);
+        let Some(first_root) = roots.first() else {
+            return logs;
+        };
+        if logs.first().is_some_and(|log| log.0.y == first_root.0.y) {
+            logs.extend(roots);
+            return logs;
         }
-
-        Cow::Borrowed(root_positions)
+        roots
     }
 }

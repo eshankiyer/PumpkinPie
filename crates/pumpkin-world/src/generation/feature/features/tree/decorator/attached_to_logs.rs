@@ -21,6 +21,7 @@ impl AttachedToLogsTreeDecorator {
         block_registry: &dyn WorldPortalExt,
         random: &mut RandomGenerator,
         log_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         let mut sorted = vanilla_hash_set_order(log_positions);
         sorted.sort_by_key(|pos| pos.0.y);
@@ -40,6 +41,7 @@ impl AttachedToLogsTreeDecorator {
             {
                 continue;
             }
+            decorations.push(pos);
             chunk.set_block_state(
                 &pos.0,
                 self.block_provider.get(random, pos, chunk, block_registry),

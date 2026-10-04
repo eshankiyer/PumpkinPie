@@ -32,6 +32,7 @@ impl PaleMossTreeDecorator {
         random: &mut RandomGenerator,
         log_positions: &[BlockPos],
         foliage_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         if log_positions.is_empty() {
             return;
@@ -71,7 +72,7 @@ impl PaleMossTreeDecorator {
             if random.next_f32() < self.trunk_probability {
                 let down = pos.down();
                 if chunk.is_air(&down.0) {
-                    Self::add_moss_hanger(chunk, random, down);
+                    Self::add_moss_hanger(chunk, decorations, random, down);
                 }
             }
         }
@@ -81,7 +82,7 @@ impl PaleMossTreeDecorator {
             if random.next_f32() < self.leaves_probability {
                 let down = pos.down();
                 if chunk.is_air(&down.0) {
-                    Self::add_moss_hanger(chunk, random, down);
+                    Self::add_moss_hanger(chunk, decorations, random, down);
                 }
             }
         }
@@ -89,6 +90,7 @@ impl PaleMossTreeDecorator {
 
     fn add_moss_hanger<T: GenerationCache>(
         chunk: &mut T,
+        decorations: &mut Vec<BlockPos>,
         random: &mut RandomGenerator,
         start: BlockPos,
     ) {
@@ -96,6 +98,7 @@ impl PaleMossTreeDecorator {
         while chunk.is_air(&pos.down().0) && random.next_f32() >= 0.5 {
             let mut props = PaleHangingMossLikeProperties::default(&Block::PALE_HANGING_MOSS);
             props.tip = false;
+            decorations.push(pos);
             chunk.set_block_state(
                 &pos.0,
                 BlockState::from_id(props.to_state_id(&Block::PALE_HANGING_MOSS)),
@@ -104,6 +107,7 @@ impl PaleMossTreeDecorator {
         }
         let mut props = PaleHangingMossLikeProperties::default(&Block::PALE_HANGING_MOSS);
         props.tip = true;
+        decorations.push(pos);
         chunk.set_block_state(
             &pos.0,
             BlockState::from_id(props.to_state_id(&Block::PALE_HANGING_MOSS)),

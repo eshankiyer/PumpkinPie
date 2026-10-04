@@ -188,6 +188,8 @@ impl FallenTreeFeature {
                 &[],
                 logs,
                 &[],
+                // Fallen trees have no leaf pass; their decoration setter only writes the block.
+                &mut Vec::new(),
             );
         }
     }

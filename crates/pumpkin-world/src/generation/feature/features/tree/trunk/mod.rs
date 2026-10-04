@@ -1,5 +1,5 @@
 use fancy::FancyTrunkPlacer;
-use pumpkin_data::BlockState;
+use pumpkin_data::{BlockId, BlockState, tag};
 use pumpkin_util::{
     math::position::BlockPos,
     random::{RandomGenerator, RandomImpl},
@@ -39,6 +39,18 @@ impl TrunkPlacer {
         self.base_height as u32
             + random.next_bounded_i32(self.height_rand_a as i32 + 1) as u32
             + random.next_bounded_i32(self.height_rand_b as i32 + 1) as u32
+    }
+
+    /// Vanilla `TrunkPlacer.validTreePos`, including the `UpwardsBranchingTrunkPlacer` override
+    /// that also accepts its `can_grow_through` blocks (`UpwardsBranchingTrunkPlacer.java:137-139`).
+    pub fn valid_tree_pos(&self, state: &BlockState, id: BlockId) -> bool {
+        TreeFeature::can_replace(state, id)
+            || matches!(&self.r#type, TrunkType::UpwardsBranching(placer) if placer.can_grow_through.contains(&id.as_u16()))
+    }
+
+    /// Vanilla `TrunkPlacer.isFree` (`TrunkPlacer.java:117-119`).
+    pub fn is_free(&self, state: &BlockState, id: BlockId) -> bool {
+        self.valid_tree_pos(state, id) || id.has_tag(tag::Block::MINECRAFT_LOGS)
     }
 
     pub fn set_dirt<T: GenerationCache>(

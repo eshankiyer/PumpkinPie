@@ -27,6 +27,7 @@ impl AttachedToLeavesTreeDecorator {
         block_registry: &dyn WorldPortalExt,
         random: &mut RandomGenerator,
         foliage_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         let mut blacklist: HashSet<BlockPos> = HashSet::new();
         let mut leaves = vanilla_hash_set_order(foliage_positions);
@@ -60,6 +61,7 @@ impl AttachedToLeavesTreeDecorator {
             let state = self
                 .block_provider
                 .get(random, placement_pos, chunk, block_registry);
+            decorations.push(placement_pos);
             chunk.set_block_state(&placement_pos.0, state);
         }
     }

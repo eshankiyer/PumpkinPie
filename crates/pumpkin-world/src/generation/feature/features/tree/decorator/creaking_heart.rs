@@ -22,6 +22,7 @@ impl CreakingHeartTreeDecorator {
         chunk: &mut T,
         random: &mut RandomGenerator,
         log_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         if log_positions.is_empty() || random.next_f32() >= self.probability {
             return;
@@ -46,6 +47,7 @@ impl CreakingHeartTreeDecorator {
         let mut props = CreakingHeartLikeProperties::default(&Block::CREAKING_HEART);
         props.creaking_heart_state = CreakingHeartState::Dormant;
         props.natural = true;
+        decorations.push(target);
         chunk.set_block_state(
             &target.0,
             BlockState::from_id(props.to_state_id(&Block::CREAKING_HEART)),

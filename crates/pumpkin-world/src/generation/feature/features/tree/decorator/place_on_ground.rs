@@ -22,6 +22,7 @@ impl PlaceOnGroundTreeDecorator {
         random: &mut RandomGenerator,
         root_positions: &[BlockPos],
         log_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         let list = TreeDecorator::get_leaf_litter_positions(root_positions, log_positions);
 
@@ -35,7 +36,7 @@ impl PlaceOnGroundTreeDecorator {
         let mut l = pos.0.z;
         let mut m = pos.0.z;
 
-        for block_pos_2 in list.iter() {
+        for block_pos_2 in &list {
             if block_pos_2.0.y != i {
                 continue;
             }
@@ -54,7 +55,7 @@ impl PlaceOnGroundTreeDecorator {
                 random.next_inbetween_i32(block_box.min.y, block_box.max.y),
                 random.next_inbetween_i32(block_box.min.z, block_box.max.z),
             );
-            self.generate_decoration(chunk, block_registry, pos, random);
+            self.generate_decoration(chunk, block_registry, decorations, pos, random);
         }
     }
 
@@ -62,6 +63,7 @@ impl PlaceOnGroundTreeDecorator {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
+        decorations: &mut Vec<BlockPos>,
         pos: BlockPos,
         random: &mut RandomGenerator,
     ) {
@@ -74,6 +76,7 @@ impl PlaceOnGroundTreeDecorator {
             && !state.to_block_id().has_tag(MINECRAFT_LEAVES)
         // TODO: using heightmap seems not to work
         {
+            decorations.push(up_pos);
             chunk.set_block_state(
                 &up_pos.0,
                 self.block_state_provider

@@ -20,6 +20,7 @@ impl AlterGroundTreeDecorator {
         random: &mut RandomGenerator,
         root_positions: &[BlockPos],
         log_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         let positions = TreeDecorator::get_leaf_litter_positions(root_positions, log_positions);
         let Some(first) = positions.first() else {
@@ -32,12 +33,13 @@ impl AlterGroundTreeDecorator {
             .filter(|pos| pos.0.y == min_y)
             .collect();
         for pos in lowest {
-            self.place_circle(chunk, block_registry, random, pos.west().north());
-            self.place_circle(chunk, block_registry, random, pos.east().east().north());
-            self.place_circle(chunk, block_registry, random, pos.west().south().south());
+            self.place_circle(chunk, block_registry, decorations, random, pos.west().north());
+            self.place_circle(chunk, block_registry, decorations, random, pos.east().east().north());
+            self.place_circle(chunk, block_registry, decorations, random, pos.west().south().south());
             self.place_circle(
                 chunk,
                 block_registry,
+                decorations,
                 random,
                 pos.east().east().south().south(),
             );
@@ -47,7 +49,7 @@ impl AlterGroundTreeDecorator {
                 let zz = placement / 8;
                 if xx == 0 || xx == 7 || zz == 0 || zz == 7 {
                     let target = BlockPos::new(pos.0.x - 3 + xx, pos.0.y, pos.0.z - 3 + zz);
-                    self.place_circle(chunk, block_registry, random, target);
+                    self.place_circle(chunk, block_registry, decorations, random, target);
                 }
             }
         }
@@ -57,6 +59,7 @@ impl AlterGroundTreeDecorator {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
+        decorations: &mut Vec<BlockPos>,
         random: &mut RandomGenerator,
         pos: BlockPos,
     ) {
@@ -64,7 +67,7 @@ impl AlterGroundTreeDecorator {
             for zz in -2i32..=2 {
                 if xx.abs() != 2 || zz.abs() != 2 {
                     let target = BlockPos::new(pos.0.x + xx, pos.0.y, pos.0.z + zz);
-                    self.place_block_at(chunk, block_registry, random, target);
+                    self.place_block_at(chunk, block_registry, decorations, random, target);
                 }
             }
         }
@@ -74,6 +77,7 @@ impl AlterGroundTreeDecorator {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
+        decorations: &mut Vec<BlockPos>,
         random: &mut RandomGenerator,
         pos: BlockPos,
     ) {
@@ -83,6 +87,7 @@ impl AlterGroundTreeDecorator {
                 .provider
                 .get_optional(block_registry, chunk, random, cursor)
             {
+                decorations.push(cursor);
                 chunk.set_block_state(&cursor.0, state);
                 break;
             }

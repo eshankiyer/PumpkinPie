@@ -41,6 +41,7 @@ impl BeehiveTreeDecorator {
         random: &mut RandomGenerator,
         log_positions: &[BlockPos],
         foliage_positions: &[BlockPos],
+        decorations: &mut Vec<BlockPos>,
     ) {
         // `TreeDecorator.Context` sorts the trunk and foliage sets by Y
         // (`TreeDecorator.java:45-50`); the sort is stable, so ties keep the `HashSet` order.
@@ -85,6 +86,7 @@ impl BeehiveTreeDecorator {
 
         let mut props = BeeNestLikeProperties::default(&Block::BEE_NEST);
         props.facing = WORLDGEN_FACING;
+        decorations.push(hive_pos);
         chunk.set_block_state(
             &hive_pos.0,
             BlockState::from_id(props.to_state_id(&Block::BEE_NEST)),
