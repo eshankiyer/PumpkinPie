@@ -531,13 +531,29 @@ impl BlockBehaviour for ShelfBlock {
     }
 }
 
-/// `SelectableSlotContainer.getHitSlot` (`SelectableSlotContainer.java:15-22`) with the shelf's
-/// 1x3 grid: slot = column + row * columns.
+/// `SelectableSlotContainer.getHitSlot` with the shelf's 1x3 grid.
 fn get_hit_slot(hit: &BlockHitResult<'_>, facing: HorizontalFacing) -> Option<usize> {
+    selectable_hit_slot(hit, facing, ROWS, COLUMNS).map(|slot| slot as usize)
+}
+
+/// `SelectableSlotContainer.getHitSlot` (`SelectableSlotContainer.java:17-23`), shared by every
+/// block implementing the interface (shelves, chiseled bookshelves).
+pub(crate) fn selectable_hit_slot(
+    hit: &BlockHitResult<'_>,
+    facing: HorizontalFacing,
+    rows: i32,
+    columns: i32,
+) -> Option<i32> {
     let (hit_x, hit_y) = relative_hit_coordinates_for_block_face(hit, facing)?;
-    let row = get_section(1.0 - hit_y, ROWS);
-    let column = get_section(hit_x, COLUMNS);
-    Some((column + row * COLUMNS) as usize)
+    Some(hit_slot_from_coordinates(hit_x, hit_y, rows, columns))
+}
+
+/// The grid math of `SelectableSlotContainer.getHitSlot`: slot = column + row * columns, rows
+/// counted from the top of the face.
+pub(crate) fn hit_slot_from_coordinates(hit_x: f32, hit_y: f32, rows: i32, columns: i32) -> i32 {
+    let row = get_section(1.0 - hit_y, rows);
+    let column = get_section(hit_x, columns);
+    column + row * columns
 }
 
 /// `SelectableSlotContainer.getRelativeHitCoordinatesForBlockFace`
@@ -560,7 +576,7 @@ fn relative_hit_coordinates_for_block_face(
     }
 }
 
-/// `SelectableSlotContainer.getSection` (`SelectableSlotContainer.java:55-58`).
+/// `SelectableSlotContainer.getSection` (`SelectableSlotContainer.java:46-50`).
 fn get_section(relative_coordinate: f32, max_sections: i32) -> i32 {
     let targeted_pixel = relative_coordinate * 16.0;
     let section_size = 16.0 / max_sections as f32;

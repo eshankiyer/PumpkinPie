@@ -1,7 +1,6 @@
 use crate::block::blocks::fire::FireBlockBase;
 use crate::block::blocks::fire::fire::FireBlock;
 use crate::world::World;
-use pumpkin_data::fluid::Fluid;
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockStateId, tag};
 use pumpkin_util::math::position::BlockPos;
@@ -23,9 +22,8 @@ impl Ignition {
         F: FnOnce(Arc<World>, BlockPos, BlockStateId) -> Fut,
         Fut: Future<Output = ()>,
     {
-        if world.get_fluid(&location).name != Fluid::EMPTY.name {
-            return false;
-        }
+        // Vanilla never reads the clicked block's fluid (`FlintAndSteelItem.java:26-58`): a
+        // waterlogged block that cannot be lit still gets fire on the adjacent face.
         let fire_block = FireBlockBase::get_fire_type(world, &fire_pos);
 
         let state_id = world.get_block_state_id(&location);
@@ -62,13 +60,14 @@ fn can_be_lit(block: &Block, state_id: BlockStateId) -> Option<BlockStateId> {
         props.to_props()
     };
 
-    if block.has_tag(&tag::Block::MINECRAFT_CANDLES)
+    if (block.has_tag(&tag::Block::MINECRAFT_CANDLES)
+        || block.has_tag(&tag::Block::MINECRAFT_CAMPFIRES))
         && props
             .iter()
             .any(|(key, value)| *key == "waterlogged" && *value == "true")
     {
-        // Vanilla `CandleBlock.canLight` rejects waterlogged candles
-        // (`CandleBlock.java:166-169`).
+        // Vanilla `CandleBlock.canLight` and `CampfireBlock.canLight` reject waterlogged
+        // candles and campfires (`CandleBlock.java:166-168`, `CampfireBlock.java:329-331`).
         return None;
     }
 

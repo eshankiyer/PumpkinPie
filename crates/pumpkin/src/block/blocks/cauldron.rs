@@ -2,9 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::block::registry::BlockActionResult;
+use crate::block::blocks::dripstone::{DripFluid, stalactite_drip_fluid_above_cauldron};
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs, HandlePrecipitationArgs,
-    OnEntityCollisionArgs, Precipitation, UseWithItemArgs,
+    OnEntityCollisionArgs, OnScheduledTickArgs, Precipitation, UseWithItemArgs,
 };
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -16,6 +17,7 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::world::WorldEvent;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
@@ -68,7 +70,81 @@ async fn fire_cauldron_change(
     !event.cancelled
 }
 
+/// `AbstractCauldronBlock.canReceiveStalactiteDrip` and its overrides: an empty cauldron takes
+/// either fluid (`CauldronBlock.java:54-57`), a water cauldron (precipitation `RAIN`) takes water
+/// (`LayeredCauldronBlock.java:65-68`), and lava and powder snow cauldrons take nothing
+/// (`AbstractCauldronBlock.java:102-104`).
+pub(crate) fn can_receive_stalactite_drip(block: &Block, fluid: DripFluid) -> bool {
+    match block.id {
+        BlockId::CAULDRON => true,
+        BlockId::WATER_CAULDRON => fluid == DripFluid::Water,
+        _ => false,
+    }
+}
+
+/// `CauldronBlock.receiveStalactiteDrip` (`CauldronBlock.java:59-72`) and
+/// `LayeredCauldronBlock.receiveStalactiteDrip` (`LayeredCauldronBlock.java:134-142`).
+async fn receive_stalactite_drip(
+    world: &Arc<World>,
+    position: &BlockPos,
+    block: &Block,
+    fluid: DripFluid,
+) {
+    let (new_state_id, world_event) = match (block.id, fluid) {
+        (BlockId::CAULDRON, DripFluid::Water) => (
+            Block::WATER_CAULDRON.default_state.id,
+            WorldEvent::SoundDripWaterIntoCauldron,
+        ),
+        (BlockId::CAULDRON, DripFluid::Lava) => (
+            Block::LAVA_CAULDRON.default_state.id,
+            WorldEvent::SoundDripLavaIntoCauldron,
+        ),
+        (BlockId::WATER_CAULDRON, _) => {
+            let state_id = world.get_block_state_id(position);
+            let mut props = WaterCauldronLikeProperties::from_state_id(state_id, block);
+            if props.level >= 3 {
+                return;
+            }
+            props.level += 1;
+            (
+                props.to_state_id(block),
+                WorldEvent::SoundDripWaterIntoCauldron,
+            )
+        }
+        _ => return,
+    };
+
+    world
+        .set_block_state(position, new_state_id, BlockFlags::NOTIFY_ALL)
+        .await;
+    emit_game_event(
+        world,
+        GameEvent::BlockChange,
+        position.to_centered_f64(),
+        GameEventContext {
+            source_entity: None,
+            affected_block_state: Some(new_state_id),
+        },
+    )
+    .await;
+    world.sync_world_event(world_event, *position, 0);
+}
+
 impl BlockBehaviour for CauldronBlock {
+    /// `AbstractCauldronBlock.tick` (`AbstractCauldronBlock.java:91-100`): scheduled by a
+    /// stalactite dripping a source fluid towards this cauldron.
+    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(fluid) = stalactite_drip_fluid_above_cauldron(args.world, args.position)
+            else {
+                return;
+            };
+            if can_receive_stalactite_drip(args.block, fluid) {
+                receive_stalactite_drip(args.world, args.position, args.block, fluid).await;
+            }
+        })
+    }
+
     fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let entity = args.entity.get_entity();

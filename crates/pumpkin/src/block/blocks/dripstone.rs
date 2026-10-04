@@ -3,20 +3,31 @@ use std::sync::Arc;
 use crate::{
     block::{
         BlockBehaviour, BlockFuture, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-        OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+        OnPlaceArgs, OnScheduledTickArgs, PlacedArgs, RandomTickArgs,
+        blocks::cauldron::can_receive_stalactite_drip,
     },
     entity::{falling::FallingEntity, player::Player},
-    world::World,
+    world::{
+        World,
+        game_event::{GameEventContext, emit_game_event},
+    },
 };
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{
-    Block, BlockDirection, BlockStateId,
+    Block, BlockDirection, BlockState, BlockStateId,
     block_properties::{
         BlockProperties, PointedDripstoneLikeProperties, SpeleothemThickness, VerticalDirection,
     },
+    dimension::Dimension,
+    fluid::Fluid,
+    game_event::GameEvent,
+    world::WorldEvent,
 };
 use pumpkin_macros::pumpkin_block_from_tag;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
 
@@ -101,6 +112,341 @@ async fn spawn_falling_stalactite(world: &Arc<World>, position: &BlockPos) {
     }
 }
 
+/// `PointedDripstoneBlock.MAX_SEARCH_LENGTH_WHEN_CHECKING_DRIP_TYPE` and
+/// `MAX_SEARCH_LENGTH_BETWEEN_STALACTITE_TIP_AND_CAULDRON` (`PointedDripstoneBlock.java:38,41`).
+const MAX_DRIP_SEARCH_LENGTH: i32 = 11;
+
+/// `PointedDripstoneBlock.WATER_TRANSFER_PROBABILITY_PER_RANDOM_TICK` and
+/// `LAVA_TRANSFER_PROBABILITY_PER_RANDOM_TICK` (`PointedDripstoneBlock.java:42-43`).
+const WATER_TRANSFER_PROBABILITY: f32 = 0.175_781_25;
+const LAVA_TRANSFER_PROBABILITY: f32 = 0.058_593_75;
+
+/// The two source fluids a stalactite can carry into a cauldron.
+///
+/// `PointedDripstoneBlock.canFillCauldron` (`PointedDripstoneBlock.java:196-198`). Every other
+/// fluid above a stalactite (flowing fluids, `EMPTY`) is represented as `None`; none of the
+/// callers distinguish between them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DripFluid {
+    Water,
+    Lava,
+}
+
+/// `PointedDripstoneBlock.FluidInfo` (`PointedDripstoneBlock.java:236-237`).
+struct FluidAboveStalactite {
+    pos: BlockPos,
+    fluid: Option<DripFluid>,
+    source_block: &'static Block,
+}
+
+/// What a `findBlockVertical` probe decided about one position.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum VerticalProbe {
+    Found,
+    Continue,
+    Stop,
+}
+
+/// The stepping of `SpeleothemBlock.findBlockVertical` (`SpeleothemBlock.java:340-362`):
+/// `i` runs from 1 while `i < max_steps`, so at most `max_steps - 1` positions are probed.
+fn find_block_vertical_by(
+    start: BlockPos,
+    up: bool,
+    max_steps: i32,
+    mut probe: impl FnMut(&BlockPos) -> VerticalProbe,
+) -> Option<BlockPos> {
+    let mut pos = start;
+    for _ in 1..max_steps {
+        pos = if up { pos.up() } else { pos.down() };
+        match probe(&pos) {
+            VerticalProbe::Found => return Some(pos),
+            VerticalProbe::Stop => return None,
+            VerticalProbe::Continue => {}
+        }
+    }
+    None
+}
+
+/// `SpeleothemBlock.findBlockVertical`: the target is tested before the build-height and path
+/// checks.
+fn find_block_vertical(
+    world: &World,
+    start: &BlockPos,
+    up: bool,
+    path: impl Fn(&BlockPos, &Block, &BlockState) -> bool,
+    target: impl Fn(&Block, &BlockState) -> bool,
+    max_steps: i32,
+) -> Option<BlockPos> {
+    find_block_vertical_by(*start, up, max_steps, |pos| {
+        let (block, state) = world.get_block_and_state(pos);
+        if target(block, state) {
+            VerticalProbe::Found
+        } else if !world.is_in_height_limit(pos.0.y) || !path(pos, block, state) {
+            VerticalProbe::Stop
+        } else {
+            VerticalProbe::Continue
+        }
+    })
+}
+
+/// `SpeleothemBlock.isTip` (`SpeleothemBlock.java:235-242`).
+fn is_tip(block: &Block, state_id: BlockStateId, include_merged_tip: bool) -> bool {
+    if !is_speleothem(block) {
+        return false;
+    }
+    let thickness = PointedDripstoneLikeProperties::from_state_id(state_id, block).thickness;
+    thickness == SpeleothemThickness::Tip
+        || (include_merged_tip && thickness == SpeleothemThickness::TipMerge)
+}
+
+/// `SpeleothemBlock.isStalactiteStartPos` (`SpeleothemBlock.java:297-299`).
+fn is_stalactite_start_pos(
+    world: &World,
+    block: &Block,
+    state_id: BlockStateId,
+    pos: &BlockPos,
+) -> bool {
+    is_stalactite(block, state_id) && world.get_block(&pos.up()) != block
+}
+
+/// `SpeleothemBlock.isFreeHangingStalactite` (`SpeleothemBlock.java:444-446`).
+fn is_free_hanging_stalactite(block: &Block, state_id: BlockStateId) -> bool {
+    if !is_stalactite(block, state_id) {
+        return false;
+    }
+    let props = PointedDripstoneLikeProperties::from_state_id(state_id, block);
+    props.thickness == SpeleothemThickness::Tip && !props.waterlogged
+}
+
+/// The path predicate shared by `findTip` and `findRootBlock`: the same block pointing the
+/// same way.
+fn same_speleothem_path(
+    speleothem: &Block,
+    direction: VerticalDirection,
+) -> impl Fn(&BlockPos, &Block, &BlockState) -> bool {
+    move |_, block, state| {
+        block == speleothem
+            && PointedDripstoneLikeProperties::from_state_id(state.id, block).vertical_direction
+                == direction
+    }
+}
+
+/// `SpeleothemBlock.findTip` (`SpeleothemBlock.java:324-338`).
+fn find_tip(
+    world: &World,
+    block: &Block,
+    state_id: BlockStateId,
+    pos: &BlockPos,
+    max_search_length: i32,
+    include_merged_tip: bool,
+) -> Option<BlockPos> {
+    if is_tip(block, state_id, include_merged_tip) {
+        return Some(*pos);
+    }
+    let direction = PointedDripstoneLikeProperties::from_state_id(state_id, block).vertical_direction;
+    find_block_vertical(
+        world,
+        pos,
+        direction == VerticalDirection::Up,
+        same_speleothem_path(block, direction),
+        |target, target_state| is_tip(target, target_state.id, include_merged_tip),
+        max_search_length,
+    )
+}
+
+/// `PointedDripstoneBlock.findRootBlock` (`PointedDripstoneBlock.java:151-158`): the first
+/// block behind the speleothem that is not part of it.
+fn find_root_block(
+    world: &World,
+    block: &Block,
+    state_id: BlockStateId,
+    pos: &BlockPos,
+    max_search_length: i32,
+) -> Option<BlockPos> {
+    let direction = PointedDripstoneLikeProperties::from_state_id(state_id, block).vertical_direction;
+    find_block_vertical(
+        world,
+        pos,
+        direction == VerticalDirection::Down,
+        same_speleothem_path(block, direction),
+        |target, _| target != block,
+        max_search_length,
+    )
+}
+
+/// `PointedDripstoneBlock.getFluidAboveStalactite` (`PointedDripstoneBlock.java:179-194`).
+fn fluid_above_stalactite(
+    world: &World,
+    block: &Block,
+    state_id: BlockStateId,
+    pos: &BlockPos,
+) -> Option<FluidAboveStalactite> {
+    if !is_stalactite(block, state_id) {
+        return None;
+    }
+    let root = find_root_block(world, block, state_id, pos, MAX_DRIP_SEARCH_LENGTH)?;
+    let above = root.up();
+    let source_block = world.get_block(&above);
+    // `WATER_EVAPORATES` is modelled as the nether, as elsewhere in this repository.
+    let fluid = if source_block == &Block::MUD && world.dimension != Dimension::THE_NETHER {
+        Some(DripFluid::Water)
+    } else {
+        // `getFluidState().getType()` is the source fluid only for a source; flowing fluids are
+        // distinct types that `canFillCauldron` rejects.
+        let (fluid, fluid_state) = world.get_fluid_and_fluid_state(&above);
+        if !fluid_state.is_source {
+            None
+        } else if fluid.matches_type(&Fluid::WATER) {
+            Some(DripFluid::Water)
+        } else if fluid.matches_type(&Fluid::LAVA) {
+            Some(DripFluid::Lava)
+        } else {
+            None
+        }
+    };
+    Some(FluidAboveStalactite {
+        pos: above,
+        fluid,
+        source_block,
+    })
+}
+
+/// `PointedDripstoneBlock.REQUIRED_SPACE_TO_DRIP_THROUGH_NON_SOLID_BLOCK`, i.e.
+/// `Block.column(4, 0, 16)` (`PointedDripstoneBlock.java:47`, `Block.java:177-185`).
+fn drip_column() -> BoundingBox {
+    BoundingBox::new(
+        Vector3::new(6.0 / 16.0, 0.0, 6.0 / 16.0),
+        Vector3::new(10.0 / 16.0, 1.0, 10.0 / 16.0),
+    )
+}
+
+/// The collision half of `PointedDripstoneBlock.canDripThrough`: whether any collision box of
+/// `state` overlaps the drip column.
+fn collision_blocks_drip(state: &BlockState, pos: &BlockPos) -> bool {
+    let column = drip_column();
+    state
+        .get_block_collision_shapes_at(pos)
+        .any(|shape| shape.intersects(&column))
+}
+
+/// `PointedDripstoneBlock.canDripThrough` (`PointedDripstoneBlock.java:219-234`).
+fn can_drip_through(world: &World, pos: &BlockPos, state: &BlockState) -> bool {
+    if state.is_air() {
+        return true;
+    }
+    if state.is_solid_render() {
+        return false;
+    }
+    if !world.get_fluid_and_fluid_state(pos).1.is_empty {
+        return false;
+    }
+    !collision_blocks_drip(state, pos)
+}
+
+/// `PointedDripstoneBlock.findStalactiteTipAboveCauldron` (`PointedDripstoneBlock.java:167-170`).
+fn find_stalactite_tip_above_cauldron(world: &World, cauldron_pos: &BlockPos) -> Option<BlockPos> {
+    find_block_vertical(
+        world,
+        cauldron_pos,
+        true,
+        |pos, _, state| can_drip_through(world, pos, state),
+        |block, state| is_free_hanging_stalactite(block, state.id),
+        MAX_DRIP_SEARCH_LENGTH,
+    )
+}
+
+/// `PointedDripstoneBlock.getCauldronFillFluidType` (`PointedDripstoneBlock.java:172-177`);
+/// `None` stands for `Fluids.EMPTY`.
+fn cauldron_fill_fluid_type(world: &World, stalactite_pos: &BlockPos) -> Option<DripFluid> {
+    let (block, state_id) = world.get_block_and_state_id(stalactite_pos);
+    fluid_above_stalactite(world, block, state_id, stalactite_pos)?.fluid
+}
+
+/// The fluid a stalactite above `cauldron_pos` would drip into it, as read by
+/// `AbstractCauldronBlock.tick` (`AbstractCauldronBlock.java:91-100`).
+pub fn stalactite_drip_fluid_above_cauldron(
+    world: &World,
+    cauldron_pos: &BlockPos,
+) -> Option<DripFluid> {
+    let tip = find_stalactite_tip_above_cauldron(world, cauldron_pos)?;
+    cauldron_fill_fluid_type(world, &tip)
+}
+
+/// `PointedDripstoneBlock.findFillableCauldronBelowStalactiteTip`
+/// (`PointedDripstoneBlock.java:160-165`). Fullness is not checked here.
+fn find_fillable_cauldron_below_stalactite_tip(
+    world: &World,
+    tip: &BlockPos,
+    fluid: DripFluid,
+) -> Option<BlockPos> {
+    find_block_vertical(
+        world,
+        tip,
+        false,
+        |pos, _, state| can_drip_through(world, pos, state),
+        |block, _| can_receive_stalactite_drip(block, fluid),
+        MAX_DRIP_SEARCH_LENGTH,
+    )
+}
+
+/// `PointedDripstoneBlock.maybeTransferFluid` (`PointedDripstoneBlock.java:90-132`).
+///
+/// The `Block.pushEntitiesUp` call of the mud-to-clay branch is not modelled.
+async fn maybe_transfer_fluid(world: &Arc<World>, pos: &BlockPos, random_value: f32) {
+    // `!(r > WATER) || !(r > LAVA)` reduces to `r <= WATER`.
+    if random_value > WATER_TRANSFER_PROBABILITY {
+        return;
+    }
+    let (block, state_id) = world.get_block_and_state_id(pos);
+    if !is_stalactite_start_pos(world, block, state_id, pos) {
+        return;
+    }
+    let Some(info) = fluid_above_stalactite(world, block, state_id, pos) else {
+        return;
+    };
+    let (fluid, transfer_probability) = match info.fluid {
+        Some(DripFluid::Water) => (DripFluid::Water, WATER_TRANSFER_PROBABILITY),
+        Some(DripFluid::Lava) => (DripFluid::Lava, LAVA_TRANSFER_PROBABILITY),
+        None => return,
+    };
+    if random_value >= transfer_probability {
+        return;
+    }
+    let Some(tip) = find_tip(world, block, state_id, pos, MAX_DRIP_SEARCH_LENGTH, false) else {
+        return;
+    };
+
+    if info.source_block == &Block::MUD && fluid == DripFluid::Water {
+        let clay = Block::CLAY.default_state.id;
+        world
+            .set_block_state(&info.pos, clay, BlockFlags::NOTIFY_ALL)
+            .await;
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            info.pos.to_centered_f64(),
+            GameEventContext {
+                source_entity: None,
+                affected_block_state: Some(clay),
+            },
+        )
+        .await;
+        world.sync_world_event(WorldEvent::DripstoneDrip, tip, 0);
+    } else if let Some(cauldron_pos) = find_fillable_cauldron_below_stalactite_tip(world, &tip, fluid)
+    {
+        world.sync_world_event(WorldEvent::DripstoneDrip, tip, 0);
+        // At most `50 + 10`: the cauldron search probes ten blocks below the tip.
+        let delay = 50 + (tip.0.y - cauldron_pos.0.y);
+        let cauldron = world.get_block(&cauldron_pos);
+        world.schedule_block_tick(
+            cauldron,
+            cauldron_pos,
+            u8::try_from(delay).unwrap_or(u8::MAX),
+            TickPriority::Normal,
+        );
+    }
+}
+
 /// Shared behaviour for every block in `#minecraft:speleothems`.
 ///
 /// That tag holds `pointed_dripstone` and `sulfur_spike`. `Blocks.java:5342-5344` registers the
@@ -111,6 +457,18 @@ async fn spawn_falling_stalactite(world: &Arc<World>, position: &BlockPos) {
 pub struct DripstoneBlock;
 
 impl BlockBehaviour for DripstoneBlock {
+    /// `PointedDripstoneBlock.randomTick` (`PointedDripstoneBlock.java:84-88`). Sulfur spikes do
+    /// not override it, and the speleothem growth of `super.randomTick` is not implemented.
+    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.block != &Block::POINTED_DRIPSTONE {
+                return;
+            }
+            let random_value: f32 = rand::rng().random();
+            maybe_transfer_fluid(args.world, args.position, random_value).await;
+        })
+    }
+
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         can_place_at_pos(
             args.block_accessor,
@@ -659,6 +1017,44 @@ mod tests {
         assert!(is_stalactite(&Block::POINTED_DRIPSTONE, down));
         assert!(!is_stalactite(&Block::POINTED_DRIPSTONE, up));
         assert!(!is_stalactite(&Block::STONE, Block::STONE.default_state.id));
+    }
+
+    #[test]
+    fn find_block_vertical_probes_at_most_ten_positions() {
+        let start = BlockPos::new(0, 0, 0);
+        let mut probed = 0;
+        let found = find_block_vertical_by(start, false, MAX_DRIP_SEARCH_LENGTH, |_| {
+            probed += 1;
+            VerticalProbe::Continue
+        });
+        assert_eq!(found, None);
+        assert_eq!(probed, 10);
+
+        let found = find_block_vertical_by(start, true, MAX_DRIP_SEARCH_LENGTH, |pos| {
+            if pos.0.y == 10 {
+                VerticalProbe::Found
+            } else {
+                VerticalProbe::Continue
+            }
+        });
+        assert_eq!(found, Some(BlockPos::new(0, 10, 0)));
+
+        let found = find_block_vertical_by(start, true, MAX_DRIP_SEARCH_LENGTH, |pos| {
+            if pos.0.y == 11 {
+                VerticalProbe::Found
+            } else {
+                VerticalProbe::Continue
+            }
+        });
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn drip_column_is_blocked_by_fence_posts_and_carpets() {
+        let pos = BlockPos::new(0, 0, 0);
+        assert!(collision_blocks_drip(Block::OAK_FENCE.default_state, &pos));
+        assert!(collision_blocks_drip(Block::WHITE_CARPET.default_state, &pos));
+        assert!(!collision_blocks_drip(Block::AIR.default_state, &pos));
     }
 
     /// `#minecraft:speleothems` holds `pointed_dripstone` and `sulfur_spike`, and

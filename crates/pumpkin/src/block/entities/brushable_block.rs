@@ -14,6 +14,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
+use rand::RngExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -447,7 +448,7 @@ impl BrushableBlockBlockEntity {
         item: Option<ItemStack>,
         hit_direction: BlockDirection,
     ) {
-        if let Some(stack) = item {
+        if let Some(mut stack) = item {
             let drop_pos = self.position.offset(hit_direction.to_offset());
             let size = f64::from(EntityType::ITEM.dimension[0]);
             let center_range = 1.0 - size;
@@ -458,8 +459,16 @@ impl BrushableBlockBlockEntity {
                 f64::from(drop_pos.0.z) + 0.5 * center_range + half_size,
             );
             let entity = Entity::new(world.clone(), spawn_pos, &EntityType::ITEM);
+            // Vanilla drops `split(nextInt(21) + 10)` with zero velocity and the 5-arg
+            // constructor's pickup delay of 0; any remainder is discarded with `item = EMPTY`.
+            let dropped = stack.split(rand::rng().random_range(10..=30));
             world
-                .spawn_entity(Arc::new(ItemEntity::new(entity, stack)))
+                .spawn_entity(Arc::new(ItemEntity::new_with_velocity(
+                    entity,
+                    dropped,
+                    Vector3::new(0.0, 0.0, 0.0),
+                    0,
+                )))
                 .await;
         }
 

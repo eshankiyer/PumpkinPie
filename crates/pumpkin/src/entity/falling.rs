@@ -123,6 +123,27 @@ impl FallingEntity {
         block_state: BlockStateId,
         hurts_entities: Option<(f32, i32)>,
     ) {
+        Self::replace_spawn_configured(world, position, block_state, hurts_entities, false).await;
+    }
+
+    /// Same as [`Self::replace_spawn`], followed by `disableDrop` (`BrushableBlock.tick`,
+    /// `BrushableBlock.java:89-92`): the instance is spawned with `cancelDrop` already set, so
+    /// on landing it breaks via `onBrokenAfterFall` instead of placing or dropping.
+    pub async fn replace_spawn_without_drop(
+        world: &Arc<World>,
+        position: BlockPos,
+        block_state: BlockStateId,
+    ) {
+        Self::replace_spawn_configured(world, position, block_state, None, true).await;
+    }
+
+    async fn replace_spawn_configured(
+        world: &Arc<World>,
+        position: BlockPos,
+        block_state: BlockStateId,
+        hurts_entities: Option<(f32, i32)>,
+        cancel_drop: bool,
+    ) {
         // `FallingBlockEntity.fall` (`FallingBlockEntity.java:91-102`): the entity carries the
         // state with `waterlogged=false`, and the origin is replaced by the state's fluid as a
         // legacy block, so a waterlogged block leaves a water source behind.
@@ -147,6 +168,9 @@ impl FallingEntity {
         entity.set_start_pos(position);
         if let Some((damage_per_distance, damage_max)) = hurts_entities {
             entity.set_hurts_entities(damage_per_distance, damage_max);
+        }
+        if cancel_drop {
+            entity.disable_drop();
         }
         world.spawn_entity(entity).await;
     }

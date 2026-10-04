@@ -2,6 +2,7 @@ use std::sync::{Arc, atomic::Ordering};
 
 use pumpkin_macros::pumpkin_block;
 
+use crate::block::blocks::shelf::selectable_hit_slot;
 use crate::block::entities::chiseled_bookshelf::ChiseledBookshelfBlockEntity;
 use crate::{
     block::{
@@ -24,7 +25,7 @@ use pumpkin_data::{
     tag::Taggable,
 };
 use pumpkin_inventory::screen_handler::InventoryPlayer;
-use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::inventory::Inventory;
 
 #[pumpkin_block("minecraft:chiseled_bookshelf")]
@@ -258,45 +259,14 @@ impl ChiseledBookshelfBlock {
         world.play_sound(sound, SoundCategory::Blocks, &position.to_centered_f64());
     }
 
+    /// `ChiseledBookShelfBlock` is a `SelectableSlotContainer` with `getRows() = 2` and
+    /// `getColumns() = 3` (`ChiseledBookShelfBlock.java:54-62`).
     fn get_slot_for_hit(hit: &BlockHitResult<'_>, facing: HorizontalFacing) -> Option<i8> {
-        Self::get_hit_pos(hit, facing).map(|position| {
-            let i = i8::from(position.y < 0.5);
-            let j = Self::get_column(position.x);
-            j + i * 3
-        })
+        selectable_hit_slot(hit, facing, Self::ROWS, Self::COLUMNS).map(|slot| slot as i8)
     }
 
-    fn get_hit_pos(hit: &BlockHitResult<'_>, facing: HorizontalFacing) -> Option<Vector2<f32>> {
-        // If the direction is not horizontal, we cannot hit a slot
-        let direction = hit.face.to_horizontal_facing()?;
-
-        // If the facing direction does not match the block's facing, we cannot hit a slot
-        if facing != direction {
-            return None;
-        }
-
-        match direction {
-            HorizontalFacing::North => Some(Vector2::new(1.0 - hit.cursor_pos.x, hit.cursor_pos.y)),
-            HorizontalFacing::South => Some(Vector2::new(hit.cursor_pos.x, hit.cursor_pos.y)),
-            HorizontalFacing::West => Some(Vector2::new(hit.cursor_pos.z, hit.cursor_pos.y)),
-            HorizontalFacing::East => Some(Vector2::new(1.0 - hit.cursor_pos.z, hit.cursor_pos.y)),
-        }
-    }
-
-    // Magic numbers for the slots
-    // These are based on the vanilla chiseled bookshelf implementation
-    const OFFSET_SLOT_0: f32 = 0.375;
-    const OFFSET_SLOT_1: f32 = 0.6875;
-
-    fn get_column(x: f32) -> i8 {
-        if x < Self::OFFSET_SLOT_0 {
-            0
-        } else if x < Self::OFFSET_SLOT_1 {
-            1
-        } else {
-            2
-        }
-    }
+    const ROWS: i32 = 2;
+    const COLUMNS: i32 = 3;
 
     const fn is_slot_used(properties: ChiseledBookshelfLikeProperties, slot: i8) -> bool {
         match slot {
@@ -326,5 +296,22 @@ mod tests {
         assert_eq!(occupied.len(), 1);
         assert_eq!(occupied[0].0, 4);
         assert_eq!(occupied[0].1.get_item().id, Item::BOOK.id);
+    }
+
+    #[test]
+    fn hit_slot_uses_even_selectable_slot_sections() {
+        use crate::block::blocks::shelf::hit_slot_from_coordinates;
+        let slot = |x, y| {
+            hit_slot_from_coordinates(
+                x,
+                y,
+                ChiseledBookshelfBlock::ROWS,
+                ChiseledBookshelfBlock::COLUMNS,
+            )
+        };
+        assert_eq!(slot(0.34, 0.9), 1);
+        assert_eq!(slot(0.67, 0.9), 2);
+        assert_eq!(slot(0.1, 0.5), 3);
+        assert_eq!(slot(0.99, 0.01), 5);
     }
 }
