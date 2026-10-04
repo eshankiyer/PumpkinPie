@@ -34,21 +34,17 @@ impl CakeBlock {
         location: &BlockPos,
         state_id: BlockStateId,
     ) -> BlockActionResult {
-        match player.gamemode.load() {
-            GameMode::Survival | GameMode::Adventure => {
-                let hunger_level = player.hunger_manager.level.load();
-                if hunger_level >= 20 {
-                    return BlockActionResult::Pass;
-                }
-                player.hunger_manager.level.store(20.min(hunger_level + 2));
-                player
-                    .hunger_manager
-                    .saturation
-                    .store(player.hunger_manager.saturation.load() + 0.4);
-                player.send_health().await;
-            }
-            GameMode::Creative | GameMode::Spectator => {}
+        if player.gamemode.load() == GameMode::Spectator {
+            return BlockActionResult::Pass;
         }
+        // `CakeBlock.eat` (`CakeBlock.java:94-100`) gates on `Player.canEat(false)`
+        // (`Player.java:1604-1606`): invulnerable (creative) players always eat.
+        let invulnerable = player.abilities.lock().await.invulnerable;
+        if !invulnerable && !player.hunger_manager.needs_food() {
+            return BlockActionResult::Pass;
+        }
+        player.hunger_manager.eat_with_modifier(2, 0.1);
+        player.send_health().await;
 
         let mut properties = CakeLikeProperties::from_state_id(state_id, block);
         match properties.bites {

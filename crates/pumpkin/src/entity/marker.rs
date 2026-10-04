@@ -18,8 +18,9 @@ use pumpkin_util::math::vector3::Vector3;
 /// is `final` and always returns false (:67-69). Its `getAddEntityPacket`
 /// override (:37-39) throws because vanilla never tracks it to clients
 /// (`EntityTypes.java:662-663`, `clientTrackingRange(0)`); Pumpkin has no
-/// per-type client tracking range, so the spawn packets are suppressed directly
-/// in `send_java_spawn_packet`/`send_bedrock_spawn_packet` below.
+/// per-type client tracking range, so `is_client_tracked` returns false, which
+/// the world's spawn broadcast and chunk pairing check before sending anything.
+/// The spawn packet overrides below stay empty as a second line of defence.
 pub struct MarkerEntity {
     pub entity: Entity,
     pub data: Mutex<NbtCompound>,
@@ -121,6 +122,10 @@ impl EntityBase for MarkerEntity {
         _cause: Option<&'a dyn EntityBase>,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move { false })
+    }
+
+    fn is_client_tracked(&self) -> bool {
+        false
     }
 
     fn send_java_spawn_packet<'a>(&'a self, _client: &'a JavaClient) -> EntityBaseFuture<'a, ()> {

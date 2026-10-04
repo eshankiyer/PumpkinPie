@@ -5263,7 +5263,7 @@ impl World {
 
                         // Vanilla `ServerPlayer.broadcastToPlayer` filters this pairing
                         // (`ServerPlayer.java:1175-1181`).
-                        if entity.broadcast_to_player(&player) {
+                        if entity.is_client_tracked() && entity.broadcast_to_player(&player) {
                             player.client.enqueue_spawn_packet(&entity).await;
                             // Vanilla `ServerEntity.sendPairingData` sends all per-entity state to
                             // this newly tracking player (`ServerEntity.java:274-319`).
@@ -5289,7 +5289,9 @@ impl World {
                         if base_entity.chunk_pos.load() == position {
                             // Vanilla `ServerPlayer.broadcastToPlayer` filters this pairing
                             // (`ServerPlayer.java:1175-1181`).
-                            if !base_entity.broadcast_to_player(&player) {
+                            if !entity.is_client_tracked()
+                                || !base_entity.broadcast_to_player(&player)
+                            {
                                 continue;
                             }
                             player.client.enqueue_spawn_packet(entity).await;
@@ -5840,6 +5842,10 @@ impl World {
     }
 
     pub fn broadcast_entity_spawn(&self, entity: &Arc<dyn EntityBase>) {
+        // Vanilla never tracks `clientTrackingRange(0)` types (`ChunkMap.java:1142-1146`).
+        if !entity.is_client_tracked() {
+            return;
+        }
         let base_entity = entity.get_entity();
         let chunk_pos = base_entity.chunk_pos.load();
 

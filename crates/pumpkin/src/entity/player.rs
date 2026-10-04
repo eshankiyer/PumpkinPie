@@ -265,7 +265,7 @@ use pumpkin_util::resource_location::ResourceLocation;
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::click::ClickEvent;
 use pumpkin_util::text::hover::HoverEvent;
-use pumpkin_util::{GameMode, Hand};
+use pumpkin_util::{Difficulty, GameMode, Hand};
 use pumpkin_world::biome;
 use pumpkin_world::cylindrical_chunk_iterator::Cylindrical;
 use pumpkin_world::level::{Level, SyncChunk, SyncEntityChunk};
@@ -3508,6 +3508,12 @@ impl Player {
 
         let caller: Arc<dyn EntityBase> = self.clone();
         self.living_entity.tick(&caller, server).await;
+        // `Player.aiStep` runs `tickRegeneration` (`Player.java:447`), and
+        // `LivingEntity.tick` only reaches `aiStep` after `baseTick` has ticked
+        // effects, and only while not removed (`LivingEntity.java:2754-2798`).
+        if !self.living_entity.entity.is_removed() {
+            self.tick_regeneration().await;
+        }
         // Vanilla updates pose in PlayerEntity#tick after super.tick().
         self.update_player_pose().await;
         self.hunger_manager.tick(self).await;
@@ -5142,6 +5148,38 @@ impl Player {
         }
         self.hunger_manager
             .add_exhaustion(exhaustion_event.exhaustion);
+    }
+
+    /// Vanilla `ServerPlayer.tickRegeneration` (`ServerPlayer.java:745-764`): on peaceful with
+    /// `natural_health_regeneration`, heal and refill saturation every 20 ticks and food every
+    /// 10 ticks. The food/saturation change reaches the client via `tick_health`.
+    async fn tick_regeneration(&self) {
+        let info = self.world().level_info.load();
+        if info.difficulty != Difficulty::Peaceful || !info.game_rules.natural_health_regeneration
+        {
+            return;
+        }
+        drop(info);
+        let (heal, saturation_up, food_up) = peaceful_regen_actions(
+            self.tick_counter.load(Ordering::Relaxed),
+            self.living_entity.health.load(),
+            self.living_entity.get_max_health(),
+            self.hunger_manager.saturation.load(),
+            self.hunger_manager.level.load(),
+        );
+        if heal {
+            self.heal(1.0).await;
+        }
+        if saturation_up {
+            // Vanilla `FoodData.setSaturation` does not clamp to the food level
+            // (`FoodData.java:112-114`), unlike `HungerManager::set_saturation`.
+            let saturation = self.hunger_manager.saturation.load();
+            self.hunger_manager.saturation.store(saturation + 1.0);
+        }
+        if food_up {
+            let level = self.hunger_manager.level.load();
+            self.hunger_manager.level.store(level + 1);
+        }
     }
 
     pub async fn heal(&self, additional_health: f32) {
@@ -9484,10 +9522,29 @@ pub(crate) const fn restore_creative_interaction_count(stack: &mut ItemStack, or
     }
 }
 
+/// The `(heal, saturation += 1, food += 1)` decisions of `ServerPlayer.tickRegeneration`
+/// (`ServerPlayer.java:745-764`) once its peaceful/gamerule gate has passed. Healing also
+/// requires `health > 0`, the alive check of `LivingEntity.heal` (`LivingEntity.java:1156-1161`)
+/// that `LivingEntity::heal` lacks.
+const fn peaceful_regen_actions(
+    tick: i32,
+    health: f32,
+    max_health: f32,
+    saturation: f32,
+    food: u8,
+) -> (bool, bool, bool) {
+    let every_second = tick % 20 == 0;
+    (
+        every_second && health > 0.0 && health < max_health,
+        every_second && saturation < 20.0,
+        tick % 10 == 0 && food < 20,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Player, ability_invulnerability_blocks, attack_charge_ready, attack_range_is_in_range,
+        Player, ability_invulnerability_blocks, peaceful_regen_actions, attack_charge_ready, attack_range_is_in_range,
         attack_speed_for_item, bedrock_inventory_slot, can_harm_player_teams,
         can_start_fall_flying, can_use_game_master_blocks_state, damage_dealt_stat_points,
         experience_level_after_delta, extract_parrot_variant, first_fifth_level_crossed,
@@ -9952,5 +10009,31 @@ mod tests {
         assert!(!player_on_climbable(true, false, true));
         assert!(!player_on_climbable(false, true, true));
         assert!(!player_on_climbable(false, false, false));
+    }
+
+    #[test]
+    fn peaceful_regen_cadence() {
+        assert_eq!(
+            peaceful_regen_actions(40, 10.0, 20.0, 5.0, 10),
+            (true, true, true)
+        );
+        assert_eq!(
+            peaceful_regen_actions(30, 10.0, 20.0, 5.0, 10),
+            (false, false, true)
+        );
+        assert_eq!(
+            peaceful_regen_actions(41, 10.0, 20.0, 5.0, 10),
+            (false, false, false)
+        );
+        // Full health, saturation and food: nothing to do.
+        assert_eq!(
+            peaceful_regen_actions(20, 20.0, 20.0, 20.0, 20),
+            (false, false, false)
+        );
+        // Dead players are never healed.
+        assert_eq!(
+            peaceful_regen_actions(20, 0.0, 20.0, 20.0, 20),
+            (false, false, false)
+        );
     }
 }

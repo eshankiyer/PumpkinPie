@@ -11,6 +11,12 @@ const MAX_FOOD: u8 = 20;
 const EXHAUSTION_COST: f32 = 4.0;
 const MAX_EXHAUSTION: f32 = 40.0;
 
+/// Vanilla `FoodConstants.saturationByModifier` (`FoodConstants.java:30-32`).
+#[must_use]
+pub fn saturation_by_modifier(nutrition: i32, modifier: f32) -> f32 {
+    nutrition as f32 * modifier * 2.0
+}
+
 pub struct HungerManager {
     pub level: AtomicCell<u8>,
     pub saturation: AtomicCell<f32>,
@@ -115,16 +121,40 @@ impl HungerManager {
         }
     }
 
-    /// Vanilla `FoodData.eat(FoodProperties)`, which forwards the component's
-    /// `saturation()` straight to `FoodData.add` -- the value is already absolute,
-    /// not a modifier, so no `FoodConstants.saturationByModifier` scaling applies.
-    pub async fn eat(&self, player: &Player, food: u8, saturation: f32) {
-        let new_level = self.level.load().saturating_add(food).min(MAX_FOOD);
-        let new_sat = (self.saturation.load() + saturation).clamp(0.0, f32::from(new_level));
+    /// Vanilla `FoodData.add` (`FoodData.java:19-22`): the food sum is a Java `int` add
+    /// clamped to `[0, 20]`, then saturation is clamped to `[0, new food level]` with
+    /// `Mth.clamp(float)` (`value < min ? min : Math.min(value, max)`).
+    fn add(&self, food: i32, saturation: f32) {
+        let new_level = food
+            .wrapping_add(i32::from(self.level.load()))
+            .clamp(0, i32::from(MAX_FOOD));
+        let max = new_level as f32;
+        let sum = saturation + self.saturation.load();
+        let new_sat = if sum < 0.0 {
+            0.0
+        } else if sum > max {
+            max
+        } else {
+            sum
+        };
 
-        self.level.store(new_level);
+        // `new_level` lies in `0..=20`, so the narrowing is lossless.
+        self.level.store(new_level as u8);
         self.saturation.store(new_sat);
+    }
 
+    /// Vanilla `FoodData.eat(int, float)` (`FoodData.java:24-26`), used by cake slices and
+    /// the saturation effect: the saturation gained is
+    /// `FoodConstants.saturationByModifier(food, modifier)`.
+    pub fn eat_with_modifier(&self, food: i32, saturation_modifier: f32) {
+        self.add(food, saturation_by_modifier(food, saturation_modifier));
+    }
+
+    /// Vanilla `FoodData.eat(FoodProperties)` (`FoodData.java:28-30`), which forwards the
+    /// component's `saturation()` straight to `FoodData.add` -- the value is already
+    /// absolute, not a modifier, so no `FoodConstants.saturationByModifier` scaling applies.
+    pub async fn eat(&self, player: &Player, food: i32, saturation: f32) {
+        self.add(food, saturation);
         player.send_health().await;
     }
 
@@ -133,19 +163,6 @@ impl HungerManager {
         let current = self.exhaustion.load();
         self.exhaustion
             .store((current + exhaustion).min(MAX_EXHAUSTION));
-    }
-
-    /// Add hunger manually
-    pub fn add_hunger(&self, hunger: u8) {
-        let current = self.level.load();
-        self.level.store((current + hunger).min(MAX_FOOD));
-    }
-
-    /// Add saturation manually
-    pub fn add_saturation(&self, saturation: f32) {
-        let current = self.saturation.load();
-        self.saturation
-            .store((current + saturation).min(f32::from(self.level.load())));
     }
 
     pub fn set_level(&self, level: u8) {
@@ -214,3 +231,62 @@ impl NBTStorage for HungerManager {
 }
 
 impl NBTStorageInit for HungerManager {}
+
+#[cfg(test)]
+mod tests {
+    use super::{HungerManager, saturation_by_modifier};
+
+    fn manager(level: u8, saturation: f32) -> HungerManager {
+        let manager = HungerManager::default();
+        manager.level.store(level);
+        manager.saturation.store(saturation);
+        manager
+    }
+
+    #[test]
+    fn cake_modifier_matches_literal() {
+        assert_eq!(saturation_by_modifier(2, 0.1).to_bits(), 0.4f32.to_bits());
+    }
+
+    #[test]
+    fn huge_saturation_effect_clamps() {
+        let m = HungerManager::default();
+        m.eat_with_modifier(256, 1.0);
+        assert_eq!(m.level.load(), 20);
+        assert_eq!(m.saturation.load(), 20.0);
+
+        let m = HungerManager::default();
+        m.eat_with_modifier(236, 1.0);
+        assert_eq!(m.level.load(), 20);
+        assert_eq!(m.saturation.load(), 20.0);
+    }
+
+    #[test]
+    fn cake_slice() {
+        let m = manager(10, 3.0);
+        m.eat_with_modifier(2, 0.1);
+        assert_eq!(m.level.load(), 12);
+        assert_eq!(m.saturation.load(), 3.0 + 0.4);
+
+        let m = manager(4, 10.0);
+        m.eat_with_modifier(2, 0.1);
+        assert_eq!(m.level.load(), 6);
+        assert_eq!(m.saturation.load(), 6.0);
+    }
+
+    #[test]
+    fn add_clamps_like_java() {
+        let m = manager(10, 2.0);
+        m.add(300, 0.0);
+        assert_eq!(m.level.load(), 20);
+
+        let m = manager(10, 2.0);
+        m.add(0, -5.0);
+        assert_eq!(m.saturation.load(), 0.0);
+
+        // Java `int` addition wraps before the clamp.
+        let m = manager(20, 2.0);
+        m.add(i32::MAX, 0.0);
+        assert_eq!(m.level.load(), 0);
+    }
+}

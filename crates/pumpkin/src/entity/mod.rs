@@ -647,6 +647,14 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         )
     }
 
+    /// Vanilla `ChunkMap.addEntity` (`ChunkMap.java:1142-1146`) never tracks a type whose
+    /// `clientTrackingRange` is 0, so no spawn, pairing or metadata packet is ever sent for
+    /// it. The only such type is `minecraft:marker` (`EntityTypes.java:662-663`), whose
+    /// `getAddEntityPacket` throws (`Marker.java:36-39`).
+    fn is_client_tracked(&self) -> bool {
+        true
+    }
+
     fn is_collidable(&self, _entity: Option<Box<dyn EntityBase>>) -> bool {
         false
     }

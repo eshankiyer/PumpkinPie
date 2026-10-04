@@ -4342,10 +4342,11 @@ impl LivingEntity {
             if let Some(entity) = world.get_entity_by_id(self.entity.entity_id)
                 && let Some(player) = entity.get_player()
             {
-                // Add hunger and saturation
-                let hunger = amplifier + 1;
-                player.hunger_manager.add_hunger(hunger);
-                player.hunger_manager.add_saturation(hunger as f32 * 2.0);
+                // `SaturationMobEffect.applyEffectTick`: `eat(amplification + 1, 1.0F)`; the
+                // client is resynced by `Player::tick_health`, as by `ServerPlayer.doTick`.
+                player
+                    .hunger_manager
+                    .eat_with_modifier(i32::from(amplifier) + 1, 1.0);
             }
         } else if effect_type == &StatusEffect::BAD_OMEN {
             // BadOmenMobEffect.applyEffectTick: on entering a real village (with room left
@@ -7041,7 +7042,7 @@ impl EntityBase for LivingEntity {
                     {
                         player
                             .hunger_manager
-                            .eat(player, food.nutrition as u8, food.saturation)
+                            .eat(player, food.nutrition, food.saturation)
                             .await;
                         self.entity.world.load().play_bedrock_level_sound(
                             "burp",
