@@ -604,6 +604,17 @@ impl NBTStorage for AllayEntity {
                 "DuplicationCooldown",
                 self.duplication_cooldown.load(Ordering::Relaxed),
             );
+
+            // `LivingEntity.addAdditionalSaveData` stores the packed brain (`:760`).
+            let dimension = self
+                .mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .dimension
+                .minecraft_name;
+            self.brain().write_nbt(nbt, dimension);
         })
     }
 
@@ -639,6 +650,16 @@ impl NBTStorage for AllayEntity {
                 .and_then(|value| i32::try_from(value).ok())
                 .unwrap_or(0);
             self.set_duplication_cooldown(i64::from(cooldown));
+            // `LivingEntity.readAdditionalSaveData` restores the brain memories (`:832`).
+            let dimension = self
+                .mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .dimension
+                .minecraft_name;
+            self.brain().read_nbt(nbt, dimension);
         })
     }
 }

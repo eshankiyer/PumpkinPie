@@ -23,6 +23,8 @@ use std::any::Any;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::damage::DamageType;
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use uuid::Uuid;
@@ -82,6 +84,23 @@ impl MemoryKeyId {
     #[must_use]
     pub const fn index(self) -> usize {
         self as usize
+    }
+
+    /// Registry id of the memory types vanilla registers *with* a codec, i.e. those for which
+    /// `MemoryModuleType.canSerialize()` holds (`memory/MemoryModuleType.java:84,137-140`).
+    /// Every other type here is registered without one and is never saved.
+    ///
+    /// The liked note block's id is `liked_noteblock`, not [`MemoryKey::NAME`].
+    #[must_use]
+    pub const fn serialized_name(self) -> Option<&'static str> {
+        match self {
+            Self::IsPanicking => Some("minecraft:is_panicking"),
+            Self::LikedPlayer => Some("minecraft:liked_player"),
+            Self::LikedNoteblockPosition => Some("minecraft:liked_noteblock"),
+            Self::LikedNoteblockCooldownTicks => Some("minecraft:liked_noteblock_cooldown_ticks"),
+            Self::ItemPickupCooldownTicks => Some("minecraft:item_pickup_cooldown_ticks"),
+            _ => None,
+        }
     }
 }
 
@@ -487,6 +506,69 @@ impl MemoryStore {
         }
     }
 
+    /// The `memories` map of `Brain.pack()` (`Brain.java:113-135`): every registered slot with
+    /// a value whose type has a codec, as `{value, ttl?}` (`ExpirableValue.java:21-28`). `ttl`
+    /// is written only when the slot can expire (`memory/MemorySlot.java:69-79`).
+    ///
+    /// `dimension` fills the `GlobalPos` of the liked note block, which Pumpkin stores as a
+    /// bare `BlockPos` (see the module docs).
+    #[must_use]
+    pub fn write_memories_nbt(&self, dimension: &str) -> NbtCompound {
+        let mut memories = NbtCompound::new();
+        for id in MemoryKeyId::ALL {
+            let Some(name) = id.serialized_name() else {
+                continue;
+            };
+            if !self.is_registered(id) {
+                continue;
+            }
+            let slot = &self.slots[id.index()];
+            let Some(value) = slot.value.as_deref() else {
+                continue;
+            };
+            let mut entry = NbtCompound::new();
+            if !write_memory_value(id, value, dimension, &mut entry) {
+                continue;
+            }
+            if let Some(ttl) = slot.time_to_live {
+                entry.put_long("ttl", ttl);
+            }
+            memories.put_compound(name, entry);
+        }
+        memories
+    }
+
+    /// The restore loop of the `Brain` constructor (`Brain.java:96-98`). Each entry goes
+    /// through `setMemoryInternal`, which silently drops types this brain never registered
+    /// (`Brain.java:186-213`); an entry that fails to decode is skipped.
+    ///
+    /// A liked note block saved in another dimension is skipped: vanilla keeps it but erases
+    /// it on first use through the dimension check of `GlobalPos.isCloseEnough`
+    /// (`AllayAi.java:113-117`), and a bare `BlockPos` cannot carry the dimension.
+    pub fn read_memories_nbt(&mut self, memories: &NbtCompound, dimension: &str) {
+        for id in MemoryKeyId::ALL {
+            let Some(name) = id.serialized_name() else {
+                continue;
+            };
+            if !self.is_registered(id) {
+                continue;
+            }
+            let Some(entry) = memories.get_compound(name) else {
+                continue;
+            };
+            let Some(value) = read_memory_value(id, entry, dimension) else {
+                continue;
+            };
+            // `MemorySlot.set(value)` stores `NEVER_EXPIRE` (`Long.MAX_VALUE`), which this port
+            // represents as `None`.
+            let time_to_live = entry.get_long("ttl").filter(|ttl| *ttl != i64::MAX);
+            self.slots[id.index()] = MemorySlot {
+                value: Some(value),
+                time_to_live,
+            };
+        }
+    }
+
     /// `Brain.memories.isEmpty()` (`Brain.java:454-455`): registration creates the slots, so
     /// an empty memory store has no registered memory modules.
     #[must_use]
@@ -504,6 +586,84 @@ fn is_empty_collection(value: &dyn Any) -> bool {
         || value
             .downcast_ref::<NearestVisibleLivingEntities>()
             .is_some_and(|entities| entities.entities.is_empty())
+}
+
+/// Encodes one memory value under `value` with its type's codec
+/// (`memory/MemoryModuleType.java:84,137-140`). Returns `false` for a type without a codec.
+fn write_memory_value(
+    id: MemoryKeyId,
+    value: &(dyn Any + Send),
+    dimension: &str,
+    entry: &mut NbtCompound,
+) -> bool {
+    match id {
+        // `Codec.BOOL`.
+        MemoryKeyId::IsPanicking => value.downcast_ref::<bool>().is_some_and(|value| {
+            entry.put_bool("value", *value);
+            true
+        }),
+        // `UUIDUtil.CODEC`: four-int array.
+        MemoryKeyId::LikedPlayer => value.downcast_ref::<Uuid>().is_some_and(|value| {
+            entry.put_uuid("value", *value);
+            true
+        }),
+        // `GlobalPos.CODEC`: `{dimension, pos: int[3]}` (`GlobalPos.java:13-17`,
+        // `BlockPos.java:33-37`).
+        MemoryKeyId::LikedNoteblockPosition => {
+            value.downcast_ref::<BlockPos>().is_some_and(|pos| {
+                let mut global_pos = NbtCompound::new();
+                global_pos.put_string("dimension", dimension.to_string());
+                global_pos.put("pos", NbtTag::IntArray(vec![pos.0.x, pos.0.y, pos.0.z]));
+                entry.put_compound("value", global_pos);
+                true
+            })
+        }
+        // `Codec.INT`.
+        MemoryKeyId::LikedNoteblockCooldownTicks | MemoryKeyId::ItemPickupCooldownTicks => {
+            value.downcast_ref::<i32>().is_some_and(|value| {
+                entry.put_int("value", *value);
+                true
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Decodes the `value` field of one saved memory, the inverse of [`write_memory_value`].
+fn read_memory_value(
+    id: MemoryKeyId,
+    entry: &NbtCompound,
+    dimension: &str,
+) -> Option<Box<dyn Any + Send>> {
+    match id {
+        MemoryKeyId::IsPanicking => entry
+            .get_bool("value")
+            .map(|value| Box::new(value) as Box<dyn Any + Send>),
+        MemoryKeyId::LikedPlayer => entry
+            .get_uuid("value")
+            .map(|value| Box::new(value) as Box<dyn Any + Send>),
+        MemoryKeyId::LikedNoteblockPosition => {
+            let global_pos = entry.get_compound("value")?;
+            // `Level.RESOURCE_KEY_CODEC` reads a bare path as `minecraft:<path>`.
+            let saved = global_pos.get_string("dimension")?;
+            let same_dimension = if saved.contains(':') {
+                saved == dimension
+            } else {
+                dimension.strip_prefix("minecraft:") == Some(saved)
+            };
+            if !same_dimension {
+                return None;
+            }
+            match global_pos.get_int_array("pos")? {
+                [x, y, z] => Some(Box::new(BlockPos::new(*x, *y, *z)) as Box<dyn Any + Send>),
+                _ => None,
+            }
+        }
+        MemoryKeyId::LikedNoteblockCooldownTicks | MemoryKeyId::ItemPickupCooldownTicks => entry
+            .get_int("value")
+            .map(|value| Box::new(value) as Box<dyn Any + Send>),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -583,6 +743,62 @@ mod tests {
         assert_eq!(store.get::<ItemPickupCooldownTicksMemory>(), Some(&2));
         store.erase::<LikedNoteblockCooldownTicksMemory>();
         assert_eq!(store.get::<ItemPickupCooldownTicksMemory>(), Some(&2));
+    }
+
+    #[test]
+    fn memories_nbt_roundtrip() {
+        let player = Uuid::from_u128(0x0123_4567_89ab_cdef_0011_2233_4455_6677);
+        let mut store = MemoryStore::new();
+        store.register(MemoryKeyId::LikedPlayer);
+        store.register(MemoryKeyId::ItemPickupCooldownTicks);
+        store.register(MemoryKeyId::LikedNoteblockPosition);
+        store.register(MemoryKeyId::WalkTarget);
+        store.set::<LikedPlayerMemory>(player);
+        store.set_with_expiry::<ItemPickupCooldownTicksMemory>(7, 5);
+        store.set::<LikedNoteblockPositionMemory>(BlockPos::new(1, -2, 3));
+        store.set::<WalkTargetMemory>(WalkTarget::new(
+            PositionTracker::of_block(BlockPos::new(0, 0, 0)),
+            1.0,
+            0,
+        ));
+
+        let memories = store.write_memories_nbt("minecraft:overworld");
+        // `walk_target` has no codec, and a never-expiring slot writes no `ttl`.
+        assert!(!memories.has("minecraft:walk_target"));
+        assert!(
+            !memories
+                .get_compound("minecraft:liked_player")
+                .is_some_and(|entry| entry.has("ttl"))
+        );
+        assert_eq!(
+            memories
+                .get_compound("minecraft:item_pickup_cooldown_ticks")
+                .and_then(|entry| entry.get_long("ttl")),
+            Some(5)
+        );
+
+        let mut restored = MemoryStore::new();
+        restored.register(MemoryKeyId::LikedPlayer);
+        restored.register(MemoryKeyId::ItemPickupCooldownTicks);
+        restored.read_memories_nbt(&memories, "minecraft:overworld");
+        assert_eq!(restored.get::<LikedPlayerMemory>(), Some(&player));
+        assert_eq!(restored.time_until_expiry::<LikedPlayerMemory>(), i64::MAX);
+        assert_eq!(restored.get::<ItemPickupCooldownTicksMemory>(), Some(&7));
+        assert_eq!(
+            restored.time_until_expiry::<ItemPickupCooldownTicksMemory>(),
+            5
+        );
+        // Not registered on the restoring brain, so `setMemoryInternal` drops it.
+        assert!(!restored.has_value::<LikedNoteblockPositionMemory>());
+
+        restored.register(MemoryKeyId::LikedNoteblockPosition);
+        restored.read_memories_nbt(&memories, "minecraft:the_nether");
+        assert!(!restored.has_value::<LikedNoteblockPositionMemory>());
+        restored.read_memories_nbt(&memories, "minecraft:overworld");
+        assert_eq!(
+            restored.get::<LikedNoteblockPositionMemory>(),
+            Some(&BlockPos::new(1, -2, 3))
+        );
     }
 
     #[test]

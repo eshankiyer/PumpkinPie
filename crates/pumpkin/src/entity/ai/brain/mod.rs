@@ -46,6 +46,8 @@ use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
 
+use pumpkin_nbt::compound::NbtCompound;
+
 use crate::entity::mob::Mob;
 
 use behavior::{Behavior, BehaviorStatus};
@@ -260,6 +262,32 @@ impl Brain {
 
     pub fn erase<K: MemoryKey>(&self) {
         self.memory.lock().unwrap().erase::<K>();
+    }
+
+    /// `output.store("Brain", Brain.Packed.CODEC, brain.pack())` (`LivingEntity.java:760`,
+    /// `Brain.java:463-467`). Written unconditionally, so an empty store gives
+    /// `Brain: {memories: {}}`.
+    pub fn write_nbt(&self, nbt: &mut NbtCompound, dimension: &str) {
+        let memories = self.memory.lock().unwrap().write_memories_nbt(dimension);
+        let mut brain = NbtCompound::new();
+        brain.put_compound("memories", memories);
+        nbt.put_compound("Brain", brain);
+    }
+
+    /// `input.read("Brain", ...).ifPresent(makeBrain)` (`LivingEntity.java:832`). The entity
+    /// is freshly built with its default activities, which is what `Provider.makeBrain`
+    /// (`Brain.java:485-488`) also produces, so only the memories need restoring.
+    pub fn read_nbt(&self, nbt: &NbtCompound, dimension: &str) {
+        let Some(memories) = nbt
+            .get_compound("Brain")
+            .and_then(|brain| brain.get_compound("memories"))
+        else {
+            return;
+        };
+        self.memory
+            .lock()
+            .unwrap()
+            .read_memories_nbt(memories, dimension);
     }
 
     /// `Brain.clearMemories` (`Brain.java:154-156`).

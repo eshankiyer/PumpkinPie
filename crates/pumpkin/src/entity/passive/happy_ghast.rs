@@ -528,6 +528,19 @@ impl NBTStorage for HappyGhastEntity {
                 "still_timeout",
                 self.server_still_timeout.load(Ordering::Relaxed),
             );
+
+            // `LivingEntity.addAdditionalSaveData` stores the packed brain (`:760`).
+            if let Some(brain) = self.mob_entity.brain.as_ref() {
+                let dimension = self
+                    .mob_entity
+                    .living_entity
+                    .entity
+                    .world
+                    .load()
+                    .dimension
+                    .minecraft_name;
+                brain.write_nbt(nbt, dimension);
+            }
         })
     }
 
@@ -538,6 +551,19 @@ impl NBTStorage for HappyGhastEntity {
             self.read_animal_nbt(nbt);
             if let Some(timeout) = nbt.get_int("still_timeout") {
                 self.set_server_still_timeout(timeout);
+            }
+
+            // `LivingEntity.readAdditionalSaveData` restores the brain memories (`:832`).
+            if let Some(brain) = self.mob_entity.brain.as_ref() {
+                let dimension = self
+                    .mob_entity
+                    .living_entity
+                    .entity
+                    .world
+                    .load()
+                    .dimension
+                    .minecraft_name;
+                brain.read_nbt(nbt, dimension);
             }
         })
     }
