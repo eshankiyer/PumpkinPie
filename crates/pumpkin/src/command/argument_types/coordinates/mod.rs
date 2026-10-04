@@ -1,8 +1,6 @@
 use crate::command::context::command_source::CommandSource;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
-use crate::command::errors::error_types::{
-    CommandErrorType, READER_EXPECTED_DOUBLE, READER_EXPECTED_INT,
-};
+use crate::command::errors::error_types::CommandErrorType;
 use crate::command::string_reader::StringReader;
 use pumpkin_data::translation;
 use pumpkin_util::math::vector2::Vector2;
@@ -17,6 +15,14 @@ pub mod vec3;
 pub const MIXED_TYPE_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
     translation::java::ARGUMENT_POS_MIXED,
     translation::java::ARGUMENT_POS_MIXED,
+);
+pub const MISSING_DOUBLE_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::ARGUMENT_POS_MISSING_DOUBLE,
+    translation::java::ARGUMENT_POS_MISSING_DOUBLE,
+);
+pub const MISSING_INT_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::ARGUMENT_POS_MISSING_INT,
+    translation::java::ARGUMENT_POS_MISSING_INT,
 );
 
 /// Represents a single world coordinate.
@@ -88,7 +94,7 @@ impl WorldCoordinate {
         if reader.peek() == Some('^') {
             Err(MIXED_TYPE_ERROR_TYPE.create(reader))
         } else if !reader.can_read_char() {
-            Err(READER_EXPECTED_DOUBLE.create(reader))
+            Err(MISSING_DOUBLE_ERROR_TYPE.create(reader))
         } else {
             let is_relative = Self::consume_relative_start(reader);
             let i = reader.cursor();
@@ -123,7 +129,7 @@ impl WorldCoordinate {
         if reader.peek() == Some('^') {
             Err(MIXED_TYPE_ERROR_TYPE.create(reader))
         } else if !reader.can_read_char() {
-            Err(READER_EXPECTED_INT.create(reader))
+            Err(MISSING_INT_ERROR_TYPE.create(reader))
         } else {
             let is_relative = Self::consume_relative_start(reader);
             let value = if reader.can_read_char() && reader.peek() != Some(' ') {
@@ -302,7 +308,7 @@ impl Coordinates {
 
     fn parse_local_number(i: usize, reader: &mut StringReader) -> Result<f64, CommandSyntaxError> {
         if !reader.can_read_char() {
-            Err(READER_EXPECTED_DOUBLE.create(reader))
+            Err(MISSING_DOUBLE_ERROR_TYPE.create(reader))
         } else if reader.peek() != Some('^') {
             reader.set_cursor(i);
             Err(MIXED_TYPE_ERROR_TYPE.create(reader))

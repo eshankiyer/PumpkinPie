@@ -106,7 +106,8 @@ mod test {
         INCOMPLETE_ERROR_TYPE, Vec3ArgumentType,
     };
     use crate::command::argument_types::coordinates::{
-        Coordinates, MIXED_TYPE_ERROR_TYPE, WorldCoordinate,
+        Coordinates, MISSING_DOUBLE_ERROR_TYPE, MISSING_INT_ERROR_TYPE, MIXED_TYPE_ERROR_TYPE,
+        WorldCoordinate,
     };
     use crate::command::string_reader::StringReader;
     use pumpkin_util::math::vector3::Vector3;
@@ -205,5 +206,21 @@ mod test {
         let mut reader = StringReader::new("^1 ^2");
 
         assert_parse_err_reset!(reader, Vec3ArgumentType::Default, &INCOMPLETE_ERROR_TYPE);
+    }
+
+    #[test]
+    fn parse_missing_coordinate() {
+        // A trailing space with nothing after it is a missing coordinate, not a bad number.
+        let mut reader = StringReader::new("1 2 ");
+        assert_parse_err_reset!(reader, Vec3ArgumentType::Default, &MISSING_DOUBLE_ERROR_TYPE);
+
+        let mut reader = StringReader::new("^1 ^2 ");
+        assert_parse_err_reset!(reader, Vec3ArgumentType::Default, &MISSING_DOUBLE_ERROR_TYPE);
+
+        let mut reader = StringReader::new("");
+        assert!(
+            WorldCoordinate::parse_integer(&mut reader)
+                .is_err_and(|e| e.is(&MISSING_INT_ERROR_TYPE))
+        );
     }
 }
