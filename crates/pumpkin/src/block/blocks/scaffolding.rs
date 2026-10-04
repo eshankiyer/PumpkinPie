@@ -1,6 +1,6 @@
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::{
-    Block, BlockDirection, BlockStateId,
+    Block, BlockDirection, BlockStateId, HorizontalFacingExt,
     block_properties::{BlockProperties, ScaffoldingLikeProperties},
 };
 use pumpkin_macros::pumpkin_block;
@@ -15,6 +15,8 @@ use crate::block::{
     OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::falling::FallingEntity;
+use crate::entity::player::Player;
+use crate::world::World;
 
 /// `net.minecraft.world.level.block.ScaffoldingBlock`: distance-from-support propagation with a
 /// tick-driven collapse into a falling-block entity when unsupported.
@@ -22,6 +24,18 @@ use crate::entity::falling::FallingEntity;
 pub struct ScaffoldingBlock;
 
 const MAX_DISTANCE: u8 = 7;
+
+/// Outcome of the pure part of `ScaffoldingBlockItem.updatePlacementContext`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlacementRedirect {
+    /// Place at this position; the direction is the new context's clicked face.
+    Place(BlockPos, BlockDirection),
+    /// `updatePlacementContext` returned null without leaving the world.
+    Refused,
+    /// The redirect walked out of world bounds at this position (vanilla then returns null,
+    /// sending the build-limit message when it left through the top).
+    OutOfBounds(BlockPos),
+}
 
 impl ScaffoldingBlock {
     /// `ScaffoldingBlock.getInteractionShape` (`ScaffoldingBlock.java:67-69`) always returns the
@@ -59,7 +73,7 @@ impl ScaffoldingBlock {
     /// Faithful to a vanilla mutable-cursor quirk: the vertical check reads `pos.below()`, but
     /// the horizontal scan afterward is centered on `pos` itself (the cursor is reused via
     /// `setWithOffset(pos, direction)`, not advanced from `pos.below()`).
-    fn get_distance(accessor: &dyn BlockAccessor, pos: &BlockPos) -> u8 {
+    pub(crate) fn get_distance(accessor: &dyn BlockAccessor, pos: &BlockPos) -> u8 {
         let below_pos = pos.down();
         let (below_block, below_state) = accessor.get_block_and_state(&below_pos);
 
@@ -93,6 +107,106 @@ impl ScaffoldingBlock {
         distance
     }
 
+    /// `ScaffoldingBlockItem.updatePlacementContext` (`ScaffoldingBlockItem.java:19-64`) for the
+    /// server's block-item path. `pos` is `BlockPlaceContext.getClickedPos`. Returns the final
+    /// placement position and the redirected clicked face, or `None` when vanilla returns null
+    /// (nothing is placed and nothing is consumed).
+    pub(crate) async fn update_placement_context(
+        world: &World,
+        player: &Player,
+        pos: BlockPos,
+        clicked_face: BlockDirection,
+        inside_block: bool,
+    ) -> Option<(BlockPos, BlockDirection)> {
+        let entity = &player.living_entity.entity;
+        let redirect = Self::resolve_placement(
+            world,
+            pos,
+            clicked_face,
+            entity.is_sneaking(),
+            inside_block,
+            entity.get_horizontal_facing().to_block_direction(),
+            |p| world.is_in_build_limit(p),
+        );
+        match redirect {
+            PlacementRedirect::Place(target, direction) => Some((target, direction)),
+            PlacementRedirect::Refused => None,
+            PlacementRedirect::OutOfBounds(out) => {
+                let max_y = world.get_top_y();
+                if out.0.y > max_y {
+                    // `ServerPlayer.sendBuildLimitMessage(true, maxY)` (`ServerPlayer.java:1808-1810`).
+                    player
+                        .send_overlay_message(
+                            &pumpkin_util::text::TextComponent::translate_cross(
+                                pumpkin_data::translation::java::BUILD_TOOHIGH,
+                                pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
+                                vec![pumpkin_util::text::TextComponent::text(max_y.to_string())],
+                            )
+                            .color_named(pumpkin_util::text::color::NamedColor::Red),
+                        )
+                        .await;
+                }
+                None
+            }
+        }
+    }
+
+    /// World-independent body of [`Self::update_placement_context`]. `horizontal_direction` is
+    /// `UseOnContext.getHorizontalDirection` and `in_bounds` is `Level.isInWorldBounds`.
+    fn resolve_placement(
+        accessor: &dyn BlockAccessor,
+        pos: BlockPos,
+        clicked_face: BlockDirection,
+        sneaking: bool,
+        inside_block: bool,
+        horizontal_direction: BlockDirection,
+        in_bounds: impl Fn(BlockPos) -> bool,
+    ) -> PlacementRedirect {
+        if accessor.get_block(&pos) != &Block::SCAFFOLDING {
+            return if Self::get_distance(accessor, &pos) == MAX_DISTANCE {
+                PlacementRedirect::Refused
+            } else {
+                PlacementRedirect::Place(pos, clicked_face)
+            };
+        }
+
+        let direction = if sneaking {
+            if inside_block {
+                clicked_face.opposite()
+            } else {
+                clicked_face
+            }
+        } else if clicked_face == BlockDirection::Up {
+            horizontal_direction
+        } else {
+            BlockDirection::Up
+        };
+
+        // Only horizontal steps count, so an upward redirect climbs the whole column.
+        let mut horizontal_distance = 0;
+        let mut placement_pos = pos.offset(direction.to_offset());
+        while horizontal_distance < MAX_DISTANCE {
+            if !in_bounds(placement_pos) {
+                return PlacementRedirect::OutOfBounds(placement_pos);
+            }
+
+            let (block, state) = accessor.get_block_and_state(&placement_pos);
+            if block != &Block::SCAFFOLDING {
+                if state.replaceable() {
+                    return PlacementRedirect::Place(placement_pos, direction);
+                }
+                break;
+            }
+
+            placement_pos = placement_pos.offset(direction.to_offset());
+            if direction.is_horizontal() {
+                horizontal_distance += 1;
+            }
+        }
+
+        PlacementRedirect::Refused
+    }
+
     /// `ScaffoldingBlock.isBottom` (`ScaffoldingBlock.java:154-156`): true when the scaffold isn't
     /// resting directly on another scaffold, but also isn't fully supported (`distance > 0`).
     fn is_bottom(accessor: &dyn BlockAccessor, pos: &BlockPos, distance: u8) -> bool {
@@ -112,14 +226,14 @@ impl BlockBehaviour for ScaffoldingBlock {
         })
     }
 
-    /// `ScaffoldingBlockItem.mustSurvive` is false (`ScaffoldingBlockItem.java:66-69`),
-    /// so placement is allowed at distance 7 and the scheduled tick performs the vanilla
-    /// falling/destroying transition. The block's separate `canSurvive` predicate is
-    /// `getDistance(level, pos) < 7` (`ScaffoldingBlock.java:131-134`), but this hook is the
-    /// placement-time check in Pumpkin's block-item path.
+    /// The block-item path (`use_item_on` set) skips survival because
+    /// `ScaffoldingBlockItem.mustSurvive` is false (`ScaffoldingBlockItem.java:66-69`; a
+    /// distance-7 cell reached by a redirect then falls on its scheduled tick). Every other
+    /// caller, such as falling-block landing (`FallingBlockEntity.java:185-189`), gets
+    /// `ScaffoldingBlock.canSurvive`: `getDistance(level, pos) < 7` (`ScaffoldingBlock.java:131-134`).
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
-        let _ = args;
-        true
+        args.use_item_on.is_some()
+            || Self::get_distance(args.block_accessor, args.position) < MAX_DISTANCE
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
@@ -349,5 +463,170 @@ mod tests {
         let shapes = ScaffoldingBlock::collision_shapes_for_context(state_id, false, true, true);
         assert_eq!(shapes.len(), 1);
         assert_eq!(shapes[0].max.y, 0.125);
+    }
+
+    fn in_bounds_below(top_y: i32) -> impl Fn(BlockPos) -> bool {
+        move |p: BlockPos| p.0.y <= top_y
+    }
+
+    #[test]
+    fn placement_on_a_non_scaffold_is_refused_at_distance_seven() {
+        // `ScaffoldingBlockItem.java:25-27`: no support below or beside means null.
+        let pos = BlockPos::new(0, 1, 0);
+        let accessor = MockAccessor::default();
+        assert_eq!(
+            ScaffoldingBlock::resolve_placement(
+                &accessor,
+                pos,
+                BlockDirection::Up,
+                false,
+                false,
+                BlockDirection::North,
+                in_bounds_below(320),
+            ),
+            PlacementRedirect::Refused
+        );
+
+        let supported =
+            accessor_with(&[(pos.down(), &Block::STONE, Block::STONE.default_state.id)]);
+        assert_eq!(
+            ScaffoldingBlock::resolve_placement(
+                &supported,
+                pos,
+                BlockDirection::Up,
+                false,
+                false,
+                BlockDirection::North,
+                in_bounds_below(320),
+            ),
+            PlacementRedirect::Place(pos, BlockDirection::Up)
+        );
+    }
+
+    #[test]
+    fn side_click_climbs_the_whole_column() {
+        // Vertical steps never count toward the seven-step limit.
+        let mut accessor = MockAccessor::default();
+        accessor.set(
+            BlockPos::new(0, 0, 0),
+            &Block::STONE,
+            Block::STONE.default_state.id,
+        );
+        for y in 1..=3 {
+            accessor.set(
+                BlockPos::new(0, y, 0),
+                &Block::SCAFFOLDING,
+                scaffolding_state(0),
+            );
+        }
+        assert_eq!(
+            ScaffoldingBlock::resolve_placement(
+                &accessor,
+                BlockPos::new(0, 2, 0),
+                BlockDirection::North,
+                false,
+                false,
+                BlockDirection::East,
+                in_bounds_below(320),
+            ),
+            PlacementRedirect::Place(BlockPos::new(0, 4, 0), BlockDirection::Up)
+        );
+    }
+
+    #[test]
+    fn top_click_extends_horizontally_up_to_seven_steps() {
+        let mut accessor = MockAccessor::default();
+        for x in 0..=6 {
+            accessor.set(
+                BlockPos::new(x, 1, 0),
+                &Block::SCAFFOLDING,
+                scaffolding_state(0),
+            );
+        }
+        let place = |accessor: &MockAccessor| {
+            ScaffoldingBlock::resolve_placement(
+                accessor,
+                BlockPos::new(0, 1, 0),
+                BlockDirection::Up,
+                false,
+                false,
+                BlockDirection::East,
+                in_bounds_below(320),
+            )
+        };
+        assert_eq!(
+            place(&accessor),
+            PlacementRedirect::Place(BlockPos::new(7, 1, 0), BlockDirection::East)
+        );
+
+        // An eighth scaffold uses up all seven horizontal steps.
+        accessor.set(
+            BlockPos::new(7, 1, 0),
+            &Block::SCAFFOLDING,
+            scaffolding_state(0),
+        );
+        assert_eq!(place(&accessor), PlacementRedirect::Refused);
+    }
+
+    #[test]
+    fn top_click_at_the_build_limit_still_redirects_horizontally() {
+        let top_y = 319;
+        let accessor = accessor_with(&[(
+            BlockPos::new(0, top_y, 0),
+            &Block::SCAFFOLDING,
+            scaffolding_state(0),
+        )]);
+        assert_eq!(
+            ScaffoldingBlock::resolve_placement(
+                &accessor,
+                BlockPos::new(0, top_y, 0),
+                BlockDirection::Up,
+                false,
+                false,
+                BlockDirection::South,
+                in_bounds_below(top_y),
+            ),
+            PlacementRedirect::Place(BlockPos::new(0, top_y, 1), BlockDirection::South)
+        );
+        assert_eq!(
+            ScaffoldingBlock::resolve_placement(
+                &accessor,
+                BlockPos::new(0, top_y, 0),
+                BlockDirection::West,
+                false,
+                false,
+                BlockDirection::South,
+                in_bounds_below(top_y),
+            ),
+            PlacementRedirect::OutOfBounds(BlockPos::new(0, top_y + 1, 0))
+        );
+    }
+
+    #[test]
+    fn sneaking_follows_the_clicked_face() {
+        let accessor = accessor_with(&[(
+            BlockPos::new(0, 1, 0),
+            &Block::SCAFFOLDING,
+            scaffolding_state(0),
+        )]);
+        let place = |inside| {
+            ScaffoldingBlock::resolve_placement(
+                &accessor,
+                BlockPos::new(0, 1, 0),
+                BlockDirection::West,
+                true,
+                inside,
+                BlockDirection::North,
+                in_bounds_below(320),
+            )
+        };
+        assert_eq!(
+            place(false),
+            PlacementRedirect::Place(BlockPos::new(-1, 1, 0), BlockDirection::West)
+        );
+        assert_eq!(
+            place(true),
+            PlacementRedirect::Place(BlockPos::new(1, 1, 0), BlockDirection::East)
+        );
     }
 }

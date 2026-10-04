@@ -632,6 +632,54 @@ impl BlockRegistry {
             .await;
     }
 
+    /// Scaffolding placement position resolution (`BlockPlaceContext.java:51-57` followed by
+    /// `ScaffoldingBlockItem.updatePlacementContext`). `None` means vanilla's `BlockItem.place`
+    /// returns `FAIL`.
+    async fn resolve_scaffolding_placement(
+        world: &World,
+        player: &Player,
+        clicked_block_pos: BlockPos,
+        face: BlockDirection,
+        replace_clicked: bool,
+        use_item_on: &SUseItemOn,
+    ) -> Option<(BlockPos, BlockDirection, BlockIsReplacing)> {
+        let target = if replace_clicked {
+            clicked_block_pos
+        } else {
+            // `BlockPlaceContext.canPlace`: a held scaffold replaces scaffolding too.
+            let target = BlockPos(clicked_block_pos.0 + face.to_offset());
+            let (target_block, target_state) = world.get_block_and_state(&target);
+            if target_block != &Block::SCAFFOLDING && !target_state.replaceable() {
+                return None;
+            }
+            target
+        };
+
+        let (position, direction) = ScaffoldingBlock::update_placement_context(
+            world,
+            player,
+            target,
+            face,
+            use_item_on.inside_block,
+        )
+        .await?;
+
+        // `getStateForPlacement` waterlogs from `getFluidState(pos).is(Fluids.WATER)`.
+        let (block, state) = world.get_block_and_state(&position);
+        let replacing = if block == &Block::WATER {
+            use pumpkin_data::block_properties::{BlockProperties, WaterLikeProperties};
+            BlockIsReplacing::Water(WaterLikeProperties::from_state_id(state.id, block).level)
+        } else if block == &Block::SEAGRASS || block == &Block::TALL_SEAGRASS {
+            // `SeagrassBlock.getFluidState` / `TallSeagrassBlock.getFluidState` report a source.
+            BlockIsReplacing::Water(0)
+        } else {
+            BlockIsReplacing::Other
+        };
+        // Pumpkin's placement face points back toward the clicked block, the opposite of
+        // `BlockPlaceContext.getClickedFace`; scaffolding ignores it either way.
+        Some((position, direction.opposite(), replacing))
+    }
+
     #[expect(clippy::too_many_lines)]
     pub async fn place_block(
         &self,
@@ -654,55 +702,97 @@ impl BlockRegistry {
         let clicked_block_pos = BlockPos(location.0);
         let world = entity.world.load_full();
 
-        if location.0.y + face.to_offset().y < world.get_bottom_y() {
-            return Err(BlockPlacingError::BlockOutOfWorld);
-        }
-
-        if location.0.y + face.to_offset().y > world.get_top_y() {
-            // Vanilla uses `ServerPlayer.sendOverlayMessage` for placement-limit feedback
-            // (`ServerPlayer.java:1798-1805`).
-            player
-                .send_overlay_message(
-                    &pumpkin_util::text::TextComponent::translate_cross(
-                        pumpkin_data::translation::java::BUILD_TOOHIGH,
-                        pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
-                        vec![pumpkin_util::text::TextComponent::text(
-                            (world.get_top_y()).to_string(),
-                        )],
-                    )
-                    .color_named(pumpkin_util::text::color::NamedColor::Red),
-                )
-                .await;
-            return Err(BlockPlacingError::BlockOutOfWorld);
-        }
-
         let (clicked_block, clicked_block_state) = world.get_block_and_state(&clicked_block_pos);
+        // `ScaffoldingBlock.canBeReplaced` is true whenever scaffolding is in hand
+        // (`ScaffoldingBlock.java:72-74`), so `BlockPlaceContext.replaceClicked` holds for a
+        // clicked scaffold as well as any replaceable block (`BlockPlaceContext.java:30`).
+        let is_scaffolding = placed_block == &Block::SCAFFOLDING;
+        let scaffolding_replace_clicked = is_scaffolding
+            && (clicked_block == &Block::SCAFFOLDING || clicked_block_state.replaceable());
 
-        let replace_clicked_block = if clicked_block == placed_block {
-            self.can_update_at(
-                &world,
-                clicked_block,
-                clicked_block_state.id,
-                &clicked_block_pos,
-                face,
-                use_item_on,
-                player,
-            )
-            .then_some(BlockIsReplacing::Itself(clicked_block_state.id))
-        } else if clicked_block_state.replaceable() {
-            if clicked_block == &Block::WATER {
-                use pumpkin_data::block_properties::{BlockProperties, WaterLikeProperties};
-                let water_props =
-                    WaterLikeProperties::from_state_id(clicked_block_state.id, clicked_block);
-                Some(BlockIsReplacing::Water(water_props.level))
-            } else {
-                Some(BlockIsReplacing::Other)
+        // A replaced clicked position was already bounds-checked by the packet handler, and
+        // scaffolding redirects that leave the world are refused (and messaged) by
+        // `ScaffoldingBlock::update_placement_context`.
+        if !scaffolding_replace_clicked {
+            if location.0.y + face.to_offset().y < world.get_bottom_y() {
+                return Err(BlockPlacingError::BlockOutOfWorld);
             }
-        } else {
-            None
-        };
 
-        let (final_block_pos, final_face, replacing) =
+            if location.0.y + face.to_offset().y > world.get_top_y() {
+                // Vanilla uses `ServerPlayer.sendOverlayMessage` for placement-limit feedback
+                // (`ServerPlayer.java:1798-1805`).
+                player
+                    .send_overlay_message(
+                        &pumpkin_util::text::TextComponent::translate_cross(
+                            pumpkin_data::translation::java::BUILD_TOOHIGH,
+                            pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
+                            vec![pumpkin_util::text::TextComponent::text(
+                                (world.get_top_y()).to_string(),
+                            )],
+                        )
+                        .color_named(pumpkin_util::text::color::NamedColor::Red),
+                    )
+                    .await;
+                return Err(BlockPlacingError::BlockOutOfWorld);
+            }
+        }
+
+        let (final_block_pos, final_face, replacing) = if is_scaffolding {
+            let Some(resolved) = Self::resolve_scaffolding_placement(
+                &world,
+                player,
+                clicked_block_pos,
+                face,
+                scaffolding_replace_clicked,
+                use_item_on,
+            )
+            .await
+            else {
+                // `ServerGamePacketListenerImpl.handleUseItemOn` (java:1367-1371): a failed
+                // UP-face placement attempt at or above the max build height still sends the
+                // build-limit message.
+                if face == BlockDirection::Up && clicked_block_pos.0.y >= world.get_top_y() {
+                    player
+                        .send_overlay_message(
+                            &pumpkin_util::text::TextComponent::translate_cross(
+                                pumpkin_data::translation::java::BUILD_TOOHIGH,
+                                pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
+                                vec![pumpkin_util::text::TextComponent::text(
+                                    world.get_top_y().to_string(),
+                                )],
+                            )
+                            .color_named(pumpkin_util::text::color::NamedColor::Red),
+                        )
+                        .await;
+                }
+                return Ok(None);
+            };
+            resolved
+        } else {
+            let replace_clicked_block = if clicked_block == placed_block {
+                self.can_update_at(
+                    &world,
+                    clicked_block,
+                    clicked_block_state.id,
+                    &clicked_block_pos,
+                    face,
+                    use_item_on,
+                    player,
+                )
+                .then_some(BlockIsReplacing::Itself(clicked_block_state.id))
+            } else if clicked_block_state.replaceable() {
+                if clicked_block == &Block::WATER {
+                    use pumpkin_data::block_properties::{BlockProperties, WaterLikeProperties};
+                    let water_props =
+                        WaterLikeProperties::from_state_id(clicked_block_state.id, clicked_block);
+                    Some(BlockIsReplacing::Water(water_props.level))
+                } else {
+                    Some(BlockIsReplacing::Other)
+                }
+            } else {
+                None
+            };
+
             if let Some(replacing) = replace_clicked_block {
                 (clicked_block_pos, face.opposite(), replacing)
             } else {
@@ -743,7 +833,8 @@ impl BlockRegistry {
                         return Ok(None);
                     }
                 }
-            };
+            }
+        };
 
         if !self.can_place_at(
             Some(server),
@@ -776,7 +867,12 @@ impl BlockRegistry {
         // placement. (e.g. arrows/xp orbs/displays/markers should not)
         let state = BlockState::from_id(new_state);
         let mut buildable = true;
-        for shape in state.get_block_collision_shapes_at(&final_block_pos) {
+        // `ScaffoldingBlock.getCollisionShape` is empty for a placement collision context
+        // (`ScaffoldingBlock.java:137-139`), so entities never obstruct scaffolding placement.
+        for shape in state
+            .get_block_collision_shapes_at(&final_block_pos)
+            .filter(|_| !is_scaffolding)
+        {
             let placed_box = shape.at_pos(final_block_pos);
 
             if Self::has_blocking_entity_in_box(world.as_ref(), &placed_box) {
