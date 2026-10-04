@@ -22,6 +22,7 @@ use pumpkin_data::Enchantment;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
     CustomNameImpl, DataComponentImpl, EnchantmentsImpl, StoredEnchantmentsImpl,
+    WrittenBookContentImpl,
 };
 use pumpkin_data::item::Item;
 use pumpkin_data::{item_stack::ItemStack, screen::WindowType};
@@ -161,17 +162,57 @@ fn merge_enchantments(
     (any_compatible, any_incompatible)
 }
 
-/// Applies the rename half of `AnvilMenu.createResult` (AnvilMenu.java:264-274) to `result`
+/// `StringUtil.filterText(input, false)` (StringUtil.java:70-86): keeps only characters for
+/// which `isAllowedChatCharacter` (StringUtil.java:62-64) holds, i.e. drops the section sign,
+/// control characters (including `\n`) and DEL. Java walks UTF-16 units, but surrogate units
+/// are always kept, so walking `char`s is equivalent.
+fn filter_text(input: &str) -> String {
+    input
+        .chars()
+        .filter(|&c| c != '\u{a7}' && c >= ' ' && c != '\u{7f}')
+        .collect()
+}
+
+/// `AnvilMenu.validateName` (AnvilMenu.java:300-303): the filtered name, or `None` when it is
+/// longer than 50 UTF-16 units (Java `String.length()`), measured after filtering.
+fn validate_name(name: &str) -> Option<String> {
+    let filtered = filter_text(name);
+    (filtered.encode_utf16().count() <= MAX_NAME_LENGTH).then_some(filtered)
+}
+
+/// `StringUtil.isBlank` (StringUtil.java:88-94): empty, or every character satisfies
+/// `Character.isWhitespace || Character.isSpaceChar`. That union is Unicode `White_Space`
+/// without U+0085, plus the U+001C..U+001F separators.
+fn is_blank(s: &str) -> bool {
+    s.chars()
+        .all(|c| (c.is_whitespace() && c != '\u{85}') || ('\u{1c}'..='\u{1f}').contains(&c))
+}
+
+/// `ItemStack.getHoverName().getString()` (ItemStack.java:803-822): the custom name, else a
+/// non-blank written-book title, else the item name.
+fn hover_name_string(stack: &ItemStack) -> String {
+    if let Some(custom) = stack.get_data_component::<CustomNameImpl>() {
+        return custom.name.clone().get_text();
+    }
+    if let Some(book) = stack.get_data_component::<WrittenBookContentImpl>()
+        && !is_blank(&book.title)
+    {
+        return book.title.clone();
+    }
+    stack.get_item_name().get_text()
+}
+
+/// Applies the rename half of `AnvilMenu.createResult` (AnvilMenu.java:224-233) to `result`
 /// and returns the naming cost (1 when the name actually changed, else 0).
 /// Split out of `create_result` to keep it under the workspace line limit.
 fn apply_rename(rename_text: &str, input: &ItemStack, result: &mut ItemStack) -> i32 {
-    if rename_text.is_empty() {
-        if get_custom_name(input).is_some() {
-            remove_custom_name(result);
+    if !is_blank(rename_text) {
+        if rename_text != hover_name_string(input) {
+            result.set_custom_name(rename_text.to_string());
             return 1;
         }
-    } else if Some(rename_text) != get_custom_name(input).as_deref() {
-        result.set_custom_name(rename_text.to_string());
+    } else if get_custom_name(input).is_some() {
+        remove_custom_name(result);
         return 1;
     }
     0
@@ -237,7 +278,8 @@ impl Slot for AnvilResultSlot {
 pub struct AnvilScreenHandler {
     pub inventory: Arc<dyn Inventory>,
     behaviour: ScreenHandlerBehaviour,
-    pub rename_text: String,
+    /// `AnvilMenu.itemName` (AnvilMenu.java:33); `None` until the first rename packet.
+    pub rename_text: Option<String>,
     pub repair_cost: i16,
     /// `AnvilMenu.repairItemCountCost` (AnvilMenu.java:31): how many of the addition stack a
     /// material repair consumes.
@@ -255,7 +297,7 @@ impl AnvilScreenHandler {
         let mut handler = Self {
             inventory: inventory.clone(),
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Anvil)),
-            rename_text: String::new(),
+            rename_text: None,
             repair_cost: 0,
             repair_item_count_cost: 0,
             only_renaming: false,
@@ -273,17 +315,15 @@ impl AnvilScreenHandler {
         handler
     }
 
-    /// `AnvilMenu.setItemName` (AnvilMenu.java:280-298); `validateName` (AnvilMenu.java:300-303)
-    /// only implements the length cap, not the full `StringUtil.filterText` control-character
-    /// strip.
+    /// `AnvilMenu.setItemName` (AnvilMenu.java:280-298), validated by `validate_name`.
     pub async fn update_item_name(&mut self, name: String, player: &dyn InventoryPlayer) {
-        if name.chars().count() > MAX_NAME_LENGTH {
+        let Some(validated) = validate_name(&name) else {
+            return;
+        };
+        if self.rename_text.as_ref() == Some(&validated) {
             return;
         }
-        if name == self.rename_text {
-            return;
-        }
-        self.rename_text = name;
+        self.rename_text = Some(validated);
         self.create_result(player).await;
         self.send_content_updates().await;
     }
@@ -324,7 +364,11 @@ impl AnvilScreenHandler {
             return;
         }
 
-        let naming_cost = apply_rename(&self.rename_text, &input, &mut result);
+        let naming_cost = apply_rename(
+            self.rename_text.as_deref().unwrap_or_default(),
+            &input,
+            &mut result,
+        );
         price += naming_cost;
 
         let final_price = if price <= 0 {
@@ -686,5 +730,65 @@ mod tests {
         assert_eq!(get_custom_name(&item), Some("Excalibur".to_string()));
         remove_custom_name(&mut item);
         assert_eq!(get_custom_name(&item), None);
+    }
+
+    #[test]
+    fn filter_and_validate_name_match_string_util() {
+        assert_eq!(filter_text("\u{a7}cRed\u{7f}\n"), "cRed");
+        assert!(validate_name(&"a".repeat(50)).is_some());
+        assert!(validate_name(&"a".repeat(51)).is_none());
+        // Length is measured after filtering.
+        assert!(validate_name(&format!("{}\u{a7}", "a".repeat(50))).is_some());
+        // Supplementary-plane characters are two UTF-16 units each.
+        assert!(validate_name(&"\u{1f600}".repeat(26)).is_none());
+    }
+
+    #[test]
+    fn is_blank_matches_string_util() {
+        assert!(is_blank(""));
+        assert!(is_blank("   "));
+        assert!(is_blank("\u{a0}\u{3000}"));
+        assert!(!is_blank(" a "));
+        assert!(!is_blank("\u{85}"));
+    }
+
+    #[test]
+    fn blank_rename_removes_or_ignores_custom_name() {
+        let input = ItemStack::new(1, &Item::IRON_PICKAXE);
+        let mut result = input.clone();
+        assert_eq!(apply_rename("   ", &input, &mut result), 0);
+        assert_eq!(get_custom_name(&result), None);
+
+        let mut named = ItemStack::new(1, &Item::IRON_PICKAXE);
+        named.set_custom_name("Excalibur".to_string());
+        let mut result = named.clone();
+        assert_eq!(apply_rename("   ", &named, &mut result), 1);
+        assert_eq!(get_custom_name(&result), None);
+
+        let mut result = named.clone();
+        assert_eq!(apply_rename("Excalibur", &named, &mut result), 0);
+    }
+
+    #[test]
+    fn rename_compares_against_written_book_title() {
+        let mut book = ItemStack::new(1, &Item::WRITTEN_BOOK);
+        book.patch.push((
+            DataComponent::WrittenBookContent,
+            Some(
+                WrittenBookContentImpl {
+                    title: "My Book".to_string(),
+                    author: String::new(),
+                    pages: Vec::new(),
+                    generation: 0,
+                }
+                .to_dyn(),
+            ),
+        ));
+        let mut result = book.clone();
+        assert_eq!(apply_rename("Written Book", &book, &mut result), 1);
+        assert_eq!(get_custom_name(&result), Some("Written Book".to_string()));
+        let mut result = book.clone();
+        assert_eq!(apply_rename("My Book", &book, &mut result), 0);
+        assert_eq!(get_custom_name(&result), None);
     }
 }
