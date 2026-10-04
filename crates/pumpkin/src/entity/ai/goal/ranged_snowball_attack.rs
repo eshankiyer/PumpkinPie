@@ -5,6 +5,7 @@ use std::sync::Arc;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
 
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::ai::pathfinder::NavigatorGoal;
@@ -13,6 +14,7 @@ use crate::entity::projectile::snowball::SnowballEntity;
 use crate::entity::{Entity, EntityBase};
 
 pub struct RangedSnowballAttackGoal {
+    target: Option<Arc<dyn EntityBase>>,
     attack_time: i32,
     see_time: i32,
     attack_interval: i32,
@@ -24,6 +26,7 @@ impl RangedSnowballAttackGoal {
     #[must_use]
     pub const fn new(interval: i32, range: f64) -> Self {
         Self {
+            target: None,
             attack_time: -1,
             see_time: 0,
             attack_interval: interval,
@@ -64,34 +67,49 @@ impl RangedSnowballAttackGoal {
             .thrown
             .set_velocity(velocity.x, velocity.y, velocity.z, 1.6, 12.0);
         world.spawn_entity(Arc::new(projectile)).await;
-        world.play_sound(
-            Sound::EntitySnowGolemShoot,
-            SoundCategory::Hostile,
-            &position,
-        );
+        // `Entity.playSound` (`Entity.java:1486-1490`): skipped when silent, category is
+        // `getSoundSource()`, which `SnowGolem` leaves at the `NEUTRAL` default.
+        if !shooter.is_silent() {
+            let pitch = 0.4 / mob.get_random().random::<f32>().mul_add(0.4, 0.8);
+            world.play_sound_fine(
+                Sound::EntitySnowGolemShoot,
+                SoundCategory::Neutral,
+                &position,
+                1.0,
+                pitch,
+            );
+        }
+    }
+
+    /// `RangedAttackGoal.canUse`: caches the mob's target while it is alive.
+    async fn refresh_target(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob.get_mob_entity().target.lock().await.clone();
+        match target {
+            Some(target) if target.get_entity().is_alive() => {
+                self.target = Some(target);
+                true
+            }
+            _ => false,
+        }
     }
 }
 
 impl Goal for RangedSnowballAttackGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            mob.get_mob_entity()
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|target| target.get_entity().is_alive())
-        })
+        Box::pin(async move { self.refresh_target(mob).await })
     }
 
+    /// `RangedAttackGoal.canContinueToUse` (`RangedAttackGoal.java:55-57`): the live target is
+    /// still valid, or the cached one is alive and the mob is still navigating.
     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            mob.get_mob_entity()
-                .target
-                .lock()
-                .await
+            if self.refresh_target(mob).await {
+                return true;
+            }
+            self.target
                 .as_ref()
                 .is_some_and(|target| target.get_entity().is_alive())
+                && !mob.get_mob_entity().navigator.lock().unwrap().is_idle()
         })
     }
 
@@ -101,6 +119,7 @@ impl Goal for RangedSnowballAttackGoal {
 
     fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
+            self.target = None;
             self.attack_time = -1;
             self.see_time = 0;
         })
@@ -108,7 +127,7 @@ impl Goal for RangedSnowballAttackGoal {
 
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
+            let Some(target) = self.target.clone() else {
                 return;
             };
             let shooter = mob.get_entity();
@@ -122,13 +141,9 @@ impl Goal for RangedSnowballAttackGoal {
                 self.see_time = 0;
             }
 
-            mob.get_mob_entity()
-                .look_control
-                .lock()
-                .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-            self.attack_time -= 1;
-
+            // `RangedAttackGoal.tick` (`RangedAttackGoal.java:81-99`): range and sight only pick
+            // between holding still and approaching; the countdown below always runs, so the
+            // golem keeps throwing while it closes in on a visible target.
             if distance_squared > self.range * self.range || self.see_time < 5 {
                 mob.get_mob_entity()
                     .navigator
@@ -139,10 +154,17 @@ impl Goal for RangedSnowballAttackGoal {
                         destination: target_pos,
                         speed: self.speed,
                     });
-                return;
+            } else {
+                mob.get_mob_entity().navigator.lock().unwrap().stop();
             }
 
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
+            mob.get_mob_entity()
+                .look_control
+                .lock()
+                .unwrap()
+                .look_at_entity_with_range(&target, 30.0, 30.0);
+
+            self.attack_time -= 1;
             if self.attack_time == 0 {
                 if !has_line_of_sight {
                     return;
