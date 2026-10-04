@@ -108,6 +108,15 @@ impl JavaClient {
                 last_output: old_command_block.last_output.lock().await.clone().into(),
                 track_output: command.track_output().into(),
                 success_count: AtomicU32::new(0),
+                // Vanilla keeps the same `BaseCommandBlock`, so its execution guard survives.
+                last_execution: old_command_block
+                    .last_execution
+                    .load(Ordering::SeqCst)
+                    .into(),
+                update_last_execution: old_command_block
+                    .update_last_execution
+                    .load(Ordering::SeqCst)
+                    .into(),
                 // Preserve the command block's BaseCommandBlock name while replacing its
                 // block-state-backed entity (`CommandBlockEntity.java:69-84`).
                 custom_name: std::sync::Mutex::new(

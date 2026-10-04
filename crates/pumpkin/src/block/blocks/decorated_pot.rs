@@ -4,8 +4,10 @@ use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, DecoratedPotLikeProperties};
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{DataComponentImpl, PotDecorationsImpl};
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Enchantment, tag};
@@ -15,9 +17,11 @@ use crate::block::entities::decorated_pot::{DecoratedPotBlockEntity, WobbleStyle
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, GetComparatorOutputArgs,
-    NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs, PlacedArgs,
-    PlayerWillDestroyArgs, UseWithItemArgs,
+    NormalUseArgs, OnPlaceArgs, OnProjectileHitArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs,
+    PlacedArgs, PlayerWillDestroyArgs, UseWithItemArgs,
 };
+use crate::world::game_event::{GameEventContext, emit_game_event};
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 
 #[pumpkin_block("minecraft:decorated_pot")]
@@ -46,69 +50,112 @@ impl BlockBehaviour for DecoratedPotBlock {
         })
     }
 
+    /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:95-139`). An empty hand or a
+    /// refused item is `TRY_WITH_EMPTY_HAND`, which falls back to `useWithoutItem` for the
+    /// main hand only.
     fn use_with_item<'a>(
         &'a self,
         args: UseWithItemArgs<'a>,
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if args.item_stack.item_count == 0 {
-                return self
-                    .normal_use(NormalUseArgs {
-                        server: args.server,
-                        world: args.world,
-                        block: args.block,
-                        position: args.position,
-                        player: args.player,
-                        hit: args.hit,
-                    })
-                    .await;
-            }
-
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                if pot_entity.try_insert_item(args.item_stack, 1).await {
-                    // `DecoratedPotBlock.useItemOn` wobbles positively on a successful
-                    // insert (`DecoratedPotBlock.java:104`).
-                    pot_entity.wobble(args.world, WobbleStyle::Positive).await;
-                    args.world.play_sound(
-                        Sound::BlockDecoratedPotInsert,
-                        SoundCategory::Blocks,
-                        &args.position.to_f64(),
-                    );
-                } else {
-                    args.world.play_sound(
-                        Sound::BlockDecoratedPotInsertFail,
-                        SoundCategory::Blocks,
-                        &args.position.to_f64(),
-                    );
-                }
-                return BlockActionResult::Success;
-            }
-
-            BlockActionResult::Pass
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return BlockActionResult::Pass;
+            };
+            let Some(pot_entity) = block_entity
+                .as_any()
+                .downcast_ref::<DecoratedPotBlockEntity>()
+            else {
+                return BlockActionResult::Pass;
+            };
+            let Some(pitch_bend) = pot_entity
+                .try_insert_item(args.item_stack, args.player.gamemode.load())
+                .await
+            else {
+                return BlockActionResult::PassToDefaultBlockAction;
+            };
+            pot_entity.wobble(args.world, WobbleStyle::Positive).await;
+            args.world.play_sound_fine(
+                Sound::BlockDecoratedPotInsert,
+                SoundCategory::Blocks,
+                &args.position.to_centered_f64(),
+                1.0,
+                0.5f32.mul_add(pitch_bend, 0.7),
+            );
+            let position = args.position.to_f64();
+            args.world.spawn_particle(
+                Vector3::new(position.x + 0.5, position.y + 1.2, position.z + 0.5),
+                Vector3::new(0.0, 0.0, 0.0),
+                0.0,
+                7,
+                Particle::DustPlume,
+            );
+            emit_game_event(
+                args.world,
+                GameEvent::BlockChange,
+                args.position.to_centered_f64(),
+                GameEventContext::of_entity(args.player.clone()),
+            )
+            .await;
+            BlockActionResult::Success
         })
     }
 
+    /// `DecoratedPotBlock.useWithoutItem` (`DecoratedPotBlock.java:141-153`).
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return BlockActionResult::Pass;
+            };
+            let Some(pot_entity) = block_entity
+                .as_any()
+                .downcast_ref::<DecoratedPotBlockEntity>()
+            else {
+                return BlockActionResult::Pass;
+            };
             args.world.play_sound(
                 Sound::BlockDecoratedPotInsertFail,
                 SoundCategory::Blocks,
-                &args.position.to_f64(),
+                &args.position.to_centered_f64(),
             );
-            // `DecoratedPotBlock.useWithoutItem` wobbles negatively on a failed
-            // interaction (`DecoratedPotBlock.java:140`).
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                pot_entity.wobble(args.world, WobbleStyle::Negative).await;
-            }
+            pot_entity.wobble(args.world, WobbleStyle::Negative).await;
+            emit_game_event(
+                args.world,
+                GameEvent::BlockChange,
+                args.position.to_centered_f64(),
+                GameEventContext::of_entity(args.player.clone()),
+            )
+            .await;
             BlockActionResult::Success
+        })
+    }
+
+    /// `DecoratedPotBlock.onProjectileHit` (`DecoratedPotBlock.java:216-223`): a projectile
+    /// that may interact and break cracks the pot, then destroys it with drops.
+    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if !crate::entity::projectile::projectile_may_interact(
+                args.projectile,
+                args.server,
+                args.world,
+                args.position,
+            )
+            .await
+                || !crate::entity::projectile::projectile_may_break(args.projectile, args.world)
+            {
+                return;
+            }
+            let mut props = DecoratedPotLikeProperties::from_state_id(args.state.id, args.block);
+            props.cracked = true;
+            args.world
+                .set_block_state(
+                    args.position,
+                    props.to_state_id(args.block),
+                    BlockFlags::empty(),
+                )
+                .await;
+            args.world
+                .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
+                .await;
         })
     }
 

@@ -213,6 +213,7 @@ impl BedrockClient {
                         }
                     }
 
+                    let before_block_use = held_item.clone();
                     let result = server
                         .block_registry
                         .use_with_item(
@@ -229,6 +230,19 @@ impl BedrockClient {
                             &world,
                         )
                         .await;
+
+                    // `ServerPlayerGameMode.useItemOn` passes the live hand stack
+                    // (`ServerPlayerGameMode.java:366-370`): keep what the block consumed,
+                    // unless the block already rewrote the hand slot itself.
+                    if !held_item.are_equal(&before_block_use)
+                        && player
+                            .inventory()
+                            .held_item()
+                            .await
+                            .are_equal(&before_block_use)
+                    {
+                        player.inventory().set_held_item(held_item.clone()).await;
+                    }
 
                     if result.consumes_action() {
                         return;

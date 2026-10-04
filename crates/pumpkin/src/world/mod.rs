@@ -7639,6 +7639,10 @@ impl World {
         let Some(entity) = self.get_block_entity(block_pos) else {
             return false;
         };
+        let previous_command_block_auto = entity
+            .as_any()
+            .downcast_ref::<crate::block::entities::command_block::CommandBlockEntity>()
+            .map(|command_block| command_block.auto.load(Relaxed));
         // `BlockEntity.applyComponents` replaces the stored map with the item components the
         // entity did not consume as implicit ones, even when that leaves it empty
         // (`BlockEntity.java:298-300`).
@@ -7657,6 +7661,15 @@ impl World {
             .entry(block_pos.chunk_position())
             .or_default()
             .insert(*block_pos, entity.clone());
+        // `TypedEntityData.loadInto` runs `CommandBlockEntity.loadAdditional`, whose
+        // `setAutomatic` starts a newly "always active" block (`CommandBlockEntity.java:78-108`).
+        if let Some(previous_auto) = previous_command_block_auto
+            && let Some(command_block) = entity
+                .as_any()
+                .downcast_ref::<crate::block::entities::command_block::CommandBlockEntity>()
+        {
+            command_block.start_if_newly_automatic(self, previous_auto);
+        }
         self.update_block_entity(&entity);
         true
     }

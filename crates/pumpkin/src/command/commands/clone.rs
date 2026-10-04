@@ -239,7 +239,19 @@ impl CommandExecutor for CloneExecutor {
                             &block.dest_pos,
                             block.block_entity_components.clone().unwrap_or_default(),
                         );
-                        world.add_block_entity(be);
+                        world.add_block_entity(be.clone());
+                        // `loadCustomOnly` on the fresh destination entity runs
+                        // `CommandBlockEntity.setAutomatic` (`CloneCommands.java:266-273`;
+                        // `CommandBlockEntity.java:78-108`); a fresh entity is automatic only
+                        // for a chain block (`CommandBlock.java:54-58`).
+                        if let Some(command_block) = be
+                            .as_any()
+                            .downcast_ref::<crate::block::entities::command_block::CommandBlockEntity>()
+                        {
+                            let fresh_auto = world.get_block(&block.dest_pos).id
+                                == pumpkin_data::Block::CHAIN_COMMAND_BLOCK.id;
+                            command_block.start_if_newly_automatic(world, fresh_auto);
+                        }
                     }
                 }
 
