@@ -8,7 +8,11 @@
 // ladder (EMERGE/DIG/ROAR/FIGHT/INVESTIGATE/SNIFF/IDLE, each a `Brain` memory-gated
 // `Behavior` list) is not portable as-is. This implementation instead keeps the anger
 // state and cooldowns as plain fields on `WardenEntity`, ticked directly from `mob_tick`,
-// and drives targeting/attacking through the existing Goal system. Concretely ported:
+// and drives attacking through the existing Goal system. Like vanilla (which registers no
+// goals for a warden), it never picks a target by sight: every attack target comes from
+// anger, through `SetRoarTarget(Warden::getEntityAngryAt)` (`AngerManagement.getActiveEntity`,
+// i.e. `AngerManagement::top_suspect`), the roar it starts, and the FIGHT activity's
+// `StopAttackingIfTargetInvalid`, all run from `mob_tick`. Concretely ported:
 // anger accumulation from vibrations and melee hits, vibration-driven investigation
 // (via `mob_entity.target`), and the sonic boom ranged attack. Explicitly NOT ported,
 // with reasons:
@@ -26,10 +30,10 @@
 //   - ROARING is ported below (`start_roar`/`cancel_roar`, ticked in `mob_tick`): fully
 //     timer-driven (`WardenAi.ROAR_DURATION` = 84 ticks, sound at tick 25 per
 //     `Roar.TICKS_BEFORE_PLAYING_ROAR_SOUND`), so it needs no memory/sensor equivalent.
-//     It replaces the previous immediate `set_attack_target` call on becoming angry at a
-//     player with vanilla's actual behavior (`Warden.increaseAngerAt` only *erases* the
-//     attack target on that transition; it's `Roar.stop()` that assigns the roar target as
-//     the new attack target once the roar finishes, Roar.java:58-65).
+//     As in vanilla, `Warden.increaseAngerAt` only *erases* the attack target on becoming
+//     angry at a player; the roar is started by the `SetRoarTarget` step (`set_roar_target`)
+//     at the top suspect, and `Roar.stop()` assigns the roar target as the new attack
+//     target once the roar finishes (Roar.java:58-65).
 //   - EMERGING (`Warden.finalizeSpawn`, Warden.java:480-492) is gated on
 //     `EntitySpawnReason::TRIGGERED` (sculk shrieker summons only) in vanilla. Pumpkin has
 //     no spawn-reason plumbing at all (`grep EntitySpawnReason pumpkin/src/` turns up only
@@ -73,7 +77,12 @@
 //   for simplicity, not architecturally blocked.
 // - `WardenAi.setDisturbanceLocation`'s two-phase "walk to a bare location, then decide"
 //   investigation: there is no location-only walk-goal wired here, so a heard/seen
-//   disturbance becomes an immediate soft attack-target instead (`set_disturbance` below).
+//   disturbance becomes a soft target in `mob_entity.target` instead (`set_disturbance`
+//   below). It is tracked by `disturbance_source` so that it never counts as vanilla's
+//   `ATTACK_TARGET` (`hard_target`), and it expires after the memory's 100 ticks. A calm
+//   warden still melees such a soft target through `MeleeAttackGoal`, which vanilla's
+//   INVESTIGATE activity does not do.
+// - `canTargetEntity`'s `!isAlliedTo` and `!isInvulnerable` terms (Warden.java:390-400).
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -175,9 +184,9 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::{
         goal::{
-            active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-            look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
-            track_target::TrackTargetGoal, wander_around::WanderAroundGoal,
+            look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+            melee_attack::MeleeAttackGoal, swim::SwimGoal, track_target::TrackTargetGoal,
+            wander_around::WanderAroundGoal,
         },
         pathfinder::node::PathType,
     },
@@ -237,6 +246,17 @@ fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
     );
 }
 
+/// Resolves an anger suspect's uuid to its entity. `World::get_entity_by_uuid` only searches
+/// non-player entities, so players are looked up separately; vanilla's `AngerManagement` holds
+/// the `Entity` itself and needs no lookup.
+fn resolve_suspect(world: &World, uuid: Uuid) -> Option<Arc<dyn EntityBase>> {
+    world.get_entity_by_uuid(uuid).or_else(|| {
+        world
+            .get_player_by_uuid(uuid)
+            .map(|p| p as Arc<dyn EntityBase>)
+    })
+}
+
 /// `WardenAi.EMERGE_DURATION` (WardenAi.java:49): `Mth.ceil(133.59999F)`.
 const EMERGE_DURATION: i32 = 134;
 
@@ -269,6 +289,11 @@ pub struct WardenEntity {
     listener: std::sync::Mutex<Option<Arc<WardenVibrationListener>>>,
     /// `Roar` behavior state; `None` when not roaring. See `RoarState`.
     roar_state: std::sync::Mutex<Option<RoarState>>,
+    /// The uuid of `mob_entity.target` while it holds a disturbance source (vanilla's
+    /// `DISTURBANCE_LOCATION`) rather than an `ATTACK_TARGET`. See `set_disturbance`.
+    disturbance_source: std::sync::Mutex<Option<Uuid>>,
+    /// Ticks until the disturbance memory expires (`WardenAi.setDisturbanceLocation`, 100).
+    disturbance_ticks: AtomicI32,
     /// Ticks left in `Pose::EMERGING`; 0 when not emerging. See `start_emerging`.
     emerging_ticks: AtomicI32,
     /// The `Warden.CLIENT_ANGER_LEVEL` entity datum (`Warden.java:85`, `getClientAngerLevel`):
@@ -288,6 +313,8 @@ impl WardenEntity {
             listener_registered: AtomicBool::new(false),
             listener: std::sync::Mutex::new(None),
             roar_state: std::sync::Mutex::new(None),
+            disturbance_source: std::sync::Mutex::new(None),
+            disturbance_ticks: AtomicI32::new(0),
             emerging_ticks: AtomicI32::new(0),
             client_anger_level: AtomicI32::new(0),
         };
@@ -311,17 +338,8 @@ impl WardenEntity {
         );
         goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
         drop(goal_selector);
-
-        let mut target_selector = mob_arc
-            .mob_entity
-            .target_selector
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        target_selector.add_goal(
-            1,
-            ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
-        );
-        drop(target_selector);
+        // No target selector: `Mob.registerGoals` is empty and `Warden` does not override it
+        // (Mob.java:163-164), so a warden never targets by sight. See `mob_tick`.
 
         // The navigation setup of the `Warden` constructor (`Warden.java:128-134`) and of
         // `Warden.createNavigation` (`Warden.java:544-558`). `FIRE` is `DamageFire` here and
@@ -423,6 +441,12 @@ impl WardenEntity {
         if !base.is_alive() {
             return false;
         }
+        if !Arc::ptr_eq(
+            &base.world.load(),
+            &self.mob_entity.living_entity.entity.world.load(),
+        ) {
+            return false;
+        }
         if base.entity_type.id == EntityType::ARMOR_STAND.id
             || base.entity_type.id == EntityType::WARDEN.id
         {
@@ -449,16 +473,18 @@ impl WardenEntity {
             anger.increase_anger(uuid, is_player, amount)
         };
 
-        let maybe_switch_target = {
-            let target = self.mob_entity.target.lock().await;
-            !matches!(&*target, Some(t) if t.get_player().is_some())
-        };
+        let hard_target = self.hard_target().await;
+        let maybe_switch_target = hard_target
+            .as_ref()
+            .is_none_or(|t| t.get_player().is_none());
         if is_player && maybe_switch_target && AngerLevel::by_anger(new_anger).is_angry() {
-            // `Warden.increaseAngerAt` (Warden.java:451-464) only erases the attack-target
-            // memory here; it's `Roar.stop()` (Roar.java:58-65) that assigns the roar
-            // target as the new attack target once the roar finishes. `start_roar` mirrors
-            // that two-step handoff instead of switching target immediately.
-            self.start_roar(entity.clone()).await;
+            // `Warden.increaseAngerAt` (Warden.java:451-464) only erases `ATTACK_TARGET`;
+            // the next `SetRoarTarget` step in `mob_tick` then roars at the top suspect, and
+            // `Roar.stop()` (Roar.java:58-65) makes it the attack target. A disturbance (soft
+            // target) is a different memory and is left alone.
+            if hard_target.is_some() {
+                *self.mob_entity.target.lock().await = None;
+            }
         }
 
         if play_sound {
@@ -487,7 +513,8 @@ impl WardenEntity {
             return;
         }
         sync_warden_pose(&self.mob_entity.living_entity.entity, EntityPose::Roaring);
-        Box::pin(self.increase_anger_at(&target, warden_anger::ROAR_ANGER_INCREASE, false)).await;
+        self.increase_anger_at(&target, warden_anger::ROAR_ANGER_INCREASE, false)
+            .await;
     }
 
     /// `Warden.setAttackTarget` also erases `ROAR_TARGET` (Warden.java:510-515); mirrored
@@ -534,19 +561,18 @@ impl WardenEntity {
         match outcome {
             Outcome::None => {}
             Outcome::PlaySound => {
-                let pos = self.mob_entity.living_entity.entity.pos.load();
-                self.mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .play_sound_fine(
+                // `body.playSound` is `Entity.playSound`, a no-op while silent
+                // (Entity.java:1486-1490).
+                let entity = &self.mob_entity.living_entity.entity;
+                if !entity.is_silent() {
+                    entity.world.load().play_sound_fine(
                         Sound::EntityWardenRoar,
                         SoundCategory::Hostile,
-                        &pos,
+                        &entity.pos.load(),
                         3.0,
                         1.0,
                     );
+                }
             }
             Outcome::Complete(target) => {
                 sync_warden_pose(&self.mob_entity.living_entity.entity, EntityPose::Standing);
@@ -555,9 +581,13 @@ impl WardenEntity {
         }
     }
 
-    /// `Warden.playListeningSound` (Warden.java:428-432): suppressed while roaring.
+    /// `Warden.playListeningSound` (Warden.java:428-432): suppressed while roaring, and, as
+    /// `Entity.playSound` (Entity.java:1486-1490), while silent. The pitch is
+    /// `getVoicePitch`.
     async fn play_listening_sound(&self) {
-        if self.roar_state.lock().unwrap().is_some() {
+        if self.roar_state.lock().unwrap().is_some()
+            || self.mob_entity.living_entity.entity.is_silent()
+        {
             return;
         }
         let anger = self.active_anger().await;
@@ -571,19 +601,137 @@ impl WardenEntity {
             .entity
             .world
             .load()
-            .play_sound_fine(sound, SoundCategory::Hostile, &pos, 10.0, 1.0);
+            .play_sound_fine(
+                sound,
+                SoundCategory::Hostile,
+                &pos,
+                10.0,
+                self.get_sound_pitch(),
+            );
     }
 
-    /// `Warden.getActiveAnger` against the current attack target, if any.
+    /// `Warden.getActiveAnger` against the current attack target, if any. A disturbance
+    /// (soft target) is not `getTarget()`, so it reads `highestAnger` like no target.
     async fn active_anger(&self) -> i32 {
-        let target_uuid = self
-            .mob_entity
-            .target
+        let target_uuid = self.hard_target().await.map(|t| t.get_entity().entity_uuid);
+        self.anger.lock().await.active_anger(target_uuid)
+    }
+
+    /// `Warden.getTarget()` (vanilla `ATTACK_TARGET`): `mob_entity.target` unless it holds the
+    /// disturbance source set by `set_disturbance`.
+    async fn hard_target(&self) -> Option<Arc<dyn EntityBase>> {
+        let target = self.mob_entity.target.lock().await.clone()?;
+        let soft = *self.disturbance_source.lock().unwrap();
+        (soft != Some(target.get_entity().entity_uuid)).then_some(target)
+    }
+
+    /// Forgets the disturbance, clearing `mob_entity.target` if it still holds it.
+    async fn clear_disturbance(&self) {
+        let Some(soft) = self.disturbance_source.lock().unwrap().take() else {
+            return;
+        };
+        let mut target = self.mob_entity.target.lock().await;
+        if target
+            .as_ref()
+            .is_some_and(|t| t.get_entity().entity_uuid == soft)
+        {
+            *target = None;
+        }
+    }
+
+    /// Vanilla `AngerManagement`'s `filter` (`Warden::canTargetEntity`, which requires a
+    /// `LivingEntity`), applied to a suspect uuid.
+    fn is_valid_suspect(&self, world: &World, uuid: Uuid) -> bool {
+        uuid != self.mob_entity.living_entity.entity.entity_uuid
+            && resolve_suspect(world, uuid).is_some_and(|e| {
+                e.get_living_entity().is_some() && self.can_target_entity(e.as_ref())
+            })
+    }
+
+    /// `AngerManagement.getActiveEntity` (AngerManagement.java:162-172): the first suspect, in
+    /// anger order, that the warden may target.
+    async fn active_entity(&self) -> Option<Arc<dyn EntityBase>> {
+        let world = self.mob_entity.living_entity.entity.world.load_full();
+        let top = self
+            .anger
             .lock()
             .await
-            .as_ref()
-            .map(|t| t.get_entity().entity_uuid);
-        self.anger.lock().await.active_anger(target_uuid)
+            .top_suspect(|uuid| self.is_valid_suspect(&world, uuid))?;
+        resolve_suspect(&world, top)
+    }
+
+    /// `Warden.getEntityAngryAt` (Warden.java:466-468).
+    async fn entity_angry_at(&self) -> Option<Arc<dyn EntityBase>> {
+        if !self.get_anger_level().await.is_angry() {
+            return None;
+        }
+        self.active_entity().await
+    }
+
+    /// `StopAttackingIfTargetInvalid` as the FIGHT activity configures it (WardenAi.java:139-144,
+    /// no can't-reach timeout): drop an attack target the warden may no longer target or is no
+    /// longer angry at, and forget the anger at one it may no longer target
+    /// (`WardenAi.onTargetInvalid`, WardenAi.java:157-163). A disturbance whose source became
+    /// untargetable is dropped too, without touching anger.
+    async fn stop_attacking_if_target_invalid(&self) {
+        if let Some(target) = self.hard_target().await {
+            let uuid = target.get_entity().entity_uuid;
+            let targetable = self.can_target_entity(target.as_ref());
+            let angry = {
+                let anger = self.anger.lock().await;
+                AngerLevel::by_anger(anger.active_anger(Some(uuid))).is_angry()
+            };
+            if targetable && angry {
+                return;
+            }
+            if !targetable {
+                self.anger.lock().await.clear_anger(uuid);
+            }
+            let mut current = self.mob_entity.target.lock().await;
+            if current
+                .as_ref()
+                .is_some_and(|t| t.get_entity().entity_uuid == uuid)
+            {
+                *current = None;
+            }
+            return;
+        }
+
+        let soft = self.mob_entity.target.lock().await.clone();
+        if let Some(soft) = soft
+            && !self.can_target_entity(soft.as_ref())
+        {
+            self.clear_disturbance().await;
+        }
+    }
+
+    /// `SetRoarTarget.create(Warden::getEntityAngryAt)` (SetRoarTarget.java:12-27), the first
+    /// behaviour of the IDLE, INVESTIGATE and SNIFF activities: with no roar and no attack
+    /// target, start roaring at the suspect the warden is angry at. A disturbance does not
+    /// block it (INVESTIGATE runs it too) and is replaced by the roar.
+    async fn set_roar_target(&self) {
+        let roaring = self.roar_state.lock().unwrap().is_some();
+        if roaring || self.hard_target().await.is_some() {
+            return;
+        }
+        let Some(target) = self.entity_angry_at().await else {
+            return;
+        };
+        if !self.can_target_entity(target.as_ref()) {
+            return;
+        }
+        self.clear_disturbance().await;
+        self.start_roar(target).await;
+    }
+
+    /// Counts the disturbance memory down and forgets it once its 100 ticks are up.
+    async fn tick_disturbance(&self) {
+        if self.disturbance_source.lock().unwrap().is_none() {
+            return;
+        }
+        if self.disturbance_ticks.fetch_sub(1, Ordering::Relaxed) <= 1 {
+            self.clear_disturbance().await;
+        }
     }
 
     #[must_use]
@@ -613,6 +761,7 @@ impl WardenEntity {
     /// (`SonicBoom.setCooldown(this, 200)` — vanilla's `TIME_TO_USE_MELEE_UNTIL_SONIC_BOOM`).
     async fn set_attack_target(&self, target: Arc<dyn EntityBase>) {
         self.cancel_roar();
+        *self.disturbance_source.lock().unwrap() = None;
         *self.mob_entity.target.lock().await = Some(target);
         self.sonic_boom_cooldown.store(
             warden_anger::SONIC_BOOM_NEW_TARGET_COOLDOWN_TICKS,
@@ -620,15 +769,22 @@ impl WardenEntity {
         );
     }
 
-    /// `WardenAi.setDisturbanceLocation`, redirected onto the existing goal system by
-    /// setting the current attack target directly to the disturbance's source entity (see
-    /// module doc comment on why the location-only walk phase is skipped).
+    /// `WardenAi.setDisturbanceLocation` (WardenAi.java:171-179), redirected onto the
+    /// existing goal system by setting `mob_entity.target` to the disturbance's source entity
+    /// as a soft target (see module doc comment on why the location-only walk phase is
+    /// skipped). Like the memory it stands in for, a newer disturbance replaces an older one,
+    /// and it expires after `DISTURBANCE_LOCATION_EXPIRY_TICKS`.
     async fn set_disturbance(&self, source: &Arc<dyn EntityBase>) {
-        let already_angry = self.get_anger_level().await.is_angry();
-        let has_target = self.mob_entity.target.lock().await.is_some();
-        if !already_angry && !has_target {
-            *self.mob_entity.target.lock().await = Some(source.clone());
+        if self.hard_target().await.is_some() || self.entity_angry_at().await.is_some() {
+            return;
         }
+        let mut target = self.mob_entity.target.lock().await;
+        *self.disturbance_source.lock().unwrap() = Some(source.get_entity().entity_uuid);
+        self.disturbance_ticks.store(
+            warden_anger::DISTURBANCE_LOCATION_EXPIRY_TICKS,
+            Ordering::Relaxed,
+        );
+        *target = Some(source.clone());
     }
 
     /// Vanilla `Warden.doPush` (`Warden.java:528-537`) records touch anger once per
@@ -677,10 +833,19 @@ impl WardenEntity {
         drop(world);
 
         if let Some(source) = source_entity {
-            self.increase_anger_at(&source, warden_anger::DEFAULT_ANGER, false)
+            // The one-argument `increaseAngerAt(sourceEntity)` (Warden.java:446-448, 636),
+            // which plays the listening sound.
+            self.increase_anger_at(&source, warden_anger::DEFAULT_ANGER, true)
                 .await;
+            // Warden.java:640-645: only investigate a vibration from the entity the warden is
+            // most interested in, or any vibration when it has no suspect.
             if !self.get_anger_level().await.is_angry() {
-                self.set_disturbance(&source).await;
+                let active = self.active_entity().await;
+                if active
+                    .is_none_or(|a| a.get_entity().entity_uuid == source.get_entity().entity_uuid)
+                {
+                    self.set_disturbance(&source).await;
+                }
             }
         }
     }
@@ -697,8 +862,8 @@ impl WardenEntity {
         if self.sonic_boom_cooldown.load(Ordering::Relaxed) > 0 {
             return;
         }
-        let target = self.mob_entity.target.lock().await.clone();
-        let Some(target) = target else {
+        // `SonicBoom` belongs to the FIGHT activity, so it needs an `ATTACK_TARGET`.
+        let Some(target) = self.hard_target().await else {
             return;
         };
         if !self.can_target_entity(target.as_ref()) {
@@ -854,6 +1019,13 @@ impl Mob for WardenEntity {
 
             self.tick_roar().await;
 
+            // The brain behaviours, which vanilla ticks before `angerManagement.tick`
+            // (Warden.java:289-299): FIGHT's `StopAttackingIfTargetInvalid`, the disturbance
+            // memory's expiry, then `SetRoarTarget`.
+            self.stop_attacking_if_target_invalid().await;
+            self.tick_disturbance().await;
+            self.set_roar_target().await;
+
             let age = self
                 .mob_entity
                 .living_entity
@@ -861,15 +1033,11 @@ impl Mob for WardenEntity {
                 .age
                 .load(Ordering::Relaxed);
             if age % warden_anger::ANGERMANAGEMENT_TICK_DELAY == 0 {
-                let self_uuid = self.mob_entity.living_entity.entity.entity_uuid;
                 let world = self.mob_entity.living_entity.entity.world.load_full();
-                let valid = |uuid: Uuid| {
-                    uuid != self_uuid
-                        && world
-                            .get_entity_by_uuid(uuid)
-                            .is_some_and(|e| self.can_target_entity(e.as_ref()))
-                };
-                self.anger.lock().await.tick(valid);
+                self.anger
+                    .lock()
+                    .await
+                    .tick(|uuid| self.is_valid_suspect(&world, uuid));
                 // The republish happens above (before the emerging early return); the decay
                 // here only runs when not emerging (pre-existing gap).
                 self.sync_client_anger_level().await;
@@ -892,7 +1060,7 @@ impl Mob for WardenEntity {
                 return;
             };
             let world = self.mob_entity.living_entity.entity.world.load();
-            let Some(attacker) = world.get_entity_by_uuid(source.get_entity().entity_uuid) else {
+            let Some(attacker) = resolve_suspect(&world, source.get_entity().entity_uuid) else {
                 return;
             };
             drop(world);
@@ -904,7 +1072,8 @@ impl Mob for WardenEntity {
             )
             .await;
 
-            let has_target = self.mob_entity.target.lock().await.is_some();
+            // `ATTACK_TARGET.isEmpty()` (Warden.java:500): a disturbance does not count.
+            let has_target = self.hard_target().await.is_some();
             if !has_target {
                 let self_pos = self.mob_entity.living_entity.entity.pos.load();
                 let attacker_pos = attacker.get_entity().pos.load();

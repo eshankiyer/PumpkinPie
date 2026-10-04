@@ -15,7 +15,8 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        move_towards_restriction::MoveTowardsRestrictionGoal, wander_around::WanderAroundGoal,
+        move_towards_restriction::MoveTowardsRestrictionGoal, track_target::TrackTargetGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{
         Mob, MobEntity,
@@ -145,10 +146,16 @@ impl ElderGuardianEntity {
                 continue;
             }
 
+            // `Vec3.closerThan` is a strict `<`, so a player at exactly 50 blocks is excluded.
             let player_pos = player.living_entity.entity.pos.load();
             if origin.squared_distance_to(player_pos.x, player_pos.y, player_pos.z)
-                > EFFECT_RADIUS * EFFECT_RADIUS
+                >= EFFECT_RADIUS * EFFECT_RADIUS
             {
+                continue;
+            }
+
+            // `MobEffectUtil.addEffectToPlayersAround` skips players the source is allied to.
+            if TrackTargetGoal::is_allied(self, player.as_ref()).await {
                 continue;
             }
 

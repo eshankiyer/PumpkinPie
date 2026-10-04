@@ -228,7 +228,8 @@ impl AngerManagement {
     }
 
     /// `AngerManagement.getTopSuspect` + `getActiveEntity`, filtered by `valid` (vanilla's
-    /// `this.filter`, i.e. `Warden::canTargetEntity`).
+    /// `this.filter`, i.e. `Warden::canTargetEntity`). The warden's `SetRoarTarget` step and
+    /// its vibration-investigation gate read it through `WardenEntity::active_entity`.
     #[must_use]
     pub fn top_suspect(&self, valid: impl Fn(Uuid) -> bool) -> Option<Uuid> {
         self.suspects.iter().find(|u| valid(**u)).copied()
