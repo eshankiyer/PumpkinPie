@@ -272,12 +272,27 @@ impl GenerationCache for Cache {
 
     fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
         match heightmap {
-            HeightMap::WorldSurfaceWg | HeightMap::WorldSurface => {
-                self.top_block_height_exclusive(x, z)
+            HeightMap::WorldSurfaceWg | HeightMap::OceanFloorWg => {
+                // A proto chunk keeps its own (possibly frozen) worldgen maps. A level chunk
+                // has none, so vanilla primes one from its blocks, which equals the final map.
+                let dx = (x >> 4) - self.x;
+                let dy = (z >> 4) - self.z;
+                if dx >= 0
+                    && dy >= 0
+                    && dx < self.size
+                    && dy < self.size
+                    && let Chunk::Proto(data) = &self.chunks[(dx * self.size + dy) as usize]
+                {
+                    return data.get_top_y(heightmap, x, z);
+                }
+                if matches!(heightmap, HeightMap::WorldSurfaceWg) {
+                    self.top_block_height_exclusive(x, z)
+                } else {
+                    self.ocean_floor_height_exclusive(x, z)
+                }
             }
-            HeightMap::OceanFloorWg | HeightMap::OceanFloor => {
-                self.ocean_floor_height_exclusive(x, z)
-            }
+            HeightMap::WorldSurface => self.top_block_height_exclusive(x, z),
+            HeightMap::OceanFloor => self.ocean_floor_height_exclusive(x, z),
             HeightMap::MotionBlocking => self.top_motion_blocking_block_height_exclusive(x, z),
             HeightMap::MotionBlockingNoLeaves => {
                 self.top_motion_blocking_block_no_leaves_height_exclusive(x, z)
@@ -298,7 +313,7 @@ impl GenerationCache for Cache {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let min_y = data.section.min_y;
 
-                heightmap.get(ChunkHeightmapType::MotionBlocking, x, z, min_y)
+                heightmap.get(ChunkHeightmapType::MotionBlocking, x, z, min_y) + 1
             }
             Chunk::Proto(data) => data.top_motion_blocking_block_height_exclusive(x, z),
         }
@@ -316,7 +331,7 @@ impl GenerationCache for Cache {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let min_y = data.section.min_y;
-                heightmap.get(ChunkHeightmapType::MotionBlockingNoLeaves, x, z, min_y)
+                heightmap.get(ChunkHeightmapType::MotionBlockingNoLeaves, x, z, min_y) + 1
             }
             Chunk::Proto(data) => data.top_motion_blocking_block_no_leaves_height_exclusive(x, z),
         }
@@ -334,7 +349,7 @@ impl GenerationCache for Cache {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let min_y = data.section.min_y;
-                heightmap.get(ChunkHeightmapType::WorldSurface, x, z, min_y) // can we return this?
+                heightmap.get(ChunkHeightmapType::WorldSurface, x, z, min_y) + 1
             }
             Chunk::Proto(data) => data.top_block_height_exclusive(x, z),
         }
@@ -351,7 +366,7 @@ impl GenerationCache for Cache {
                 let heightmap = data.heightmap.lock().unwrap();
                 let min_y = data.section.min_y;
 
-                heightmap.get(ChunkHeightmapType::OceanFloor, x, z, min_y)
+                heightmap.get(ChunkHeightmapType::OceanFloor, x, z, min_y) + 1
             }
             Chunk::Proto(data) => data.ocean_floor_height_exclusive(x, z),
         }
@@ -587,24 +602,31 @@ impl Cache {
                     custom_gen.step_to_surface(self.chunks[mid].get_proto_chunk_mut());
                 }
             },
-            StagedChunkEnum::Carvers => match generator {
-                generator::WorldGenerator::Noise(noise_gen) => {
-                    // Vanilla `ChunkStatusTasks.generateCarvers` installs this filter before
-                    // applying carvers (`ChunkStatusTasks.java:116-128`).
-                    crate::generation::blender::Blender::add_around_old_chunks_carving_mask_filter(
-                        self,
-                    );
-                    self.chunks[mid]
-                        .get_proto_chunk_mut()
-                        .step_to_carvers(noise_gen);
+            StagedChunkEnum::Carvers => {
+                match generator {
+                    generator::WorldGenerator::Noise(noise_gen) => {
+                        // Vanilla `ChunkStatusTasks.generateCarvers` installs this filter before
+                        // applying carvers (`ChunkStatusTasks.java:116-128`).
+                        crate::generation::blender::Blender::add_around_old_chunks_carving_mask_filter(
+                            self,
+                        );
+                        self.chunks[mid]
+                            .get_proto_chunk_mut()
+                            .step_to_carvers(noise_gen);
+                    }
+                    generator::WorldGenerator::Flat(flat_gen) => {
+                        flat_gen.step_to_carvers(self.chunks[mid].get_proto_chunk_mut());
+                    }
+                    generator::WorldGenerator::Custom(custom_gen) => {
+                        custom_gen.step_to_carvers(self.chunks[mid].get_proto_chunk_mut());
+                    }
                 }
-                generator::WorldGenerator::Flat(flat_gen) => {
-                    flat_gen.step_to_carvers(self.chunks[mid].get_proto_chunk_mut());
-                }
-                generator::WorldGenerator::Custom(custom_gen) => {
-                    custom_gen.step_to_carvers(self.chunks[mid].get_proto_chunk_mut());
-                }
-            },
+                // Vanilla primes the final heightmaps from the blocks once the persisted status
+                // is CARVERS (`ChunkStatusTasks.generateFeatures`), dropping pre-carver heights.
+                self.chunks[mid]
+                    .get_proto_chunk_mut()
+                    .prime_final_heightmaps();
+            }
             StagedChunkEnum::Features => match generator {
                 generator::WorldGenerator::Noise(noise_gen) => {
                     ProtoChunk::generate_features_and_structure(

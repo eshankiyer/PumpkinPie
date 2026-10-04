@@ -2,6 +2,7 @@ use core::f32;
 
 use pumpkin_data::{BlockDirection, BlockState, BlockStateId};
 use pumpkin_util::{
+    HeightMap,
     math::{self, lerp, position::BlockPos, vector3::Vector3},
     random::{RandomGenerator, RandomImpl},
 };
@@ -57,7 +58,8 @@ impl OreFeature {
 
         for probe_x in n..=(n + q) {
             for probe_z in p..=(p + q) {
-                if o > chunk.ocean_floor_height_exclusive(probe_x, probe_z) {
+                // OreFeature.java:46 reads OCEAN_FLOOR_WG, frozen since the surface stage.
+                if o > chunk.get_top_y(&HeightMap::OceanFloorWg, probe_x, probe_z) {
                     continue;
                 }
                 return self.generate_vein_part(chunk, random, d, e, h, j, l, m, n, o, p, q, r);

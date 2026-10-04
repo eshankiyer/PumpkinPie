@@ -14,7 +14,7 @@ use pumpkin_data::tag::RegistryKey;
 use pumpkin_data::{Block, BlockState, block_properties::blocks_movement, chunk::Biome};
 use pumpkin_data::{BlockId, BlockStateId, tag};
 use pumpkin_util::random::xoroshiro128::XoroshiroSplitter;
-use pumpkin_util::random::{RandomImpl, get_carver_seed};
+use pumpkin_util::random::RandomImpl;
 use pumpkin_util::{
     HeightMap,
     math::{block_box::BlockBox, position::BlockPos, vector2::Vector2, vector3::Vector3},
@@ -238,6 +238,11 @@ pub struct ProtoChunk {
     pub flat_ocean_floor_height_map: [i16; CHUNK_AREA],
     pub flat_motion_blocking_height_map: [i16; CHUNK_AREA],
     pub flat_motion_blocking_no_leaves_height_map: [i16; CHUNK_AREA],
+    /// `WORLD_SURFACE_WG`: maintained only while the stage is at or before `Surface`
+    /// (vanilla `ChunkStatus.heightmapsAfter`), then frozen for the rest of generation.
+    pub flat_surface_wg_height_map: [i16; CHUNK_AREA],
+    /// `OCEAN_FLOOR_WG`: frozen after `Surface`, like `flat_surface_wg_height_map`.
+    pub flat_ocean_floor_wg_height_map: [i16; CHUNK_AREA],
     structure_starts: FxHashMap<StructureKeys, StructureInstance>,
 
     height: u16,
@@ -585,6 +590,8 @@ impl ProtoChunk {
             flat_ocean_floor_height_map: default_heightmap,
             flat_motion_blocking_height_map: default_heightmap,
             flat_motion_blocking_no_leaves_height_map: default_heightmap,
+            flat_surface_wg_height_map: default_heightmap,
+            flat_ocean_floor_wg_height_map: default_heightmap,
             structure_starts: FxHashMap::default(),
             height,
             bottom_y,
@@ -865,16 +872,121 @@ impl ProtoChunk {
 
     #[must_use]
     pub const fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        let index = Self::local_position_to_height_map_index(x & 15, z & 15);
         match heightmap {
-            HeightMap::WorldSurfaceWg | HeightMap::WorldSurface => {
-                self.top_block_height_exclusive(x, z)
-            }
-            HeightMap::OceanFloorWg | HeightMap::OceanFloor => {
-                self.ocean_floor_height_exclusive(x, z)
-            }
+            HeightMap::WorldSurfaceWg => self.flat_surface_wg_height_map[index] as i32 + 1,
+            HeightMap::WorldSurface => self.top_block_height_exclusive(x, z),
+            HeightMap::OceanFloorWg => self.flat_ocean_floor_wg_height_map[index] as i32 + 1,
+            HeightMap::OceanFloor => self.ocean_floor_height_exclusive(x, z),
             HeightMap::MotionBlocking => self.top_motion_blocking_block_height_exclusive(x, z),
             HeightMap::MotionBlockingNoLeaves => {
                 self.top_motion_blocking_block_no_leaves_height_exclusive(x, z)
+            }
+        }
+    }
+
+    /// Port of `Heightmap.update` for the two worldgen heightmaps, which vanilla
+    /// applies to every write (air included) while they are in `heightmapsAfter`.
+    fn update_worldgen_height_maps(
+        &mut self,
+        local_x: i32,
+        local_z: i32,
+        y: i16,
+        block_state: &BlockState,
+    ) {
+        let index = Self::local_position_to_height_map_index(local_x, local_z);
+        let block = BlockId::from_state_id(block_state.id);
+
+        let surface = self.flat_surface_wg_height_map[index];
+        if y >= surface {
+            if !block_state.is_air() {
+                self.flat_surface_wg_height_map[index] = y;
+            } else if y == surface {
+                self.flat_surface_wg_height_map[index] =
+                    self.scan_height_below(local_x, local_z, y, |state| !state.is_air());
+            }
+        }
+
+        let ocean_floor = self.flat_ocean_floor_wg_height_map[index];
+        if y >= ocean_floor {
+            if blocks_movement(block_state, block) {
+                self.flat_ocean_floor_wg_height_map[index] = y;
+            } else if y == ocean_floor {
+                self.flat_ocean_floor_wg_height_map[index] =
+                    self.scan_height_below(local_x, local_z, y, |state| {
+                        blocks_movement(state, BlockId::from_state_id(state.id))
+                    });
+            }
+        }
+    }
+
+    /// Highest y below `y` in the column whose block satisfies `predicate`, or
+    /// `i16::MIN` when none does.
+    fn scan_height_below(
+        &self,
+        local_x: i32,
+        local_z: i32,
+        y: i16,
+        predicate: impl Fn(&BlockState) -> bool,
+    ) -> i16 {
+        let bottom_y = self.bottom_y() as i32;
+        let mut scan_y = i32::from(y) - 1;
+        while scan_y >= bottom_y {
+            let state = BlockState::from_id(self.get_block_state_raw(
+                local_x,
+                scan_y - bottom_y,
+                local_z,
+            ));
+            if predicate(state) {
+                return scan_y as i16;
+            }
+            scan_y -= 1;
+        }
+        i16::MIN
+    }
+
+    /// Recomputes the four final heightmaps from the blocks, standing in for vanilla
+    /// priming them on first use once the persisted status reaches `CARVERS`
+    /// (`Heightmap.primeHeightmaps`: scan down, skipping only `Blocks.AIR`).
+    pub fn prime_final_heightmaps(&mut self) {
+        let bottom_y = self.bottom_y() as i32;
+        let height = self.height() as i32;
+        for local_x in 0..CHUNK_DIM as i32 {
+            for local_z in 0..CHUNK_DIM as i32 {
+                let index = Self::local_position_to_height_map_index(local_x, local_z);
+                let mut heights = [i16::MIN; ChunkHeightmapType::ALL.len()];
+                let mut remaining = ChunkHeightmapType::ALL.len();
+                for local_y in (0..height).rev() {
+                    let state_id = self.get_block_state_raw(local_x, local_y, local_z);
+                    if state_id == BlockStateId::AIR {
+                        continue;
+                    }
+                    let state = BlockState::from_id(state_id);
+                    for (height_slot, heightmap_type) in
+                        heights.iter_mut().zip(ChunkHeightmapType::ALL.iter())
+                    {
+                        if *height_slot == i16::MIN && heightmap_type.is_opaque(state) {
+                            *height_slot = (local_y + bottom_y) as i16;
+                            remaining -= 1;
+                        }
+                    }
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+                for (height, heightmap_type) in heights.iter().zip(ChunkHeightmapType::ALL.iter()) {
+                    let map = match heightmap_type {
+                        ChunkHeightmapType::WorldSurface => &mut self.flat_surface_height_map,
+                        ChunkHeightmapType::MotionBlocking => {
+                            &mut self.flat_motion_blocking_height_map
+                        }
+                        ChunkHeightmapType::MotionBlockingNoLeaves => {
+                            &mut self.flat_motion_blocking_no_leaves_height_map
+                        }
+                        ChunkHeightmapType::OceanFloor => &mut self.flat_ocean_floor_height_map,
+                    };
+                    map[index] = *height;
+                }
             }
         }
     }
@@ -958,6 +1070,11 @@ impl ProtoChunk {
 
         if local_y < 0 || local_y >= self.height() as i32 {
             return;
+        }
+        // Vanilla only updates the `*_WG` maps while the persisted status is at or
+        // before SURFACE; carvers still run under SURFACE, so they update them too.
+        if self.stage <= StagedChunkEnum::Surface {
+            self.update_worldgen_height_maps(local_x, local_z, y as i16, block_state);
         }
         if !block_state.is_air() {
             let index = Self::local_position_to_height_map_index(local_x, local_z);
@@ -1809,9 +1926,9 @@ impl ProtoChunk {
             }
 
             let mut candidates = set.structures.to_vec();
-            let carver_seed = get_carver_seed(seed, self.x, self.z);
-            let mut random: RandomGenerator =
-                RandomGenerator::Xoroshiro(Xoroshiro::from_seed(carver_seed));
+            // Vanilla `ChunkGenerator.createStructures`: `setLargeFeatureSeed` over the
+            // legacy LCG picks the weighted entry of a multi-structure set.
+            let mut random = create_chunk_random(seed as i64, self.x, self.z);
 
             let mut total_weight: u32 = candidates.iter().map(|e| e.weight).sum();
 

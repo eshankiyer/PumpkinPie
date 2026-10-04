@@ -1,11 +1,11 @@
 use pumpkin_data::structures::{
-    ConcentricRingsStructurePlacement, RandomSpreadStructurePlacement, StructurePlacement,
-    StructurePlacementType, StructureSet,
+    RandomSpreadStructurePlacement, StructurePlacement, StructurePlacementType, StructureSet,
 };
-use pumpkin_util::math::{floor_div, position::BlockPos};
+use pumpkin_util::math::{floor_div, position::BlockPos, vector2::Vector2};
 
 use crate::generation::structure::placement::{
-    GlobalStructureCache, get_structure_chunk_in_region,
+    GlobalStructureCache, apply_additional_chunk_restrictions, get_locate_pos,
+    get_structure_chunk_in_region,
 };
 
 use super::WorldGenerator;
@@ -18,6 +18,20 @@ pub struct FoundStructure {
     pub distance_sq: f64,
 }
 
+impl FoundStructure {
+    /// Wraps a locate position with its squared distance to `origin`, as vanilla's
+    /// `BlockPos.distSqr` (all three axes, low corner to low corner).
+    fn new(origin: BlockPos, pos: BlockPos) -> Self {
+        let dx = f64::from(pos.0.x) - f64::from(origin.0.x);
+        let dy = f64::from(pos.0.y) - f64::from(origin.0.y);
+        let dz = f64::from(pos.0.z) - f64::from(origin.0.z);
+        Self {
+            pos,
+            distance_sq: dx * dx + dy * dy + dz * dz,
+        }
+    }
+}
+
 /// Finds the block position of the nearest structure whose placement is listed
 /// in `placements`, within `max_search_radius` chunk-region rings.
 ///
@@ -26,10 +40,12 @@ pub struct FoundStructure {
 ///
 /// 1. **Concentric-rings** placements (strongholds) are resolved in one pass
 ///    from the pre-computed [`GlobalStructureCache`].
-/// 2. **Random-spread** placements are searched ring-by-ring outward, stopping
-///    at the first radius that produces any result.
+/// 2. **Random-spread** placements are searched ring-by-ring outward. Every
+///    placement is evaluated at a radius, and the search stops after the first
+///    radius where any of them produced a result.
 ///
-/// The best candidate from both passes is returned.
+/// The best candidate from both passes is returned, as the placement's
+/// locate position (chunk min corner plus `locate_offset`).
 pub fn find_nearest_structure(
     origin: BlockPos,
     placements: &[&StructurePlacement],
@@ -45,8 +61,8 @@ pub fn find_nearest_structure(
 
     // ── Pass 1: Concentric-rings (strongholds) ──────────────────────────────
     for p in placements {
-        if let StructurePlacementType::ConcentricRings(rings) = &p.placement_type
-            && let Some(found) = find_nearest_concentric(origin, rings, global_cache)
+        if let StructurePlacementType::ConcentricRings(_) = &p.placement_type
+            && let Some(found) = find_nearest_concentric(origin, p, global_cache)
             && nearest
                 .as_ref()
                 .is_none_or(|n| found.distance_sq < n.distance_sq)
@@ -55,11 +71,11 @@ pub fn find_nearest_structure(
         }
     }
 
-    let random_spread: Vec<(&RandomSpreadStructurePlacement, u32)> = placements
+    let random_spread: Vec<(&StructurePlacement, &RandomSpreadStructurePlacement)> = placements
         .iter()
         .filter_map(|p| {
             if let StructurePlacementType::RandomSpread(r) = &p.placement_type {
-                Some((r, p.salt))
+                Some((*p, r))
             } else {
                 None
             }
@@ -70,25 +86,29 @@ pub fn find_nearest_structure(
         let chunk_origin_x = origin.0.x >> 4;
         let chunk_origin_z = origin.0.z >> 4;
 
-        'radius: for radius in 0..=max_search_radius {
-            for (placement, salt) in &random_spread {
-                if let Some(found) = find_nearest_random_spread_at_radius(
+        for radius in 0..=max_search_radius {
+            let mut found_something = false;
+            for (placement, spread) in &random_spread {
+                if let Some(found) = find_first_random_spread_at_radius(
                     origin,
                     chunk_origin_x,
                     chunk_origin_z,
                     radius,
                     world_seed,
                     placement,
-                    *salt,
+                    spread,
                 ) {
+                    found_something = true;
                     if nearest
                         .as_ref()
                         .is_none_or(|n| found.distance_sq < n.distance_sq)
                     {
                         nearest = Some(found);
                     }
-                    break 'radius;
                 }
+            }
+            if found_something {
+                break;
             }
         }
     }
@@ -96,9 +116,10 @@ pub fn find_nearest_structure(
     nearest.map(|f| f.pos)
 }
 
-/// Finds the nearest candidate that actually produces one of `target_structures`.
-/// Explorer maps use this instead of pointing at a placement-only candidate whose
-/// biome may reject the requested structure.
+/// Finds the first candidate, in vanilla ring order, that produces one of `target_structures`.
+///
+/// Returns its locate position. Explorer maps use this instead of pointing at a
+/// placement-only candidate whose biome may reject the requested structure.
 #[must_use]
 #[expect(clippy::too_many_lines)]
 pub fn find_nearest_structure_start(
@@ -145,7 +166,6 @@ pub fn find_nearest_structure_start(
     let global_cache = &noise_generator.global_structure_cache;
 
     for radius in 0..=max_search_radius {
-        let mut nearest: Option<FoundStructure> = None;
         for region_x_offset in -radius..=radius {
             for region_z_offset in -radius..=radius {
                 if region_x_offset.abs() != radius && region_z_offset.abs() != radius {
@@ -214,27 +234,16 @@ pub fn find_nearest_structure_start(
                                 &mut biome_sampler,
                             )
                         });
-                    let Some(start) = start else {
-                        continue;
-                    };
-                    let position = start.start_pos;
-                    let dx = f64::from(position.0.x - origin.0.x);
-                    let dz = f64::from(position.0.z - origin.0.z);
-                    let found = FoundStructure {
-                        pos: position,
-                        distance_sq: dx * dx + dz * dz,
-                    };
-                    if nearest
-                        .as_ref()
-                        .is_none_or(|current| found.distance_sq < current.distance_sq)
-                    {
-                        nearest = Some(found);
+                    // Vanilla `getStructureGeneratingAt` returns the first hit's
+                    // `getLocatePos(start.getChunkPos())`, not the nearest of the ring.
+                    if start.is_some() {
+                        return Some(get_locate_pos(
+                            &structure_set.placement,
+                            Vector2::new(chunk_x, chunk_z),
+                        ));
                     }
                 }
             }
-        }
-        if let Some(found) = nearest {
-            return Some(found.pos);
         }
     }
     None
@@ -242,48 +251,44 @@ pub fn find_nearest_structure_start(
 
 fn find_nearest_concentric(
     origin: BlockPos,
-    // Kept for potential future bounds / distance validation.
-    _rings: &ConcentricRingsStructurePlacement,
+    placement: &StructurePlacement,
     global_cache: &GlobalStructureCache,
 ) -> Option<FoundStructure> {
     let strongholds = global_cache.get_stronghold_chunks();
-    if strongholds.is_empty() {
-        return None;
+
+    let ox = f64::from(origin.0.x);
+    let oz = f64::from(origin.0.z);
+
+    // Vanilla ranks ring chunks by distance from their centre (the constant Y=32
+    // term does not change the order); the earliest of equally near chunks wins.
+    let mut closest: Option<((i32, i32), f64)> = None;
+    for &(cx, cz) in strongholds {
+        let dx = f64::from((cx << 4) + 8) - ox;
+        let dz = f64::from((cz << 4) + 8) - oz;
+        let dist_sq = dx * dx + dz * dz;
+        if closest.is_none_or(|(_, best)| dist_sq < best) {
+            closest = Some(((cx, cz), dist_sq));
+        }
     }
 
-    let ox = origin.0.x as f64;
-    let oz = origin.0.z as f64;
-
-    strongholds
-        .iter()
-        .map(|(cx, cz)| {
-            // Centre of the chunk in block coords.
-            let bx = (cx << 4) + 8;
-            let bz = (cz << 4) + 8;
-            let dx = bx as f64 - ox;
-            let dz = bz as f64 - oz;
-            FoundStructure {
-                pos: BlockPos::new(bx, 0, bz),
-                distance_sq: dx * dx + dz * dz,
-            }
-        })
-        .min_by(|a, b| a.distance_sq.total_cmp(&b.distance_sq))
+    closest.map(|((cx, cz), _)| {
+        FoundStructure::new(origin, get_locate_pos(placement, Vector2::new(cx, cz)))
+    })
 }
 
-fn find_nearest_random_spread_at_radius(
+/// Port of vanilla's random-spread `getNearestGeneratedStructure`: walks the edge
+/// cells of the ring at `radius` (x outer, z inner) and returns the first potential
+/// structure chunk that passes the frequency check, as its locate position.
+fn find_first_random_spread_at_radius(
     origin: BlockPos,
     chunk_origin_x: i32,
     chunk_origin_z: i32,
     radius: i32,
     world_seed: i64,
-    placement: &RandomSpreadStructurePlacement,
-    salt: u32,
+    placement: &StructurePlacement,
+    spread: &RandomSpreadStructurePlacement,
 ) -> Option<FoundStructure> {
-    let spacing = placement.spacing;
-    let ox = origin.0.x as f64;
-    let oz = origin.0.z as f64;
-
-    let mut best: Option<FoundStructure> = None;
+    let spacing = spread.spacing;
 
     for rx_off in -radius..=radius {
         for rz_off in -radius..=radius {
@@ -295,22 +300,19 @@ fn find_nearest_random_spread_at_radius(
             let rz = floor_div(chunk_origin_z, spacing) + rz_off;
 
             let (struct_cx, struct_cz) =
-                get_structure_chunk_in_region(placement, world_seed, rx, rz, salt);
+                get_structure_chunk_in_region(spread, world_seed, rx, rz, placement.salt);
 
-            let bx = (struct_cx << 4) + 8;
-            let bz = (struct_cz << 4) + 8;
-            let dx = bx as f64 - ox;
-            let dz = bz as f64 - oz;
-            let dist_sq = dx * dx + dz * dz;
-
-            if best.as_ref().is_none_or(|b| dist_sq < b.distance_sq) {
-                best = Some(FoundStructure {
-                    pos: BlockPos::new(bx, 0, bz),
-                    distance_sq: dist_sq,
-                });
+            // StructureCheck.checkStart rejects chunks failing the frequency reducer.
+            if !apply_additional_chunk_restrictions(placement, world_seed, struct_cx, struct_cz) {
+                continue;
             }
+
+            return Some(FoundStructure::new(
+                origin,
+                get_locate_pos(placement, Vector2::new(struct_cx, struct_cz)),
+            ));
         }
     }
 
-    best
+    None
 }

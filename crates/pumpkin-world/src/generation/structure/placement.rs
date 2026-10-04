@@ -5,8 +5,7 @@ use pumpkin_data::structures::{
 };
 use pumpkin_util::math::{floor_div, position::BlockPos, vector2::Vector2};
 use pumpkin_util::random::{
-    RandomGenerator, RandomImpl, get_carver_seed, get_region_seed, legacy_rand::LegacyRand,
-    xoroshiro128::Xoroshiro,
+    RandomGenerator, RandomImpl, get_region_seed, legacy_rand::LegacyRand,
 };
 use std::f64::consts::PI;
 use std::sync::OnceLock;
@@ -15,7 +14,7 @@ use crate::ProtoChunk;
 use dashmap::DashMap;
 use pumpkin_data::structures::StructureKeys;
 
-use super::structures::StructurePosition;
+use super::structures::{StructurePosition, create_chunk_random};
 /// A thread-safe global cache for structures that require world-wide placement calculations
 /// rather than localized chunk-based math (e.g., Strongholds using Concentric Rings).
 ///
@@ -247,9 +246,15 @@ fn should_generate_frequency(
     frequency: f32,
 ) -> bool {
     match method {
+        // Vanilla `probabilityReducer`: `setLargeFeatureWithSalt(seed, salt, x, z)` over the
+        // legacy LCG. The salt is passed in the x slot, so it takes the x multiplier.
         FrequencyReductionMethod::Default => {
-            let region_seed = get_region_seed(seed as u64, chunk_x, chunk_z, salt);
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(region_seed));
+            let large_feature_seed = i64::from(salt)
+                .wrapping_mul(341873128712)
+                .wrapping_add(i64::from(chunk_x).wrapping_mul(132897987541))
+                .wrapping_add(seed)
+                .wrapping_add(i64::from(chunk_z));
+            let mut random = LegacyRand::from_seed(large_feature_seed as u64);
             random.next_f32() < frequency
         }
         FrequencyReductionMethod::LegacyType1 => {
@@ -259,14 +264,16 @@ fn should_generate_frequency(
             random.next_i32();
             random.next_bounded_i32((1.0 / frequency) as i32) == 0
         }
+        // Vanilla `legacyArbitrarySaltProbabilityReducer`:
+        // `setLargeFeatureWithSalt(seed, x, z, 10387320)` over the legacy LCG.
         FrequencyReductionMethod::LegacyType2 => {
             let region_seed = get_region_seed(seed as u64, chunk_x, chunk_z, 10387320);
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(region_seed));
+            let mut random = LegacyRand::from_seed(region_seed);
             random.next_f32() < frequency
         }
+        // Vanilla `legacyProbabilityReducerWithDouble`: `setLargeFeatureSeed(seed, x, z)`.
         FrequencyReductionMethod::LegacyType3 => {
-            let carver_seed = get_carver_seed(seed as u64, chunk_x, chunk_z);
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(carver_seed));
+            let mut random = create_chunk_random(seed, chunk_x, chunk_z);
             random.next_f64() < f64::from(frequency)
         }
     }
@@ -590,5 +597,74 @@ mod tests {
         assert!(apply_additional_chunk_restrictions(
             &placement, seed, 100, -50
         ));
+    }
+
+    #[test]
+    fn frequency_reducers_use_the_legacy_lcg() {
+        use super::should_generate_frequency;
+        use pumpkin_data::structures::FrequencyReductionMethod;
+
+        for (seed, x, z) in [(0i64, 0, 0), (12345, 7, -3), (-987_654_321, -40, 25)] {
+            let salt = 165_745_296u32;
+            // DEFAULT: setLargeFeatureWithSalt(seed, salt, x, z) then nextFloat.
+            let default_seed = i64::from(salt)
+                .wrapping_mul(341_873_128_712)
+                .wrapping_add(i64::from(x).wrapping_mul(132_897_987_541))
+                .wrapping_add(seed)
+                .wrapping_add(i64::from(z));
+            let expected = LegacyRand::from_seed(default_seed as u64).next_f32();
+            for p in [expected - 1e-6, expected + 1e-6] {
+                assert_eq!(
+                    should_generate_frequency(FrequencyReductionMethod::Default, seed, x, z, salt, p),
+                    expected < p
+                );
+            }
+
+            // LEGACY_TYPE_2: setLargeFeatureWithSalt(seed, x, z, 10387320) then nextFloat.
+            let type2_seed = i64::from(x)
+                .wrapping_mul(341_873_128_712)
+                .wrapping_add(i64::from(z).wrapping_mul(132_897_987_541))
+                .wrapping_add(seed)
+                .wrapping_add(10_387_320);
+            let expected = LegacyRand::from_seed(type2_seed as u64).next_f32();
+            for p in [expected - 1e-6, expected + 1e-6] {
+                assert_eq!(
+                    should_generate_frequency(
+                        FrequencyReductionMethod::LegacyType2,
+                        seed,
+                        x,
+                        z,
+                        salt,
+                        p
+                    ),
+                    expected < p
+                );
+            }
+
+            // LEGACY_TYPE_3: setLargeFeatureSeed(seed, x, z) then nextDouble.
+            let mut seeder = LegacyRand::from_seed(seed as u64);
+            let x_scale = seeder.next_i64();
+            let z_scale = seeder.next_i64();
+            let type3_seed = (i64::from(x).wrapping_mul(x_scale))
+                ^ (i64::from(z).wrapping_mul(z_scale))
+                ^ seed;
+            let expected = LegacyRand::from_seed(type3_seed as u64).next_f64();
+            assert!(!should_generate_frequency(
+                FrequencyReductionMethod::LegacyType3,
+                seed,
+                x,
+                z,
+                salt,
+                expected as f32 - 1e-6
+            ));
+            assert!(should_generate_frequency(
+                FrequencyReductionMethod::LegacyType3,
+                seed,
+                x,
+                z,
+                salt,
+                expected as f32 + 1e-6
+            ));
+        }
     }
 }
