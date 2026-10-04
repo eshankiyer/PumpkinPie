@@ -54,10 +54,17 @@ impl BlockStateCodec {
             return block.default_state.id;
         };
 
-        let props_iter = properties_map
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect::<Vec<(&str, &str)>>();
+        // Pairs vanilla's state codec would reject fall back to the default state's value.
+        let props_iter = block.valid_properties(
+            properties_map
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str())),
+        );
+        // Nothing survived (including every pair on a property-less block such as stone,
+        // whose generated `from_props` would panic): the default state, as in vanilla.
+        if props_iter.is_empty() {
+            return block.default_state.id;
+        }
 
         let block_properties = block.from_properties(&props_iter);
         block_properties.to_state_id(block)

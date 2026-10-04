@@ -9,6 +9,7 @@ use pumpkin_util::{
     resource_location::{FromResourceLocation, ResourceLocation, ToResourceLocation},
 };
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
 
 /// Represents the static definition of a Minecraft block type.
 ///
@@ -373,10 +374,85 @@ impl Block {
         self.transform_state(id, |props| rotation.apply_to_props(self.name, props))
     }
 
+    /// Every property key of this block with all of its possible values, in the block's
+    /// own `'static` spellings. Built once per block from its state list and cached.
+    fn property_values(&self) -> &'static [(&'static str, Box<[&'static str]>)] {
+        type PropertyValues = Box<[(&'static str, Box<[&'static str]>)]>;
+        const COUNT: usize = BlockId::BLOCK_COUNT as usize;
+        static CACHE: [OnceLock<PropertyValues>; COUNT] = [const { OnceLock::new() }; COUNT];
+
+        let Some(slot) = CACHE.get(usize::from(self.id.as_u16())) else {
+            return &[];
+        };
+        slot.get_or_init(|| {
+            let mut values: Vec<(&'static str, Vec<&'static str>)> = Vec::new();
+            for state in self.states {
+                let Some(props) = self.properties(state.id) else {
+                    continue;
+                };
+                for (key, value) in props.to_props() {
+                    match values.iter_mut().find(|(known, _)| *known == key) {
+                        Some((_, known_values)) => {
+                            if !known_values.contains(&value) {
+                                known_values.push(value);
+                            }
+                        }
+                        None => values.push((key, vec![value])),
+                    }
+                }
+            }
+            values
+                .into_iter()
+                .map(|(key, known_values)| (key, known_values.into_boxed_slice()))
+                .collect()
+        })
+    }
+
+    /// Resolves a raw property value the way vanilla's `Property.getValue` does: booleans
+    /// accept exactly `true`/`false` (`BooleanProperty.java:25-31`), enums their exact
+    /// serialized names (`EnumProperty.java:48-50`), and integers anything
+    /// `Integer.parseInt` reads that lies within the property's range
+    /// (`IntegerProperty.java:52-59`), so `"07"` and `"+7"` both mean `7` (ASCII digits
+    /// only; Java's non-ASCII Unicode digits are not accepted here). Returns the
+    /// block's canonical spelling, or `None` for an unknown key or a rejected value.
+    #[must_use]
+    pub fn property_value(&self, key: &str, value: &str) -> Option<&'static str> {
+        let (_, values) = self
+            .property_values()
+            .iter()
+            .find(|(known, _)| *known == key)?;
+        if let Some(known) = values.iter().copied().find(|known| *known == value) {
+            return Some(known);
+        }
+        // Only integer properties have numeric value names, so this fallback can only
+        // ever match one of them.
+        let parsed = value.parse::<i32>().ok()?.to_string();
+        values.iter().copied().find(|known| *known == parsed)
+    }
+
+    /// Keeps the property pairs vanilla's block state codec would decode, in canonical
+    /// spelling, and silently drops the rest. `StateDefinition.appendPropertyCodec`
+    /// (`StateDefinition.java:133-137`) decodes every property independently with
+    /// `orElseGet(default state's value)`, so a missing key, an unknown key, or a value
+    /// `Property.getValue` rejects leaves that property at the default state's value;
+    /// feeding the result to `from_properties` (which seeds the default state) matches it.
+    #[must_use]
+    pub fn valid_properties<'a>(
+        &self,
+        props: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Vec<(&'a str, &'static str)> {
+        props
+            .into_iter()
+            .filter_map(|(key, value)| Some((key, self.property_value(key, value)?)))
+            .collect()
+    }
+
     /// Parses a block state argument such as `minecraft:wheat[age=0]`, resolving any
     /// supplied properties against the block's definition. Returns `None` if the block
     /// name is unknown, a property name/value is not valid for the block, or the block
-    /// does not have properties at all but some were supplied.
+    /// does not have properties at all but some were supplied. Unlike the lenient NBT
+    /// codec, vanilla's `BlockStateParser.setValue` (`BlockStateParser.java:489-498`)
+    /// rejects any value `Property.getValue` does not accept.
     #[must_use]
     pub fn from_state_str(input: &str) -> Option<&'static BlockState> {
         let (name, props) = match input.find('[') {
@@ -391,35 +467,13 @@ impl Block {
             return Some(block.default_state);
         }
 
-        let valid_keys: Vec<&str> = block
-            .properties(block.default_state.id)
-            .map(|properties| {
-                properties
-                    .to_props()
-                    .into_iter()
-                    .map(|(key, _)| key)
-                    .collect()
-            })
-            .unwrap_or_default();
-
         let mut pairs = Vec::new();
         for part in props.split(',') {
             let mut kv = part.splitn(2, '=');
             let key = kv.next().unwrap_or("").trim();
             let value = kv.next().unwrap_or("").trim();
 
-            if !valid_keys.contains(&key) {
-                return None;
-            }
-
-            // Some property values only fail once resolved against the block's generated
-            // enum types; validate each key in isolation before committing to the batch
-            // below so a bad value is reported here instead of panicking downstream.
-            if std::panic::catch_unwind(|| block.from_properties(&[(key, value)])).is_err() {
-                return None;
-            }
-
-            pairs.push((key, value));
+            pairs.push((key, block.property_value(key, value)?));
         }
 
         let state_id = block.from_properties(&pairs).to_state_id(block);
@@ -530,6 +584,43 @@ mod tests {
 
     fn assert_close(actual: f64, expected: f64) {
         assert!((actual - expected).abs() < 1.0e-6, "{actual} != {expected}");
+    }
+
+    // BlockStateParser.java:489-498: commands reject any value Property.getValue rejects.
+    #[test]
+    fn from_state_str_rejects_invalid_values() {
+        assert!(Block::from_state_str("minecraft:oak_stairs[facing=up]").is_none());
+        assert!(Block::from_state_str("minecraft:wheat[age=99]").is_none());
+        assert!(Block::from_state_str("minecraft:lever[powered=yes]").is_none());
+        assert!(Block::from_state_str("minecraft:wheat[colour=red]").is_none());
+        assert!(Block::from_state_str("minecraft:stone[age=1]").is_none());
+    }
+
+    #[test]
+    fn from_state_str_accepts_valid_values() {
+        let state = Block::from_state_str("minecraft:wheat[age=7]").unwrap();
+        let props = Block::WHEAT.properties(state.id).unwrap().to_props();
+        assert!(props.contains(&("age", "7")));
+        // IntegerProperty.getValue parses with Integer.parseInt.
+        assert_eq!(
+            Block::from_state_str("minecraft:wheat[age=07]").unwrap().id,
+            state.id
+        );
+        assert!(Block::from_state_str("minecraft:oak_stairs[facing=east,half=top]").is_some());
+    }
+
+    // StateDefinition.appendPropertyCodec: each bad pair falls back to the default value.
+    #[test]
+    fn valid_properties_drops_rejected_pairs() {
+        let kept = Block::OAK_LEAVES.valid_properties([
+            ("distance", "x"),
+            ("persistent", "true"),
+            ("bogus", "1"),
+        ]);
+        assert_eq!(kept, vec![("persistent", "true")]);
+        assert_eq!(Block::OAK_LEAVES.property_value("distance", "+3"), Some("3"));
+        assert_eq!(Block::OAK_LEAVES.property_value("distance", "8"), None);
+        assert_eq!(Block::REDSTONE_TORCH.property_value("lit", "TRUE"), None);
     }
 
     #[test]

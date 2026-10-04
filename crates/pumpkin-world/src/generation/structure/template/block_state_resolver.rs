@@ -50,11 +50,15 @@ impl BlockStateResolver {
         let base_props = if entry.properties.is_empty() {
             default_props
         } else {
-            let props_slice = entry
-                .properties
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str()))
-                .collect::<Vec<_>>();
+            // `StateDefinition.appendPropertyCodec` (`StateDefinition.java:133-137`): an
+            // unknown key or a value the property rejects leaves that property at the
+            // default state's value instead of failing the whole entry.
+            let props_slice = block.valid_properties(
+                entry
+                    .properties
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str())),
+            );
             block.from_properties(&props_slice)
         };
 
@@ -118,6 +122,26 @@ mod tests {
             ],
         );
         assert_eq!(state.id.to_block_id(), Block::OAK_STAIRS.id);
+    }
+
+    // StateDefinition.java:133-137 falls back per property; LeavesBlock.java:44 defaults
+    // distance to 7, RedstoneTorchBlock.java:40 defaults lit to true.
+    #[test]
+    fn invalid_property_values_fall_back_to_default() {
+        let leaves = expect_state("minecraft:oak_leaves", &[("distance", "x")]);
+        let props = Block::OAK_LEAVES.properties(leaves.id).unwrap().to_props();
+        assert!(props.contains(&("distance", "7")));
+
+        let torch = expect_state("minecraft:redstone_torch", &[("lit", "x")]);
+        assert_eq!(torch.id, Block::REDSTONE_TORCH.default_state.id);
+
+        let stairs = expect_state(
+            "minecraft:oak_stairs",
+            &[("facing", "up"), ("half", "top")],
+        );
+        let props = Block::OAK_STAIRS.properties(stairs.id).unwrap().to_props();
+        assert!(props.contains(&("facing", "north")));
+        assert!(props.contains(&("half", "top")));
     }
 
     #[test]
