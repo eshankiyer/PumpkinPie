@@ -5,23 +5,19 @@ use pumpkin_data::BlockState;
 use pumpkin_data::block_properties::{
     BlockProperties, HorizontalFacing, OakStairsLikeProperties, StairsShape,
 };
-use pumpkin_util::{
-    BlockDirection,
-    math::{block_box::BlockBox, position::BlockPos},
-    random::RandomGenerator,
-};
+use pumpkin_util::{BlockDirection, math::block_box::BlockBox, random::RandomGenerator};
 use serde::Deserialize;
 
 use crate::{
     ProtoChunk,
     generation::{
-        positions::chunk_pos::{get_center_x, get_center_z},
+        positions::chunk_pos::{start_block_x, start_block_z},
         structure::{
             piece::StructurePieceType,
             shiftable_piece::ShiftableStructurePiece,
             structures::{
                 StructureGenerator, StructureGeneratorContext, StructurePieceBase,
-                StructurePiecesCollector, StructurePosition,
+                StructurePiecesCollector, StructurePosition, on_top_of_chunk_center,
             },
         },
     },
@@ -45,8 +41,11 @@ impl StructureGenerator for SwampHutGenerator {
         &self,
         mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
-        let x = get_center_x(context.chunk_x);
-        let z = get_center_z(context.chunk_z);
+        // `SwampHutStructure.generatePieces`: the piece box starts at the chunk's min corner,
+        // while the stub sits on top of the chunk centre.
+        let start_pos = on_top_of_chunk_center(&mut context, false, 64);
+        let x = start_block_x(context.chunk_x);
+        let z = start_block_z(context.chunk_z);
 
         let mut collector = StructurePiecesCollector::default();
         collector.add_piece(Box::new(SwampHutPiece {
@@ -63,7 +62,7 @@ impl StructureGenerator for SwampHutGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x, 64, z),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }

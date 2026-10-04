@@ -4,11 +4,13 @@ use pumpkin_data::{
     Block, BlockState,
     block_properties::{BlockProperties, HorizontalFacing, OakStairsLikeProperties},
 };
+use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
     BlockDirection, HeightMap,
     math::{block_box::BlockBox, position::BlockPos},
     random::{
-        RandomDeriverImpl, RandomGenerator, RandomImpl, xoroshiro128::Xoroshiro,
+        RandomDeriverImpl, RandomGenerator, RandomImpl, legacy_rand::LegacyRand,
+        xoroshiro128::Xoroshiro,
     },
 };
 
@@ -20,11 +22,14 @@ use crate::{
             piece::StructurePieceType,
             structures::{
                 StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
-                StructurePiecesCollector, StructurePosition, get_lowest_y,
+                StructurePiecesCollector, StructurePosition, get_lowest_y, on_top_of_chunk_center,
             },
         },
     },
 };
+
+/// `BuiltInLootTables.DESERT_PYRAMID_ARCHAEOLOGY`.
+const ARCHAEOLOGY_LOOT_TABLE: &str = "minecraft:archaeology/desert_pyramid";
 
 const WIDTH: i32 = 21;
 const HEIGHT: i32 = 15;
@@ -51,6 +56,7 @@ impl StructureGenerator for DesertPyramidGenerator {
             return None;
         }
 
+        let start_pos = on_top_of_chunk_center(&mut context, false, 64);
         let facing = BlockDirection::get_random_horizontal_direction(&mut context.random);
 
         let mut piece = StructurePiece::new(
@@ -70,7 +76,7 @@ impl StructureGenerator for DesertPyramidGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x + (WIDTH / 2), 64, z + (DEPTH / 2)),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }
@@ -185,8 +191,10 @@ impl DesertPyramidPiece {
                 self.place_collapsed_roof_piece(chunk, bb, random, x, y0, z);
             }
         }
+        // `RandomSource.createThreadLocalInstance(seed).forkPositional().at(..)`
+        // (`DesertPyramidPiece.java:419-426`) is the legacy LCG chain.
         let origin = self.piece.offset_pos(x0, y0, z0);
-        let mut seed_random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed as u64));
+        let mut seed_random = RandomGenerator::Legacy(LegacyRand::from_seed(seed as u64));
         let positional_random = seed_random.next_splitter();
         let mut roof_random = positional_random.split_pos(origin.x, origin.y, origin.z);
         let roof_x = roof_random.next_inbetween_i32(x0, x1);
@@ -454,12 +462,8 @@ impl DesertPyramidPiece {
         self.piece.add_block(chunk, chiseled, x, -2, z - 4, bb);
     }
 
-    /// Returns the sand positions collected for the structure archaeology pass. Not yet
-    /// consumed: vanilla's structure-level `afterPlace` step samples this list (plus
-    /// [`Self::get_random_collapsed_roof_pos`]) to convert a subset into `suspicious_sand`
-    /// with archaeology loot; no caller here does that conversion yet, so desert pyramids
-    /// currently generate with plain sand and no archaeology loot, same as before this data
-    /// was collected.
+    /// Returns the sand positions collected for the structure archaeology pass, consumed by
+    /// [`Self::after_place`].
     ///
     /// Vanilla `DesertPyramidPiece.getPotentialSuspiciousSandWorldPositions` returns this list
     /// (`DesertPyramidPiece.java:428-430`).
@@ -468,14 +472,77 @@ impl DesertPyramidPiece {
         &self.potential_suspicious_sand_world_positions
     }
 
-    /// Returns the positional-random collapsed-roof sand position. See the not-yet-consumed
-    /// note on [`Self::get_potential_suspicious_sand_world_positions`].
+    /// Returns the positional-random collapsed-roof sand position, always turned into
+    /// suspicious sand by [`Self::after_place`].
     ///
     /// Vanilla `DesertPyramidPiece.getRandomCollapsedRoofPos` returns this position
     /// (`DesertPyramidPiece.java:432-434`).
     #[must_use]
     pub const fn get_random_collapsed_roof_pos(&self) -> BlockPos {
         self.random_collapsed_roof_pos
+    }
+
+    /// Port of `DesertPyramidStructure.afterPlace` (`DesertPyramidStructure.java:32-63`).
+    ///
+    /// Vanilla runs it once per chunk after every intersecting piece; a desert pyramid start
+    /// holds exactly this one piece and every recorded position lies inside its box, so
+    /// running it at the end of [`StructurePieceBase::place`] is equivalent.
+    fn after_place(&mut self, chunk: &mut ProtoChunk, chunk_box: &BlockBox, seed: i64) {
+        // `SortedArraySet` ordered by `Vec3i.compareTo`: y, then z, then x. The piece records
+        // its positions again on every chunk it is placed in, so this also drops repeats.
+        let positions = &mut self.potential_suspicious_sand_world_positions;
+        positions.sort_unstable_by_key(|pos| (pos.0.y, pos.0.z, pos.0.x));
+        positions.dedup();
+
+        Self::place_suspicious_sand(chunk, chunk_box, self.random_collapsed_roof_pos);
+
+        let mut shuffled = positions.clone();
+        let bounds = self.piece.bounding_box;
+        // `BoundingBox.getCenter` (`BoundingBox.java:237-239`).
+        let center_x = bounds.min.x + (bounds.max.x - bounds.min.x + 1) / 2;
+        let center_y = bounds.min.y + (bounds.max.y - bounds.min.y + 1) / 2;
+        let center_z = bounds.min.z + (bounds.max.z - bounds.min.z + 1) / 2;
+        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(seed as u64))
+            .next_splitter()
+            .split_pos(center_x, center_y, center_z);
+        // `Util.shuffle` (`Util.java:1072-1079`).
+        for i in (2..=shuffled.len()).rev() {
+            let swap_to = random.next_bounded_i32(i as i32) as usize;
+            shuffled.swap(i - 1, swap_to);
+        }
+        // `nextInt(5, 8)` is `5 + nextInt(3)`.
+        let mut suspicious_to_place = (shuffled.len() as i32).min(5 + random.next_bounded_i32(3));
+
+        for pos in shuffled {
+            if suspicious_to_place > 0 {
+                // Counted even outside this chunk, so every chunk picks the same subset.
+                suspicious_to_place -= 1;
+                Self::place_suspicious_sand(chunk, chunk_box, pos);
+            } else if chunk_box.contains_pos(&pos.0) {
+                chunk.set_block_state(pos.0.x, pos.0.y, pos.0.z, Block::SAND.default_state);
+            }
+        }
+    }
+
+    /// Port of `DesertPyramidStructure.placeSuspiciousSand` (`DesertPyramidStructure.java:64-69`).
+    fn place_suspicious_sand(chunk: &mut ProtoChunk, chunk_box: &BlockBox, pos: BlockPos) {
+        if !chunk_box.contains_pos(&pos.0) {
+            return;
+        }
+        chunk.set_block_state(
+            pos.0.x,
+            pos.0.y,
+            pos.0.z,
+            Block::SUSPICIOUS_SAND.default_state,
+        );
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", "minecraft:brushable_block".to_string());
+        nbt.put_int("x", pos.0.x);
+        nbt.put_int("y", pos.0.y);
+        nbt.put_int("z", pos.0.z);
+        nbt.put_string("LootTable", ARCHAEOLOGY_LOOT_TABLE.to_string());
+        nbt.put_long("LootTableSeed", pos.as_long());
+        chunk.add_block_entity(nbt);
     }
 }
 
@@ -836,5 +903,101 @@ impl StructurePieceBase for DesertPyramidPiece {
         }
 
         self.add_cellar(chunk, bb, &mut level_random, seed);
+        self.after_place(chunk, bb, seed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_data::{Block, BlockStateId, dimension::Dimension};
+    use pumpkin_util::{
+        math::{block_box::BlockBox, position::BlockPos},
+        world_seed::Seed,
+    };
+
+    use super::{ARCHAEOLOGY_LOOT_TABLE, DesertPyramidPiece};
+    use crate::generation::{
+        get_world_gen,
+        proto_chunk::ProtoChunk,
+        structure::{piece::StructurePieceType, structures::StructurePiece},
+    };
+
+    /// A placed brushable block entity: its position and `LootTableSeed`.
+    type Entity = (i32, i32, i32, i64);
+
+    fn run_after_place(seed: i64) -> (Vec<BlockStateId>, Vec<Entity>) {
+        let generator = get_world_gen(
+            Seed(seed as u64),
+            Dimension::OVERWORLD,
+            true,
+            Vec::new(),
+            String::new(),
+        );
+        let mut chunk = ProtoChunk::new(0, 0, &generator);
+        let chunk_box = BlockBox::new(0, -64, 0, 15, 319, 15);
+        // Twelve recorded spots, recorded twice as a piece placed in two chunks would.
+        let recorded: Vec<BlockPos> = (0..12).map(|i| BlockPos::new(i, 70, 3)).collect();
+        let mut positions = recorded.clone();
+        positions.extend(recorded.iter().rev().copied());
+        let mut piece = DesertPyramidPiece {
+            piece: StructurePiece::new(
+                StructurePieceType::DesertTemple,
+                BlockBox::new(0, 60, 0, 20, 74, 20),
+                0,
+            ),
+            height_adjusted: true,
+            has_placed_chest: [true; 4],
+            potential_suspicious_sand_world_positions: positions,
+            random_collapsed_roof_pos: BlockPos::new(5, 73, 5),
+        };
+        piece.after_place(&mut chunk, &chunk_box, seed);
+
+        let states = recorded
+            .iter()
+            .map(|pos| chunk.get_block_state(&pos.0))
+            .collect();
+        let entities = chunk
+            .take_pending_block_entities()
+            .iter()
+            .map(|nbt| {
+                assert_eq!(nbt.get_string("id"), Some("minecraft:brushable_block"));
+                assert_eq!(nbt.get_string("LootTable"), Some(ARCHAEOLOGY_LOOT_TABLE));
+                (
+                    nbt.get_int("x").unwrap(),
+                    nbt.get_int("y").unwrap(),
+                    nbt.get_int("z").unwrap(),
+                    nbt.get_long("LootTableSeed").unwrap(),
+                )
+            })
+            .collect();
+        (states, entities)
+    }
+
+    // `DesertPyramidStructure.afterPlace`: the roof spot plus 5..=7 of the recorded spots become
+    // suspicious sand seeded with their packed position; the rest become plain sand.
+    #[test]
+    fn after_place_converts_a_deterministic_subset_to_suspicious_sand() {
+        let (states, entities) = run_after_place(1234);
+        let suspicious = Block::SUSPICIOUS_SAND.default_state.id;
+        let sand = Block::SAND.default_state.id;
+        let converted = states.iter().filter(|&&id| id == suspicious).count();
+        assert!((5..=7).contains(&converted), "{converted}");
+        assert!(states.iter().all(|&id| id == suspicious || id == sand));
+        assert_eq!(
+            roof_entity_seed(&entities),
+            Some(BlockPos::new(5, 73, 5).as_long())
+        );
+        assert_eq!(entities.len(), converted + 1);
+        for &(x, y, z, seed) in &entities {
+            assert_eq!(seed, BlockPos::new(x, y, z).as_long());
+        }
+        assert_eq!(run_after_place(1234).1, entities);
+    }
+
+    fn roof_entity_seed(entities: &[Entity]) -> Option<i64> {
+        entities
+            .iter()
+            .find(|&&(x, y, z, _)| (x, y, z) == (5, 73, 5))
+            .map(|&(_, _, _, seed)| seed)
     }
 }

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use pumpkin_data::{Block, Mirror, Rotation};
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::{
-    math::{block_box::BlockBox, position::BlockPos, vector3::Vector3},
+    math::{block_box::BlockBox, vector3::Vector3},
     random::{RandomGenerator, RandomImpl},
 };
 
@@ -16,7 +16,7 @@ use crate::{
         piece::StructurePieceType,
         structures::{
             StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
-            StructurePiecesCollector, StructurePosition,
+            StructurePiecesCollector, StructurePosition, get_lowest_y_in_5by5_box_offset_7_blocks,
         },
         template::{
             BlockStateResolver, PaletteEntry, StructureTemplate, get_block_entity_id, get_template,
@@ -40,30 +40,17 @@ impl StructureGenerator for MansionGenerator {
         mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
         let rotation = Rotation::from_index(context.random.next_bounded_i32(4) as u8);
-        let x = context.chunk_x * 16 + 7;
-        let z = context.chunk_z * 16 + 7;
-        let (offset_x, offset_z) = match rotation {
-            Rotation::None => (5, 5),
-            Rotation::Clockwise90 => (-5, 5),
-            Rotation::Rotate180 => (-5, -5),
-            Rotation::CounterClockwise90 => (5, -5),
-        };
-        let y = {
-            let sampler = context.height_sampler.as_deref_mut()?;
-            [
-                sampler.estimate_height(x, z),
-                sampler.estimate_height(x, z + offset_z),
-                sampler.estimate_height(x + offset_x, z),
-                sampler.estimate_height(x + offset_x, z + offset_z),
-            ]
-            .into_iter()
-            .min()?
-        };
-        if y < 60 {
+        let start_pos = get_lowest_y_in_5by5_box_offset_7_blocks(
+            context.height_sampler.as_deref_mut()?,
+            context.chunk_x,
+            context.chunk_z,
+            rotation,
+        );
+        if start_pos.0.y < 60 {
             return None;
         }
 
-        let origin = Vector3::new(x, y, z);
+        let origin = start_pos.0;
         let grid = MansionGrid::new(&mut context.random);
         let descriptors = MansionPiecePlacer::create(&mut context.random, origin, rotation, &grid);
         let mut pieces = Vec::with_capacity(descriptors.len());
@@ -81,7 +68,7 @@ impl StructureGenerator for MansionGenerator {
         collector.add_piece(Box::new(MansionFoundationPiece::new(piece_boxes)?));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x, y, z),
+            start_pos,
             collector: Arc::new(Mutex::new(collector)),
         })
     }
@@ -537,7 +524,7 @@ const fn transform(
 
 #[cfg(test)]
 mod tests {
-    use pumpkin_util::random::legacy_rand::LegacyRand;
+    use pumpkin_util::{math::position::BlockPos, random::legacy_rand::LegacyRand};
 
     use crate::generation::structure::structures::HeightSampler;
 
@@ -657,7 +644,7 @@ mod tests {
             .unwrap();
         let x = 3 * 16 + 7;
         let z = -2 * 16 + 7;
-        assert_eq!(position.start_pos, BlockPos::new(x, 70, z));
+        assert_eq!(position.start_pos, BlockPos::new(x, 69, z));
         assert_eq!(
             sampler.calls,
             [

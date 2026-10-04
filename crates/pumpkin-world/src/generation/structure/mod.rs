@@ -4,7 +4,6 @@ use pumpkin_data::{
 };
 
 use crate::{
-    ProtoChunk,
     biome::BiomeSupplier,
     generation::{
         biome_coords,
@@ -12,7 +11,6 @@ use crate::{
         structure::structures::{
             StructureGenerator, StructureGeneratorContext, StructurePosition,
             buried_treasure::BuriedTreasureGenerator,
-            create_chunk_random,
             desert_pyramid::DesertPyramidGenerator,
             end_city::EndCityGenerator,
             igloo::IglooGenerator,
@@ -129,60 +127,6 @@ pub fn generate_structure_position(
             generator.get_structure_position(context)
         }
     }
-}
-
-#[must_use]
-pub fn try_generate_structure(
-    key: &StructureKeys,
-    structure: &Structure,
-    seed: i64,
-    chunk: &ProtoChunk,
-    sea_level: i32,
-    height_sampler: Option<&mut dyn crate::generation::structure::structures::HeightSampler>,
-) -> Option<StructurePosition> {
-    let random = create_chunk_random(seed, chunk.x, chunk.z);
-    let context = StructureGeneratorContext {
-        seed,
-        chunk_x: chunk.x,
-        chunk_z: chunk.z,
-        random,
-        sea_level,
-        min_y: chunk.bottom_y() as i32,
-        height_sampler,
-        structure_key: Some(*key),
-    };
-    let structure_pos = generate_structure_position(key, structure, context);
-
-    if let Some(pos) = structure_pos {
-        // Get the biome at the structure's starting position.
-        // Clamp biome Y to the chunk's valid range in case a structure's start_pos.y
-        // falls outside this chunk's stored biome section range.
-        let biome_y = biome_coords::from_block(pos.start_pos.0.y);
-        let biome_height = (chunk.height() >> 2) as i32;
-        let biome_bottom = biome_coords::from_block(chunk.bottom_y() as i32);
-        let clamped_biome_y = biome_y.clamp(biome_bottom, biome_bottom + biome_height - 1);
-
-        let current_biome = chunk.get_biome_id(
-            biome_coords::from_block(pos.start_pos.0.x),
-            clamped_biome_y,
-            biome_coords::from_block(pos.start_pos.0.z),
-        ) as u16;
-
-        let biomes = get_tag_ids(
-            RegistryKey::WorldgenBiome,
-            structure
-                .biomes
-                .strip_prefix('#')
-                .unwrap_or(structure.biomes),
-        )?;
-
-        // Check if the biome is allowed for this structure
-        if biomes.contains(&current_biome) {
-            return Some(pos);
-        }
-    }
-
-    None
 }
 
 #[must_use]

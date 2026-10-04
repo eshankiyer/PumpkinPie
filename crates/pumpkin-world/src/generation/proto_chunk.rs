@@ -50,7 +50,6 @@ use crate::generation::structure::placement::should_generate_structure;
 use crate::generation::structure::structures::{
     StructureGeneratorContext, StructureInstance, create_chunk_random,
 };
-use crate::generation::structure::try_generate_structure;
 use crate::generation::surface::rule::try_apply_material_rule;
 use crate::{
     chunk::CHUNK_AREA,
@@ -1897,6 +1896,27 @@ impl ProtoChunk {
                 self.start_block_z(),
             );
 
+        // Vanilla `Structure.isValidBiome` asks the biome source at the stub's exact quart
+        // position, which may lie outside this chunk, so sample the supplier rather than the
+        // chunk's stored biomes (the same supplier `set_structure_references` uses).
+        let active_supplier = if generator.dimension == Dimension::THE_END {
+            ActiveSupplier::End(TheEndBiomeSupplier)
+        } else if generator.dimension == Dimension::THE_NETHER {
+            ActiveSupplier::Nether(MultiNoiseBiomeSupplier::NETHER)
+        } else {
+            ActiveSupplier::Overworld(MultiNoiseBiomeSupplier::OVERWORLD)
+        };
+        let base_supplier: &dyn BiomeSupplier = match &active_supplier {
+            ActiveSupplier::End(s) => s,
+            ActiveSupplier::Nether(s) | ActiveSupplier::Overworld(s) => s,
+        };
+        let blender = Blender::empty();
+        let biome_supplier = blender.get_biome_supplier(base_supplier);
+        let mut multi_noise_sampler = MultiNoiseSampler::generate(
+            &generator.base_router.multi_noise,
+            &MultiNoiseSamplerBuilderOptions::new(0, 0, 0),
+        );
+
         for (i, set) in StructureSet::ALL.iter().enumerate() {
             let allowed_biomes = &generator.structure_allowed_biomes[&i];
 
@@ -1920,6 +1940,8 @@ impl ProtoChunk {
                         entry,
                         generator,
                         &mut height_sampler,
+                        &biome_supplier,
+                        &mut multi_noise_sampler,
                     );
                 }
                 continue;
@@ -1952,6 +1974,8 @@ impl ProtoChunk {
                     selected_entry,
                     generator,
                     &mut height_sampler,
+                    &biome_supplier,
+                    &mut multi_noise_sampler,
                 ) {
                     break;
                 }
@@ -1963,6 +1987,7 @@ impl ProtoChunk {
         self.stage = StagedChunkEnum::StructureStart;
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn try_set_structure_start(
         &mut self,
         global_cache: &GlobalStructureCache,
@@ -1970,38 +1995,34 @@ impl ProtoChunk {
         entry: &WeightedEntry,
         generator: &super::generator::VanillaGenerator,
         height_sampler: &mut dyn crate::generation::structure::structures::HeightSampler,
+        biome_supplier: &dyn BiomeSupplier,
+        multi_noise_sampler: &mut MultiNoiseSampler,
     ) -> bool {
-        if entry.structure == StructureKeys::Monument {
-            let config = MultiNoiseSamplerBuilderOptions::new(0, 0, 0);
-            let mut sampler =
-                MultiNoiseSampler::generate(&generator.base_router.multi_noise, &config);
-            let center_x = chunk_pos::get_center_x(self.x);
-            let center_z = chunk_pos::get_center_z(self.z);
-            let start_y = height_sampler.estimate_ocean_floor_height(center_x, center_z);
-            if !crate::generation::structure::structures::ocean_monument::has_valid_biomes(
-                &MultiNoiseBiomeSupplier::OVERWORLD,
-                &mut sampler,
-                self.x,
-                self.z,
-                sea_level,
-                start_y,
-            ) {
-                return false;
-            }
-        }
-
         let chunk_x = self.x;
         let chunk_z = self.z;
+        let min_y = self.bottom_y() as i32;
+        let seed = generator.random_config.seed as i64;
+        // `ChunkGenerator.tryGenerateStructure` -> `Structure.findValidGenerationPoint`;
+        // `lazily_generate_structure` also runs the monument's own biome pre-check.
         let position =
             global_cache.get_or_compute_structure_start(entry.structure, chunk_x, chunk_z, || {
                 let structure = Structure::get(&entry.structure);
-                try_generate_structure(
+                let context = StructureGeneratorContext {
+                    seed,
+                    chunk_x,
+                    chunk_z,
+                    random: create_chunk_random(seed, chunk_x, chunk_z),
+                    sea_level,
+                    min_y,
+                    height_sampler: Some(height_sampler),
+                    structure_key: Some(entry.structure),
+                };
+                lazily_generate_structure(
                     &entry.structure,
                     structure,
-                    generator.random_config.seed as i64,
-                    self,
-                    sea_level,
-                    Some(height_sampler),
+                    context,
+                    biome_supplier,
+                    multi_noise_sampler,
                 )
             });
 

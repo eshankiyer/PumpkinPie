@@ -11,7 +11,7 @@ use pumpkin_data::{
 };
 use pumpkin_util::{
     BlockDirection, HeightMap,
-    math::{block_box::BlockBox, position::BlockPos},
+    math::block_box::BlockBox,
     random::{RandomGenerator, RandomImpl},
 };
 
@@ -24,7 +24,7 @@ use crate::{
             structures::{
                 BlockRandomizer, StructureGenerator, StructureGeneratorContext, StructurePiece,
                 StructurePieceBase, StructurePiecesCollector, StructurePosition, WorldPortalExt,
-                get_lowest_y,
+                get_lowest_y, on_top_of_chunk_center,
             },
         },
     },
@@ -58,6 +58,7 @@ impl StructureGenerator for JungleTempleGenerator {
             return None;
         }
 
+        let start_pos = on_top_of_chunk_center(&mut context, false, 64);
         let facing = BlockDirection::get_random_horizontal_direction(&mut context.random);
 
         let mut piece = StructurePiece::new(
@@ -78,7 +79,7 @@ impl StructureGenerator for JungleTempleGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x + (WIDTH / 2), 64, z + (DEPTH / 2)),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }

@@ -10,12 +10,13 @@ use pumpkin_util::{
 use crate::{
     ProtoChunk,
     generation::{
-        positions::chunk_pos::{get_center_x, get_center_z},
+        positions::chunk_pos::{start_block_x, start_block_z},
         structure::{
             piece::StructurePieceType,
             structures::{
                 StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
                 StructurePiecesCollector, StructurePosition, WorldPortalExt,
+                on_top_of_chunk_center,
             },
         },
     },
@@ -26,10 +27,12 @@ pub struct BuriedTreasureGenerator;
 impl StructureGenerator for BuriedTreasureGenerator {
     fn get_structure_position(
         &self,
-        context: StructureGeneratorContext<'_>,
+        mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
-        let x = get_center_x(context.chunk_x);
-        let z = get_center_z(context.chunk_z);
+        let start_pos = on_top_of_chunk_center(&mut context, true, 90);
+        // `BuriedTreasureStructure.generatePieces`: the piece sits at `getBlockX(9)`/`getBlockZ(9)`.
+        let x = start_block_x(context.chunk_x) + 9;
+        let z = start_block_z(context.chunk_z) + 9;
 
         let bounding_box = BlockBox::new(x, -64, z, x, 320, z);
 
@@ -40,7 +43,7 @@ impl StructureGenerator for BuriedTreasureGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x, 90, z),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }

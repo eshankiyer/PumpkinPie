@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use pumpkin_data::{BlockDirection, Mirror, Rotation, item::Item, item_stack::ItemStack};
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::{
-    math::{block_box::BlockBox, position::BlockPos, vector3::Vector3},
+    math::{block_box::BlockBox, vector3::Vector3},
     random::{RandomGenerator, RandomImpl},
 };
 
@@ -15,7 +15,7 @@ use crate::{
         piece::StructurePieceType,
         structures::{
             StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
-            StructurePiecesCollector, StructurePosition,
+            StructurePiecesCollector, StructurePosition, get_lowest_y_in_5by5_box_offset_7_blocks,
         },
         template::{BlockStateResolver, PaletteEntry, get_block_entity_id},
     },
@@ -34,37 +34,23 @@ impl StructureGenerator for EndCityGenerator {
         mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
         let rotation = Rotation::from_index(context.random.next_bounded_i32(4) as u8);
-        let x = context.chunk_x * 16 + 7;
-        let z = context.chunk_z * 16 + 7;
-        let (offset_x, offset_z) = match rotation {
-            Rotation::None => (5, 5),
-            Rotation::Clockwise90 => (-5, 5),
-            Rotation::Rotate180 => (-5, -5),
-            Rotation::CounterClockwise90 => (5, -5),
-        };
-        let y = {
-            let sampler = context.height_sampler.as_deref_mut()?;
-            [
-                sampler.estimate_height(x, z) - 1,
-                sampler.estimate_height(x, z + offset_z) - 1,
-                sampler.estimate_height(x + offset_x, z) - 1,
-                sampler.estimate_height(x + offset_x, z + offset_z) - 1,
-            ]
-            .into_iter()
-            .min()?
-        };
-        if y < 60 {
+        let start_pos = get_lowest_y_in_5by5_box_offset_7_blocks(
+            context.height_sampler.as_deref_mut()?,
+            context.chunk_x,
+            context.chunk_z,
+            rotation,
+        );
+        if start_pos.0.y < 60 {
             return None;
         }
 
-        let descriptors =
-            EndCityLayout::create(Vector3::new(x, y, z), rotation, &mut context.random)?;
+        let descriptors = EndCityLayout::create(start_pos.0, rotation, &mut context.random)?;
         let mut collector = StructurePiecesCollector::default();
         for descriptor in descriptors {
             collector.add_piece(Box::new(EndCityTemplatePiece::new(descriptor)));
         }
         Some(StructurePosition {
-            start_pos: BlockPos::new(x, y, z),
+            start_pos,
             collector: Arc::new(Mutex::new(collector)),
         })
     }
@@ -300,7 +286,7 @@ fn entity_nbt(id: &str, position: Vector3<f64>) -> NbtCompound {
 
 #[cfg(test)]
 mod tests {
-    use pumpkin_util::random::legacy_rand::LegacyRand;
+    use pumpkin_util::{math::position::BlockPos, random::legacy_rand::LegacyRand};
 
     use crate::generation::structure::{structures::HeightSampler, template::get_template};
 

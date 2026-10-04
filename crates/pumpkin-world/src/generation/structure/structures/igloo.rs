@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use pumpkin_data::{Block, block_rotation::Rotation};
 use pumpkin_util::{
-    math::{block_box::BlockBox, position::BlockPos, vector3::Vector3},
+    math::{block_box::BlockBox, vector3::Vector3},
     random::RandomGenerator,
 };
 use serde::Deserialize;
@@ -25,6 +25,7 @@ use crate::{
             structures::{
                 StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
                 StructurePiecesCollector, StructurePosition, WorldPortalExt,
+                on_top_of_chunk_center,
             },
             template::{StructureTemplate, get_template, place_template},
         },
@@ -66,6 +67,7 @@ impl StructureGenerator for IglooGenerator {
         &self,
         mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
+        let start_pos = on_top_of_chunk_center(&mut context, false, 64);
         let chunk_center_x = get_center_x(context.chunk_x);
         let chunk_center_z = get_center_z(context.chunk_z);
 
@@ -123,7 +125,7 @@ impl StructureGenerator for IglooGenerator {
         collector.add_piece(Box::new(piece));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(chunk_center_x, 64, chunk_center_z),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }

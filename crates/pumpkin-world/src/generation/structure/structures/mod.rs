@@ -757,8 +757,11 @@ pub trait StructureGenerator {
 pub trait HeightSampler {
     fn estimate_height(&mut self, block_x: i32, block_z: i32) -> i32;
 
+    /// First occupied `OCEAN_FLOOR_WG` height (`ChunkGenerator.getFirstOccupiedHeight`, i.e.
+    /// base height - 1). Samplers without an ocean-floor heightmap approximate it with the
+    /// world-surface estimate, still offset to the first occupied block.
     fn estimate_ocean_floor_height(&mut self, block_x: i32, block_z: i32) -> i32 {
-        self.estimate_height(block_x, block_z)
+        self.estimate_height(block_x, block_z) - 1
     }
 }
 
@@ -779,11 +782,62 @@ pub fn get_lowest_y(
     size_x: i32,
     size_z: i32,
 ) -> i32 {
-    let corner_a = sampler.estimate_height(min_x, min_z);
-    let corner_b = sampler.estimate_height(min_x, min_z + size_z);
-    let corner_c = sampler.estimate_height(min_x + size_x, min_z);
-    let corner_d = sampler.estimate_height(min_x + size_x, min_z + size_z);
+    // `ChunkGenerator.getFirstOccupiedHeight` is `getBaseHeight - 1`, while
+    // `estimate_height` returns the base height (the first free block).
+    let corner_a = sampler.estimate_height(min_x, min_z) - 1;
+    let corner_b = sampler.estimate_height(min_x, min_z + size_z) - 1;
+    let corner_c = sampler.estimate_height(min_x + size_x, min_z) - 1;
+    let corner_d = sampler.estimate_height(min_x + size_x, min_z + size_z) - 1;
     corner_a.min(corner_b).min(corner_c).min(corner_d)
+}
+
+/// Port of the stub position of `Structure.onTopOfChunkCenter`
+/// (`net/minecraft/world/level/levelgen/structure/Structure.java:121-129`).
+///
+/// The stub is the chunk's middle column at its first-occupied height (`OCEAN_FLOOR_WG` when
+/// `ocean_floor`, otherwise `WORLD_SURFACE_WG`); `fallback_y` is used when no height sampler
+/// is available.
+#[must_use]
+pub fn on_top_of_chunk_center(
+    context: &mut StructureGeneratorContext<'_>,
+    ocean_floor: bool,
+    fallback_y: i32,
+) -> BlockPos {
+    let x = start_block_x(context.chunk_x) + 8;
+    let z = start_block_z(context.chunk_z) + 8;
+    let y = context
+        .height_sampler
+        .as_deref_mut()
+        .map_or(fallback_y, |sampler| {
+            if ocean_floor {
+                // Already the occupied height.
+                sampler.estimate_ocean_floor_height(x, z)
+            } else {
+                sampler.estimate_height(x, z) - 1
+            }
+        });
+    BlockPos::new(x, y, z)
+}
+
+/// Port of `Structure.getLowestYIn5by5BoxOffset7Blocks`
+/// (`net/minecraft/world/level/levelgen/structure/Structure.java:183-200`), the start
+/// position of woodland mansions and end cities.
+#[must_use]
+pub fn get_lowest_y_in_5by5_box_offset_7_blocks(
+    sampler: &mut dyn HeightSampler,
+    chunk_x: i32,
+    chunk_z: i32,
+    rotation: Rotation,
+) -> BlockPos {
+    let (offset_x, offset_z) = match rotation {
+        Rotation::None => (5, 5),
+        Rotation::Clockwise90 => (-5, 5),
+        Rotation::Rotate180 => (-5, -5),
+        Rotation::CounterClockwise90 => (5, -5),
+    };
+    let x = start_block_x(chunk_x) + 7;
+    let z = start_block_z(chunk_z) + 7;
+    BlockPos::new(x, get_lowest_y(sampler, x, z, offset_x, offset_z), z)
 }
 
 impl HeightSampler
@@ -846,6 +900,91 @@ mod structure_random_tests {
                 -196_012_664,
                 372_718_864
             ]
+        );
+    }
+
+    /// Returns `heights` in order, recording every sampled column; ocean-floor queries return
+    /// `ocean_floor`.
+    struct RecordingHeightSampler {
+        calls: Vec<(i32, i32)>,
+        heights: std::vec::IntoIter<i32>,
+        ocean_floor: i32,
+    }
+
+    impl HeightSampler for RecordingHeightSampler {
+        fn estimate_height(&mut self, block_x: i32, block_z: i32) -> i32 {
+            self.calls.push((block_x, block_z));
+            self.heights.next().unwrap()
+        }
+
+        fn estimate_ocean_floor_height(&mut self, block_x: i32, block_z: i32) -> i32 {
+            self.calls.push((block_x, block_z));
+            self.ocean_floor
+        }
+    }
+
+    fn sampler(heights: Vec<i32>) -> RecordingHeightSampler {
+        RecordingHeightSampler {
+            calls: Vec::new(),
+            heights: heights.into_iter(),
+            ocean_floor: 40,
+        }
+    }
+
+    fn context(sampler: &mut RecordingHeightSampler) -> StructureGeneratorContext<'_> {
+        StructureGeneratorContext {
+            seed: 0,
+            chunk_x: 2,
+            chunk_z: -3,
+            random: create_chunk_random(0, 2, -3),
+            sea_level: 63,
+            min_y: -64,
+            height_sampler: Some(sampler),
+            structure_key: None,
+        }
+    }
+
+    // `Structure.getCornerHeights` samples `getFirstOccupiedHeight`, one below the base height.
+    #[test]
+    fn lowest_y_uses_first_occupied_heights() {
+        let mut heights = sampler(vec![64, 63, 70, 70]);
+        assert_eq!(get_lowest_y(&mut heights, 0, 0, 21, 21), 62);
+        assert_eq!(heights.calls, [(0, 0), (0, 21), (21, 0), (21, 21)]);
+
+        let mut heights = sampler(vec![64, 63, 70, 70]);
+        assert!(
+            desert_pyramid::DesertPyramidGenerator
+                .get_structure_position(context(&mut heights))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn five_by_five_box_offsets_follow_rotation() {
+        let mut heights = sampler(vec![80, 75, 90, 90]);
+        let pos =
+            get_lowest_y_in_5by5_box_offset_7_blocks(&mut heights, 2, -3, Rotation::Rotate180);
+        assert_eq!(pos, BlockPos::new(39, 74, -41));
+        assert_eq!(heights.calls, [(39, -41), (39, -46), (34, -41), (34, -46)]);
+    }
+
+    // `Structure.onTopOfChunkCenter`: the middle column at its first-occupied height.
+    #[test]
+    fn chunk_center_stub_uses_first_occupied_height() {
+        let mut heights = sampler(vec![100]);
+        let mut ctx = context(&mut heights);
+        assert_eq!(
+            on_top_of_chunk_center(&mut ctx, false, 64),
+            BlockPos::new(40, 99, -40)
+        );
+        assert_eq!(
+            on_top_of_chunk_center(&mut ctx, true, 64),
+            BlockPos::new(40, 40, -40)
+        );
+        ctx.height_sampler = None;
+        assert_eq!(
+            on_top_of_chunk_center(&mut ctx, true, 90),
+            BlockPos::new(40, 90, -40)
         );
     }
 }
