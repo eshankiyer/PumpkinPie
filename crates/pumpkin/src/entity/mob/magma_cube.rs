@@ -31,6 +31,11 @@ impl Mob for MagmaCubeEntity {
         self.slime.get_mob_entity()
     }
 
+    /// `AbstractCubeMob.getMaxHeadXRot` (`AbstractCubeMob.java:279-282`).
+    fn get_max_look_pitch_change(&self) -> f32 {
+        0.0
+    }
+
     fn light_level_dependent_magic_value(&self, _world: &World) -> f32 {
         1.0
     }

@@ -13,6 +13,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::clamp_angle;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -160,7 +161,7 @@ impl ArmadilloEntity {
             goal_selector.add_goal(1, Box::new(ArmadilloCurlUpGoal::new()));
             goal_selector.add_goal(2, EscapeDangerGoal::new(2.0));
             goal_selector.add_goal(3, BreedGoal::new(1.0));
-            goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, ARMADILLO_FOOD, false)));
+            goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, ARMADILLO_FOOD, false).as_brain_follow_temptation()));
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.1)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
@@ -356,6 +357,26 @@ impl Animal for ArmadilloEntity {
 impl Mob for ArmadilloEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Armadillo.getMaxHeadYRot` (`Armadillo.java:373-376`).
+    fn get_max_head_rotation(&self) -> f32 {
+        if self.is_scared() { 0.0 } else { 32.0 }
+    }
+
+    /// `Armadillo.tick` (`Armadillo.java:165-176`): while scared the head is clamped to the
+    /// body every tick (`Mob.clampHeadRotationToBody` with the 0 limit above), navigating or not.
+    fn post_tick(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            if self.is_scared() {
+                let entity = &self.mob_entity.living_entity.entity;
+                entity.head_yaw.store(clamp_angle(
+                    entity.head_yaw.load(),
+                    entity.body_yaw.load(),
+                    self.get_max_head_rotation(),
+                ));
+            }
+        })
     }
 
     fn modify_incoming_damage(&self, amount: f32, _damage_type: DamageType) -> f32 {

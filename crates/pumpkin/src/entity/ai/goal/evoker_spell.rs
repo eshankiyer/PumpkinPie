@@ -87,7 +87,7 @@ impl Goal for EvokerCastingSpellGoal {
                     .unwrap()
                     .look_at_entity_with_range(
                         &target,
-                        mob.get_max_look_yaw_change(),
+                        mob.get_max_head_rotation(),
                         mob.get_max_look_pitch_change(),
                     );
             }

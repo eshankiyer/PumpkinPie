@@ -558,6 +558,34 @@ impl Mob for SulfurCubeEntity {
         &self.entity
     }
 
+    /// `AbstractCubeMob.getMaxHeadXRot` (`AbstractCubeMob.java:279-282`).
+    fn get_max_look_pitch_change(&self) -> f32 {
+        0.0
+    }
+
+    /// `SulfurCube.SulfurCubeLookControl.tick` (`SulfurCube.java:938-946`): while carrying an
+    /// item the normal look tick is skipped; yaw snaps to the nearest multiple of 90 and the
+    /// head follows it. Only touches atomics (called while `look_control` is locked).
+    fn look_control_should_tick(&self) -> bool {
+        if !self.has_body_item_cached.load(Ordering::Relaxed) {
+            return true;
+        }
+        let entity = &self.entity.living_entity.entity;
+        let yaw = entity.yaw.load();
+        // `Mth.wrapDegrees90`
+        let mut close_angle = yaw % 90.0;
+        if close_angle >= 45.0 {
+            close_angle -= 90.0;
+        }
+        if close_angle < -45.0 {
+            close_angle += 90.0;
+        }
+        let snapped = yaw - close_angle;
+        entity.yaw.store(snapped);
+        entity.head_yaw.store(snapped);
+        false
+    }
+
     /// Vanilla `SulfurCube.isInvulnerableToPiercingWeapon` (`SulfurCube.java:923-925`) keeps
     /// an unprimed invulnerable cube out of piercing-weapon hits, but allows a primed cube.
     fn mob_is_invulnerable_to_piercing_weapon(&self) -> bool {

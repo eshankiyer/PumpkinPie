@@ -416,6 +416,16 @@ impl Mob for WolfEntity {
         &self.mob_entity
     }
 
+    /// `Wolf.getMaxHeadXRot` (`Wolf.java:395-398`). Pumpkin's wolf derives its sitting pose
+    /// from the ordered-to-sit flag.
+    fn get_max_look_pitch_change(&self) -> f32 {
+        if self.mob_entity.is_ordered_to_sit() {
+            20.0
+        } else {
+            40.0
+        }
+    }
+
     /// Vanilla `Wolf.canMate` (Wolf.java:620-633): both wolves must be tamed, the partner must
     /// not be sitting, and both must be in love.
     fn can_breed_with(&self, mate: &dyn EntityBase) -> bool {

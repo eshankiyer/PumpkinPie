@@ -99,7 +99,7 @@ impl Goal for FoxPounceGoal {
                     .look_control
                     .lock()
                     .unwrap()
-                    .look_at_entity(mob, &target);
+                    .look_at_entity_with_range(&target, 60.0, 30.0);
 
                 let entity = mob.get_entity();
                 let my_pos = entity.pos.load();
@@ -145,7 +145,7 @@ impl Goal for FoxPounceGoal {
                 .look_control
                 .lock()
                 .unwrap()
-                .look_at_entity(mob, &target);
+                .look_at_entity_with_range(&target, 60.0, 30.0);
 
             let entity = mob.get_entity();
             let my_pos = entity.pos.load();

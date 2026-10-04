@@ -91,7 +91,11 @@ impl Goal for StalkPreyGoal {
                     .look_control
                     .lock()
                     .unwrap()
-                    .look_at_entity(mob, &target);
+                    .look_at_entity_with_range(
+                        &target,
+                        mob.get_max_head_rotation(),
+                        mob.get_max_look_pitch_change(),
+                    );
             } else {
                 fox.set_is_interested(false);
                 fox.set_is_crouching(false);
@@ -111,7 +115,11 @@ impl Goal for StalkPreyGoal {
                 .look_control
                 .lock()
                 .unwrap()
-                .look_at_entity(mob, &target);
+                .look_at_entity_with_range(
+                        &target,
+                        mob.get_max_head_rotation(),
+                        mob.get_max_look_pitch_change(),
+                    );
 
             let my_pos = mob.get_entity().pos.load();
             let target_pos = target.get_entity().pos.load();

@@ -187,6 +187,11 @@ impl Mob for GuardianEntity {
         &self.mob_entity
     }
 
+    /// `Guardian.getMaxHeadXRot` (`Guardian.java:326-329`).
+    fn get_max_look_pitch_change(&self) -> f32 {
+        180.0
+    }
+
     fn on_damage<'a>(
         &'a self,
         damage_type: DamageType,

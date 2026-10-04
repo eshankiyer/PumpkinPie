@@ -158,7 +158,7 @@ impl GoatEntity {
                 )),
             );
             goal_selector.add_goal(3, BreedGoal::new(1.0));
-            goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
+            goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false).as_brain_follow_temptation()));
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.25)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
@@ -313,6 +313,11 @@ impl super::animal::Animal for GoatEntity {
 impl Mob for GoatEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Goat.getMaxHeadYRot` (`Goat.java:185-188`).
+    fn get_max_head_rotation(&self) -> f32 {
+        15.0
     }
 
     /// `Goat.calculateFallDamage` (`Goat.java:123-125`): goats take 10 less fall damage.

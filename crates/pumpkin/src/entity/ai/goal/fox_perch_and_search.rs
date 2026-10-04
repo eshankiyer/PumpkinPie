@@ -117,7 +117,13 @@ impl Goal for FoxPerchAndSearchGoal {
                 .look_control
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at(mob, pos.x + self.rel_x, eye_y, pos.z + self.rel_z);
+                .look_at_with_range(
+                    pos.x + self.rel_x,
+                    eye_y,
+                    pos.z + self.rel_z,
+                    mob.get_max_head_rotation(),
+                    mob.get_max_look_pitch_change(),
+                );
         })
     }
 

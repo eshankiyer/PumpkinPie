@@ -81,21 +81,24 @@ impl LookControl {
     }
 
     pub fn tick(&mut self, mob: &dyn Mob) {
+        if !mob.look_control_should_tick() {
+            return;
+        }
         let entity = mob.get_entity();
-        if Self::should_stay_horizontal() {
+        if mob.look_control_resets_pitch() {
             entity.set_pitch(0.0);
         }
 
         if self.look_at_timer > 0 {
             self.look_at_timer -= 1;
-            if let Some(yaw) = self.get_target_yaw(mob.get_mob_entity()) {
+            if let Some(yaw) = mob.look_control_target_yaw(self.position) {
                 entity.head_yaw.store(self.change_angle(
                     entity.head_yaw.load(),
                     yaw,
                     self.max_yaw_change,
                 ));
             }
-            if let Some(pitch) = self.get_target_pitch(mob.get_mob_entity()) {
+            if let Some(pitch) = mob.look_control_target_pitch(self.position) {
                 entity.set_pitch(self.change_angle(
                     entity.pitch.load(),
                     pitch,
@@ -110,11 +113,9 @@ impl LookControl {
             ));
         }
 
-        Self::clamp_head_yaw(mob);
-    }
-
-    const fn should_stay_horizontal() -> bool {
-        true
+        if mob.look_control_clamps_head_to_body() {
+            Self::clamp_head_yaw(mob);
+        }
     }
 
     fn clamp_head_yaw(mob: &dyn Mob) {
@@ -132,8 +133,9 @@ impl LookControl {
         }
     }
 
-    fn get_target_pitch(&self, mob: &MobEntity) -> Option<f32> {
-        let position = self.position;
+    /// Vanilla `LookControl.getXRotD`.
+    #[must_use]
+    pub fn target_pitch(mob: &MobEntity, position: Vector3<f64>) -> Option<f32> {
         let mob_position = mob.living_entity.entity.pos.load();
         let d = position.x - mob_position.x;
         let e = position.y - mob.living_entity.entity.get_eye_y();
@@ -146,8 +148,9 @@ impl LookControl {
         }
     }
 
-    fn get_target_yaw(&self, mob: &MobEntity) -> Option<f32> {
-        let position = self.position;
+    /// Vanilla `LookControl.getYRotD`.
+    #[must_use]
+    pub fn target_yaw(mob: &MobEntity, position: Vector3<f64>) -> Option<f32> {
         let mob_position = mob.living_entity.entity.pos.load();
         let d = position.x - mob_position.x;
         let e = position.z - mob_position.z;

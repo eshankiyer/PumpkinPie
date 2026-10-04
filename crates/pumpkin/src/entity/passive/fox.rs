@@ -615,6 +615,16 @@ impl Mob for FoxEntity {
         &self.mob_entity
     }
 
+    /// `Fox.FoxLookControl.tick` (`Fox.java:1067-1071`): no head turning while asleep.
+    fn look_control_should_tick(&self) -> bool {
+        !self.is_sleeping()
+    }
+
+    /// `Fox.FoxLookControl.resetXRotOnTick` (`Fox.java:1073-1076`).
+    fn look_control_resets_pitch(&self) -> bool {
+        !(self.is_pouncing() || self.is_crouching() || self.is_interested() || self.is_faceplanted())
+    }
+
     /// `Fox.canHoldItem` reached through `Mob.wantsToPickUp` (`Mob.java`'s
     /// `wantsToPickUp` -> `canHoldItem`).
     fn wants_to_pick_up_item(&self, _world: &World, _stack: &ItemStack) -> bool {

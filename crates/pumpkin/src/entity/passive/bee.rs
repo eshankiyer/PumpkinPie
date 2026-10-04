@@ -1240,6 +1240,16 @@ impl Mob for BeeEntity {
         &self.mob_entity
     }
 
+    /// `Bee.BeeLookControl.tick` (`Bee.java:1062-1066`): the look control is frozen while angry.
+    fn look_control_should_tick(&self) -> bool {
+        !self.persistent_anger.is_angry()
+    }
+
+    /// `Bee.BeeLookControl.resetXRotOnTick` (`Bee.java:1068-1071`).
+    fn look_control_resets_pitch(&self) -> bool {
+        !self.pollinating.load(Relaxed)
+    }
+
     fn get_bee(&self) -> Option<&Self> {
         Some(self)
     }

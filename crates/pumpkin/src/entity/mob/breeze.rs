@@ -141,6 +141,16 @@ impl Mob for BreezeEntity {
         &self.mob_entity
     }
 
+    /// `Breeze.getMaxHeadYRot` (`Breeze.java:249-252`).
+    fn get_max_head_rotation(&self) -> f32 {
+        30.0
+    }
+
+    /// `Breeze.getHeadRotSpeed` (`Breeze.java:254-257`).
+    fn get_max_look_yaw_change(&self) -> f32 {
+        25.0
+    }
+
     /// `Breeze.deflection` (`Breeze.java:196-202`): a breeze bats away every projectile except
     /// wind charges, its own included. The tag test mirrors vanilla's
     /// `is(EntityTypeTags.DEFLECTS_PROJECTILES)`, which today matches only the breeze; it is kept

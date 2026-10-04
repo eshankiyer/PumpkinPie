@@ -1886,6 +1886,44 @@ pub trait Mob: EntityBase + Send + Sync {
         75.0
     }
 
+    /// Gate for the whole look-control tick. Vanilla subclasses override `LookControl.tick`
+    /// to skip it entirely (`Bee.BeeLookControl` while angry, `Bee.java:1062-1066`;
+    /// `Fox.FoxLookControl` while sleeping, `Fox.java:1067-1071`).
+    ///
+    /// Called while `look_control` is locked: overrides must only read atomics.
+    fn look_control_should_tick(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `LookControl.resetXRotOnTick` (`LookControl.java:69-71`, default true).
+    ///
+    /// Called while `look_control` is locked: overrides must only read atomics.
+    fn look_control_resets_pitch(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `LookControl.getYRotD`, overridden by `Shulker.ShulkerLookControl`
+    /// (`Shulker.java:685-701`).
+    ///
+    /// Called while `look_control` is locked: overrides must only read atomics.
+    fn look_control_target_yaw(&self, wanted: Vector3<f64>) -> Option<f32> {
+        LookControl::target_yaw(self.get_mob_entity(), wanted)
+    }
+
+    /// Vanilla `LookControl.getXRotD`, overridden by `Shulker.ShulkerLookControl`
+    /// (`Shulker.java:703-706`).
+    ///
+    /// Called while `look_control` is locked: overrides must only read atomics.
+    fn look_control_target_pitch(&self, wanted: Vector3<f64>) -> Option<f32> {
+        LookControl::target_pitch(self.get_mob_entity(), wanted)
+    }
+
+    /// Whether `LookControl.clampHeadRotationToBody` runs; `Shulker.ShulkerLookControl`
+    /// makes it a no-op (`Shulker.java:681-683`).
+    fn look_control_clamps_head_to_body(&self) -> bool {
+        true
+    }
+
     fn get_mob_entity(&self) -> &MobEntity;
 
     /// Passenger-specific attachment overrides are dispatched by the existing rider position

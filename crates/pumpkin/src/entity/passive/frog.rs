@@ -136,7 +136,7 @@ impl FrogEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, Box::new(FrogTongueAttackGoal::new()));
-            goal_selector.add_goal(1, Box::new(TemptGoal::new(1.0, FROG_FOOD, false)));
+            goal_selector.add_goal(1, Box::new(TemptGoal::new(1.0, FROG_FOOD, false).as_brain_follow_temptation()));
             // `FrogAi.initLaySpawnActivity` (`FrogAi.java:143-168`) outranks the idle bundle,
             // and `AnimalMakeLove(FROG)` (`FrogAi.java:90`) is what `BreedGoal` stands in for.
             goal_selector.add_goal(1, FrogLaySpawnGoal::new(frog_weak, 1.0));
@@ -239,6 +239,22 @@ impl NBTStorage for FrogEntity {
 impl Mob for FrogEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Frog.FrogLookControl.resetXRotOnTick` (`Frog.java:345-347`): pitch is kept while a
+    /// tongue target is set.
+    fn look_control_resets_pitch(&self) -> bool {
+        self.tongue_target_id.load(Ordering::Relaxed) < 0
+    }
+
+    /// `Frog.getHeadRotSpeed` (`Frog.java:125-128`).
+    fn get_max_look_yaw_change(&self) -> f32 {
+        35.0
+    }
+
+    /// `Frog.getMaxHeadYRot` (`Frog.java:130-133`).
+    fn get_max_head_rotation(&self) -> f32 {
+        5.0
     }
 
     /// `Frog.calculateFallDamage` (`Frog.java:304-306`): frogs take 5 less fall damage.

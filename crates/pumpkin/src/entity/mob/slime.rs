@@ -409,6 +409,11 @@ impl Mob for SlimeEntity {
         &self.entity
     }
 
+    /// `AbstractCubeMob.getMaxHeadXRot` (`AbstractCubeMob.java:279-282`).
+    fn get_max_look_pitch_change(&self) -> f32 {
+        0.0
+    }
+
     /// `set_size` runs from `new`/`randomize_size` and from NBT load, both before the entity
     /// has any viewers, so its broadcast reaches nobody. This is the first point at which
     /// nearby players exist, so publish the size here too.

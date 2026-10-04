@@ -56,6 +56,11 @@ pub struct TemptGoal {
     /// `TemptGoal.ForNonPathfinders` (`TemptGoal.java:132-146`): steers the mob's move control
     /// instead of its path navigator.
     non_pathfinder: bool,
+    /// Stands in for the brain behaviour `FollowTemptation`, whose look goes through
+    /// `LookAtTargetSink` -> `LookControl.setLookAt(Vec3)` (`FollowTemptation.java:87`,
+    /// `LookAtTargetSink.java:23`) and so uses the mob's default head speeds instead of
+    /// `TemptGoal.tick`'s `getMaxHeadYRot() + 20`.
+    brain_follow_temptation: bool,
 }
 
 /// Vanilla `TemptGoal#canContinueToUse`'s scare check, factored out as a pure
@@ -116,7 +121,15 @@ impl TemptGoal {
             variant: TemptVariant::Plain,
             running_flag: None,
             non_pathfinder: false,
+            brain_follow_temptation: false,
         }
+    }
+
+    /// Marks this goal as a stand-in for the brain behaviour `FollowTemptation`.
+    #[must_use]
+    pub const fn as_brain_follow_temptation(mut self) -> Self {
+        self.brain_follow_temptation = true;
+        self
     }
 
     /// Publishes `isRunning` (set in `start`, cleared in `stop`) to `flag`.
@@ -141,6 +154,7 @@ impl TemptGoal {
     pub fn for_nautilus(speed: f64, tempt_items: &'static [&'static Item]) -> Self {
         Self {
             variant: TemptVariant::Nautilus,
+            brain_follow_temptation: true,
             ..Self::new(speed, tempt_items, false)
         }
     }
@@ -348,16 +362,24 @@ impl Goal for TemptGoal {
             let mob_entity = mob.get_mob_entity();
             let player_pos = player.get_entity().pos.load();
 
-            mob_entity
+            let player_eye_y = player.get_entity().get_eye_y();
+            let mut look_control = mob_entity
                 .look_control
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at(
-                    mob,
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.brain_follow_temptation {
+                look_control.look_at(mob, player_pos.x, player_eye_y, player_pos.z);
+            } else {
+                // `TemptGoal.tick` (`TemptGoal.java:112`).
+                look_control.look_at_with_range(
                     player_pos.x,
-                    player.get_entity().get_eye_y(),
+                    player_eye_y,
                     player_pos.z,
+                    mob.get_max_head_rotation() + 20.0,
+                    mob.get_max_look_pitch_change(),
                 );
+            }
+            drop(look_control);
 
             let mob_pos = mob_entity.living_entity.entity.pos.load();
             let stop_distance = self.stop_distance(mob);

@@ -148,7 +148,13 @@ impl Goal for FollowMobGoal {
                 .look_control
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .look_at(mob, target_pos.x, target_entity.get_eye_y(), target_pos.z);
+                .look_at_with_range(
+                    target_pos.x,
+                    target_entity.get_eye_y(),
+                    target_pos.z,
+                    10.0,
+                    mob.get_max_look_pitch_change(),
+                );
 
             self.time_to_recalc_path -= 1;
             if self.time_to_recalc_path > 0 {

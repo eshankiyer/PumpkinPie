@@ -13,6 +13,7 @@
 //! selector, mirrors the `ShootTongue` behavior).
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use pumpkin_data::entity::{EntityPose, EntityType};
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -27,6 +28,7 @@ use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::mob::magma_cube::MagmaCubeEntity;
 use crate::entity::mob::slime::SlimeEntity;
+use crate::entity::passive::frog::FrogEntity;
 use crate::entity::{Entity, EntityBase};
 
 /// Syncs the tracked-data `POSE` without going through `Entity::set_pose`'s per-pose
@@ -47,9 +49,14 @@ fn sync_tongue_pose(entity: &Entity, pose: EntityPose) {
 
 /// Syncs `DATA_TONGUE_TARGET_ID` (`Frog::setTongueTarget`/`eraseTongueTarget`): tells clients
 /// which entity to aim the tongue-extend animation at. Vanilla refreshes this every tick the
-/// behavior runs and clears it on `stop`.
-fn sync_tongue_target(entity: &Entity, target_id: Option<i32>) {
-    entity.send_meta_data(
+/// behavior runs and clears it on `stop`. The id is also kept on the frog, where
+/// `Frog.FrogLookControl.resetXRotOnTick` (`Frog.java:345-347`) reads it.
+fn sync_tongue_target(mob: &dyn Mob, target_id: Option<i32>) {
+    if let Some(frog) = mob.cast_any().downcast_ref::<FrogEntity>() {
+        frog.tongue_target_id
+            .store(target_id.unwrap_or(-1), Ordering::Relaxed);
+    }
+    mob.get_entity().send_meta_data(
         &[Metadata::new(
             tracked_data::frog::TONGUE_TARGET_ID,
             OptionalInt(target_id),
@@ -230,12 +237,14 @@ impl Goal for FrogTongueAttackGoal {
             let Some(target) = target else {
                 return;
             };
+            // `BehaviorUtils.lookAtEntity` (`ShootTongue.java:72`) feeds `LookAtTargetSink`,
+            // which uses the frog's default head speeds.
             mob.get_mob_entity()
                 .look_control
                 .lock()
                 .unwrap()
-                .look_at_entity_with_range(&target, 30.0, 30.0);
-            sync_tongue_target(mob.get_entity(), Some(target.get_entity().entity_id));
+                .look_at_entity(mob, &target);
+            sync_tongue_target(mob, Some(target.get_entity().entity_id));
 
             let mob_pos = mob.get_entity().pos.load();
             let target_pos = target.get_entity().pos.load();
@@ -258,7 +267,7 @@ impl Goal for FrogTongueAttackGoal {
         Box::pin(async move {
             mob.set_mob_target(None).await;
             sync_tongue_pose(mob.get_entity(), EntityPose::Standing);
-            sync_tongue_target(mob.get_entity(), None);
+            sync_tongue_target(mob, None);
             mob.get_mob_entity().navigator.lock().unwrap().stop();
             self.state = TongueState::Done;
         })

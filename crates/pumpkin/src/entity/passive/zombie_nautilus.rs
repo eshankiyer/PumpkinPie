@@ -309,11 +309,10 @@ impl ZombieNautilusEntity {
             // `ZombieNautilusAi.initIdleActivity` priority 1: `FollowTemptation(0.9F)`.
             goal_selector.add_goal(
                 2,
-                Box::new(TemptGoal::new(
-                    SPEED_MULTIPLIER_WHEN_TEMPTED,
-                    TEMPT_ITEMS,
-                    false,
-                )),
+                Box::new(
+                    TemptGoal::new(SPEED_MULTIPLIER_WHEN_TEMPTED, TEMPT_ITEMS, false)
+                        .as_brain_follow_temptation(),
+                ),
             );
             // `ZombieNautilusAi.initIdleActivity` priority 3: `RandomStroll.swim(1.0F)`.
             goal_selector.add_goal(

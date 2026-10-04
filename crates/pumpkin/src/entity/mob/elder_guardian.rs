@@ -196,6 +196,11 @@ impl Mob for ElderGuardianEntity {
         &self.mob_entity
     }
 
+    /// `Guardian.getMaxHeadXRot` (`Guardian.java:326-329`), inherited by `ElderGuardian`.
+    fn get_max_look_pitch_change(&self) -> f32 {
+        180.0
+    }
+
     /// `ElderGuardian` inherits `Guardian.hurtServer` (Guardian.java:311-324) unchanged.
     fn on_damage<'a>(
         &'a self,

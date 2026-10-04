@@ -49,6 +49,39 @@ trait BlockDirectionExt {
     fn axis_of(self) -> Axis;
 }
 
+/// `Shulker.ShulkerLookControl.getYRotD` basis (`Shulker.java:686-701`) as
+/// `(forward, right)` per attach face: `up = attachFace.getOpposite()`,
+/// `forward = up.getRotation().transform(SOUTH)` and `right = up x forward`.
+const fn look_basis(attach_face: BlockDirection) -> ([f32; 3], [f32; 3]) {
+    match attach_face {
+        BlockDirection::Down => ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
+        BlockDirection::Up => ([0.0, 0.0, -1.0], [1.0, 0.0, 0.0]),
+        BlockDirection::North => ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        BlockDirection::South => ([0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]),
+        BlockDirection::West => ([0.0, -1.0, 0.0], [0.0, 0.0, -1.0]),
+        BlockDirection::East => ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
+    }
+}
+
+/// `Shulker.ShulkerLookControl.getYRotD` (`Shulker.java:686-701`): head yaw in the plane of
+/// the attach face, from the offset `(dx, dy, dz)` of the wanted position relative to the
+/// shulker's feet x/z and eye y.
+fn attached_look_yaw(attach_face: BlockDirection, offset: [f32; 3]) -> Option<f32> {
+    let (forward, right) = look_basis(attach_face);
+    let dot = |a: [f32; 3]| a[0] * offset[0] + a[1] * offset[1] + a[2] * offset[2];
+    let delta_right = dot(right);
+    let delta_forward = dot(forward);
+    if delta_right.abs() <= 1.0E-5 && delta_forward.abs() <= 1.0E-5 {
+        None
+    } else {
+        Some(
+            f64::from(-delta_right)
+                .atan2(f64::from(delta_forward))
+                .to_degrees() as f32,
+        )
+    }
+}
+
 impl BlockDirectionExt for BlockDirection {
     fn axis_of(self) -> Axis {
         match self {
@@ -374,6 +407,40 @@ impl Mob for ShulkerEntity {
         &self.mob_entity
     }
 
+    /// `Shulker.getMaxHeadXRot` (`Shulker.java:523-526`).
+    fn get_max_look_pitch_change(&self) -> f32 {
+        180.0
+    }
+
+    /// `Shulker.getMaxHeadYRot` (`Shulker.java:528-531`).
+    fn get_max_head_rotation(&self) -> f32 {
+        180.0
+    }
+
+    /// `Shulker.ShulkerLookControl.getYRotD` (`Shulker.java:686-701`).
+    fn look_control_target_yaw(&self, wanted: Vector3<f64>) -> Option<f32> {
+        let entity = &self.mob_entity.living_entity.entity;
+        let pos = entity.pos.load();
+        attached_look_yaw(
+            self.get_attach_face(),
+            [
+                (wanted.x - pos.x) as f32,
+                (wanted.y - entity.get_eye_y()) as f32,
+                (wanted.z - pos.z) as f32,
+            ],
+        )
+    }
+
+    /// `Shulker.ShulkerLookControl.getXRotD` (`Shulker.java:703-706`): always level.
+    fn look_control_target_pitch(&self, _wanted: Vector3<f64>) -> Option<f32> {
+        Some(0.0)
+    }
+
+    /// `Shulker.ShulkerLookControl.clampHeadRotationToBody` is empty (`Shulker.java:681-683`).
+    fn look_control_clamps_head_to_body(&self) -> bool {
+        false
+    }
+
     fn can_be_collided_with(&self) -> bool {
         true
     }
@@ -533,6 +600,13 @@ impl Goal for ShulkerAttackGoal {
             if !target.get_entity().is_alive() {
                 return;
             }
+
+            // `ShulkerAttackGoal.tick` (`Shulker.java:625`) looks before the range check.
+            mob_entity
+                .look_control
+                .lock()
+                .unwrap()
+                .look_at_entity_with_range(&target, 180.0, 180.0);
 
             let entity = &mob_entity.living_entity.entity;
             let shulker_pos = entity.pos.load();
@@ -775,5 +849,36 @@ impl BlockPosExt for BlockPos {
             self.0.y + offset.y,
             self.0.z + offset.z,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floor_look_yaw_matches_world_yaw() {
+        // Target due east: vanilla base `getYRotD` gives atan2(0, 1) - 90 = -90.
+        let yaw = attached_look_yaw(BlockDirection::Down, [1.0, 0.0, 0.0]).unwrap();
+        assert!((yaw + 90.0).abs() < 1.0E-4);
+        // Target due south: 0.
+        let yaw = attached_look_yaw(BlockDirection::Down, [0.0, 0.0, 1.0]).unwrap();
+        assert!(yaw.abs() < 1.0E-4);
+    }
+
+    #[test]
+    fn wall_look_yaw_is_relative_to_attach_face() {
+        // On a north wall, "forward" points down: a target straight below is yaw 0.
+        let yaw = attached_look_yaw(BlockDirection::North, [0.0, -1.0, 0.0]).unwrap();
+        assert!(yaw.abs() < 1.0E-4);
+        // right = +x, forward = -y: atan2(-1, 1) = -45.
+        let yaw = attached_look_yaw(BlockDirection::North, [1.0, -1.0, 0.0]).unwrap();
+        assert!((yaw + 45.0).abs() < 1.0E-4);
+    }
+
+    #[test]
+    fn look_yaw_empty_when_target_on_axis() {
+        // Straight up from a floor shulker lies along its up axis: no yaw.
+        assert!(attached_look_yaw(BlockDirection::Down, [0.0, 3.0, 0.0]).is_none());
     }
 }

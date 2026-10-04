@@ -274,6 +274,11 @@ impl Mob for RavagerEntity {
         &self.mob_entity
     }
 
+    /// `Ravager.getMaxHeadYRot` (`Ravager.java:129-132`).
+    fn get_max_head_rotation(&self) -> f32 {
+        45.0
+    }
+
     /// Vanilla: `Raider.setCelebrating` (`Raider.java:177-179`).
     fn set_celebrating(&self, celebrating: bool) {
         if self

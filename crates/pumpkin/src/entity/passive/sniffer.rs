@@ -142,7 +142,7 @@ impl SnifferEntity {
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, EscapeDangerGoal::new(2.0));
             goal_selector.add_goal(2, BreedGoal::with_mate_predicate(1.0, sniffer_can_mate));
-            goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false)));
+            goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false).as_brain_follow_temptation()));
             goal_selector.add_goal(4, SnifferDigGoal::new(1.0, Arc::downgrade(&mob_arc)));
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
@@ -394,6 +394,11 @@ impl super::animal::Animal for SnifferEntity {
 impl Mob for SnifferEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Sniffer.getMaxHeadYRot` (`Sniffer.java:417-420`).
+    fn get_max_head_rotation(&self) -> f32 {
+        50.0
     }
 
     fn on_mob_death<'a>(
