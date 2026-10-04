@@ -10,6 +10,7 @@ use pumpkin_data::{Advancement, translation};
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::resource::ResourceKey;
 use pumpkin_util::text::TextComponent;
+use pumpkin_world::generation::feature::configured_features::CONFIGURED_FEATURES;
 use std::pin::Pin;
 use std::string::ToString;
 
@@ -27,8 +28,8 @@ pub const ERROR_INVALID_BIOME: CommandErrorType<1> =
     CommandErrorType::new("commands.fillbiome.invalid", "commands.fillbiome.invalid");
 
 pub const ERROR_INVALID_CONFIGURED_FEATURE: CommandErrorType<1> = CommandErrorType::new(
-    "commands.place.feature.invalid",
-    "commands.place.feature.invalid",
+    translation::java::COMMANDS_PLACE_FEATURE_INVALID,
+    translation::java::COMMANDS_PLACE_FEATURE_INVALID,
 );
 
 pub const ERROR_NOT_SUMMONABLE_ENTITY: CommandErrorType<1> = CommandErrorType::new(
@@ -77,6 +78,13 @@ impl ArgumentType for ResourceKeyArgument {
                     .iter()
                     .map(|biome| format!("minecraft:{}", biome.registry_id));
                 suggestions_builder.filter_and_suggest_iter(biomes).build()
+            })
+        } else if self.0 == CONFIGURED_FEATURE_REGISTRY {
+            Box::pin(async move {
+                let features = CONFIGURED_FEATURES
+                    .keys()
+                    .map(|feature| format!("minecraft:{}", feature.to_name()));
+                suggestions_builder.filter_and_suggest_iter(features).build()
             })
         } else {
             Box::pin(async move { Suggestions::empty() })
@@ -133,11 +141,16 @@ impl ResourceKeyArgument {
             CONFIGURED_FEATURE_REGISTRY,
             &ERROR_INVALID_CONFIGURED_FEATURE,
         )?;
-        ConfiguredFeature::from_name(resource_key.identifier.path()).ok_or_else(|| {
-            ERROR_INVALID_CONFIGURED_FEATURE.create_without_context(TextComponent::text(
-                resource_key.identifier.path().to_string(),
-            ))
-        })
+        // Vanilla `resolveKey` looks up the exact key and reports the full id
+        // (`ResourceKeyArgument.java:66-74`); only the `minecraft` namespace has entries.
+        let invalid = || {
+            ERROR_INVALID_CONFIGURED_FEATURE
+                .create_without_context(TextComponent::text(resource_key.identifier.to_string()))
+        };
+        if resource_key.identifier.namespace() != "minecraft" {
+            return Err(invalid());
+        }
+        ConfiguredFeature::from_name(resource_key.identifier.path()).ok_or_else(invalid)
     }
 
     /// Returns a [`CommandContext`]'s parsed resource key argument as a [`Biome`](pumpkin_data::biome::Biome).

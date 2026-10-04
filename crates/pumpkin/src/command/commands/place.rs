@@ -1,11 +1,11 @@
 use pumpkin_data::chunk_gen_settings::GenerationSettings;
-use pumpkin_data::placed_feature::PlacedFeature as PlacedFeatureKey;
 use pumpkin_data::structures::{Structure, StructureKeys, StructureType};
 use pumpkin_data::translation;
 use pumpkin_data::{Block, BlockStateId, Mirror, Rotation};
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::math::block_box::BlockBox;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::random::hash_block_pos;
 use pumpkin_util::text::TextComponent;
@@ -13,20 +13,25 @@ use pumpkin_world::generation::proto_chunk::ProtoChunk;
 use pumpkin_world::world::{BlockAccessor, WorldPortalExt};
 
 use crate::command::argument_builder::{ArgumentBuilder, argument, command, literal};
-use crate::command::argument_types::coordinates::block_pos::BlockPosArgumentType;
+use crate::command::argument_types::coordinates::block_pos::{
+    BlockPosArgumentType, NOT_LOADED_ERROR_TYPE,
+};
 use crate::command::argument_types::core::integer::IntegerArgumentType;
 use crate::command::argument_types::identifier::IdentifierArgumentType;
-use crate::command::argument_types::placed_feature::PlacedFeatureNameArgumentType;
 use crate::command::argument_types::pool::PoolNameArgumentType;
+use crate::command::argument_types::resource_key::{
+    CONFIGURED_FEATURE_REGISTRY, ResourceKeyArgument,
+};
 use crate::command::argument_types::structure::StructureNameArgumentType;
 use crate::command::argument_types::template::TemplateNameArgumentType;
 use crate::command::context::command_context::CommandContext;
+use crate::command::errors::command_syntax_error::CommandSyntaxError;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
+use crate::world::World;
 use crate::world::block_placer::WorldBlockPlacer;
-use pumpkin_world::generation::feature::configured_features::CONFIGURED_FEATURES;
-use pumpkin_world::generation::feature::placed_features::{Feature, PLACED_FEATURES};
+use crate::world::feature_placer::FeatureCache;
 use pumpkin_world::generation::structure::structures::StructureGeneratorContext;
 use pumpkin_world::generation::structure::structures::jigsaw::{
     PoolElementStructurePiece, place_pool_element_templates,
@@ -40,6 +45,8 @@ use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::random::RandomGenerator;
 use pumpkin_util::random::legacy_rand::LegacyRand;
+use pumpkin_util::random::xoroshiro128::Xoroshiro;
+use rand::RngExt;
 
 const DESCRIPTION: &str = "Places a structure template in the world.";
 const PERMISSION: &str = "minecraft:command.place";
@@ -56,12 +63,46 @@ static STRUCTURE_INVALID: CommandErrorType<1> = CommandErrorType::new(
     translation::java::COMMANDS_PLACE_STRUCTURE_INVALID,
     "commands.place.structure.invalid",
 );
-static FEATURE_INVALID: CommandErrorType<1> = CommandErrorType::new(
-    translation::java::COMMANDS_PLACE_FEATURE_INVALID,
-    "commands.place.feature.invalid",
+static FEATURE_FAILED: CommandErrorType<0> = CommandErrorType::new(
+    translation::java::COMMANDS_PLACE_FEATURE_FAILED,
+    translation::java::COMMANDS_PLACE_FEATURE_FAILED,
 );
 
 const CHUNK_DIM: i32 = 16;
+
+/// The target position of a `/place` subcommand: `BlockPosArgument.getLoadedBlockPos` for an
+/// explicit argument, else `BlockPos.containing(source.getPosition())` (`PlaceCommand.java:66-84`).
+fn target_pos(
+    context: &CommandContext,
+    name: &str,
+    explicit_pos: bool,
+) -> Result<BlockPos, CommandSyntaxError> {
+    if explicit_pos {
+        BlockPosArgumentType::get_loaded_block_pos(context, name)
+    } else {
+        Ok(BlockPos::floored_v(context.source.position))
+    }
+}
+
+/// Vanilla `PlaceCommand.checkLoaded`: every chunk in the closed rectangle must be loaded.
+fn check_loaded(
+    world: &World,
+    min_chunk: (i32, i32),
+    max_chunk: (i32, i32),
+) -> Result<(), CommandSyntaxError> {
+    for cx in min_chunk.0..=max_chunk.0 {
+        for cz in min_chunk.1..=max_chunk.1 {
+            if world
+                .level
+                .read_chunk_sync(&Vector2::new(cx, cz), |_| ())
+                .is_none()
+            {
+                return Err(NOT_LOADED_ERROR_TYPE.create_without_context());
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Clamps a world Y into valid chunk bounds, placing the surface one block below the target.
 fn ground_y(block_y: i32, chunk_min_y: i32, chunk_height: i32) -> i32 {
@@ -118,7 +159,9 @@ impl WorldPortalExt for CommandBlockRegistry {
     }
 }
 
-struct PlaceTemplateExecutor;
+struct PlaceTemplateExecutor {
+    explicit_pos: bool,
+}
 
 impl CommandExecutor for PlaceTemplateExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
@@ -126,10 +169,7 @@ impl CommandExecutor for PlaceTemplateExecutor {
             let template_name = context.get_argument::<String>("template")?.clone();
 
             let block_pos =
-                BlockPosArgumentType::get_block_pos(context, "pos").unwrap_or_else(|_| {
-                    let p = context.source.position;
-                    BlockPos::new(p.x as i32, p.y as i32, p.z as i32)
-                });
+                target_pos(context, "pos", self.explicit_pos)?;
 
             let template_name = template_name
                 .strip_prefix("minecraft:")
@@ -182,7 +222,9 @@ impl CommandExecutor for PlaceTemplateExecutor {
     }
 }
 
-struct PlaceJigsawExecutor;
+struct PlaceJigsawExecutor {
+    explicit_pos: bool,
+}
 
 impl CommandExecutor for PlaceJigsawExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
@@ -192,10 +234,9 @@ impl CommandExecutor for PlaceJigsawExecutor {
             let max_depth = *context.get_argument::<i32>("max_depth")?;
 
             let block_pos =
-                BlockPosArgumentType::get_block_pos(context, "pos").unwrap_or_else(|_| {
-                    let p = context.source.position;
-                    BlockPos::new(p.x as i32, p.y as i32, p.z as i32)
-                });
+                target_pos(context, "position", self.explicit_pos)?;
+            let chunk = (block_pos.0.x >> 4, block_pos.0.z >> 4);
+            check_loaded(context.world(), chunk, chunk)?;
 
             let (_piece_count, mut placer) = {
                 let seed = hash_block_pos(block_pos.0.x, block_pos.0.y, block_pos.0.z) as u64;
@@ -274,7 +315,9 @@ impl CommandExecutor for PlaceJigsawExecutor {
     }
 }
 
-struct PlaceStructureExecutor;
+struct PlaceStructureExecutor {
+    explicit_pos: bool,
+}
 
 #[allow(clippy::too_many_lines)]
 impl CommandExecutor for PlaceStructureExecutor {
@@ -291,10 +334,7 @@ impl CommandExecutor for PlaceStructureExecutor {
             let structure = Structure::get(&key);
 
             let block_pos =
-                BlockPosArgumentType::get_block_pos(context, "pos").unwrap_or_else(|_| {
-                    let p = context.source.position;
-                    BlockPos::new(p.x as i32, p.y as i32, p.z as i32)
-                });
+                target_pos(context, "pos", self.explicit_pos)?;
 
             let seed = hash_block_pos(block_pos.0.x, block_pos.0.y, block_pos.0.z) as u64;
 
@@ -535,101 +575,30 @@ impl CommandExecutor for PlaceStructureExecutor {
     }
 }
 
-struct PlaceFeatureExecutor;
+struct PlaceFeatureExecutor {
+    explicit_pos: bool,
+}
 
 impl CommandExecutor for PlaceFeatureExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
         Box::pin(async move {
-            let feature_id = context.get_argument::<Identifier>("feature")?;
-            let feature_name = feature_id.to_string();
+            let feature = ResourceKeyArgument::get_configured_feature(context, "feature")?;
+            let block_pos = target_pos(context, "pos", self.explicit_pos)?;
 
-            let key = PlacedFeatureKey::from_name(&feature_name).ok_or_else(|| {
-                FEATURE_INVALID.create_without_context(TextComponent::text(feature_name.clone()))
-            })?;
+            // Vanilla `PlaceCommand.placeFeature` (`PlaceCommand.java:249-261`): the 3x3 chunks
+            // around the target must be loaded, then the feature is placed into the live level.
+            let (cx, cz) = (block_pos.0.x >> 4, block_pos.0.z >> 4);
+            check_loaded(context.world(), (cx - 1, cz - 1), (cx + 1, cz + 1))?;
 
-            let placed = PLACED_FEATURES.get(&key).ok_or_else(|| {
-                FEATURE_INVALID.create_without_context(TextComponent::text(feature_name.clone()))
-            })?;
-
-            let configured = match &placed.feature {
-                Feature::Named(name) => CONFIGURED_FEATURES.get(name).ok_or_else(|| {
-                    FEATURE_INVALID
-                        .create_without_context(TextComponent::text(feature_name.clone()))
-                })?,
-                Feature::Inlined(f) => f.as_ref(),
-            };
-
-            let block_pos =
-                BlockPosArgumentType::get_block_pos(context, "pos").unwrap_or_else(|_| {
-                    let p = context.source.position;
-                    BlockPos::new(p.x as i32, p.y as i32, p.z as i32)
-                });
-
-            let world_gen = context.world().level.world_gen();
-            let cx = block_pos.0.x >> 4;
-            let cz = block_pos.0.z >> 4;
-            let mut chunk = ProtoChunk::new(cx, cz, &world_gen);
-            let generation_bottom_y = chunk.generation_bottom_y();
-            let generation_height = chunk.generation_height();
-            let chunk_min_y = chunk.bottom_y() as i32;
-            let chunk_height = chunk.height() as i32;
-            let surface_y = ground_y(block_pos.0.y, chunk_min_y, chunk_height);
-
-            let ground = surface_y as i16;
-            chunk.flat_surface_height_map = [ground; 256];
-            chunk.flat_ocean_floor_height_map = [ground; 256];
-            chunk.flat_motion_blocking_height_map = [ground; 256];
-            chunk.flat_motion_blocking_no_leaves_height_map = [ground; 256];
-
-            // Feature generation runs against a synthetic solid terrain, not the
-            // live chunk. Features that depend on existing air, caves, or fluids
-            // may therefore differ from normal world generation.
-            for x in 0..CHUNK_DIM {
-                for z in 0..CHUNK_DIM {
-                    for y in chunk_min_y..surface_y {
-                        chunk.set_block_state(x, y, z, Block::STONE.default_state);
-                    }
-                    chunk.set_block_state(x, surface_y, z, Block::GRASS_BLOCK.default_state);
-                }
+            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
+            let mut cache = FeatureCache::new(context.world());
+            // A live `ServerLevel` would load any chunk the feature reaches; this cache is
+            // bounded to the loaded region, so an escape is reported as a failed placement
+            // rather than a success that changed nothing.
+            if !cache.place(feature, block_pos, &mut random) || cache.has_escaped() {
+                return Err(FEATURE_FAILED.create_without_context());
             }
-
-            let snapshot = snapshot_blocks(&chunk, cx, cz, chunk_min_y, chunk_height);
-
-            let reg = CommandBlockRegistry;
-            let seed = hash_block_pos(block_pos.0.x, block_pos.0.y, block_pos.0.z) as u64;
-            let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(seed));
-
-            configured.generate(
-                &mut chunk,
-                &reg,
-                generation_bottom_y,
-                generation_height,
-                key,
-                &mut random,
-                block_pos,
-            );
-
-            let mut placer = WorldBlockPlacer::new(context.world());
-            apply_delta(
-                &chunk,
-                &snapshot,
-                cx,
-                cz,
-                chunk_min_y,
-                chunk_height,
-                &mut placer,
-            );
-
-            for nbt in chunk.pending_block_entities.drain(..) {
-                placer.block_entity_nbts.push(nbt);
-            }
-
-            placer.finalize().await;
-            context
-                .world()
-                .queue_block_updates(&placer.changed_positions)
-                .await;
-            context.world().flush_block_updates().await;
+            cache.commit().await;
 
             context
                 .source
@@ -637,7 +606,7 @@ impl CommandExecutor for PlaceFeatureExecutor {
                     pumpkin_macros::translate_cross!(
                         translation::java::COMMANDS_PLACE_FEATURE_SUCCESS,
                         translation::bedrock::COMMANDS_PLACE_SUCCESS,
-                        TextComponent::text(feature_name),
+                        TextComponent::text(format!("minecraft:{}", feature.to_name())),
                         TextComponent::text(block_pos.0.x.to_string()),
                         TextComponent::text(block_pos.0.y.to_string()),
                         TextComponent::text(block_pos.0.z.to_string())
@@ -710,10 +679,12 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
             .then(
                 literal("template").then(
                     argument("template", TemplateNameArgumentType)
-                        .executes(PlaceTemplateExecutor)
-                        .then(
-                            argument("pos", BlockPosArgumentType).executes(PlaceTemplateExecutor),
-                        ),
+                        .executes(PlaceTemplateExecutor {
+                            explicit_pos: false,
+                        })
+                        .then(argument("pos", BlockPosArgumentType).executes(
+                            PlaceTemplateExecutor { explicit_pos: true },
+                        )),
                 ),
             )
             .then(
@@ -721,11 +692,12 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                     argument("pool", PoolNameArgumentType).then(
                         argument("target", IdentifierArgumentType).then(
                             argument("max_depth", IntegerArgumentType::new(1, 20))
-                                .executes(PlaceJigsawExecutor)
-                                .then(
-                                    argument("pos", BlockPosArgumentType)
-                                        .executes(PlaceJigsawExecutor),
-                                ),
+                                .executes(PlaceJigsawExecutor {
+                                    explicit_pos: false,
+                                })
+                                .then(argument("position", BlockPosArgumentType).executes(
+                                    PlaceJigsawExecutor { explicit_pos: true },
+                                )),
                         ),
                     ),
                 ),
@@ -733,17 +705,23 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
             .then(
                 literal("structure").then(
                     argument("structure", StructureNameArgumentType)
-                        .executes(PlaceStructureExecutor)
-                        .then(
-                            argument("pos", BlockPosArgumentType).executes(PlaceStructureExecutor),
-                        ),
+                        .executes(PlaceStructureExecutor {
+                            explicit_pos: false,
+                        })
+                        .then(argument("pos", BlockPosArgumentType).executes(
+                            PlaceStructureExecutor { explicit_pos: true },
+                        )),
                 ),
             )
             .then(
                 literal("feature").then(
-                    argument("feature", PlacedFeatureNameArgumentType)
-                        .executes(PlaceFeatureExecutor)
-                        .then(argument("pos", BlockPosArgumentType).executes(PlaceFeatureExecutor)),
+                    argument("feature", ResourceKeyArgument(CONFIGURED_FEATURE_REGISTRY))
+                        .executes(PlaceFeatureExecutor {
+                            explicit_pos: false,
+                        })
+                        .then(argument("pos", BlockPosArgumentType).executes(
+                            PlaceFeatureExecutor { explicit_pos: true },
+                        )),
                 ),
             ),
     );

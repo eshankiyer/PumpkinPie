@@ -19,7 +19,6 @@ use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::tree::Tree;
 use crate::command::node::{RedirectModifier, Redirection};
 use crate::data::datapack::ExecuteFunctionError;
-use crate::entity::r#type::from_type;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::math::position::BlockPos;
@@ -28,7 +27,6 @@ use pumpkin_util::math::vector3::Axis;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
 use std::sync::Arc;
-use uuid::Uuid;
 
 const DESCRIPTION: &str = "Execute a command with a modified context.";
 const PERMISSION: &str = "minecraft:command.execute";
@@ -476,13 +474,14 @@ fn execute_summon_modifier<'a>(
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
         let entity_type = ResourceArgument::get_summonable_entity_type(context, "entity_type")?;
-        let entity = from_type(
+        // Vanilla `spawnEntityAndRedirect` (`ExecuteCommand.java:1052-1055`).
+        let entity = super::summon::create_entity(
+            &context.source,
             entity_type,
             context.source.position,
-            context.source.world(),
-            Uuid::new_v4(),
-        );
-        context.source.world().spawn_entity(entity.clone()).await;
+            None,
+        )
+        .await?;
         let mut source = context.source.as_ref().clone();
         source.entity = Some(entity);
         Ok(vec![Arc::new(source)])

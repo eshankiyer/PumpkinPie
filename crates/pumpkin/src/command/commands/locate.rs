@@ -93,6 +93,7 @@ fn coordinates_text(pos: &BlockPos, absolute_y: bool) -> TextComponent {
             TextComponent::text(z.to_string()),
         ],
     )
+    .wrap_in_square_brackets()
     .color_named(NamedColor::Green)
     .click_event(ClickEvent::SuggestCommand {
         command: Cow::from(format!("/tp @s {x} {y} {z}")),
@@ -114,19 +115,24 @@ fn result_name(searched: &ResourceOrTag, found: &str) -> String {
     }
 }
 
-/// Vanilla reports the horizontal block distance for structures and POIs.
+/// Vanilla reports the horizontal block distance for structures and POIs:
+/// `LocateCommand.dist` squares the deltas in Java `int` arithmetic, then
+/// takes a `float` square root (`Mth.sqrt`) and floors it.
 fn horizontal_distance(origin: &BlockPos, target: &BlockPos) -> i32 {
-    let dx = f64::from(target.0.x - origin.0.x);
-    let dz = f64::from(target.0.z - origin.0.z);
-    dx.hypot(dz).floor().max(0.0) as i32
+    let dx = target.0.x.wrapping_sub(origin.0.x);
+    let dz = target.0.z.wrapping_sub(origin.0.z);
+    let sq = dx.wrapping_mul(dx).wrapping_add(dz.wrapping_mul(dz));
+    (f64::from(sq as f32).sqrt() as f32).floor() as i32
 }
 
-/// ... and the full 3D block distance for biomes.
+/// ... and the full 3D block distance for biomes: the `double` `distSqr`
+/// narrowed to `float` before `Mth.sqrt`, then floored.
 fn absolute_distance(origin: &BlockPos, target: &BlockPos) -> i32 {
-    let dx = f64::from(target.0.x - origin.0.x);
-    let dy = f64::from(target.0.y - origin.0.y);
-    let dz = f64::from(target.0.z - origin.0.z);
-    (dx * dx + dy * dy + dz * dz).sqrt().floor().max(0.0) as i32
+    let dx = f64::from(origin.0.x) - f64::from(target.0.x);
+    let dy = f64::from(origin.0.y) - f64::from(target.0.y);
+    let dz = f64::from(origin.0.z) - f64::from(target.0.z);
+    let sq = dx.mul_add(dx, dy.mul_add(dy, dz * dz)) as f32;
+    (f64::from(sq).sqrt() as f32).floor() as i32
 }
 
 async fn send_success(

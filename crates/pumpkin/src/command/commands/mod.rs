@@ -132,7 +132,6 @@ pub fn default_dispatcher(
     );
     dispatcher.register(tellraw::init_command_tree(), "minecraft:command.tellraw");
     dispatcher.register(title::init_command_tree(), "minecraft:command.title");
-    dispatcher.register(summon::init_command_tree(), "minecraft:command.summon");
     dispatcher.register(
         experience::init_command_tree(),
         "minecraft:command.experience",
@@ -185,6 +184,7 @@ pub fn default_dispatcher(
     };
 
     say::register(&mut dispatcher, registry);
+    summon::register(&mut dispatcher, registry);
     banlist::register(&mut dispatcher, registry);
     difficulty::register(&mut dispatcher, registry);
     debug::register(&mut dispatcher, registry);
@@ -484,13 +484,6 @@ fn register_level_2_permissions(registry: &PermissionRegistry) {
         .register_permission(Permission::new(
             "minecraft:command.title",
             "Controls screen titles displayed to players",
-            PermissionDefault::Op(PermissionLvl::Two),
-        ))
-        .unwrap_or_else(|e| tracing::warn!("{e}"));
-    registry
-        .register_permission(Permission::new(
-            "minecraft:command.summon",
-            "Summons an entity",
             PermissionDefault::Op(PermissionLvl::Two),
         ))
         .unwrap_or_else(|e| tracing::warn!("{e}"));

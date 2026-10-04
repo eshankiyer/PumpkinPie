@@ -168,6 +168,12 @@ impl<'a> FeatureCache<'a> {
         self.world.get_heightmap_height(kind, x, z) + 1
     }
 
+    /// Whether any read or write so far left the loaded region; [`Self::commit`] would then
+    /// discard the placement.
+    pub fn has_escaped(&self) -> bool {
+        self.escaped.load(Ordering::Relaxed)
+    }
+
     /// Applies the buffered placement, or discards it if anything escaped the loaded region.
     /// Returns whether the world was changed.
     pub async fn commit(self) -> bool {

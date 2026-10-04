@@ -233,7 +233,6 @@ pub mod hex_color;
 pub mod identifier;
 pub mod nbt;
 pub mod objective;
-pub mod placed_feature;
 pub mod pool;
 pub mod range;
 pub mod resource;
