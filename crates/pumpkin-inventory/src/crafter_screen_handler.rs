@@ -29,7 +29,7 @@ use crate::{
     player::player_inventory::PlayerInventory,
     screen_handler::{
         InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
-        ScreenHandlerFuture, ScreenProperty,
+        ScreenHandlerFuture, ScreenHandlerListener, ScreenProperty,
     },
     slot::{BoxFuture, Slot},
 };
@@ -227,6 +227,44 @@ impl RecipeInputInventory for CrafterRecipeInput {
     }
 }
 
+/// `CrafterMenu.refreshRecipeResult` (`CrafterMenu.java:106-113`): writes the recipe the nine
+/// inputs currently form (or empty) into the one-slot preview inventory.
+async fn refresh_preview(inventory: &Arc<dyn Inventory>, result_inventory: &Arc<dyn Inventory>) {
+    let input = CrafterRecipeInput(inventory.clone());
+    let result = match_crafting_recipe(&input, None).await.map_or_else(
+        || ItemStack::EMPTY.clone(),
+        |matched| matched.to_item_stack(),
+    );
+    result_inventory.set_stack(0, result).await;
+}
+
+/// The menu acting as its own `ContainerListener` (`CrafterMenu.java:39`, `addSlotListener(this)`).
+///
+/// `slotChanged` (`CrafterMenu.java:119-122`) refreshes the preview whenever a broadcast sees a
+/// slot differ, so the preview follows the crafter's contents however they changed: drag
+/// distribution, pickup-all, hopper insertion, a redstone craft, or another viewer.
+struct CrafterPreviewListener {
+    inventory: Arc<dyn Inventory>,
+    result_inventory: Arc<dyn Inventory>,
+}
+
+impl ScreenHandlerListener for CrafterPreviewListener {
+    fn on_slot_update<'a>(
+        &'a self,
+        _screen_handler: &'a ScreenHandlerBehaviour,
+        slot: u8,
+        _stack: ItemStack,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            // Vanilla refreshes for every slot index; the result depends only on the nine inputs,
+            // so filtering avoids re-triggering on the preview slot itself.
+            if (slot as usize) < CRAFTER_SLOT_COUNT {
+                refresh_preview(&self.inventory, &self.result_inventory).await;
+            }
+        })
+    }
+}
+
 /// Screen handler for a crafter block (`CrafterMenu.java`).
 pub struct CrafterScreenHandler {
     /// The crafter's nine input slots.
@@ -271,7 +309,10 @@ impl CrafterScreenHandler {
         let player_inv: Arc<dyn Inventory> = player_inventory.clone();
         handler.add_player_slots(&player_inv);
 
-        handler.add_slot(Arc::new(NonInteractiveResultSlot::new(result_inventory, 0)));
+        handler.add_slot(Arc::new(NonInteractiveResultSlot::new(
+            result_inventory.clone(),
+            0,
+        )));
 
         // `CrafterMenu.java:52`: addDataSlots(this.containerData).
         for index in 0..CRAFTER_PROPERTY_COUNT {
@@ -280,6 +321,14 @@ impl CrafterScreenHandler {
 
         // `CrafterMenu.java:53`: this.refreshRecipeResult().
         handler.refresh_recipe_result().await;
+
+        // `CrafterMenu.java:39`: this.addSlotListener(this), after addSlots returns.
+        handler
+            .add_listener(Arc::new(CrafterPreviewListener {
+                inventory,
+                result_inventory,
+            }))
+            .await;
 
         handler
     }
@@ -290,12 +339,7 @@ impl CrafterScreenHandler {
     /// `CrafterBlockEntity`'s redstone-triggered tick already resolves independently via the
     /// same [`match_crafting_recipe`].
     async fn refresh_recipe_result(&self) {
-        let input = CrafterRecipeInput(self.inventory.clone());
-        let result = match_crafting_recipe(&input, None).await.map_or_else(
-            || ItemStack::EMPTY.clone(),
-            |matched| matched.to_item_stack(),
-        );
-        self.result_inventory.set_stack(0, result).await;
+        refresh_preview(&self.inventory, &self.result_inventory).await;
     }
 
     /// `CrafterMenu.java:62-64`.
@@ -693,6 +737,31 @@ mod tests {
         handler.quick_move(&player, INV_SLOT_START).await;
 
         assert_eq!(inventory.get_stack(0).await.item_count, 2);
+    }
+
+    #[tokio::test]
+    async fn preview_follows_inputs_changed_outside_a_click() {
+        let (mut handler, inventory, _, _) = handler().await;
+        // A 2x2 of planks written straight into the crafter, as a hopper would.
+        for index in [0, 1, 3, 4] {
+            inventory
+                .set_stack(index, ItemStack::new(1, &Item::OAK_PLANKS))
+                .await;
+        }
+
+        handler.send_content_updates().await;
+
+        let preview = handler.get_behaviour().slots[45].get_stack().await;
+        assert_eq!(preview.item.id, Item::CRAFTING_TABLE.id);
+
+        inventory.set_stack(0, ItemStack::EMPTY.clone()).await;
+        handler.send_content_updates().await;
+        assert!(
+            handler.get_behaviour().slots[45]
+                .get_stack()
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]
