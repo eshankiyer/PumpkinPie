@@ -1,3 +1,4 @@
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item::Item;
 use pumpkin_data::translation;
 use pumpkin_data::{
@@ -105,15 +106,15 @@ impl BlockBehaviour for RespawnAnchorBlock {
             let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
 
             if args.item_stack.item.id != Item::GLOWSTONE.id || props.charges >= Self::MAX_CHARGES {
-                // Vanilla additionally checks the off-hand item here (`useItemOn`,
-                // `RespawnAnchorBlock.java:92-96`): if the main hand isn't usable but the
-                // off-hand holds glowstone and the anchor is chargeable, it returns `PASS` so
-                // the interaction is retried with the off-hand item instead of falling through
-                // to the empty-hand action. This codebase's packet dispatch
-                // (`call_use_item_on` in `pumpkin/src/net/java/play.rs`) only ever processes the
-                // single hand named by the incoming packet and has no generic same-click
-                // off-hand retry, so this case is a known divergence rather than something
-                // fixable locally in this block.
+                // `useItemOn` (`RespawnAnchorBlock.java:91-94`): a main-hand use with glowstone in
+                // the off hand and room to charge returns `PASS`, skipping `useWithoutItem`; the
+                // client then sends the off-hand use, which charges the anchor.
+                if args.equipment_slot == &EquipmentSlot::MAIN_HAND
+                    && props.charges < Self::MAX_CHARGES
+                    && args.player.inventory().off_hand_item().await.item.id == Item::GLOWSTONE.id
+                {
+                    return BlockActionResult::Pass;
+                }
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
@@ -148,6 +149,14 @@ impl BlockBehaviour for RespawnAnchorBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
+            // `useWithoutItem` (`RespawnAnchorBlock.java:99-130`): an empty anchor passes, so the
+            // held item is used instead, before the dimension check can explode it.
+            let state_id = args.world.get_block_state_id(args.position);
+            let props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
+            if props.charges == 0 {
+                return BlockActionResult::Pass;
+            }
+
             if !Self::works_here(args.world) {
                 args.world
                     .break_block(args.position, None, BlockFlags::SKIP_DROPS)
@@ -195,37 +204,19 @@ impl BlockBehaviour for RespawnAnchorBlock {
                 return BlockActionResult::SuccessServer;
             }
 
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
-            if props.charges == 0 {
-                args.player
-                    .send_system_message(&pumpkin_macros::translate_cross!(
-                        translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
-                        translation::bedrock::TILE_BED_NOSLEEP
-                    ))
-                    .await;
-                return BlockActionResult::SuccessServer;
-            }
-
             let changed = args
                 .player
                 .set_respawn_point(
                     args.world.dimension.clone(),
                     *args.position,
-                    args.player.get_entity().yaw.load(),
-                    args.player.get_entity().pitch.load(),
+                    0.0,
+                    0.0,
                     false,
                 )
                 .await;
+            // Setting the spawn never spends a charge; it is consumed on respawn instead
+            // (`ServerPlayer.findRespawnAndUseSpawnBlock`).
             if changed {
-                props.charges -= 1;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
                 args.world.play_sound(
                     Sound::BlockRespawnAnchorSetSpawn,
                     SoundCategory::Blocks,
@@ -237,8 +228,9 @@ impl BlockBehaviour for RespawnAnchorBlock {
                         translation::bedrock::TILE_BED_RESPAWNSET
                     ))
                     .await;
+                return BlockActionResult::SuccessServer;
             }
-            BlockActionResult::SuccessServer
+            BlockActionResult::Consume
         })
     }
 

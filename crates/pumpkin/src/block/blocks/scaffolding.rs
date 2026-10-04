@@ -47,7 +47,8 @@ impl ScaffoldingBlock {
     /// Returns the context-dependent collision pieces from
     /// `ScaffoldingBlock.getCollisionShape` (`ScaffoldingBlock.java:137-145`). The generated
     /// stable pieces already contain `SHAPE_STABLE`; the lower slab is the additional piece in
-    /// `SHAPE_UNSTABLE_BOTTOM`.
+    /// `SHAPE_UNSTABLE_BOTTOM`. `descending` is the entity's shift-key (sneak) flag, as
+    /// `Entity.isDescending` returns `isShiftKeyDown` (`Entity.java:2693-2695`).
     pub(crate) fn collision_shapes_for_context(
         state_id: BlockStateId,
         above_block: bool,
@@ -463,6 +464,23 @@ mod tests {
         let shapes = ScaffoldingBlock::collision_shapes_for_context(state_id, false, true, true);
         assert_eq!(shapes.len(), 1);
         assert_eq!(shapes[0].max.y, 0.125);
+    }
+
+    #[test]
+    fn collision_shape_is_stable_for_non_sneaking_entities_above() {
+        // `ScaffoldingBlock.java:139-140`: above the full block and not descending (not sneaking)
+        // yields `SHAPE_STABLE`, whatever the entity's vertical velocity.
+        let state_id = Block::SCAFFOLDING.default_state.id;
+        let shapes = ScaffoldingBlock::collision_shapes_for_context(state_id, true, true, false);
+        let expected: Vec<BoundingBox> = pumpkin_data::BlockState::from_id(state_id)
+            .get_block_collision_shapes()
+            .collect();
+        assert_eq!(shapes.len(), 7);
+        assert_eq!(shapes.len(), expected.len());
+        for (shape, want) in shapes.iter().zip(&expected) {
+            assert_eq!((shape.min.x, shape.min.y, shape.min.z), (want.min.x, want.min.y, want.min.z));
+            assert_eq!((shape.max.x, shape.max.y, shape.max.z), (want.max.x, want.max.y, want.max.z));
+        }
     }
 
     fn in_bounds_below(top_y: i32) -> impl Fn(BlockPos) -> bool {

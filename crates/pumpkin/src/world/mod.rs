@@ -2698,11 +2698,15 @@ impl World {
                 // `ScaffoldingBlock.getCollisionShape` (`ScaffoldingBlock.java:137-145`) depends
                 // on whether the entity is above the block and whether it is descending; the
                 // generated state table alone cannot represent that collision context.
-                let entity_box = entity.get_entity().bounding_box.load();
-                let descending = entity.get_entity().velocity.load().y < 0.0;
+                // `EntityCollisionContext` takes `descending` from `Entity.isDescending`, which is
+                // `isShiftKeyDown` (`Entity.java:2693-2695`), not the vertical velocity, and
+                // `isAbove` compares the feet Y against `maxY - 1.0E-5F`
+                // (`EntityCollisionContext.java:77-79`).
+                let descending = entity.get_entity().is_sneaking();
+                let feet_y = entity.get_entity().pos.load().y;
                 let block_y = f64::from(pos.0.y);
-                let above_block = entity_box.min.y >= block_y + 1.0;
-                let above_below_block = entity_box.min.y >= block_y;
+                let above_block = feet_y > block_y + 1.0 - f64::from(1.0E-5f32);
+                let above_below_block = feet_y > block_y - f64::from(1.0E-5f32);
                 for shape in crate::block::blocks::scaffolding::ScaffoldingBlock::collision_shapes_for_context(
                     state.id,
                     above_block,
