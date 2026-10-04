@@ -198,7 +198,8 @@ impl fmt::Debug for LocalMobCapCalculator {
 }
 
 impl LocalMobCapCalculator {
-    const fn calc_distance(chunk_pos: Vector2<i32>, player_pos: &Vector3<f64>) -> f64 {
+    /// `ChunkMap.euclideanDistanceSquared`: horizontal distance squared from the chunk centre.
+    pub(crate) const fn calc_distance(chunk_pos: Vector2<i32>, player_pos: &Vector3<f64>) -> f64 {
         let dx = ((chunk_pos.x << 4) + 8) as f64 - player_pos.x;
         let dy = ((chunk_pos.y << 4) + 8) as f64 - player_pos.z;
         dx * dx + dy * dy

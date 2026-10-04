@@ -2150,44 +2150,56 @@ impl World {
             custom_spawners::tick_wandering_trader_spawner(self).await;
         }
 
-        // 5. Spawn independent chunk-spawner work after all tick phases.
-        if !spawn_list.is_empty() {
-            let mut spawning_chunks = Vec::new();
-            for pos in active_chunks.iter() {
-                if let Some(chunk) = self.level.read_chunk_sync(pos, std::clone::Clone::clone) {
-                    spawning_chunks.push((*pos, chunk));
+        // 5. Spawning chunks (`ServerChunkCache.tickChunks`, `ServerChunkCache.java:388-397`).
+        // `ChunkMap.collectSpawningChunks` (`ChunkMap.java:937-949`) keeps only chunks within
+        // 128 blocks (horizontal, chunk centre) of a non-spectator player
+        // (`ChunkMap.java:1007-1014`). Every such chunk is ticked even when `spawn_list` is
+        // empty, because inhabited time and thunder do not depend on spawning categories.
+        let player_positions: Vec<Vector3<f64>> = self
+            .players
+            .load()
+            .iter()
+            .filter(|p| p.gamemode.load() != GameMode::Spectator)
+            .map(|p| p.position())
+            .collect();
+        let mut spawning_chunks = Vec::new();
+        for pos in active_chunks.iter() {
+            if !player_positions.iter().any(|player_pos| {
+                natural_spawner::LocalMobCapCalculator::calc_distance(*pos, player_pos) < 16384.0
+            }) {
+                continue;
+            }
+            if let Some(chunk) = self.level.read_chunk_sync(pos, std::clone::Clone::clone) {
+                spawning_chunks.push((*pos, chunk));
+            }
+        }
+
+        spawning_chunks.shuffle(&mut rng());
+
+        // `ServerChunkCache.tickSpawningChunk` (`ServerChunkCache.java:415`) increments
+        // inhabited time first; it is done here, before the batched thunder/spawn work.
+        for (_, chunk) in &spawning_chunks {
+            chunk.inhabited_time.fetch_add(1, Relaxed);
+        }
+
+        for chunk_batch in spawning_chunks.chunks(8) {
+            let batch = chunk_batch.to_vec();
+            let world = self.clone();
+            let s_list = spawn_list.clone();
+            let s_state = spawn_state.clone();
+
+            chunk_tasks.spawn(async move {
+                for (pos, chunk) in batch {
+                    world
+                        .tick_spawning_chunk(pos, &chunk, &s_list, &s_state)
+                        .await;
                 }
-            }
-
-            spawning_chunks.shuffle(&mut rng());
-
-            for chunk_batch in spawning_chunks.chunks(8) {
-                let batch = chunk_batch.to_vec();
-                let world = self.clone();
-                let s_list = spawn_list.clone();
-                let s_state = spawn_state.clone();
-
-                chunk_tasks.spawn(async move {
-                    for (pos, chunk) in batch {
-                        world
-                            .tick_spawning_chunk(pos, &chunk, &s_list, &s_state)
-                            .await;
-                    }
-                });
-            }
+            });
         }
 
         while let Some(res) = chunk_tasks.join_next().await {
             if let Err(e) = res {
                 error!("Chunk task panicked: {:?}", e);
-            }
-        }
-
-        // Update chunk inhabited time for active chunks
-        let loaded_chunks = self.level.loaded_chunks.clone();
-        for pos in active_chunks.iter() {
-            if let Some(chunk) = loaded_chunks.get(pos) {
-                chunk.inhabited_time.fetch_add(1, Relaxed);
             }
         }
     }
@@ -2782,8 +2794,8 @@ impl World {
         spawn_list: &Vec<&'static MobCategory>,
         spawn_state: &Arc<SpawnState>,
     ) {
-        // this.level.tickThunder(chunk);
-        //TODO check in simulation distance
+        // `ServerLevel.tickThunder`. Every active chunk is already in entity-ticking range
+        // (`ServerChunkCache.java:416`). Runs regardless of `spawn_list`.
         let (is_raining, is_thundering) = {
             let weather = self.weather.lock().await;
             (weather.raining, weather.thundering)
