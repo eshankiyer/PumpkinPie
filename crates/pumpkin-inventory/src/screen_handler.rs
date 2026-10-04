@@ -38,6 +38,7 @@ use pumpkin_data::{
     screen::WindowType,
     sound::Sound,
     statistic::StatisticCategory,
+    world::WorldEvent,
 };
 use pumpkin_protocol::{
     codec::item_stack_seralizer::OptionalItemStackHash,
@@ -305,6 +306,30 @@ pub trait InventoryPlayer: Send + Sync {
 
     /// Awards experience points to the player (used for furnace smelting, etc.)
     fn award_experience(&self, amount: i32) -> PlayerFuture<'_, ()>;
+
+    /// `ExperienceOrb.award(level, Vec3.atCenterOf(pos), amount)` run through the open menu's
+    /// `ContainerLevelAccess.execute` (`GrindstoneMenu.java:67-71`): the orbs appear at the
+    /// centre of the block the menu was opened at, and nothing happens without one
+    /// (`ContainerLevelAccess.NULL`).
+    ///
+    /// The default awards directly so that test doubles need not model a world.
+    fn award_experience_at_container(&self, amount: i32) -> PlayerFuture<'_, ()> {
+        self.award_experience(amount)
+    }
+
+    /// `level.levelEvent(event, pos, data)` at the open menu's position, run through
+    /// `ContainerLevelAccess.execute` (e.g. `GrindstoneMenu.java:73`). A no-op when the menu
+    /// has no position. The default is inert for test doubles.
+    fn container_world_event(&self, _event: WorldEvent, _data: i32) -> PlayerFuture<'_, ()> {
+        Box::pin(async {})
+    }
+
+    /// `Player.mayBuild` (`Player.java:1612-1614`), i.e. `abilities.mayBuild`: false for
+    /// adventure and spectator players. The default allows building so that test doubles
+    /// need not model abilities.
+    fn may_build(&self) -> PlayerFuture<'_, bool> {
+        Box::pin(async { true })
+    }
 
     /// Increments a statistic for the player.
     fn increment_stat(
@@ -1159,23 +1184,19 @@ pub trait ScreenHandler: Send + Sync {
                     let slot = self.get_behaviour().slots[slot_index as usize].clone();
                     let prev_stack = slot.get_cloned_stack().await;
                     if !prev_stack.is_empty() {
+                        // `AbstractContainerMenu.doClick` THROW (AbstractContainerMenu.java:513-533):
+                        // `safeTake` already runs `onTake`, and the Ctrl+Q loop stops as soon as a
+                        // take yields nothing (e.g. a Binding-cursed armor piece), comparing the
+                        // item only via `isSameItem`.
+                        let amount = if button == 0 { 1 } else { prev_stack.item_count };
+                        let mut dropped = slot.safe_take(amount, u8::MAX, player).await;
+                        player.drop_item(dropped.clone(), true).await;
                         if button == 1 {
-                            // Throw all
-                            while slot
-                                .get_cloned_stack()
-                                .await
-                                .are_items_and_components_equal(&prev_stack)
+                            while !dropped.is_empty()
+                                && slot.get_cloned_stack().await.is_same_item(&dropped)
                             {
-                                let drop_stack =
-                                    slot.safe_take(prev_stack.item_count, u8::MAX, player).await;
-                                player.drop_item(drop_stack, true).await;
-                                // player.handleCreativeModeItemDrop(itemStack);
-                            }
-                        } else {
-                            let drop_stack = slot.safe_take(1, u8::MAX, player).await;
-                            if !drop_stack.is_empty() {
-                                slot.on_take_item(player, &drop_stack).await;
-                                player.drop_item(drop_stack, true).await;
+                                dropped = slot.safe_take(amount, u8::MAX, player).await;
+                                player.drop_item(dropped.clone(), true).await;
                             }
                         }
                     }

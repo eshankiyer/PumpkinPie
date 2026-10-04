@@ -19,7 +19,6 @@ use arc_swap::ArcSwap;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel::Receiver;
 use pumpkin_data::dimension::Dimension;
-use pumpkin_inventory::merchant::merchant_screen_handler::MerchantScreenHandler;
 use pumpkin_inventory::player::ender_chest_inventory::EnderChestInventory;
 use pumpkin_protocol::bedrock::client::play_status::CPlayStatus;
 use pumpkin_protocol::bedrock::client::set_time::CSetTime;
@@ -221,6 +220,7 @@ use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_data::tag::Taggable;
+use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, BlockState, Enchantment, screen::WindowType, tag, translation};
 use pumpkin_inventory::player::{
     player_inventory::PlayerInventory, player_screen_handler::PlayerScreenHandler,
@@ -3377,20 +3377,16 @@ impl Player {
             }
         }
 
+        // `ServerPlayer.tick` (ServerPlayer.java:588-592): broadcast, then close any menu that is
+        // no longer `stillValid` (out of range, block replaced, lectern book taken, ...).
         let current_screen_handler = self.current_screen_handler.lock().await.clone();
-        let invalid_merchant = {
-            let screen_handler = current_screen_handler.lock().await;
-            screen_handler.as_any().is::<MerchantScreenHandler>()
-                && !screen_handler.can_use(self.as_ref())
+        let still_valid = {
+            let mut screen_handler = current_screen_handler.lock().await;
+            screen_handler.send_content_updates().await;
+            screen_handler.can_use(self.as_ref())
         };
-        if invalid_merchant {
+        if !still_valid {
             self.close_handled_screen().await;
-        } else {
-            current_screen_handler
-                .lock()
-                .await
-                .send_content_updates()
-                .await;
         }
 
         // if self.client.closed.load(Ordering::Relaxed) {
@@ -7260,17 +7256,31 @@ impl Player {
     }
 
     /// Handles when the player clicks a button in a container (e.g. Enchantment Table)
+    ///
+    /// `ServerGamePacketListenerImpl.handleContainerButtonClick`
+    /// (ServerGamePacketListenerImpl.java:2001-2014).
     pub async fn on_container_button_click(self: &Arc<Self>, packet: SContainerButtonClick) {
+        self.update_last_action_time();
+        if self.gamemode.load() == GameMode::Spectator {
+            return;
+        }
         let screen_handler = self.current_screen_handler.lock().await.clone();
         let mut screen_handler = screen_handler.lock().await;
 
         if i32::from(screen_handler.sync_id()) != packet.window_id.0 {
             return;
         }
+        if !screen_handler.can_use(self.as_ref()) {
+            debug!("Player {} interacted with invalid menu", self.gameprofile.name);
+            return;
+        }
 
-        screen_handler
+        let accepted = screen_handler
             .on_button_click(self.as_ref(), packet.button_id.0)
             .await;
+        if accepted {
+            screen_handler.send_content_updates().await;
+        }
     }
 
     pub async fn has_permission(self: &Arc<Self>, server: &Server, node: &str) -> bool {
@@ -9280,16 +9290,41 @@ impl InventoryPlayer for Player {
 
     fn award_experience(&self, amount: i32) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
-            // Both callers of this — the furnace result slot and the grindstone — award through
-            // `ExperienceOrb.award` in vanilla (`AbstractFurnaceBlockEntity.createExperience`,
-            // `GrindstoneMenu.onTake`). Granting the points directly skipped the orb entirely,
-            // and since Mending is applied when an orb is picked up, furnace and grindstone
-            // experience never repaired a Mending tool.
+            // The furnace result slot awards through `ExperienceOrb.award` at the player's
+            // position in vanilla (`AbstractFurnaceBlockEntity.createExperience`). Granting the
+            // points directly skipped the orb entirely, and since Mending is applied when an orb
+            // is picked up, furnace experience never repaired a Mending tool.
             if amount > 0 {
                 let amount = u32::try_from(amount).unwrap_or(0);
                 ExperienceOrbEntity::spawn(&self.world(), self.position(), amount).await;
             }
         })
+    }
+
+    fn award_experience_at_container(&self, amount: i32) -> PlayerFuture<'_, ()> {
+        Box::pin(async move {
+            // `ContainerLevelAccess.execute` does nothing without a position (`NULL`); with one,
+            // the orbs appear at `Vec3.atCenterOf(pos)` (GrindstoneMenu.java:67-71).
+            let Some(pos) = self.open_container_pos.load() else {
+                return;
+            };
+            if amount > 0 {
+                let amount = u32::try_from(amount).unwrap_or(0);
+                ExperienceOrbEntity::spawn(&self.world(), pos.to_centered_f64(), amount).await;
+            }
+        })
+    }
+
+    fn container_world_event(&self, event: WorldEvent, data: i32) -> PlayerFuture<'_, ()> {
+        Box::pin(async move {
+            if let Some(pos) = self.open_container_pos.load() {
+                self.world().sync_world_event(event, pos, data);
+            }
+        })
+    }
+
+    fn may_build(&self) -> PlayerFuture<'_, bool> {
+        Box::pin(async move { self.abilities.lock().await.allow_modify_world })
     }
 
     fn increment_stat(

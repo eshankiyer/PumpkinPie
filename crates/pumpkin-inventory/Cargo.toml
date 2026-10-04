@@ -18,6 +18,7 @@ pumpkin-data = { workspace = true, features = [
     "enchantment",
     "potion",
     "statistic",
+    "world",
 ] }
 
 pumpkin-world.workspace = true

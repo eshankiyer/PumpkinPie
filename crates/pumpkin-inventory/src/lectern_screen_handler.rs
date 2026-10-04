@@ -145,6 +145,10 @@ impl ScreenHandler for LecternScreenHandler {
                     true
                 }
                 Self::TAKE_BOOK_BUTTON_ID => {
+                    // `LecternMenu.java:57-60`: adventure/spectator players cannot take it.
+                    if !player.may_build().await {
+                        return false;
+                    }
                     let stack = self.inventory.remove_stack(0).await;
                     if stack.is_empty() {
                         return false;

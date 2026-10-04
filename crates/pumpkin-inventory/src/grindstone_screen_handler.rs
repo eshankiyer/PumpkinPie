@@ -6,16 +6,13 @@
 //! result at 2) and `computeResult`/`mergeItems`/`removeNonCursesFrom` are transcribed from that
 //! file (exact line ranges cited on each function below).
 //!
-//! Two upstream mechanisms have no Pumpkin-side representation and are approximated:
-//! - `RepairCostImpl` is a unit struct with no carried value, so the vanilla
-//!   `item.set(DataComponents.REPAIR_COST, repairCost)` write (GrindstoneMenu.java:196) cannot be
-//!   persisted onto the output item. The formula itself is implemented and unit-tested.
-//! - Vanilla spawns a physical XP orb entity in the world on take (GrindstoneMenu.java:68-74).
-//!   Pumpkin's furnace screen handler (see `furnace_like_slot.rs`) already established the
-//!   precedent of awarding XP directly to the player instead of spawning a visible orb; this
-//!   follows that precedent rather than inventing a new cross-crate world-access path (the
-//!   screen handler, in `pumpkin-inventory`, has no access to the concrete `World` type that
-//!   lives in the `pumpkin` crate, which depends on `pumpkin-inventory` and not vice versa).
+//! `RepairCostImpl` is a unit struct with no carried value, so the vanilla
+//! `item.set(DataComponents.REPAIR_COST, repairCost)` write (GrindstoneMenu.java:196) cannot be
+//! persisted onto the output item. The formula itself is implemented and unit-tested.
+//!
+//! The result slot's `access.execute` world effects (XP orb at the block centre and level event
+//! 1042, GrindstoneMenu.java:66-74) go through [`InventoryPlayer::award_experience_at_container`]
+//! and [`InventoryPlayer::container_world_event`], since this crate has no `World` access.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -29,6 +26,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
 use pumpkin_data::tag::{Enchantment as EnchantmentTag, Taggable};
+use pumpkin_data::world::WorldEvent;
 use pumpkin_protocol::java::server::play::SlotActionType;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::inventory::SimpleInventory;
@@ -232,12 +230,6 @@ fn experience_amount(input: &ItemStack, additional: &ItemStack) -> i32 {
     }
 }
 
-/// Vanilla `GrindstoneMenu` refreshes after repair-slot changes and after result `onTake`
-/// clears those slots (`GrindstoneMenu.java:66-77, 110-120, 242-252`).
-fn refreshes_result_for_slot(slot_index: i32) -> bool {
-    (0..=2).contains(&slot_index)
-}
-
 pub struct GrindstoneScreenHandler {
     behaviour: ScreenHandlerBehaviour,
     pub repair_inventory: Arc<SimpleInventory>,
@@ -276,6 +268,10 @@ impl GrindstoneScreenHandler {
         handler
     }
 
+    /// `GrindstoneMenu.createResult` (GrindstoneMenu.java:117-120). Vanilla runs it from the repair
+    /// container's `setChanged` (`slotsChanged`, :32-38, 109-115) on every write; Pumpkin has no
+    /// container listener, so it is re-run after every click. `compute_result` is a pure function
+    /// of the two inputs, so recomputing over unchanged inputs is a no-op for syncing.
     async fn update_result(&self) {
         let input = self.repair_inventory.get_stack(0).await;
         let additional = self.repair_inventory.get_stack(1).await;
@@ -334,9 +330,9 @@ impl ScreenHandler for GrindstoneScreenHandler {
         Box::pin(async move {
             self.internal_on_slot_click(slot_index, button, action_type, player)
                 .await;
-            if refreshes_result_for_slot(slot_index) {
-                self.update_result().await;
-            }
+            // Any click (shift-click into the repair slots, drags reported as slot -999,
+            // double-click collection) may have written the repair slots.
+            self.update_result().await;
         })
     }
 
@@ -389,7 +385,9 @@ impl ScreenHandler for GrindstoneScreenHandler {
             if item.is_empty() {
                 slot.set_stack(ItemStack::EMPTY.clone()).await;
             } else {
-                slot.mark_dirty().await;
+                // `item` is a copy here, not vanilla's live `slot.getItem()`, so the remainder of a
+                // partial move has to be written back.
+                slot.set_stack(item.clone()).await;
             }
 
             if item.item_count == stack_left.item_count {
@@ -397,9 +395,9 @@ impl ScreenHandler for GrindstoneScreenHandler {
             }
 
             slot.on_take_item(player, &item).await;
-            if refreshes_result_for_slot(slot_index) {
-                self.update_result().await;
-            }
+            // The doClick repeat loop re-reads slot 2 between iterations, so the result has to be
+            // current before returning (vanilla refreshes it inside `setChanged`).
+            self.update_result().await;
             stack_left
         })
     }
@@ -448,8 +446,7 @@ impl Slot for GrindstoneRepairSlot {
 }
 
 /// `GrindstoneMenu`'s result slot (GrindstoneMenu.java:60-105): never accepts items, and on take
-/// awards XP (see module docs for the physical-orb-vs-direct-award note) and clears both repair
-/// slots.
+/// pops XP at the grindstone, plays its use event and clears both repair slots.
 struct GrindstoneResultSlot {
     inventory: Arc<dyn Inventory>,
     repair_inventory: Arc<SimpleInventory>,
@@ -499,10 +496,15 @@ impl Slot for GrindstoneResultSlot {
             let input = self.repair_inventory.get_stack(0).await;
             let additional = self.repair_inventory.get_stack(1).await;
 
+            // `access.execute` (GrindstoneMenu.java:67-74): orbs at the block centre, then level
+            // event 1042, which fires even when no XP is awarded.
             let amount = experience_amount(&input, &additional);
             if amount > 0 {
-                player.award_experience(amount).await;
+                player.award_experience_at_container(amount).await;
             }
+            player
+                .container_world_event(WorldEvent::SoundGrindstoneUsed, 0)
+                .await;
 
             self.repair_inventory
                 .set_stack(0, ItemStack::EMPTY.clone())
@@ -642,14 +644,203 @@ mod tests {
         assert_eq!(experience_from_item(&item), expected);
     }
 
-    #[test]
-    fn taking_result_refreshes_the_output_after_inputs_are_cleared() {
-        // `GrindstoneMenu.onTake` clears both inputs and `slotsChanged` recreates the result
-        // (`GrindstoneMenu.java:66-77, 110-120`).
-        assert!(refreshes_result_for_slot(0));
-        assert!(refreshes_result_for_slot(1));
-        assert!(refreshes_result_for_slot(2));
-        assert!(!refreshes_result_for_slot(3));
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::screen_handler::PlayerFuture;
+
+    /// Counts the result slot's world effects and dropped stacks.
+    struct TestPlayer {
+        inventory: Arc<PlayerInventory>,
+        xp_awards: AtomicUsize,
+        world_events: AtomicUsize,
+        drops: AtomicUsize,
+    }
+
+    impl TestPlayer {
+        fn new() -> Self {
+            Self {
+                inventory: Arc::new(PlayerInventory::new(
+                    Arc::new(TokioMutex::new(EntityEquipment::new())),
+                    Arc::new(build_equipment_slots()),
+                )),
+                xp_awards: AtomicUsize::new(0),
+                world_events: AtomicUsize::new(0),
+                drops: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl InventoryPlayer for TestPlayer {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn drop_item(&self, item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
+            if !item.is_empty() {
+                self.drops.fetch_add(1, Ordering::Relaxed);
+            }
+            Box::pin(async {})
+        }
+        fn get_inventory(&self) -> Arc<PlayerInventory> {
+            self.inventory.clone()
+        }
+        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn has_infinite_materials(&self) -> bool {
+            false
+        }
+        fn is_creative(&self) -> bool {
+            false
+        }
+        fn experience_level(&self) -> i32 {
+            0
+        }
+        fn add_experience_levels(&self, _levels: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn enchantment_seed(&self) -> i32 {
+            0
+        }
+        fn set_enchantment_seed(&self, _seed: i32) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_inventory_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerContent,
+            _window_type: Option<WindowType>,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_slot_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerSlot,
+            _window_type: Option<WindowType>,
+            _total_slots: usize,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_cursor_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetCursorItem,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_property_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetContainerProperty,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_slot_set_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetPlayerInventory,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_set_held_item_packet<'a>(
+            &'a self,
+            _packet: &'a pumpkin_protocol::java::client::play::CSetSelectedSlot,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn enqueue_equipment_change<'a>(
+            &'a self,
+            _slot: &'a pumpkin_data::data_component_impl::EquipmentSlot,
+            _stack: &'a ItemStack,
+        ) -> PlayerFuture<'a, ()> {
+            Box::pin(async {})
+        }
+        fn award_experience(&self, _amount: i32) -> PlayerFuture<'_, ()> {
+            self.xp_awards.fetch_add(1, Ordering::Relaxed);
+            Box::pin(async {})
+        }
+        fn container_world_event(&self, event: WorldEvent, _data: i32) -> PlayerFuture<'_, ()> {
+            if matches!(event, WorldEvent::SoundGrindstoneUsed) {
+                self.world_events.fetch_add(1, Ordering::Relaxed);
+            }
+            Box::pin(async {})
+        }
+        fn increment_stat(
+            &self,
+            _category: pumpkin_data::statistic::StatisticCategory,
+            _stat_id: i32,
+            _amount: i32,
+        ) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    async fn count_of(handler: &GrindstoneScreenHandler, item: &'static Item) -> u32 {
+        let mut total = 0;
+        for slot in &handler.get_behaviour().slots {
+            let stack = slot.get_cloned_stack().await;
+            if stack.item == item {
+                total += u32::from(stack.item_count);
+            }
+        }
+        total
+    }
+
+    #[tokio::test]
+    async fn partial_shift_click_keeps_the_remainder_in_the_source_slot() {
+        let player = TestPlayer::new();
+        let mut handler = GrindstoneScreenHandler::new(0, &player.inventory);
+        let slots = handler.get_behaviour().slots.clone();
+        slots[0].set_stack(ItemStack::new(1, &Item::IRON_PICKAXE)).await;
+        slots[1].set_stack(ItemStack::new(1, &Item::IRON_PICKAXE)).await;
+        // Both repair slots full: main inventory (3..30) moves to the hotbar (30..39).
+        slots[3].set_stack(ItemStack::new(64, &Item::STONE)).await;
+        slots[30].set_stack(ItemStack::new(40, &Item::STONE)).await;
+        for slot in &slots[31..39] {
+            slot.set_stack(ItemStack::new(64, &Item::DIRT)).await;
+        }
+
+        handler
+            .on_slot_click(3, 0, SlotActionType::QuickMove, &player)
+            .await;
+
+        assert_eq!(count_of(&handler, &Item::STONE).await, 104);
+        assert_eq!(slots[3].get_cloned_stack().await.item_count, 40);
+        assert_eq!(slots[30].get_cloned_stack().await.item_count, 64);
+    }
+
+    #[tokio::test]
+    async fn shift_clicking_an_enchanted_item_in_computes_the_result() {
+        let player = TestPlayer::new();
+        let mut handler = GrindstoneScreenHandler::new(0, &player.inventory);
+        let mut pickaxe = ItemStack::new(1, &Item::IRON_PICKAXE);
+        pickaxe.enchant(&Enchantment::EFFICIENCY, 3);
+        handler.get_behaviour().slots[3].set_stack(pickaxe).await;
+
+        handler
+            .on_slot_click(3, 0, SlotActionType::QuickMove, &player)
+            .await;
+
+        let slots = handler.get_behaviour().slots.clone();
+        assert!(slots[0].get_cloned_stack().await.item == &Item::IRON_PICKAXE);
+        let result = slots[2].get_cloned_stack().await;
+        assert!(result.item == &Item::IRON_PICKAXE);
+        assert_eq!(result.get_enchantment_level(&Enchantment::EFFICIENCY), 0);
+    }
+
+    #[tokio::test]
+    async fn throwing_the_result_runs_on_take_once() {
+        let player = TestPlayer::new();
+        let mut handler = GrindstoneScreenHandler::new(0, &player.inventory);
+        let mut pickaxe = ItemStack::new(1, &Item::IRON_PICKAXE);
+        pickaxe.enchant(&Enchantment::EFFICIENCY, 3);
+        handler.repair_inventory.set_stack(0, pickaxe).await;
+        handler.update_result().await;
+
+        handler
+            .on_slot_click(2, 0, SlotActionType::Throw, &player)
+            .await;
+
+        assert_eq!(player.drops.load(Ordering::Relaxed), 1);
+        assert_eq!(player.xp_awards.load(Ordering::Relaxed), 1);
+        assert_eq!(player.world_events.load(Ordering::Relaxed), 1);
+        assert!(handler.repair_inventory.get_stack(0).await.is_empty());
+        assert!(handler.get_behaviour().slots[2].get_cloned_stack().await.is_empty());
     }
 
     #[tokio::test]
