@@ -232,7 +232,8 @@ impl PosRuleTest {
                 let dist = dx + dy + dz;
                 let chance =
                     calculate_linear_chance(dist, *min_dist, *max_dist, *min_chance, *max_chance);
-                rng.next_f32() < chance
+                // `LinearPosTest.java:39` / `AxisAlignedLinearPosTest.java:47` accept on `<=`.
+                rng.next_f32() <= chance
             }
             Self::AxisAlignedLinearPos {
                 axis,
@@ -248,10 +249,43 @@ impl PosRuleTest {
                 };
                 let chance =
                     calculate_linear_chance(dist, *min_dist, *max_dist, *min_chance, *max_chance);
-                rng.next_f32() < chance
+                // `LinearPosTest.java:39` / `AxisAlignedLinearPosTest.java:47` accept on `<=`.
+                rng.next_f32() <= chance
             }
         }
     }
+}
+
+/// Vanilla `RuleProcessor.processBlock` (`RuleProcessor.java:32-41`). It ignores the
+/// placement random and seeds a fresh stream from the processed position on every call;
+/// all rules and the output tag share that stream, and the first matching rule wins.
+fn process_rules(
+    rules: &[ProcessorRule],
+    placer: &impl BlockPlacer,
+    world_pos: Vector3<i32>,
+    state: &'static BlockState,
+    nbt: &mut Option<NbtCompound>,
+    structure_start: Vector3<i32>,
+) -> &'static BlockState {
+    let world_state = BlockState::from_id(placer.get_block_state(&world_pos));
+    let mut rng =
+        LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
+    for rule in rules {
+        // `ProcessorRule.test` order (`ProcessorRule.java:62-64`): input, location, then
+        // position, short-circuiting.
+        if rule.input_predicate.test(state, &mut rng)
+            && rule.location_predicate.test(world_state, &mut rng)
+            && rule
+                .position_predicate
+                .test(world_pos, structure_start, &mut rng)
+        {
+            if let Some(modifier) = &rule.block_entity_modifier {
+                modifier.apply(nbt, world_pos, &mut rng);
+            }
+            return rule.output_state;
+        }
+    }
+    state
 }
 
 fn calculate_linear_chance(
@@ -406,24 +440,14 @@ impl StructureProcessor {
         rng: &mut impl RandomImpl,
     ) -> Option<&'static BlockState> {
         match self {
-            Self::Rule(rules) => {
-                let world_state_id = placer.get_block_state(&world_pos);
-                let world_state = BlockState::from_id(world_state_id);
-                for rule in rules {
-                    if rule
-                        .position_predicate
-                        .test(world_pos, context.structure_start, rng)
-                        && rule.input_predicate.test(state, rng)
-                        && rule.location_predicate.test(world_state, rng)
-                    {
-                        if let Some(modifier) = &rule.block_entity_modifier {
-                            modifier.apply(nbt, world_pos, rng);
-                        }
-                        return Some(rule.output_state);
-                    }
-                }
-                Some(state)
-            }
+            Self::Rule(rules) => Some(process_rules(
+                rules,
+                placer,
+                world_pos,
+                state,
+                nbt,
+                context.structure_start,
+            )),
             Self::BlockRot {
                 integrity,
                 rottable_blocks,
