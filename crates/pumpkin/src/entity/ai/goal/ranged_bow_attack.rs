@@ -151,10 +151,45 @@ impl RangedBowAttackGoal {
         )
     }
 
+    /// `Arrow#addEffect` as called by the `getArrow` overrides (`Stray.java:60-66`,
+    /// `Bogged.java:107-113`, `Parched.java:23-29`): `PotionContents#withEffectAdded` keeps the
+    /// projectile's potion, color and name and appends to its custom effects.
+    fn add_arrow_effects(
+        arrow_item: &mut pumpkin_data::item_stack::ItemStack,
+        effects: &[StatusEffectInstance],
+    ) {
+        if effects.is_empty() {
+            return;
+        }
+        if let Some(contents) = arrow_item.get_data_component_mut::<PotionContentsImpl>() {
+            contents.custom_effects.extend_from_slice(effects);
+            return;
+        }
+        let contents = PotionContentsImpl {
+            potion_id: None,
+            custom_color: None,
+            custom_effects: effects.to_vec(),
+            custom_name: None,
+        }
+        .to_dyn();
+        // An explicitly removed component reads as `PotionContents.EMPTY` in vanilla, so it is
+        // replaced rather than shadowed by a second patch entry.
+        if let Some(entry) = arrow_item
+            .patch
+            .iter_mut()
+            .find(|(id, _)| *id == DataComponent::PotionContents)
+        {
+            entry.1 = Some(contents);
+        } else {
+            arrow_item
+                .patch
+                .push((DataComponent::PotionContents, Some(contents)));
+        }
+    }
+
     async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase, power: f32) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
-        let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), &EntityType::ARROW);
         // `AbstractSkeleton.performRangedAttack` passes its `getProjectile` result into the
         // arrow factory (`AbstractSkeleton.java:160-174`).
         let Some((_, bow_item)) = Self::held_bow(mob).await else {
@@ -165,19 +200,14 @@ impl RangedBowAttackGoal {
             .living_entity
             .get_projectile(&bow_item)
             .await;
-        if !self.arrow_effects.is_empty() {
-            arrow_item.patch.push((
-                DataComponent::PotionContents,
-                Some(
-                    PotionContentsImpl {
-                        potion_id: None,
-                        custom_color: None,
-                        custom_effects: self.arrow_effects.to_vec(),
-                        custom_name: None,
-                    }
-                    .to_dyn(),
-                ),
-            ));
+        // `ProjectileUtil.getMobArrow`: the projectile's `ArrowItem#createArrow` picks the
+        // entity, so a spectral arrow fires a `SpectralArrow` (`SpectralArrowItem.java:18-20`).
+        let arrow_type = ArrowEntity::entity_type_for_item(arrow_item.item);
+        let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), arrow_type);
+        // The variant effects are only added `if (arrow instanceof Arrow)`; `SpectralArrow`
+        // extends `AbstractArrow`, not `Arrow`.
+        if arrow_type.id == EntityType::ARROW.id {
+            Self::add_arrow_effects(&mut arrow_item, self.arrow_effects);
         }
         let arrow =
             ArrowEntity::new_shot(arrow_entity, shooter, &arrow_item, ArrowPickup::Disallowed);
@@ -353,7 +383,78 @@ fn bow_power_for_time(time_held: i32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{RangedBowAttackGoal, bow_power_for_time};
+    use crate::entity::projectile::arrow::ArrowEntity;
+    use crate::item::potion::PotionContents;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::{
+        DataComponentImpl, PotionContentsImpl, StatusEffectInstance,
+    };
+    use pumpkin_data::effect::StatusEffect;
+    use pumpkin_data::entity::EntityType;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_data::potion::Potion;
     use pumpkin_util::math::vector3::Vector3;
+
+    /// `new MobEffectInstance(MobEffects.SLOWNESS, 600)` as `Stray#getArrow` adds it.
+    const SLOWNESS_600: &[StatusEffectInstance] = &[StatusEffectInstance {
+        effect_id: std::borrow::Cow::Borrowed("minecraft:slowness"),
+        amplifier: 0,
+        duration: 600,
+        ambient: false,
+        show_particles: true,
+        show_icon: true,
+    }];
+
+    #[test]
+    fn variant_effect_is_appended_to_tipped_arrow_contents() {
+        let mut arrow = ItemStack::new(1, &Item::TIPPED_ARROW);
+        arrow.patch.push((
+            DataComponent::PotionContents,
+            Some(
+                PotionContentsImpl {
+                    potion_id: Some(Potion::POISON.id as i32),
+                    custom_color: None,
+                    custom_effects: Vec::new(),
+                    custom_name: None,
+                }
+                .to_dyn(),
+            ),
+        ));
+        RangedBowAttackGoal::add_arrow_effects(&mut arrow, SLOWNESS_600);
+
+        let contents = arrow.get_data_component::<PotionContentsImpl>().unwrap();
+        assert_eq!(contents.potion_id, Some(Potion::POISON.id as i32));
+        let effects = PotionContents::read_potion_effects(&arrow);
+        assert_eq!(effects.len(), 2);
+        assert_eq!(effects[0].0.id, StatusEffect::POISON.id);
+        assert_eq!(effects[1].0.id, StatusEffect::SLOWNESS.id);
+        assert_eq!(effects[1].1, 600);
+    }
+
+    #[test]
+    fn variant_effect_replaces_removed_contents() {
+        let mut arrow = ItemStack::new(1, &Item::ARROW);
+        arrow.patch.push((DataComponent::PotionContents, None));
+        RangedBowAttackGoal::add_arrow_effects(&mut arrow, SLOWNESS_600);
+
+        assert_eq!(arrow.patch.len(), 1);
+        let effects = PotionContents::read_potion_effects(&arrow);
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].0.id, StatusEffect::SLOWNESS.id);
+    }
+
+    #[test]
+    fn spectral_projectile_fires_a_spectral_arrow() {
+        assert_eq!(
+            ArrowEntity::entity_type_for_item(&Item::SPECTRAL_ARROW).id,
+            EntityType::SPECTRAL_ARROW.id
+        );
+        assert_eq!(
+            ArrowEntity::entity_type_for_item(&Item::TIPPED_ARROW).id,
+            EntityType::ARROW.id
+        );
+    }
 
     #[test]
     fn preserves_vanilla_skeleton_bow_interval() {
