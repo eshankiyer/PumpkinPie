@@ -124,6 +124,23 @@ impl Mob for MooshroomEntity {
         Animal::get_walk_target_value(self, pos)
     }
 
+    /// `MushroomCow` keeps `AbstractCow`'s classic sound set (AbstractCow.java:59-87).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityCowAmbient)
+    }
+
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityCowHurt)
+    }
+
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityCowStep)
+    }
+
+    fn get_sound_volume(&self) -> f32 {
+        super::cow::COW_SOUND_VOLUME
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,

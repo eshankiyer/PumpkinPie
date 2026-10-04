@@ -64,6 +64,50 @@ mod cow_variant {
     }
 }
 
+/// Vanilla registry ids of the `minecraft:cow_sound_variant` entries (`CowSoundVariants.java`;
+/// same order in Pumpkin's generated `registry.rs`): classic = 0, moody = 1. Synced through
+/// `DATA_SOUND_VARIANT_ID` (Cow.java:34-36) and stored under `sound_variant` (Cow.java:60).
+mod cow_sound_variant {
+    use pumpkin_data::sound::Sound;
+
+    pub const CLASSIC: u8 = 0;
+    pub const MOODY: u8 = 1;
+
+    pub const fn name(id: u8) -> &'static str {
+        match id {
+            MOODY => "minecraft:moody",
+            _ => "minecraft:classic",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<u8> {
+        match name.strip_prefix("minecraft:").unwrap_or(name) {
+            "classic" => Some(CLASSIC),
+            "moody" => Some(MOODY),
+            _ => None,
+        }
+    }
+
+    /// `SoundEvents.COW_SOUNDS` (SoundEvents.java:1985-1999) as (ambient, hurt, step).
+    pub const fn sounds(id: u8) -> (Sound, Sound, Sound) {
+        match id {
+            MOODY => (
+                Sound::EntityCowMoodyAmbient,
+                Sound::EntityCowMoodyHurt,
+                Sound::EntityCowMoodyStep,
+            ),
+            _ => (
+                Sound::EntityCowAmbient,
+                Sound::EntityCowHurt,
+                Sound::EntityCowStep,
+            ),
+        }
+    }
+}
+
+/// `AbstractCow.getSoundVolume` (AbstractCow.java:80-83), shared with the mooshroom.
+pub(crate) const COW_SOUND_VOLUME: f32 = 0.4;
+
 /// Represents a Cow, a common passive mob that provides milk, leather, and beef.
 ///
 /// Wiki: <https://minecraft.wiki/w/Cow>
@@ -72,6 +116,9 @@ pub struct CowEntity {
     /// Vanilla `DATA_VARIANT_ID` (Cow.java:33): the registry id of the cow's
     /// [`cow_variant`] entry, synced to clients so they pick the model/texture.
     pub variant: AtomicU8,
+    /// Vanilla `DATA_SOUND_VARIANT_ID` (Cow.java:34-36): the [`cow_sound_variant`] id, or
+    /// [`VARIANT_UNSET`] until `mob_init_data_tracker` rolls it (`Cow.finalizeSpawn`).
+    pub sound_variant: AtomicU8,
     pub ageable_data: crate::entity::ageable::AgeableData,
 }
 
@@ -81,6 +128,7 @@ impl CowEntity {
         let cow = Self {
             mob_entity,
             variant: AtomicU8::new(VARIANT_UNSET),
+            sound_variant: AtomicU8::new(VARIANT_UNSET),
             ageable_data: crate::entity::ageable::AgeableData::default(),
         };
         let mob_arc = Arc::new(cow);
@@ -116,6 +164,17 @@ impl CowEntity {
         let variant = self.variant.load(Ordering::Relaxed);
         if variant == VARIANT_UNSET {
             cow_variant::TEMPERATE
+        } else {
+            variant
+        }
+    }
+
+    /// `Cow.getSoundVariant`, with the pre-roll sentinel reading as the classic default
+    /// (Cow.java:50).
+    pub fn get_sound_variant(&self) -> u8 {
+        let variant = self.sound_variant.load(Ordering::Relaxed);
+        if variant == VARIANT_UNSET {
+            cow_sound_variant::CLASSIC
         } else {
             variant
         }
@@ -176,6 +235,10 @@ impl NBTStorage for CowEntity {
             // temperate, the registry default `define`d in the constructor (Cow.java:49) --
             // same unavoidable-default reasoning as sheep.rs:57-63.
             nbt.put_string("variant", cow_variant::name(self.get_variant()).to_string());
+            nbt.put_string(
+                "sound_variant",
+                cow_sound_variant::name(self.get_sound_variant()).to_string(),
+            );
         })
     }
 
@@ -192,6 +255,13 @@ impl NBTStorage for CowEntity {
             {
                 self.variant.store(variant, Ordering::Relaxed);
             }
+            // Cow.java:67-69: a missing or unknown `sound_variant` keeps the classic default,
+            // so a loaded cow is never re-rolled.
+            let sound_variant = nbt
+                .get_string("sound_variant")
+                .and_then(cow_sound_variant::from_name)
+                .unwrap_or(cow_sound_variant::CLASSIC);
+            self.sound_variant.store(sound_variant, Ordering::Relaxed);
         })
     }
 }
@@ -217,10 +287,34 @@ impl Mob for CowEntity {
 
     /// Vanilla `Cow.setVariant` accepts any registered cow variant key (Cow.java:90-92); the
     /// spawn-egg data-component path resolves names through this hook.
+    /// `COW_SOUND_VARIANT` (Cow.java:139-141) arrives through the same hook; its names are
+    /// disjoint from the model variant's.
     fn mob_set_variant_name(&self, name: &str) {
         if let Some(variant) = cow_variant::from_name(name) {
             self.variant.store(variant, Ordering::Relaxed);
+        } else if let Some(sound_variant) = cow_sound_variant::from_name(name) {
+            self.sound_variant.store(sound_variant, Ordering::Relaxed);
         }
+    }
+
+    /// `AbstractCow.getAmbientSound` via `Cow.getSoundSet` (AbstractCow.java:59-62,
+    /// Cow.java:107-109).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(cow_sound_variant::sounds(self.get_sound_variant()).0)
+    }
+
+    /// `AbstractCow.getHurtSound` (AbstractCow.java:64-67).
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(cow_sound_variant::sounds(self.get_sound_variant()).1)
+    }
+
+    /// `AbstractCow.playStepSound` (AbstractCow.java:74-77) at the default 0.15 volume.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(cow_sound_variant::sounds(self.get_sound_variant()).2)
+    }
+
+    fn get_sound_volume(&self) -> f32 {
+        COW_SOUND_VOLUME
     }
 
     /// Sends the tracked variant (Cow.java:33, defined to temperate at Cow.java:49) and the
@@ -238,12 +332,27 @@ impl Mob for CowEntity {
                 let variant = Self::select_spawn_variant(world.get_biome(&pos));
                 self.variant.store(variant, Ordering::Relaxed);
             }
+            // `CowSoundVariants.pickRandomSoundVariant`: a uniform registry pick.
+            if self.sound_variant.load(Ordering::Relaxed) == VARIANT_UNSET {
+                let sound_variant = if rand::rng().random_bool(0.5) {
+                    cow_sound_variant::MOODY
+                } else {
+                    cow_sound_variant::CLASSIC
+                };
+                self.sound_variant.store(sound_variant, Ordering::Relaxed);
+            }
 
             entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::cow::VARIANT,
-                    VarInt(i32::from(self.get_variant())),
-                )],
+                &[
+                    Metadata::new(
+                        pumpkin_data::tracked_data::cow::VARIANT,
+                        VarInt(i32::from(self.get_variant())),
+                    ),
+                    Metadata::new(
+                        pumpkin_data::tracked_data::cow::SOUND_VARIANT,
+                        VarInt(i32::from(self.get_sound_variant())),
+                    ),
+                ],
                 None,
             );
 
@@ -263,7 +372,7 @@ impl Mob for CowEntity {
         super::animal::Animal::get_walk_target_value(self, pos)
     }
 
-    /// Vanilla `Cow.getBreedOffspring` (Cow.java:75): the calf takes one of its parents'
+    /// Vanilla `Cow.getBreedOffspring` (Cow.java:72-78): the calf takes one of its parents'
     /// variants at random.
     fn create_offspring<'a>(
         &'a self,
@@ -288,6 +397,12 @@ impl Mob for CowEntity {
                 if let Some(calf) = baby.cast_any().downcast_ref::<Self>() {
                     calf.variant.store(picked, Ordering::Relaxed);
                 }
+            }
+            // Breeding skips `finalizeSpawn` (Animal.java:209-216), so a calf keeps the classic
+            // sound set instead of rolling one.
+            if let Some(calf) = baby.cast_any().downcast_ref::<Self>() {
+                calf.sound_variant
+                    .store(cow_sound_variant::CLASSIC, Ordering::Relaxed);
             }
 
             Some(baby)

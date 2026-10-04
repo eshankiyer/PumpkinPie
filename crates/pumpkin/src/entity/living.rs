@@ -6549,6 +6549,7 @@ impl EntityBase for LivingEntity {
                     .and_then(Mob::get_hurt_sound)
                     .unwrap_or_else(|| self.hurt_sound());
                 let pitch = caller.get_mob().map_or(1.0, Mob::get_sound_pitch);
+                let volume = caller.get_mob().map_or(1.0, Mob::get_sound_volume);
                 // `LivingEntity.makeSound` passes `getVoicePitch` to the sound packet
                 // (`LivingEntity.java:1427-1434`).
                 // `Mob.playHurtSound` delegates to `LivingEntity.playHurtSound`, whose
@@ -6563,7 +6564,7 @@ impl EntityBase for LivingEntity {
                     hurt_sound,
                     sound_category,
                     &self.entity.pos.load(),
-                    1.0,
+                    volume,
                     pitch,
                 );
 

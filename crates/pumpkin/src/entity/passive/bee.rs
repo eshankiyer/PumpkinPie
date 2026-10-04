@@ -441,7 +441,18 @@ impl BeeEntity {
     /// `Bee.isTooFarAway`.
     #[must_use]
     fn is_too_far_away(&self, pos: BlockPos) -> bool {
-        !self.closer_than(pos, TOO_FAR_FROM_HIVE)
+        !self.block_closer_than(pos, TOO_FAR_FROM_HIVE)
+    }
+
+    /// `Bee.closerThan(BlockPos, int)`: `Vec3i.closerThan` between the target and the bee's
+    /// block position, i.e. the low-corner squared block distance.
+    #[must_use]
+    fn block_closer_than(&self, pos: BlockPos, distance: f64) -> bool {
+        let bee_pos = self.mob_entity.living_entity.entity.block_pos.load();
+        let dx = f64::from(pos.0.x) - f64::from(bee_pos.0.x);
+        let dy = f64::from(pos.0.y) - f64::from(bee_pos.0.y);
+        let dz = f64::from(pos.0.z) - f64::from(bee_pos.0.z);
+        dx * dx + dy * dy + dz * dz < distance * distance
     }
 
     /// `Entity.closerThan(BlockPos, double)`, measured against the block centre as vanilla's
@@ -696,7 +707,6 @@ impl Goal for BeePollinateGoal {
             if Self::is_raining(mob).await {
                 return false;
             }
-
             let Some(flower_pos) = Self::find_nearby_flower(mob) else {
                 bee.flower_cooldown.store(
                     mob.get_random().random_range(
@@ -715,7 +725,10 @@ impl Goal for BeePollinateGoal {
                 Self::flower_target(flower_pos),
                 1.2,
             ));
-            true
+            drop(navigator);
+            // `BaseBeeGoal.canUse` is `canBeeUse() && !isAngry()`: the flower search and its
+            // side effects run first, even for an angry bee.
+            !bee_is_angry(&bee)
         })
     }
 
@@ -730,10 +743,13 @@ impl Goal for BeePollinateGoal {
             if Self::is_raining(mob).await {
                 return false;
             }
-            if self.has_pollinated_long_enough() {
-                return mob.get_random().random::<f32>() < 0.2;
-            }
-            true
+            let keep = if self.has_pollinated_long_enough() {
+                mob.get_random().random::<f32>() < 0.2
+            } else {
+                true
+            };
+            // `BaseBeeGoal.canContinueToUse`.
+            keep && !bee_is_angry(&bee)
         })
     }
 
@@ -860,7 +876,8 @@ impl Goal for BeeEnterHiveGoal {
                 bee.hive_pos.store(None);
                 return false;
             }
-            true
+            // `BaseBeeGoal.canUse`.
+            !bee_is_angry(&bee)
         })
     }
 
@@ -956,6 +973,7 @@ impl Goal for BeeLocateHiveGoal {
             bee.hive_cooldown.load(Relaxed) == 0
                 && !bee.has_hive()
                 && bee.wants_to_enter_hive().await
+                && !bee_is_angry(&bee)
         })
     }
 
@@ -1021,21 +1039,23 @@ impl BeeGoToHiveGoal {
 
     /// `BeeGoToHiveGoal.hasReachedTarget`, reduced to the distance half.
     fn has_reached_target(bee: &BeeEntity, hive_pos: BlockPos) -> bool {
-        bee.closer_than(hive_pos, HIVE_ENTER_DISTANCE)
+        bee.block_closer_than(hive_pos, HIVE_ENTER_DISTANCE)
     }
 
+    /// `BeeGoToHiveGoal.canBeeUse` plus the `BaseBeeGoal` anger gate.
     async fn can_use(bee: &BeeEntity) -> bool {
         let Some(hive_pos) = bee.hive_pos.load() else {
             return false;
         };
-        if bee.is_too_far_away(hive_pos) || Self::has_reached_target(bee, hive_pos) {
+        // `hasHome` is the mob's leash home restriction, not `hasHive`.
+        if bee.is_too_far_away(hive_pos) || bee.mob_entity.has_home() {
             return false;
         }
-        if !bee.wants_to_enter_hive().await {
+        if !bee.wants_to_enter_hive().await || Self::has_reached_target(bee, hive_pos) {
             return false;
         }
         let world = bee.mob_entity.living_entity.entity.world.load();
-        is_beehive(world.get_block(&hive_pos))
+        is_beehive(world.get_block(&hive_pos)) && !bee_is_angry(bee)
     }
 
     fn hive_target(hive_pos: BlockPos) -> Vector3<f64> {
@@ -1657,7 +1677,7 @@ impl Goal for BeeValidateFlowerGoal {
 
 /// `Bee.BeeGoToKnownFlowerGoal` (`Bee.java:888-938`).
 ///
-/// A homeless bee that has gone 600 ticks without nectar flies back to the flower it remembers,
+/// An unleashed bee that has gone 600 ticks without nectar flies back to the flower it remembers,
 /// giving up (and forgetting the flower) after 2400 ticks of travel or if the flower turns out to
 /// be too far away.
 pub struct BeeGoToKnownFlowerGoal {
@@ -1679,13 +1699,14 @@ impl BeeGoToKnownFlowerGoal {
         let Some(flower_pos) = bee.flower_pos.load() else {
             return false;
         };
-        if bee.has_hive() {
+        // `Mob.hasHome` (a leash restriction), not `Bee.hasHive`.
+        if bee.mob_entity.has_home() {
             return false;
         }
         if bee.ticks_without_nectar() <= TICKS_WITHOUT_NECTAR_BEFORE_SEEKING_KNOWN_FLOWER {
             return false;
         }
-        !bee.closer_than(flower_pos, 2.0) && !bee_is_angry(bee)
+        !bee.block_closer_than(flower_pos, 2.0) && !bee_is_angry(bee)
     }
 }
 

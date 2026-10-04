@@ -23,7 +23,6 @@ use pumpkin_inventory::screen_handler::{
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::GameMode;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::{Inventory, SimpleInventory};
@@ -59,7 +58,7 @@ const NAUTILUS_TEMPT_ITEMS: &[&Item] = &[
 const RESTRICTION_RADIUS_BUFFER: i32 = 8;
 
 /// `AbstractNautilus.getNautilusRestrictionRadius` (`AbstractNautilus.java:241-243`).
-const fn restriction_radius(is_baby: bool, is_saddled: bool) -> i32 {
+pub(crate) const fn restriction_radius(is_baby: bool, is_saddled: bool) -> i32 {
     if !is_baby && !is_saddled { 32 } else { 16 }
 }
 
@@ -69,6 +68,30 @@ const fn restriction_radius(is_baby: bool, is_saddled: bool) -> i32 {
 fn needs_rehome(has_home: bool, dist_sq: f64, radius: i32, home_radius: i32) -> bool {
     let limit = f64::from(radius + RESTRICTION_RADIUS_BUFFER);
     !has_home || dist_sq >= limit * limit || radius != home_radius
+}
+
+/// The re-anchor half of `AbstractNautilus.checkRestriction` (`AbstractNautilus.java:248-250`),
+/// shared by both nautilus species once the tame/unleashed/unridden gate has passed.
+pub(crate) fn rehome_if_needed(mob_entity: &MobEntity, radius: i32) {
+    let entity = &mob_entity.living_entity.entity;
+    let home_radius = mob_entity.position_target_range.load(Ordering::Relaxed);
+    let home = mob_entity.position_target.load();
+    let pos = entity.block_pos.load();
+    let dx = f64::from(home.0.x) - f64::from(pos.0.x);
+    let dy = f64::from(home.0.y) - f64::from(pos.0.y);
+    let dz = f64::from(home.0.z) - f64::from(pos.0.z);
+    // `hasHome()` is `homeRadius != -1` (`Mob.java:1225-1227`).
+    if needs_rehome(
+        home_radius != -1,
+        dx.mul_add(dx, dy.mul_add(dy, dz * dz)),
+        radius,
+        home_radius,
+    ) {
+        mob_entity.position_target.store(pos);
+        mob_entity
+            .position_target_range
+            .store(radius, Ordering::Relaxed);
+    }
 }
 
 /// A nautilus (`net/minecraft/world/entity/animal/nautilus/Nautilus.java`, behaviour in
@@ -174,25 +197,10 @@ impl NautilusEntity {
         }
 
         let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-        let radius = restriction_radius(is_baby, self.is_saddled.load(Ordering::Relaxed));
-        let home_radius = self.mob_entity.position_target_range.load(Ordering::Relaxed);
-        let home = self.mob_entity.position_target.load();
-        let pos = entity.block_pos.load();
-        let dx = f64::from(home.0.x) - f64::from(pos.0.x);
-        let dy = f64::from(home.0.y) - f64::from(pos.0.y);
-        let dz = f64::from(home.0.z) - f64::from(pos.0.z);
-        // `hasHome()` is `homeRadius != -1` (`Mob.java:1225-1227`).
-        if needs_rehome(
-            home_radius != -1,
-            dx.mul_add(dx, dy.mul_add(dy, dz * dz)),
-            radius,
-            home_radius,
-        ) {
-            self.mob_entity.position_target.store(pos);
-            self.mob_entity
-                .position_target_range
-                .store(radius, Ordering::Relaxed);
-        }
+        rehome_if_needed(
+            &self.mob_entity,
+            restriction_radius(is_baby, self.is_saddled.load(Ordering::Relaxed)),
+        );
     }
 
     /// `AbstractNautilus.usePlayerItem` (`AbstractNautilus.java:102-108`): bucket foods become
@@ -207,23 +215,7 @@ impl NautilusEntity {
             return;
         }
 
-        let mut filled = ItemStack::new(1, &Item::WATER_BUCKET);
-        if player.gamemode.load() == GameMode::Creative {
-            if !player.inventory.contains_item(&Item::WATER_BUCKET) {
-                player.inventory.insert_stack_anywhere(&mut filled).await;
-            }
-            return;
-        }
-
-        item_stack.decrement(1);
-        if item_stack.is_empty() {
-            *item_stack = filled;
-        } else {
-            player
-                .inventory
-                .offer_or_drop_stack(filled, &**player)
-                .await;
-        }
+        super::animal::fill_water_bucket_result(player, item_stack).await;
     }
 
     /// `AbstractNautilus.tryToTame` (`AbstractNautilus.java:434-444`).
@@ -456,6 +448,15 @@ impl Animal for NautilusEntity {
             tag::Item::MINECRAFT_NAUTILUS_FOOD
         };
         tag.1.contains(&item_stack.item.id)
+    }
+
+    /// `AbstractNautilus.usePlayerItem` also covers `Animal.mobInteract`'s feeding branches.
+    fn animal_use_player_item<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(Self::use_player_item(player, item_stack))
     }
 }
 

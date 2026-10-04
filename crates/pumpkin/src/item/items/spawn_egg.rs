@@ -12,7 +12,7 @@ use crate::server::Server;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::data_component_impl::{
-    AxolotlVariantImpl, CatVariantImpl, ChickenVariantImpl, CowVariantImpl, FoxVariantImpl,
+    AxolotlVariantImpl, CatVariantImpl, ChickenVariantImpl, CowSoundVariantImpl, CowVariantImpl, FoxVariantImpl,
     FrogVariantImpl, HorseVariantImpl, LlamaVariantImpl, MooshroomVariantImpl, PigVariantImpl,
     RabbitVariantImpl, SheepColorImpl, ShulkerColorImpl, VillagerVariantImpl, WolfVariantImpl,
     ParrotVariantImpl, ZombieNautilusVariantImpl,
@@ -128,6 +128,11 @@ pub(crate) fn apply_entity_variant(item: &ItemStack, mob: &dyn EntityBase) {
     } else if let Some(comp) = item.get_data_component::<ShulkerColorImpl>() {
         mob.set_variant_name(&comp.value);
     } else if let Some(comp) = item.get_data_component::<ParrotVariantImpl>() {
+        mob.set_variant_name(&comp.value);
+    }
+    // `Cow.applyImplicitComponents` applies COW_SOUND_VARIANT independently of COW_VARIANT
+    // (Cow.java:126-130), so it cannot sit in the chain above.
+    if let Some(comp) = item.get_data_component::<CowSoundVariantImpl>() {
         mob.set_variant_name(&comp.value);
     }
 }

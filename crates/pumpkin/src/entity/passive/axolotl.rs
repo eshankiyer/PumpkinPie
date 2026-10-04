@@ -6,22 +6,28 @@ use std::sync::{Arc, Weak};
 
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::RngExt;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        axolotl_play_dead::AxolotlPlayDeadGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
-        non_tame_random_target::NonTameRandomTargetGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        axolotl_play_dead::AxolotlPlayDeadGoal, breed::BreedGoal, follow_parent::FollowParentGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal, non_tame_random_target::NonTameRandomTargetGoal,
+        swim::SwimGoal, tempt::TemptGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
+    passive::animal::{Animal, fill_water_bucket_result},
     player::Player,
 };
 use crate::world::World;
@@ -58,7 +64,7 @@ async fn axolotl_attackable(
 /// The id is what `DATA_VARIANT` and the `Variant` NBT tag both carry; vanilla's `common` flag
 /// marks the four naturally spawning colours, leaving blue as the breeding-only rare
 /// (`getSpawnVariant`, `Axolotl.java:671-674`).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AxolotlVariant {
     Lucy = 0,
     Wild = 1,
@@ -68,7 +74,7 @@ pub enum AxolotlVariant {
 }
 
 /// `Axolotl.Variant.getSpawnVariant(random, true)`: a uniform pick over the common colours.
-const COMMON_VARIANTS: [AxolotlVariant; 4] = [
+pub(crate) const COMMON_VARIANTS: [AxolotlVariant; 4] = [
     AxolotlVariant::Lucy,
     AxolotlVariant::Wild,
     AxolotlVariant::Gold,
@@ -96,6 +102,53 @@ impl AxolotlVariant {
     pub const fn id(self) -> i32 {
         self as i32
     }
+
+    /// `Axolotl.Variant.getCommonSpawnVariant` (`Axolotl.java:664-666`).
+    pub(crate) fn random_common() -> Self {
+        COMMON_VARIANTS[rand::rng().random_range(0..COMMON_VARIANTS.len())]
+    }
+
+    /// The `Axolotl.Variant` serialized names (`lucy`, `wild`, `gold`, `cyan`, `blue`), with an
+    /// optional `minecraft:` prefix as spawn-egg components carry it.
+    fn from_name(name: &str) -> Option<Self> {
+        match name.strip_prefix("minecraft:").unwrap_or(name) {
+            "lucy" => Some(Self::Lucy),
+            "wild" => Some(Self::Wild),
+            "gold" => Some(Self::Gold),
+            "cyan" => Some(Self::Cyan),
+            "blue" => Some(Self::Blue),
+            _ => None,
+        }
+    }
+}
+
+/// `Axolotl.isFood` is `#minecraft:axolotl_food` (`Axolotl.java:360-362`), whose only member is
+/// the tropical fish bucket; `FollowTemptation` uses the same items.
+const TEMPT_ITEMS: &[&Item] = &[&Item::TROPICAL_FISH_BUCKET];
+
+/// `Axolotl.useRareVariant` (`Axolotl.java:309-311`): one bred baby in 1200 is blue.
+const RARE_VARIANT_CHANCE: u32 = 1200;
+
+/// `Axolotl.AxolotlGroupData.getVariant` plus the baby half of `Axolotl.finalizeSpawn`
+/// (`Axolotl.java:160-183, 585-596`) for one natural-spawn group member. The first member of a
+/// group creates the pair of common colours; `group_size` is the number of members already
+/// finalized, so the third and later ones are babies. Returns `(variant, is_baby)`.
+fn natural_group_spawn(
+    group: &mut Option<[AxolotlVariant; 2]>,
+    group_size: i32,
+    pick: usize,
+) -> (AxolotlVariant, bool) {
+    let (pair, is_baby) = if let Some(pair) = group {
+        (*pair, group_size >= 2)
+    } else {
+        let pair = [
+            AxolotlVariant::random_common(),
+            AxolotlVariant::random_common(),
+        ];
+        *group = Some(pair);
+        (pair, false)
+    };
+    (pair[pick], is_baby)
 }
 
 /// Represents an Axolotl, a passive aquatic mob that can play dead to regenerate health.
@@ -106,21 +159,22 @@ impl AxolotlVariant {
 /// `Axolotl.java:281-285`) are carried here as a plain atomic, synced through `DATA_VARIANT` and
 /// round-tripped through the `Variant` NBT tag (`Axolotl.java:139-150`).
 ///
-/// Two halves of vanilla's variant handling are NOT ported, both for want of a hook rather than
-/// by choice:
-/// - `finalizeSpawn`'s `AxolotlGroupData` (`Axolotl.java:160-183`) picks two common colours per
-///   spawn group and gives every member of that group one of the two. Pumpkin has no
-///   `finalizeSpawn`/spawn-group-data hook, so each axolotl rolls its own common colour in
-///   `new()` -- naturally spawned groups here are more varied than vanilla's.
-/// - `getBreedOffspring`'s inheritance and the 1-in-1200 rare-blue roll
-///   (`Axolotl.java:342-357`, `useRareVariant`, `Axolotl.java:309-311`). `AxolotlEntity`
-///   implements neither `Animal` nor `AgeableMob`, so it cannot breed at all yet; blue axolotls
-///   are therefore unobtainable, since vanilla never spawns them naturally. Wiring this is a
-///   follow-up on the missing `Animal` impl, not on the variant field.
+/// Variant selection:
+/// - Natural spawns go through [`AxolotlEntity::finalize_natural_spawn`], the port of
+///   `finalizeSpawn`'s `AxolotlGroupData` (`Axolotl.java:160-183`): each spawn group shares two
+///   common colours, and its third and later members are babies. Every other spawn path keeps the
+///   uniform common-colour roll made in `new()`, which is what fresh group data gives vanilla.
+/// - Breeding (`getBreedOffspring`, `Axolotl.java:342-357`) inherits a parent's colour, or is
+///   blue with a 1-in-1200 chance (`useRareVariant`, `Axolotl.java:309-311`).
+///
+/// Feeding plays `entity.axolotl.idle_water` through `animal_interact`, like every other
+/// `Animal` here; vanilla's axolotl inherits the empty `Animal.playEatingSound`
+/// (`Animal.java:165-166`) and is silent, so that sound is a known divergence.
 pub struct AxolotlEntity {
     pub mob_entity: MobEntity,
     /// `Axolotl.DATA_VARIANT` (`Axolotl.java:83`), stored as the variant's id.
     variant: AtomicI32,
+    pub ageable_data: AgeableData,
 }
 
 impl AxolotlEntity {
@@ -128,10 +182,11 @@ impl AxolotlEntity {
         let mob_entity = MobEntity::new(entity);
         // See the struct doc: stands in for `finalizeSpawn`. An axolotl loaded from disk
         // overwrites this in `read_nbt_non_mut`, so the roll is harmless for loaded ones.
-        let variant = COMMON_VARIANTS[rand::rng().random_range(0..COMMON_VARIANTS.len())];
+        let variant = AxolotlVariant::random_common();
         let axolotl = Self {
             mob_entity,
             variant: AtomicI32::new(variant.id()),
+            ageable_data: AgeableData::default(),
         };
         let mob_arc = Arc::new(axolotl);
         let mob_weak: Weak<dyn Mob> = {
@@ -151,12 +206,19 @@ impl AxolotlEntity {
             // Vanilla `MeleeAttack.create(20)`: 20-tick attack cooldown, matched by
             // `MeleeAttackGoal`'s fixed `attack_interval_ticks`.
             goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, true)));
-            goal_selector.add_goal(3, Box::new(WanderAroundGoal::new(1.0)));
+            // `AxolotlAi.initIdleActivity` (`AxolotlAi.java:91-104`): `AnimalMakeLove(0.2F)` at 1
+            // outranks the `FollowTemptation`/`BabyFollowAdult` pair at 2 (in-water speeds 0.5
+            // and 0.6). Both sit below the attack, since FIGHT replaces IDLE while there is a
+            // target.
+            goal_selector.add_goal(3, BreedGoal::new(0.2));
+            goal_selector.add_goal(4, Box::new(TemptGoal::new(0.5, TEMPT_ITEMS, false)));
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(0.6)));
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
-                4,
+                6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
             );
-            goal_selector.add_goal(5, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(
@@ -207,6 +269,23 @@ impl AxolotlEntity {
         AxolotlVariant::by_id(self.variant.load(Relaxed))
     }
 
+    /// `Axolotl.finalizeSpawn` (`Axolotl.java:160-183`) for a natural spawn, with `group` the
+    /// spawn group's `AxolotlGroupData` colours (reset per group by the caller) and `group_size`
+    /// the members of this group finalized so far. Runs before the entity is spawned, so
+    /// `mob_init_data_tracker` syncs the result.
+    pub(crate) fn finalize_natural_spawn(
+        &self,
+        group: &mut Option<[AxolotlVariant; 2]>,
+        group_size: i32,
+    ) {
+        let (variant, is_baby) =
+            natural_group_spawn(group, group_size, rand::rng().random_range(0..2));
+        self.variant.store(variant.id(), Relaxed);
+        if is_baby {
+            self.set_baby(true);
+        }
+    }
+
     /// `Axolotl.setVariant` (`Axolotl.java:285-287`).
     pub fn set_variant(&self, variant: AxolotlVariant) {
         self.variant.store(variant.id(), Relaxed);
@@ -224,6 +303,8 @@ impl NBTStorage for AxolotlEntity {
             // `Axolotl.addAdditionalSaveData` (`Axolotl.java:139-143`). `FromBucket` is not
             // written: nothing here sets it, since axolotl bucketing lives in `item/`.
             nbt.put_int("Variant", self.variant.load(Relaxed));
+            self.write_ageable_nbt(nbt);
+            self.write_animal_nbt(nbt);
         })
     }
 
@@ -235,6 +316,46 @@ impl NBTStorage for AxolotlEntity {
                 .get_int("Variant")
                 .map_or(AxolotlVariant::DEFAULT, AxolotlVariant::by_id);
             self.variant.store(variant.id(), Relaxed);
+            self.read_ageable_nbt(nbt);
+            self.read_animal_nbt(nbt);
+        })
+    }
+}
+
+impl AgeableMob for AxolotlEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+
+    /// `Axolotl.BABY_DIMENSIONS` (`Axolotl.java:113-115`).
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.375, 0.21, 0.09375))
+    }
+}
+
+impl Animal for AxolotlEntity {
+    fn as_ageable_mob(&self) -> Option<&dyn AgeableMob> {
+        Some(self)
+    }
+
+    /// `Axolotl.isFood` (`Axolotl.java:360-362`).
+    fn is_food(&self, item_stack: &ItemStack) -> bool {
+        item_stack.item.has_tag(&tag::Item::MINECRAFT_AXOLOTL_FOOD)
+    }
+
+    /// `Axolotl.usePlayerItem` (`Axolotl.java:545-551`): the tropical fish bucket leaves a water
+    /// bucket behind.
+    fn animal_use_player_item<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if item_stack.item == &Item::TROPICAL_FISH_BUCKET {
+                fill_water_bucket_result(player, item_stack).await;
+            } else {
+                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            }
         })
     }
 }
@@ -244,15 +365,80 @@ impl Mob for AxolotlEntity {
         &self.mob_entity
     }
 
+    /// Sends the variant, plus the baby flag the `Mob` default would have sent.
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
-            self.get_entity().send_meta_data(
+            let entity = self.get_entity();
+            entity.send_meta_data(
                 &[Metadata::new(
                     tracked_data::axolotl::VARIANT,
                     self.variant.load(Relaxed),
                 )],
                 None,
             );
+            if entity.age.load(Relaxed) < 0 {
+                entity.send_meta_data(
+                    &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
+                    None,
+                );
+            }
+        })
+    }
+
+    /// `Axolotl.applyImplicitComponent` for `AXOLOTL_VARIANT` (`Axolotl.java:300-307`).
+    fn mob_set_variant_name(&self, name: &str) {
+        if let Some(variant) = AxolotlVariant::from_name(name) {
+            self.variant.store(variant.id(), Relaxed);
+        }
+    }
+
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.ageable_ai_step();
+        })
+    }
+
+    /// `Axolotl.mobInteract` (`Axolotl.java:429-431`). The bucket pickup that vanilla tries first
+    /// runs from the water bucket's own entity use when this returns false, and a water bucket is
+    /// never axolotl food, so the order is the same.
+    fn mob_interact<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, bool> {
+        self.animal_interact(player, item_stack, Sound::EntityAxolotlIdleWater)
+    }
+
+    /// `Axolotl.getBreedOffspring` (`Axolotl.java:342-357`). `BreedGoal` marks the baby
+    /// persistent and sets its baby age; breeding never reaches `finalizeSpawn`.
+    fn create_offspring<'a>(
+        &'a self,
+        mate: &'a dyn EntityBase,
+        world: &'a Arc<World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let baby = crate::entity::r#type::from_type(
+                entity.entity_type,
+                entity.pos.load(),
+                world,
+                uuid::Uuid::new_v4(),
+            );
+            let mut rng = rand::rng();
+            let variant = if rng.random_range(0..RARE_VARIANT_CHANCE) == 0 {
+                // `getRareSpawnVariant`: blue is the only non-common colour.
+                AxolotlVariant::Blue
+            } else if rng.random_bool(0.5) {
+                self.variant()
+            } else {
+                mate.cast_any()
+                    .downcast_ref::<Self>()
+                    .map_or_else(|| self.variant(), Self::variant)
+            };
+            if let Some(child) = baby.cast_any().downcast_ref::<Self>() {
+                child.variant.store(variant.id(), Relaxed);
+            }
+            Some(baby)
         })
     }
 
@@ -333,5 +519,52 @@ impl Mob for AxolotlEntity {
 
             Self::apply_supporting_effects(player).await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AxolotlVariant, COMMON_VARIANTS, TEMPT_ITEMS, natural_group_spawn};
+    use pumpkin_data::tag::{self, Taggable};
+
+    #[test]
+    fn tempt_items_match_axolotl_food_tag() {
+        // Vanilla tempts with `Axolotl.isFood`, i.e. `#minecraft:axolotl_food`.
+        for item in TEMPT_ITEMS {
+            assert!(
+                item.has_tag(&tag::Item::MINECRAFT_AXOLOTL_FOOD),
+                "{} is not in #minecraft:axolotl_food",
+                item.registry_key
+            );
+        }
+        assert_eq!(TEMPT_ITEMS.len(), tag::Item::MINECRAFT_AXOLOTL_FOOD.0.len());
+    }
+
+    #[test]
+    fn natural_group_shares_two_colours_and_babies_from_third() {
+        let mut group = None;
+        let (first, first_baby) = natural_group_spawn(&mut group, 0, 0);
+        let pair = group.expect("first member creates the group data");
+        assert_eq!(first, pair[0]);
+        assert!(!first_baby);
+        assert!(pair.iter().all(|v| COMMON_VARIANTS.contains(v)));
+
+        let (second, second_baby) = natural_group_spawn(&mut group, 1, 1);
+        assert_eq!(second, pair[1]);
+        assert!(!second_baby);
+        assert_eq!(group, Some(pair));
+
+        let (_, third_baby) = natural_group_spawn(&mut group, 2, 0);
+        assert!(third_baby);
+    }
+
+    #[test]
+    fn variant_names_include_blue_and_prefix() {
+        assert_eq!(
+            AxolotlVariant::from_name("minecraft:blue"),
+            Some(AxolotlVariant::Blue)
+        );
+        assert_eq!(AxolotlVariant::from_name("cyan"), Some(AxolotlVariant::Cyan));
+        assert_eq!(AxolotlVariant::from_name("pink"), None);
     }
 }

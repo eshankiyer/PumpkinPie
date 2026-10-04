@@ -512,6 +512,12 @@ impl MobEntity {
 
     /// Vanilla `Mob.clearHome` (`Mob.java:1221-1223`) removes the active home restriction while
     /// leaving the stored center untouched.
+    /// `Mob.hasHome`: a home restriction is set (`homeRadius != -1`).
+    #[must_use]
+    pub fn has_home(&self) -> bool {
+        self.position_target_range.load(Relaxed) != -1
+    }
+
     pub fn clear_home(&self) {
         self.position_target_range.store(-1, Relaxed);
     }
@@ -1790,6 +1796,12 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `LivingEntity.getSoundVolume` (LivingEntity.java:2317-2319), the volume
+    /// `makeSound` plays ambient and hurt sounds at (LivingEntity.java:1431-1435).
+    fn get_sound_volume(&self) -> f32 {
+        1.0
+    }
+
     /// Vanilla `LivingEntity.getVoicePitch` is consumed by `makeSound` for mob sounds
     /// (`LivingEntity.java:1431-1434, 2321-2325`).
     fn get_sound_pitch(&self) -> f32 {
@@ -1849,7 +1861,7 @@ pub trait Mob: EntityBase + Send + Sync {
                     sound,
                     self.get_sound_source(),
                     &entity.pos.load(),
-                    1.0,
+                    self.get_sound_volume(),
                     self.get_sound_pitch(),
                 );
             }

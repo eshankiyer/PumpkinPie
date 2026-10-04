@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::{Block, item_stack::ItemStack};
+use pumpkin_data::{Block, item::Item, item_stack::ItemStack};
 
 use crate::entity::{
     EntityBaseFuture,
@@ -11,6 +11,7 @@ use crate::entity::{
     player::Player,
 };
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
+use pumpkin_util::GameMode;
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 
 pub trait Animal: Mob {
@@ -43,6 +44,19 @@ pub trait Animal: Mob {
     /// (horses, llamas, cats, ocelots, nautilus) have no age-lock/forced-age state to route through.
     fn as_ageable_mob(&self) -> Option<&dyn AgeableMob> {
         None
+    }
+
+    /// Vanilla `Animal.usePlayerItem` as called from both feeding branches of
+    /// `Animal.mobInteract` (`Animal.java:137-160`). The default consumes one item; species whose
+    /// food leaves a container behind (axolotl, nautilus) override it.
+    fn animal_use_player_item<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        })
     }
 
     fn play_eating_sound(&self, sound: Sound) {
@@ -86,7 +100,7 @@ pub trait Animal: Mob {
                     .load(std::sync::atomic::Ordering::Relaxed);
 
                 if age >= 0 && mob_entity.is_breeding_ready() && !mob_entity.is_in_love() {
-                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                    self.animal_use_player_item(player, item_stack).await;
 
                     mob_entity.set_love_ticks(600, Some(player.gameprofile.id));
                     let entity = &mob_entity.living_entity.entity;
@@ -116,7 +130,7 @@ pub trait Animal: Mob {
                 let can_age_up = self.can_age_up()
                     && ageable.map_or(age < 0, AgeableMob::can_age_up);
                 if can_age_up {
-                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                    self.animal_use_player_item(player, item_stack).await;
                     let seconds = speed_up_seconds_when_feeding(-age);
                     if let Some(ageable) = ageable {
                         ageable.age_up(seconds, true);
@@ -151,5 +165,31 @@ pub trait Animal: Mob {
                 .mob_interact(player, item_stack, self.can_be_leashed())
                 .await
         })
+    }
+}
+
+/// `ItemUtils.createFilledResult(stack, player, new ItemStack(WATER_BUCKET))` with the creative
+/// stack-size limit (`ItemUtils.java:16-37`): the bucket-food `usePlayerItem` override of the
+/// axolotl (`Axolotl.java:545-551`) and the nautilus (`AbstractNautilus.java:102-108`). In
+/// creative a water bucket is added only if the inventory has none and the stack is kept;
+/// otherwise one item is consumed and the bucket replaces an emptied stack or goes to the
+/// inventory, dropping if it does not fit.
+pub(crate) async fn fill_water_bucket_result(player: &Arc<Player>, item_stack: &mut ItemStack) {
+    let mut filled = ItemStack::new(1, &Item::WATER_BUCKET);
+    if player.gamemode.load() == GameMode::Creative {
+        if !player.inventory.contains_item(&Item::WATER_BUCKET) {
+            player.inventory.insert_stack_anywhere(&mut filled).await;
+        }
+        return;
+    }
+
+    item_stack.decrement(1);
+    if item_stack.is_empty() {
+        *item_stack = filled;
+    } else {
+        player
+            .inventory
+            .offer_or_drop_stack(filled, &**player)
+            .await;
     }
 }

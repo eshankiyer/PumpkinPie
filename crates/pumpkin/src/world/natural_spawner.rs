@@ -1,4 +1,5 @@
 use crate::entity::EntityBase;
+use crate::entity::passive::axolotl::{AxolotlEntity, AxolotlVariant};
 use crate::entity::passive::polar_bear::PolarBearEntity;
 use crate::entity::passive::tropical_fish::TropicalFishEntity;
 use crate::entity::r#type::{
@@ -72,12 +73,22 @@ fn initialize_schooling_spawn(
     mob.is_max_group_size_reached(group_size)
 }
 
-fn finalize_natural_spawn(entity: &Arc<dyn EntityBase>, group_size: i32) {
+/// `axolotl_group` is the spawn group's `AxolotlGroupData` colours: `NaturalSpawner` starts each
+/// group with null group data and threads it through every `finalizeSpawn` of that group
+/// (`NaturalSpawner.java:172, 207`).
+fn finalize_natural_spawn(
+    entity: &Arc<dyn EntityBase>,
+    group_size: i32,
+    axolotl_group: &mut Option<[AxolotlVariant; 2]>,
+) {
     if let Some(polar_bear) = entity.cast_any().downcast_ref::<PolarBearEntity>() {
         // `NaturalSpawner` calls `finalizeSpawn` before incrementing groupSize
         // (`NaturalSpawner.java:198-210`); Polar Bear's override passes the group data to
         // `AgeableMob.finalizeSpawn` (`PolarBear.java:244-251`).
         polar_bear.finalize_spawn(group_size);
+    } else if let Some(axolotl) = entity.cast_any().downcast_ref::<AxolotlEntity>() {
+        // `Axolotl.finalizeSpawn` (`Axolotl.java:160-183`).
+        axolotl.finalize_natural_spawn(axolotl_group, group_size);
     }
 }
 
@@ -669,6 +680,7 @@ pub fn spawn_mobs_for_chunk_generation(
         let start_x = x;
         let start_z = z;
         let mut schooling_leader: Option<Arc<dyn EntityBase>> = None;
+        let mut axolotl_group: Option<[AxolotlVariant; 2]> = None;
         let mut group_size = 0;
 
         for _ in 0..count {
@@ -728,7 +740,7 @@ pub fn spawn_mobs_for_chunk_generation(
                     entity
                         .get_entity()
                         .set_rotation(rand::random::<f32>() * 360., 0.);
-                    finalize_natural_spawn(&entity, group_size);
+                    finalize_natural_spawn(&entity, group_size, &mut axolotl_group);
                     group_size += 1;
                     initialize_schooling_spawn(&entity, &mut schooling_leader, group_size, true);
                     world.spawn_entity_non_save(&entity);
@@ -832,6 +844,7 @@ pub fn spawn_category_for_position(
         let mut inc = 0;
         let mut current_spawner = None;
         let mut schooling_leader: Option<Arc<dyn EntityBase>> = None;
+        let mut axolotl_group: Option<[AxolotlVariant; 2]> = None;
         let mut group_size = 0;
 
         'spawn_loop: while inc < random_group_size {
@@ -909,7 +922,7 @@ pub fn spawn_category_for_position(
             entity
                 .get_entity()
                 .set_rotation(rng().random::<f32>() * 360., 0.);
-            finalize_natural_spawn(&entity, group_size);
+            finalize_natural_spawn(&entity, group_size, &mut axolotl_group);
             let entity_uuid = entity.get_entity().entity_uuid;
 
             spawn_cluster_size += 1;

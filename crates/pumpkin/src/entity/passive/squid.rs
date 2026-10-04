@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
 
 use crossbeam::atomic::AtomicCell;
 
@@ -190,7 +191,13 @@ impl Goal for SquidRandomMovementGoal {
             let Some(movement) = mob.get_movement_vector() else {
                 return;
             };
-            if mob.get_random().random_range(0..50) == 0 || movement.length_squared() <= 1.0e-5 {
+            // Squids far from every player (no reset of `noActionTime`) drift to a halt.
+            if mob.get_mob_entity().no_action_time.load(Relaxed) > 100 {
+                mob.set_movement_vector(Vector3::new(0.0, 0.0, 0.0));
+            } else if mob.get_random().random_range(0..50) == 0
+                || !mob.get_entity().touching_water.load(Relaxed)
+                || movement.length_squared() <= 1.0e-5
+            {
                 let angle = mob.get_random().random_range(0.0..std::f64::consts::TAU);
                 mob.set_movement_vector(Vector3::new(
                     angle.cos() * 0.2,

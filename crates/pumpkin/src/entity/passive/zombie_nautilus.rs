@@ -59,6 +59,10 @@
 //   readers of `MobEntity::love_ticks` outside `ai/goal/breed.rs` are `horse_breed.rs`,
 //   `turtle_lay_egg.rs`, `turtle_travel.rs` and the countdown in `mob/mod.rs:2223`, none of
 //   which spawn offspring for this species — so the null offspring holds by construction.
+// - `AbstractNautilus.checkRestriction` (AbstractNautilus.java:245-258), which pins a tame,
+//   unleashed, unridden zombie nautilus to a 32-block home radius (16 when saddled; it is
+//   never a baby), run at the top of `mob_tick` like vanilla's `customServerAiStep`, plus the
+//   `doPlayerRide` `clearHome` when the ride did not take (AbstractNautilus.java:232-239).
 // - Variant (ZombieNautilus.java:43-45, 121-145): temperate/warm, registry order taken from
 //   `ZombieNautilusVariants.bootstrap` (ZombieNautilusVariants.java:25-28) and confirmed
 //   against the generated `zombie_nautilus_variant` static registry.
@@ -84,9 +88,6 @@
 //   `RevengeGoal`, which is the goal-system analogue. The 400-tick anger expiry
 //   (NautilusAi.java:143) has no equivalent: `RevengeGoal` drops the target on
 //   `TrackTargetGoal`'s own timeout instead.
-// - `AbstractNautilus.checkRestriction` (AbstractNautilus.java:245-252), which pins a tame,
-//   unleashed, unridden nautilus to a 16- or 32-block home radius. Pumpkin's `MobEntity` has
-//   no home-position/restriction concept at all, so there is nothing to set.
 // - The custom mount inventory (`HasCustomInventoryScreen`,
 //   AbstractNautilus.java:484-522). `getInventoryColumns()` is 0 on the base class, so the
 //   screen is empty for both nautilus species anyway; the sibling carries an unused
@@ -127,7 +128,10 @@ use crate::entity::{
         wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
-    passive::animal::Animal,
+    passive::{
+        animal::Animal,
+        nautilus::{rehome_if_needed, restriction_radius},
+    },
     player::Player,
 };
 
@@ -371,6 +375,22 @@ impl ZombieNautilusEntity {
         self.is_tame.load(Ordering::Relaxed)
     }
 
+    /// `AbstractNautilus.checkRestriction` (`AbstractNautilus.java:245-252`). `canBeABaby` is
+    /// false for this species, so the radius depends only on the saddle.
+    async fn check_restriction(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if !self.is_tame() || entity.is_leashed().await {
+            return;
+        }
+        if !entity.passengers.lock().await.is_empty() {
+            return;
+        }
+        rehome_if_needed(
+            &self.mob_entity,
+            restriction_radius(false, self.is_saddled.load(Ordering::Relaxed)),
+        );
+    }
+
     pub fn set_tame(&self, tame: bool, owner: Option<Uuid>) {
         self.is_tame.store(tame, Ordering::Relaxed);
         self.owner.store(owner);
@@ -548,6 +568,8 @@ impl Mob for ZombieNautilusEntity {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;
 
+            self.check_restriction().await;
+
             // `AbstractNautilus.isAggravated` / `isMobControlled`
             // (AbstractNautilus.java:524-530), cached for the sync `can_be_leashed`.
             self.aggravated.store(
@@ -681,6 +703,10 @@ impl Mob for ZombieNautilusEntity {
                             .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
                             .await;
                     }
+                }
+                // `doPlayerRide`: drop the home if nothing ended up aboard.
+                if entity.passengers.lock().await.is_empty() {
+                    self.mob_entity.clear_home();
                 }
                 return true;
             }
