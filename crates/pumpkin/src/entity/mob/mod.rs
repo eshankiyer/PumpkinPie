@@ -564,19 +564,21 @@ impl MobEntity {
         max_spawn_cluster_size_for(self.living_entity.entity.entity_type.id)
     }
 
-    /// Vanilla `Mob.canShearEquipment` and `Mob.attemptToShearEquipment`
-    /// (`Mob.java:568-585`): equipment shearing is available only when this mob is not a
-    /// vehicle, and the first equipped item with a shearing-enabled equippable component is
-    /// removed. The item component is the server-side source of both eligibility and sound.
+    /// Vanilla `Mob.canShearEquipment` (`Mob.java:568-570`): equipment shearing is available
+    /// only when this mob is not a vehicle (`Entity.isVehicle`, i.e. it carries no passengers).
     pub async fn can_shear_equipment(&self, _player: &Player) -> bool {
-        !self.living_entity.entity.has_vehicle().await
+        !self.living_entity.entity.has_passengers().await
     }
 
-    pub async fn attempt_to_shear_equipment(&self, player: &Player) -> bool {
-        if !self.can_shear_equipment(player).await {
-            return false;
-        }
-
+    /// Vanilla `Mob.attemptToShearEquipment` and `Mob.shearItem` (`Mob.java:572-599`): the
+    /// first equipped item with a shearing-enabled equippable component is removed. The item
+    /// component is the server-side source of both eligibility and sound. `held_item` is the
+    /// interacting shears stack, which the interaction dispatcher writes back to the hand.
+    pub async fn attempt_to_shear_equipment(
+        &self,
+        player: &Player,
+        held_item: &mut ItemStack,
+    ) -> bool {
         let slots = [
             EquipmentSlot::MAIN_HAND,
             EquipmentSlot::OFF_HAND,
@@ -605,15 +607,41 @@ impl MobEntity {
             return false;
         };
 
+        let entity = &self.living_entity.entity;
+        let world = entity.world.load();
+        // `heldItem.hurtAndBreak(1, player, hand)` comes first and is a no-op for players with
+        // infinite materials (`ItemStack.java:451-455`).
+        // Vanilla `ItemStack.applyDamage` captures the item before `shrink(1)`, so the
+        // Broken stat is awarded to the shears, not the emptied stack.
+        let broken_item_id = held_item.item.id;
+        if !creative && held_item.damage_item(1) == DamageResult::Broken {
+            player
+                .increment_stat(
+                    pumpkin_data::statistic::StatisticCategory::Broken,
+                    i32::from(broken_item_id),
+                    1,
+                )
+                .await;
+            world.send_entity_status(
+                &player.living_entity.entity,
+                crate::entity::equipment_break_status(&EquipmentSlot::MAIN_HAND),
+                None,
+            );
+            // `damage_item` already shrank the stack by one (emptying a single item).
+            player
+                .sync_hand_slot(
+                    player.inventory.get_selected_slot() as usize,
+                    held_item.clone(),
+                )
+                .await;
+        }
+
         let mut equipment = self.living_entity.entity_equipment.lock().await;
         equipment.put(&slot, ItemStack::EMPTY.clone());
         drop(equipment);
         self.living_entity
             .send_equipment_changes(&[(slot, ItemStack::EMPTY.clone())]);
 
-        let entity = &self.living_entity.entity;
-        let world = entity.world.load();
-        player.damage_held_item(1).await;
         let event_context = world
             .get_player_by_id(player.entity_id())
             .map_or_else(GameEventContext::none, |player| {
@@ -3768,18 +3796,19 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
-            // `Wolf.canShearEquipment` (`Wolf.java:447-450`) overrides the base
-            // `!isVehicle()` check to also require ownership; this codebase has no
-            // per-species override point for the shared shear path, so check it here.
-            let wolf_shear_allowed = (self as &dyn std::any::Any)
-                .downcast_ref::<WolfEntity>()
-                .is_none_or(|wolf| wolf.mob_entity.owner.load() == Some(player.gameprofile.id));
+            // `Entity.interact` (`Entity.java:2289-2293`) gates on `Mob.canShearEquipment`.
+            // `Wolf.canShearEquipment` (`Wolf.java:447-450`) replaces the base `!isVehicle()`
+            // check with ownership only; this codebase has no per-species override point for
+            // the shared shear path, so select it here.
             if item_stack.is_shears()
+                && match (self as &dyn std::any::Any).downcast_ref::<WolfEntity>() {
+                    Some(wolf) => wolf.mob_entity.owner.load() == Some(player.gameprofile.id),
+                    None => self.get_mob_entity().can_shear_equipment(player).await,
+                }
                 && !player.get_entity().is_sneaking()
-                && wolf_shear_allowed
                 && self
                     .get_mob_entity()
-                    .attempt_to_shear_equipment(player)
+                    .attempt_to_shear_equipment(player, item_stack)
                     .await
             {
                 return true;
