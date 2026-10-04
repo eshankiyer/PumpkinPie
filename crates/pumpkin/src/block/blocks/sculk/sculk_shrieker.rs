@@ -130,10 +130,8 @@ impl GameEventListener for ShriekerListener {
     }
 }
 
-/// `SculkShriekerBlockEntity.tryGetPlayer` (lines 88-98), reduced to the two cases reachable
-/// from this codebase's game-event context: the player itself, or a vehicle it is steering.
-/// Projectile and item-entity owners are not resolvable here - `GameEventContext` carries no
-/// owner field (the same gap `warden.rs` documents for projectile anger scaling).
+/// `SculkShriekerBlockEntity.tryGetPlayer` (lines 88-98): the player itself, the player
+/// controlling it as a vehicle, a projectile's player owner, or an item's player thrower.
 async fn try_get_player(
     world: &Arc<World>,
     entity: &dyn crate::entity::EntityBase,
@@ -142,10 +140,40 @@ async fn try_get_player(
     if let Some(player) = world.get_player_by_uuid(base.entity_uuid) {
         return Some(player);
     }
-    let passengers = base.passengers.lock().await;
-    passengers
-        .iter()
-        .find_map(|passenger| world.get_player_by_uuid(passenger.get_entity().entity_uuid))
+    // `getControllingPassenger`: only the first passenger can control, and only on vehicles
+    // whose override accepts it. Copy it out so the passengers lock is released before awaiting.
+    let first = base.passengers.lock().await.first().cloned();
+    if let Some(first) = first
+        && first.get_player().is_some()
+    {
+        let any = entity.cast_any();
+        // `AbstractBoat.getControllingPassenger` (`AbstractBoat.java:749-750`) accepts any
+        // living first passenger; mobs decide through their own override.
+        let controls = if any.is::<crate::entity::vehicle::boat::BoatEntity>()
+            || any.is::<crate::entity::vehicle::chest_boat::ChestBoatEntity>()
+        {
+            true
+        } else if let Some(mob) = entity.get_mob() {
+            mob.has_controlling_passenger().await
+        } else {
+            false
+        };
+        if controls && let Some(player) = world.get_player_by_uuid(first.get_entity().entity_uuid)
+        {
+            return Some(player);
+        }
+    }
+    if let Some(owner_id) = crate::entity::projectile::projectile_owner_id(entity)
+        && let Some(player) = world.get_player_by_id(owner_id)
+    {
+        return Some(player);
+    }
+    // `ItemEntity.getOwner` resolves the thrower in the same level (`ItemEntity.java:90-92`).
+    let thrower = entity
+        .cast_any()
+        .downcast_ref::<crate::entity::item::ItemEntity>()?
+        .get_thrower()?;
+    world.get_player_by_uuid(thrower)
 }
 
 impl BlockBehaviour for SculkShriekerBlock {

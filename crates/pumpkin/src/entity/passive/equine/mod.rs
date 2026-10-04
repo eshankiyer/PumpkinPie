@@ -900,13 +900,13 @@ pub trait AbstractHorse: Animal {
     fn has_saddled_player_passenger(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move {
             if !AbstractHorse::is_saddled(self).await {
-                return Mob::has_controlling_passenger(self).await;
+                return self.default_has_controlling_passenger().await;
             }
             let passenger = self.get_entity().passengers.lock().await.first().cloned();
             if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
                 return true;
             }
-            Mob::has_controlling_passenger(self).await
+            self.default_has_controlling_passenger().await
         })
     }
 

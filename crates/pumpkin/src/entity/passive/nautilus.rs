@@ -464,6 +464,18 @@ impl Mob for NautilusEntity {
         &self.mob_entity
     }
 
+    /// `AbstractNautilus.getControllingPassenger` (`AbstractNautilus.java:170-171`): a saddled
+    /// nautilus is controlled by its first player passenger.
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            let first = self.get_entity().passengers.lock().await.first().cloned();
+            if self.is_saddled() && first.is_some_and(|passenger| passenger.get_player().is_some()) {
+                return true;
+            }
+            self.default_has_controlling_passenger().await
+        })
+    }
+
     /// `AbstractNautilus.openCustomInventoryScreen` gates the ridden inventory on taming and
     /// the controlling passenger (`AbstractNautilus.java:503-507`), then calls
     /// `ServerPlayer.openNautilusInventory` (`ServerPlayer.java:1385-1395`).

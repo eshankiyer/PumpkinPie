@@ -587,6 +587,21 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    /// `HappyGhast.getControllingPassenger` (`HappyGhast.java:343-346`): a harnessed ghast
+    /// outside its still timeout is controlled by its first player passenger.
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            let first = self.get_entity().passengers.lock().await.first().cloned();
+            if self.is_wearing_body_armor().await
+                && !self.is_on_still_timeout()
+                && first.is_some_and(|passenger| passenger.get_player().is_some())
+            {
+                return true;
+            }
+            self.default_has_controlling_passenger().await
+        })
+    }
+
     /// `HappyGhast.customServerAiStep` (`HappyGhast.java:400-409`) runs the Brain for babies;
     /// adults use the goal selector registered by `registerGoals`.
     fn should_tick_brain(&self) -> bool {
