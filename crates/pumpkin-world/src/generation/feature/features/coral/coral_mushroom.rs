@@ -39,18 +39,22 @@ impl CoralMushroomFeature {
                     let condition_b = (o != 0 && o != k) || (n != 0 && n != i);
                     let condition_c = (m != 0 && m != j) || (o != 0 && o != k);
                     let condition_d = m == 0 || m == j || n == 0 || n == i || o == 0 || o == k;
-                    let random_check = random.next_f32() < 0.1f32;
-
-                    if !((condition_a && condition_b && condition_c && condition_d)
-                        && !random_check
-                        && CoralFeature::generate_coral_piece(
+                    // Vanilla short-circuits: the skip roll is drawn only for
+                    // shell positions that are not on an edge.
+                    if condition_a
+                        && condition_b
+                        && condition_c
+                        && condition_d
+                        && random.next_f32() >= 0.1f32
+                    {
+                        CoralFeature::generate_coral_piece(
                             chunk,
                             block_registry,
                             random,
                             block,
                             pos,
-                        ))
-                    {}
+                        );
+                    }
                 }
             }
         }
