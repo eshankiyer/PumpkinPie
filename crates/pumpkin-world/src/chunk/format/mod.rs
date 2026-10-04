@@ -133,11 +133,22 @@ fn extract_u8_array(tag: &pumpkin_nbt::tag::NbtTag) -> Option<Box<[u8]>> {
                     pumpkin_nbt::tag::NbtTag::Byte(x) => *x as u8,
                     pumpkin_nbt::tag::NbtTag::Int(x) => *x as u8,
                     pumpkin_nbt::tag::NbtTag::Short(x) => *x as u8,
+                    // Vanilla decodes each palette entry with `orElsePartial(PLAINS)`
+                    // (`PalettedContainer.java:54`, `PalettedContainerFactory.java:34`), so an
+                    // unknown biome key becomes plains and is logged as a recoverable error.
                     pumpkin_nbt::tag::NbtTag::String(s) => {
                         let name = s.strip_prefix("minecraft:").unwrap_or(s);
-                        pumpkin_data::biome::Biome::from_name(name).map_or(0, |b| b.id)
+                        pumpkin_data::biome::Biome::from_name(name).map_or_else(
+                            || {
+                                tracing::error!(
+                                    "Recoverable errors when loading biome palette: unknown biome '{s}', using minecraft:plains"
+                                );
+                                pumpkin_data::biome::Biome::PLAINS.id
+                            },
+                            |b| b.id,
+                        )
                     }
-                    _ => 0,
+                    _ => pumpkin_data::biome::Biome::PLAINS.id,
                 })
                 .collect();
             Some(bytes)
@@ -261,7 +272,10 @@ impl ChunkData {
         let mut sky_lights = vec![LightContainer::Empty(0); section_count];
         let mut sky_light_present = vec![false; section_count];
         let mut block_palettes = vec![BlockPalette::default(); section_count];
-        let mut biome_palettes = vec![BiomePalette::default(); section_count];
+        // Sections absent from the list are filled with `createForBiomes()`, a homogeneous
+        // plains container (`ChunkAccess.replaceMissingSections`, `PalettedContainerFactory.java:42`).
+        let mut biome_palettes =
+            vec![BiomePalette::Homogeneous(pumpkin_data::biome::Biome::PLAINS.id); section_count];
         let mut unknown_section_nbt = vec![NbtCompound::new(); section_count];
 
         if let Some(sections_list) = root_tag.get_list("sections") {
@@ -345,15 +359,25 @@ impl ChunkData {
                         let data = b_compound
                             .get_long_array("data")
                             .map(|arr| arr.to_vec().into_boxed_slice());
+                        // `palette` is a required field (`PalettedContainer.java:52-56`); a
+                        // missing one fails the parse and `getOrThrow` raises a
+                        // ChunkReadException (`SerializableChunkData.java:173-179`).
                         let palette = b_compound
                             .get("palette")
                             .and_then(extract_u8_array)
-                            .unwrap_or_else(|| vec![0].into_boxed_slice());
+                            .ok_or_else(|| {
+                                ChunkParsingError::ErrorDeserializingChunk(format!(
+                                    "Missing biome palette in section {y}"
+                                ))
+                            })?;
 
                         biome_palettes[index] =
                             BiomePalette::from_disk_nbt(ChunkSectionBiomes { data, palette });
                     } else {
-                        biome_palettes[index] = BiomePalette::default();
+                        // `SerializableChunkData.java:179`: a missing `biomes` compound falls
+                        // back to `createForBiomes()` (plains).
+                        biome_palettes[index] =
+                            BiomePalette::Homogeneous(pumpkin_data::biome::Biome::PLAINS.id);
                     }
                 }
             }
@@ -1366,6 +1390,31 @@ pub(crate) mod chunk_codec_tests {
     }
 
     #[test]
+    fn missing_biomes_default_to_plains() {
+        // Section 0 is absent from the list; section 1 has no `biomes` compound.
+        let bytes = encode_chunk(0, vec![section(1, None)]);
+        let chunk = ChunkData::internal_from_bytes(&bytes, Vector2::new(0, 0)).unwrap();
+        let biomes = chunk.section.dump_biomes();
+
+        assert!(!biomes.is_empty());
+        assert!(
+            biomes
+                .iter()
+                .all(|&id| id == pumpkin_data::biome::Biome::PLAINS.id)
+        );
+    }
+
+    #[test]
+    fn biomes_without_palette_is_read_error() {
+        let mut section_compound = NbtCompound::new();
+        section_compound.put_byte("Y", 0);
+        section_compound.put_compound("biomes", NbtCompound::new());
+        let bytes = encode_chunk(0, vec![NbtTag::Compound(section_compound)]);
+
+        assert!(ChunkData::internal_from_bytes(&bytes, Vector2::new(0, 0)).is_err());
+    }
+
+    #[test]
     fn fill_keeps_uniform_light_layers_implicit() {
         let mut layer = LightContainer::new_filled(7);
 
@@ -1433,6 +1482,20 @@ mod tests {
             pumpkin_data::biome::Biome::from_name("the_void")
                 .unwrap()
                 .id
+        );
+    }
+
+    #[test]
+    fn extract_u8_array_unknown_biome_is_plains() {
+        let list_tag = NbtTag::List(vec![
+            NbtTag::String("minecraft:not_a_biome".to_string().into()),
+            NbtTag::String("modid:custom".to_string().into()),
+        ]);
+        let result = extract_u8_array(&list_tag).expect("should extract biome palette");
+
+        assert_eq!(
+            &*result,
+            &[pumpkin_data::biome::Biome::PLAINS.id; 2][..]
         );
     }
 
