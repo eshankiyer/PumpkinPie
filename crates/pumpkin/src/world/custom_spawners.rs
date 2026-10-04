@@ -310,10 +310,10 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
 /// counter, and a spawn-chance that ramps `25 -> 50 -> 75` (capped) each day
 /// until a trader actually spawns, then resets to 25.
 ///
-/// Scope reduction: the `spawn_delay`/`spawn_chance` counters live only in memory
-/// (`World::trader_spawn_delay` / `trader_spawn_chance`), not in a persisted
-/// `WanderingTraderData` saved-data file, so they reset to vanilla defaults (24000 / 25) on
-/// server restart.
+/// The `spawn_delay`/`spawn_chance` counters (`World::trader_spawn_delay` /
+/// `trader_spawn_chance`) are vanilla's `WanderingTraderData`: loaded from and saved to
+/// `data/minecraft/wandering_trader.dat` through `LevelData`. The 1200-tick outer delay is
+/// not persisted, as in vanilla.
 pub async fn tick_wandering_trader_spawner(world: &Arc<World>) {
     if !world.level_info.load().game_rules.spawn_wandering_traders {
         return;

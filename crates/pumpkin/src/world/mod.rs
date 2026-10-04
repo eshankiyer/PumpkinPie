@@ -518,6 +518,9 @@ impl World {
             lerp_time: persisted_level_info.border_size_lerp_time,
             lerp_target: persisted_level_info.border_size_lerp_target,
         });
+        // Vanilla `WanderingTraderData` (`minecraft:wandering_trader` saved data).
+        let trader_spawn_delay = persisted_level_info.wandering_trader_spawn_delay;
+        let trader_spawn_chance = persisted_level_info.wandering_trader_spawn_chance;
         drop(persisted_level_info);
 
         // Load portal POI from disk (PoiStorage::new automatically loads from disk if files exist)
@@ -575,8 +578,8 @@ impl World {
             phantom_spawn_tick: AtomicI32::new(0),
             cat_spawn_tick: AtomicI32::new(0),
             trader_tick_delay: AtomicI32::new(1200),
-            trader_spawn_delay: AtomicI32::new(24000),
-            trader_spawn_chance: AtomicI32::new(25),
+            trader_spawn_delay: AtomicI32::new(trader_spawn_delay),
+            trader_spawn_chance: AtomicI32::new(trader_spawn_chance),
             village_siege: custom_spawners::VillageSiegeState::new(),
             custom_data: std::sync::Mutex::new(custom_data),
             custom_block_entity_data: DashMap::new(),
@@ -2165,8 +2168,9 @@ impl World {
         // `WanderingTraderSpawner`, `VillageSiege`), independent of the biome-based
         // spawn list above. Vanilla passes `spawnEnemies` into every
         // `CustomSpawner.tick`; the phantom and siege spawners are the two that
-        // consume it.
-        if spawn_mobs {
+        // consume it. Only the overworld is built with custom spawners
+        // (`MinecraftServer.createLevels`); every other level gets an empty list.
+        if spawn_mobs && self.dimension == Dimension::OVERWORLD {
             if spawn_enemies {
                 custom_spawners::tick_phantom_spawner(self).await;
                 custom_spawners::tick_village_siege(self, spawn_enemies).await;

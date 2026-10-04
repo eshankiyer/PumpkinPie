@@ -114,6 +114,26 @@ pub struct LevelData {
     /// Scoreboard data persisted to `data/minecraft/scoreboard.dat`.
     #[serde(skip_serializing, default)]
     pub scoreboard_data: data_files::ScoreboardData,
+
+    /// Ticks until the next wandering trader spawn attempt (vanilla
+    /// `WanderingTraderData.spawnDelay`). Persisted to `data/minecraft/wandering_trader.dat`.
+    #[serde(skip_serializing, default = "default_wandering_trader_spawn_delay")]
+    pub wandering_trader_spawn_delay: i32,
+
+    /// Percent chance of the next wandering trader spawn attempt (vanilla
+    /// `WanderingTraderData.spawnChance`). Persisted to `data/minecraft/wandering_trader.dat`.
+    #[serde(skip_serializing, default = "default_wandering_trader_spawn_chance")]
+    pub wandering_trader_spawn_chance: i32,
+}
+
+/// Vanilla `WanderingTraderData()` default spawn delay (`WanderingTraderData.java`).
+const fn default_wandering_trader_spawn_delay() -> i32 {
+    24_000
+}
+
+/// Vanilla `WanderingTraderData()` default spawn chance (`WanderingTraderData.java`).
+const fn default_wandering_trader_spawn_chance() -> i32 {
+    25
 }
 
 const fn default_generate_structures() -> bool {
@@ -380,6 +400,8 @@ impl LevelData {
             thundering: false,
             thunder_time: 0,
             scoreboard_data: data_files::ScoreboardData::default(),
+            wandering_trader_spawn_delay: default_wandering_trader_spawn_delay(),
+            wandering_trader_spawn_chance: default_wandering_trader_spawn_chance(),
         }
     }
 

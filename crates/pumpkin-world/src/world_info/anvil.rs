@@ -485,6 +485,14 @@ fn level_data_from_nbt(data: &NbtCompound, seed: i64) -> LevelData {
     if let Some(clear_weather_time) = data.get_int("clearWeatherTime") {
         level_data.clear_weather_time = clear_weather_time;
     }
+    // Pre-26.2 level.dat kept the trader counters inline; vanilla moves them into
+    // wandering_trader.dat (`LevelDatToSavedDataPreparationFix.fixWanderingTrader`).
+    if let Some(spawn_delay) = data.get_int("WanderingTraderSpawnDelay") {
+        level_data.wandering_trader_spawn_delay = spawn_delay;
+    }
+    if let Some(spawn_chance) = data.get_int("WanderingTraderSpawnChance") {
+        level_data.wandering_trader_spawn_chance = spawn_chance;
+    }
 
     level_data
 }
@@ -671,7 +679,16 @@ impl WorldInfoReader for AnvilLevelInfo {
             level_data.map_id = next_map_id;
         }
 
-        // (wandering_trader.dat is not part of LevelData; stored separately when needed)
+        // wandering_trader.dat - vanilla `WanderingTraderData.TYPE`. Absent means a
+        // fresh or pre-26.2 world, so keep the defaults / legacy level.dat keys.
+        if minecraft_data_dir(level_folder)
+            .join("wandering_trader.dat")
+            .exists()
+        {
+            let wandering_trader = read_wandering_trader(level_folder);
+            level_data.wandering_trader_spawn_delay = wandering_trader.spawn_delay;
+            level_data.wandering_trader_spawn_chance = wandering_trader.spawn_chance;
+        }
 
         Ok(level_data)
     }
@@ -831,9 +848,12 @@ fn write_data_files(info: &LevelData, level_folder: &Path, data_version: i32) {
         error!("Failed to write maps/last_id.dat: {e}");
     }
 
-    // wandering_trader.dat (stub / load-save)
-    let mut wandering_trader = read_wandering_trader(level_folder);
-    wandering_trader.data_version = data_version;
+    // wandering_trader.dat
+    let wandering_trader = crate::world_info::data_files::WanderingTraderData {
+        spawn_delay: info.wandering_trader_spawn_delay,
+        spawn_chance: info.wandering_trader_spawn_chance,
+        data_version,
+    };
     if let Err(e) = write_wandering_trader(level_folder, &wandering_trader) {
         error!("Failed to write wandering_trader.dat: {e}");
     }
@@ -1196,6 +1216,8 @@ mod test {
             last_played: 1733847709327,
             level_name: "New World".to_string(),
             scoreboard_data: ScoreboardData::default(),
+            wandering_trader_spawn_delay: 24_000,
+            wandering_trader_spawn_chance: 25,
             spawn_x: 160,
             spawn_y: 70,
             spawn_z: 160,
@@ -1460,6 +1482,8 @@ mod test {
         level_data.data_version = 4903;
         level_data.day_time = 24000;
         level_data.clear_weather_time = 100;
+        level_data.wandering_trader_spawn_delay = 1_200;
+        level_data.wandering_trader_spawn_chance = 50;
         level_data.world_gen_settings = WorldGenSettings::new(Seed(9999));
 
         AnvilLevelInfo
@@ -1510,7 +1534,12 @@ mod test {
 
         // Verify wandering_trader.dat read
         let loaded_wt = crate::world_info::data_files::read_wandering_trader(temp_dir.path());
-        assert_eq!(loaded_wt.spawn_delay, 24000);
-        assert_eq!(loaded_wt.spawn_chance, 25);
+        assert_eq!(loaded_wt.spawn_delay, 1_200);
+        assert_eq!(loaded_wt.spawn_chance, 50);
+
+        // The trader counters round-trip back into LevelData.
+        let reloaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
+        assert_eq!(reloaded.wandering_trader_spawn_delay, 1_200);
+        assert_eq!(reloaded.wandering_trader_spawn_chance, 50);
     }
 }

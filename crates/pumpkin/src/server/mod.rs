@@ -653,6 +653,23 @@ impl Server {
     }
 
     pub fn save_world_info(&self) -> Result<(), WorldInfoError> {
+        // Vanilla `WanderingTraderData` is dirty-tracked and saved on every save, so
+        // copy the live overworld counters in before writing `wandering_trader.dat`.
+        if let Some(overworld) = self
+            .worlds
+            .load()
+            .iter()
+            .find(|world| world.dimension == Dimension::OVERWORLD)
+        {
+            let trader_spawn_delay = overworld.trader_spawn_delay.load(Ordering::Relaxed);
+            let trader_spawn_chance = overworld.trader_spawn_chance.load(Ordering::Relaxed);
+            self.level_info.rcu(|level_info| {
+                let mut snapshot = (**level_info).clone();
+                snapshot.wandering_trader_spawn_delay = trader_spawn_delay;
+                snapshot.wandering_trader_spawn_chance = trader_spawn_chance;
+                snapshot
+            });
+        }
         let level_data = self.level_info.load();
         self.world_info_writer
             .write_world_info(&level_data, &self.basic_config.get_world_path())
@@ -864,9 +881,14 @@ impl Server {
             // Vanilla `WorldBorder.Settings(WorldBorder)` (`WorldBorder.java:475-487`);
             // `write_world_info` puts these in `data/minecraft/world_border.dat`.
             let border = overworld.worldborder.lock().await.to_settings();
+            // `data/minecraft/wandering_trader.dat` (vanilla `WanderingTraderData`).
+            let trader_spawn_delay = overworld.trader_spawn_delay.load(Ordering::Relaxed);
+            let trader_spawn_chance = overworld.trader_spawn_chance.load(Ordering::Relaxed);
             self.level_info.rcu(|level_info| {
                 let mut snapshot = (**level_info).clone();
                 snapshot.day_time = day_time;
+                snapshot.wandering_trader_spawn_delay = trader_spawn_delay;
+                snapshot.wandering_trader_spawn_chance = trader_spawn_chance;
                 snapshot.clear_weather_time = weather.clear_weather_time;
                 snapshot.rain_time = weather.rain_time;
                 snapshot.raining = weather.raining;
