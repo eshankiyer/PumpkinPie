@@ -472,7 +472,7 @@ fn analog_signal_for_distance(distance: f64) -> i32 {
 }
 
 /// `LevelReader::containsAnyLiquid` (`LevelReader.java:140-161`).
-fn contains_any_liquid(world: &World, bounding_box: &BoundingBox) -> bool {
+pub(super) fn contains_any_liquid(world: &World, bounding_box: &BoundingBox) -> bool {
     for x in bounding_box.min.x.floor() as i32..bounding_box.max.x.ceil() as i32 {
         for y in bounding_box.min.y.floor() as i32..bounding_box.max.y.ceil() as i32 {
             for z in bounding_box.min.z.floor() as i32..bounding_box.max.z.ceil() as i32 {

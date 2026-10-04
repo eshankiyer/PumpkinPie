@@ -1,14 +1,22 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::BlockEntity;
+use pumpkin_data::Enchantment;
 use pumpkin_data::block_properties::{
     BlockProperties, TrialSpawnerLikeProperties, TrialSpawnerState,
+};
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{
+    DataComponentImpl, EquipmentSlot, EquippableImpl, TrimImpl,
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::trim::{TrimMaterial, TrimPattern};
 use pumpkin_data::{Block, BlockStateId, world::WorldEvent};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -23,6 +31,8 @@ use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::block::registry::BlockRegistry;
+use crate::entity::EntityBase;
 use crate::entity::NBTStorage;
 use crate::entity::item::ItemEntity;
 use crate::entity::{Entity, ominous_item_spawner::OminousItemSpawnerEntity};
@@ -336,11 +346,39 @@ fn built_in_config(key: &str) -> Option<TrialSpawnerConfig> {
     let entity_type = EntityType::from_name(mob)?;
     let mut entity = NbtCompound::new();
     entity.put_string("id", format!("minecraft:{mob}"));
+    // TrialSpawnerConfigs.java:271-289: only the ominous melee husk/zombie/baby_zombie configs
+    // (trial_chamber_melee) and the ominous ranged/slow_ranged configs (trial_chamber_ranged)
+    // carry an EquipmentTable, always with a 0.0 drop chance; every other config has none.
+    let equipment_table = if !is_ominous {
+        None
+    } else if matches!(
+        path,
+        "trial_chamber/melee/husk"
+            | "trial_chamber/melee/zombie"
+            | "trial_chamber/small_melee/baby_zombie"
+    ) {
+        Some("minecraft:equipment/trial_chamber_melee")
+    } else if path.starts_with("trial_chamber/ranged/")
+        || path.starts_with("trial_chamber/slow_ranged/")
+    {
+        Some("minecraft:equipment/trial_chamber_ranged")
+    } else {
+        None
+    };
+    let put_equipment = |data: &mut NbtCompound| {
+        if let Some(table) = equipment_table {
+            let mut equipment = NbtCompound::new();
+            equipment.put_string("loot_table", table.to_string());
+            equipment.put_float("slot_drop_chances", 0.0);
+            data.put_compound("equipment", equipment);
+        }
+    };
     let mut potentials = Vec::new();
     if mob == "zombie" && path == "trial_chamber/small_melee/baby_zombie" {
         entity.put_bool("IsBaby", true);
         let mut data = NbtCompound::new();
         data.put_compound("entity", entity);
+        put_equipment(&mut data);
         potentials.push((entity_type, 1, data));
     } else if mob == "slime" {
         for (size, weight) in [(1i8, 3i32), (2i8, 1i32)] {
@@ -354,24 +392,7 @@ fn built_in_config(key: &str) -> Option<TrialSpawnerConfig> {
     } else {
         let mut data = NbtCompound::new();
         data.put_compound("entity", entity);
-        if is_ominous {
-            let equipment_table = if matches!(
-                path,
-                "trial_chamber/melee/husk"
-                    | "trial_chamber/melee/zombie"
-                    | "trial_chamber/small_melee/baby_zombie"
-            ) {
-                "minecraft:equipment/trial_chamber_melee"
-            } else if path.contains("ranged") {
-                "minecraft:equipment/trial_chamber_ranged"
-            } else {
-                "minecraft:equipment/trial_chamber"
-            };
-            let mut equipment = NbtCompound::new();
-            equipment.put_string("loot_table", equipment_table.to_string());
-            equipment.put_float("slot_drop_chances", 0.0);
-            data.put_compound("equipment", equipment);
-        }
+        put_equipment(&mut data);
         potentials.push((entity_type, 1, data));
     }
     Some(TrialSpawnerConfig {
@@ -416,6 +437,9 @@ pub struct TrialSpawnerBlockEntity {
     next_spawn_entity: StdMutex<Option<&'static EntityType>>,
     next_spawn_data: StdMutex<Option<NbtCompound>>,
     ejecting_loot_table: StdMutex<Option<String>>,
+    // TrialSpawnerStateData.dispensing (TrialSpawnerStateData.java:54): rolled once on first
+    // use, never cleared and not persisted.
+    dispensing: StdMutex<Option<Vec<(ItemStack, u16)>>>,
 }
 
 // TrialSpawner.java:56-58
@@ -451,6 +475,7 @@ impl TrialSpawnerBlockEntity {
             next_spawn_entity: StdMutex::new(None),
             next_spawn_data: StdMutex::new(None),
             ejecting_loot_table: StdMutex::new(None),
+            dispensing: StdMutex::new(None),
         }
     }
 
@@ -833,9 +858,13 @@ impl TrialSpawnerBlockEntity {
             .is_none_or(|(hit, _)| hit == self.position)
     }
 
-    // TrialSpawner.java:161-234, simplified: no `Pos` override, spawn-placement rules,
-    // `checkSpawnObstruction`, `finalizeSpawn` or equipment (all need spawn-reason plumbing
-    // that lives in entity/); collision, line of sight and custom spawn rules are kept.
+    // TrialSpawner.java:161-234. `SpawnPlacements.checkSpawnRules(type, TRIAL_SPAWNER)`
+    // (TrialSpawner.java:191) is not called: TRIAL_SPAWNER ignores light and is a spawner
+    // reason, so the predicate of every built-in trial-chamber mob reduces to `true`
+    // (Monster.java:113-117, Mob.java:810-815, Silverfish.java:118-120, Stray.java:34-35);
+    // the peaceful gate is `can_spawn_in_level`. Custom non-monster types whose rules have no
+    // spawner escape are an accepted divergence.
+    #[allow(clippy::too_many_lines)]
     async fn spawn_mob(
         &self,
         world: &Arc<World>,
@@ -843,13 +872,16 @@ impl TrialSpawnerBlockEntity {
         is_ominous: bool,
     ) -> Option<Uuid> {
         let (entity_type, spawn_data) = self.get_or_create_next_spawn_data(world, config)?;
-        let pos = self.position.0;
-        let spawn_range = f64::from(config.spawn_range);
-        let spawn_pos = Vector3::new(
-            pos.x as f64 + (rand::random::<f64>() - rand::random::<f64>()) * spawn_range + 0.5,
-            (pos.y + rand::random_range(0..3) - 1) as f64,
-            pos.z as f64 + (rand::random::<f64>() - rand::random::<f64>()) * spawn_range + 0.5,
-        );
+        // TrialSpawner.java:171-181: a `Pos` in the entity data replaces the random position.
+        let spawn_pos = spawn_data_pos(&spawn_data).unwrap_or_else(|| {
+            let pos = self.position.0;
+            let spawn_range = f64::from(config.spawn_range);
+            Vector3::new(
+                pos.x as f64 + (rand::random::<f64>() - rand::random::<f64>()) * spawn_range + 0.5,
+                (pos.y + rand::random_range(0..3) - 1) as f64,
+                pos.z as f64 + (rand::random::<f64>() - rand::random::<f64>()) * spawn_range + 0.5,
+            )
+        });
         // TrialSpawner.java:182 tests `getSpawnAABB`, which applies the spawn dimension scale.
         if !world.is_space_empty(BoundingBox::new_from_pos(
             spawn_pos.x,
@@ -868,7 +900,13 @@ impl TrialSpawnerBlockEntity {
         }
         let uuid = uuid::Uuid::new_v4();
         let entity = crate::entity::r#type::from_type(entity_type, spawn_pos, world, uuid);
-        if let Some(entity_nbt) = spawn_data.get_compound("entity") {
+        // TrialSpawner.java:215-218 runs `finalizeSpawn` only for an id-only compound. That
+        // compound has nothing to read, so it is not read at all: the restored-from-NBT flags
+        // stay clear and `world.spawn_entity` runs Pumpkin's finalize path (equipment, the
+        // zombie baby roll, spawn attributes). Configured data is read and skips finalize.
+        if let Some(entity_nbt) = spawn_data.get_compound("entity")
+            && !has_no_configuration(entity_nbt)
+        {
             if let Some(living) = entity.get_living_entity() {
                 living.read_nbt_non_mut(entity_nbt).await;
             } else {
@@ -880,11 +918,25 @@ impl TrialSpawnerBlockEntity {
         entity
             .get_entity()
             .set_rotation(rand::random::<f32>() * 360.0, 0.0);
-        // TrialSpawner.java:220: trial spawner mobs never despawn.
         if let Some(mob) = entity.get_mob() {
+            // TrialSpawner.java:211-213 and Mob.java:821-823.
+            if Self::uses_base_spawn_obstruction(entity_type)
+                && !Self::mob_spawn_unobstructed(world, &entity.get_entity().bounding_box.load())
+            {
+                return None;
+            }
+            // TrialSpawner.java:220: trial spawner mobs never despawn.
             mob.set_persistence_required();
         }
         world.spawn_entity(entity.clone()).await;
+        // TrialSpawner.java:221 `mob.equip(equipment)` runs after `finalizeSpawn`, which in
+        // Pumpkin happens inside `spawn_entity`, so the table is applied (and broadcast) now;
+        // finalize equipment survives only in slots the table leaves empty, as in vanilla.
+        if entity.get_mob().is_some()
+            && let Some(equipment) = spawn_data.get_compound("equipment")
+        {
+            Self::equip_from_table(entity.as_ref(), equipment).await;
+        }
         // TrialSpawner.java:228-230: FlameParticle.encode() is the ordinal, OMINOUS = 1.
         let flame = i32::from(is_ominous);
         world.sync_world_event(WorldEvent::ParticlesTrialSpawnerSpawn, self.position, flame);
@@ -913,6 +965,79 @@ impl TrialSpawnerBlockEntity {
         }
         self.mark_updated(world);
         Some(uuid)
+    }
+
+    // Types that override `Mob.checkSpawnObstruction`; their bodies are not ported here, so
+    // they are left unchecked rather than given the base rule.
+    fn uses_base_spawn_obstruction(entity_type: &'static EntityType) -> bool {
+        ![
+            &EntityType::AXOLOTL,
+            &EntityType::COD,
+            &EntityType::DOLPHIN,
+            &EntityType::DROWNED,
+            &EntityType::ELDER_GUARDIAN,
+            &EntityType::GLOW_SQUID,
+            &EntityType::GUARDIAN,
+            &EntityType::IRON_GOLEM,
+            &EntityType::NAUTILUS,
+            &EntityType::OCELOT,
+            &EntityType::PUFFERFISH,
+            &EntityType::RAVAGER,
+            &EntityType::SALMON,
+            &EntityType::SQUID,
+            &EntityType::STRIDER,
+            &EntityType::TADPOLE,
+            &EntityType::TROPICAL_FISH,
+            &EntityType::WARDEN,
+            &EntityType::ZOMBIE_NAUTILUS,
+            &EntityType::ZOMBIFIED_PIGLIN,
+        ]
+        .iter()
+        .any(|t| t.id == entity_type.id)
+    }
+
+    // Mob.checkSpawnObstruction (Mob.java:821-823): no liquid in the bounding box and
+    // `isUnobstructed` (EntityGetter.java:33-48). The mob is not in the world yet, so it
+    // cannot be its own obstruction or share a vehicle with another entity.
+    fn mob_spawn_unobstructed(world: &World, bounding_box: &BoundingBox) -> bool {
+        !super::creaking_heart::contains_any_liquid(world, bounding_box)
+            && !world
+                .get_all_at_box(bounding_box)
+                .iter()
+                .any(|other| BlockRegistry::entity_blocks_building(other.as_ref()))
+    }
+
+    // EquipmentUser.equip (EquipmentUser.java:29-51): each rolled stack goes into its
+    // resolved slot (`slot.limit` is a no-op, every table stack has count 1) and takes the
+    // slot's drop chance when the map has one.
+    async fn equip_from_table(entity: &dyn EntityBase, equipment: &NbtCompound) {
+        let (Some(living), Some(mob)) = (entity.get_living_entity(), entity.get_mob()) else {
+            return;
+        };
+        let Some(stacks) = equipment
+            .get_string("loot_table")
+            .and_then(trial_chamber_equipment)
+        else {
+            return;
+        };
+        let drop_chances = equipment.get("slot_drop_chances");
+        let mut changed: Vec<(EquipmentSlot, ItemStack)> = Vec::new();
+        {
+            let mut slots = living.entity_equipment.lock().await;
+            for stack in stacks {
+                let Some(slot) = resolve_equipment_slot(&stack, &changed) else {
+                    continue;
+                };
+                slots.put(&slot, stack.clone());
+                changed.push((slot, stack));
+            }
+        }
+        for (slot, _) in &changed {
+            if let Some(chance) = slot_drop_chance(drop_chances, slot) {
+                mob.set_drop_chance(slot.clone(), chance).await;
+            }
+        }
+        living.send_equipment_changes(&changed);
     }
 
     // TrialSpawner.java:271-290
@@ -1179,6 +1304,22 @@ impl TrialSpawnerBlockEntity {
         TrialSpawnerState::Active
     }
 
+    // TrialSpawnerStateData.getDispensingItems (TrialSpawnerStateData.java:273-294) followed by
+    // `WeightedList.getRandom`. Not vanilla: the roll is not seeded from the level seed and the
+    // low-resolution spawner position.
+    fn pick_dispensing_item(&self, config: &TrialSpawnerConfig) -> Option<ItemStack> {
+        let mut cache = self.dispensing.lock().unwrap();
+        if cache.is_none() {
+            let items = ominous_dispensing_items(config.items_to_drop_when_ominous());
+            // An empty roll is not cached (TrialSpawnerStateData.java:281-283).
+            if items.is_empty() {
+                return None;
+            }
+            *cache = Some(items);
+        }
+        pick_weighted(cache.as_deref()?)
+    }
+
     // TrialSpawnerState.java:158-171 and OminousItemSpawner.java:37-42 create one
     // delayed item-spawner above a nearby detected entity at the configured cadence.
     async fn spawn_ominous_item_spawner(
@@ -1187,12 +1328,12 @@ impl TrialSpawnerBlockEntity {
         config: &TrialSpawnerConfig,
         game_time: i64,
     ) {
+        let Some(item) = self.pick_dispensing_item(config) else {
+            return;
+        };
         if game_time < self.cooldown_ends_at.load(Ordering::Relaxed) {
             return;
         }
-        let Some(item) = ominous_spawner_item(config.items_to_drop_when_ominous()) else {
-            return;
-        };
         let Some(spawn_pos) = self.calculate_position_to_spawn_spawner(world).await else {
             return;
         };
@@ -1412,6 +1553,7 @@ impl BlockEntity for TrialSpawnerBlockEntity {
             next_spawn_entity: StdMutex::new(next_spawn_entity),
             next_spawn_data: StdMutex::new(next_spawn_data),
             ejecting_loot_table: StdMutex::new(ejecting_loot_table),
+            dispensing: StdMutex::new(None),
         }
     }
 
@@ -1547,12 +1689,11 @@ fn potion_item(
 
 // items_to_drop_when_ominous.json:1-179 contains one uniform roll from each
 // pool; the generated server loot tables do not include this spawner namespace.
-fn ominous_spawner_item(table: &str) -> Option<pumpkin_data::item_stack::ItemStack> {
-    use pumpkin_data::item::Item;
-    use pumpkin_data::item_stack::ItemStack;
-
+// TrialSpawnerStateData.java:287-289 keeps each drop as a count-1 copy weighted by the
+// rolled count.
+fn ominous_dispensing_items(table: &str) -> Vec<(ItemStack, u16)> {
     if table != DEFAULT_OMINOUS_ITEMS_LOOT_TABLE {
-        return None;
+        return Vec::new();
     }
 
     let first_pool = match rand::random_range(0..7u8) {
@@ -1572,12 +1713,29 @@ fn ominous_spawner_item(table: &str) -> Option<pumpkin_data::item_stack::ItemSta
         _ => ItemStack::new(1u8 + rand::random_range(0..3u8), &Item::WIND_CHARGE),
     };
 
-    let total_weight = u16::from(first_pool.item_count) + u16::from(second_pool.item_count);
-    if rand::random_range(0..total_weight) < u16::from(first_pool.item_count) {
-        Some(first_pool)
-    } else {
-        Some(second_pool)
+    [first_pool, second_pool]
+        .into_iter()
+        .map(|drop| {
+            let weight = u16::from(drop.item_count);
+            (drop.copy_with_count(1), weight)
+        })
+        .collect()
+}
+
+// `WeightedList.getRandom`: empty for an empty or zero-weight list.
+fn pick_weighted(items: &[(ItemStack, u16)]) -> Option<ItemStack> {
+    let total: u16 = items.iter().map(|(_, weight)| *weight).sum();
+    if total == 0 {
+        return None;
     }
+    let mut roll = rand::random_range(0..total);
+    for (stack, weight) in items {
+        if roll < *weight {
+            return Some(stack.copy_with_count(1));
+        }
+        roll -= weight;
+    }
+    None
 }
 
 // Hand-ported (no generic loot-table registry entry exists for the
@@ -1627,6 +1785,152 @@ fn spawner_ejection_item(table: &str) -> Option<pumpkin_data::item_stack::ItemSt
         roll -= weight;
     }
     None
+}
+
+// NbtOps numeric decoding: Codec.DOUBLE / Codec.FLOAT accept any numeric tag.
+#[expect(clippy::cast_precision_loss)]
+const fn numeric_tag(tag: &NbtTag) -> Option<f64> {
+    match tag {
+        NbtTag::Byte(v) => Some(*v as f64),
+        NbtTag::Short(v) => Some(*v as f64),
+        NbtTag::Int(v) => Some(*v as f64),
+        NbtTag::Long(v) => Some(*v as f64),
+        NbtTag::Float(v) => Some(*v as f64),
+        NbtTag::Double(v) => Some(*v),
+        _ => None,
+    }
+}
+
+// TrialSpawner.java:171: `Pos` decodes with `Vec3.CODEC`, a list of exactly three doubles.
+fn spawn_data_pos(spawn_data: &NbtCompound) -> Option<Vector3<f64>> {
+    let [x, y, z] = spawn_data.get_compound("entity")?.get_list("Pos")? else {
+        return None;
+    };
+    Some(Vector3::new(
+        numeric_tag(x)?,
+        numeric_tag(y)?,
+        numeric_tag(z)?,
+    ))
+}
+
+// TrialSpawner.java:215: the entity data holds nothing but its string `id`.
+fn has_no_configuration(entity_nbt: &NbtCompound) -> bool {
+    entity_nbt.child_tags.len() == 1 && entity_nbt.get_string("id").is_some()
+}
+
+// EquipmentUser.resolveSlot (EquipmentUser.java:53-69): the equippable slot, otherwise the
+// main hand; a slot already filled by this roll refuses the stack.
+fn resolve_equipment_slot(
+    stack: &ItemStack,
+    inserted: &[(EquipmentSlot, ItemStack)],
+) -> Option<EquipmentSlot> {
+    if stack.is_empty() {
+        return None;
+    }
+    let slot = stack
+        .get_data_component::<EquippableImpl>()
+        .map_or(EquipmentSlot::MAIN_HAND, |equippable| {
+            equippable.slot.clone()
+        });
+    (!inserted.iter().any(|(used, _)| *used == slot)).then_some(slot)
+}
+
+// EquipmentTable.DROP_CHANCES_CODEC (EquipmentTable.java:14-24): one float for every slot,
+// or a slot-name map; an absent field is an empty map.
+fn slot_drop_chance(drop_chances: Option<&NbtTag>, slot: &EquipmentSlot) -> Option<f32> {
+    #[expect(clippy::cast_possible_truncation)]
+    match drop_chances? {
+        NbtTag::Compound(map) => map.get(slot.to_name()).and_then(numeric_tag),
+        tag => numeric_tag(tag),
+    }
+    .map(|chance| chance as f32)
+}
+
+// Hand-ported data/minecraft/loot_table/equipment/trial_chamber{,_melee,_ranged}.json (the
+// generic loot model cannot express nested `loot_table` entries), keyed by the full id.
+// Output order is the pool order: helmet, chestplate, then the weapon.
+fn trial_chamber_equipment(table: &str) -> Option<Vec<ItemStack>> {
+    fn enchanted(item: &'static Item, enchantment: Option<&'static Enchantment>) -> ItemStack {
+        let mut stack = ItemStack::new(1, item);
+        if let Some(enchantment) = enchantment {
+            stack.enchant(enchantment, 1);
+        }
+        stack
+    }
+
+    fn pick(entries: &[(u8, &'static Item, Option<&'static Enchantment>)]) -> Option<ItemStack> {
+        let total: u8 = entries.iter().map(|(weight, _, _)| *weight).sum();
+        let mut roll = rand::random_range(0..total);
+        for (weight, item, enchantment) in entries {
+            if roll < *weight {
+                return Some(enchanted(item, *enchantment));
+            }
+            roll -= weight;
+        }
+        None
+    }
+
+    let weapon = match table.strip_prefix("minecraft:").unwrap_or(table) {
+        "equipment/trial_chamber" => None,
+        "equipment/trial_chamber_melee" => pick(&[
+            (4, &Item::IRON_SWORD, None),
+            (1, &Item::IRON_SWORD, Some(&Enchantment::SHARPNESS)),
+            (1, &Item::IRON_SWORD, Some(&Enchantment::KNOCKBACK)),
+            (1, &Item::DIAMOND_SWORD, None),
+        ]),
+        "equipment/trial_chamber_ranged" => pick(&[
+            (2, &Item::BOW, None),
+            (1, &Item::BOW, Some(&Enchantment::POWER)),
+            (1, &Item::BOW, Some(&Enchantment::PUNCH)),
+        ]),
+        _ => return None,
+    };
+    let mut stacks = trial_chamber_armor();
+    stacks.extend(weapon);
+    Some(stacks)
+}
+
+// equipment/trial_chamber.json: one roll over sub-tables weighted 4/2/1, each with an
+// independent `random_chance` 0.5 helmet pool and chestplate pool. Every piece gets a copper
+// trim and protection, projectile protection and fire protection IV.
+fn trial_chamber_armor() -> Vec<ItemStack> {
+    let (helmet, chestplate, pattern) = match rand::random_range(0..7u8) {
+        0..4 => (
+            &Item::CHAINMAIL_HELMET,
+            &Item::CHAINMAIL_CHESTPLATE,
+            TrimPattern::Bolt,
+        ),
+        4..6 => (
+            &Item::IRON_HELMET,
+            &Item::IRON_CHESTPLATE,
+            TrimPattern::Flow,
+        ),
+        _ => (
+            &Item::DIAMOND_HELMET,
+            &Item::DIAMOND_CHESTPLATE,
+            TrimPattern::Flow,
+        ),
+    };
+    [helmet, chestplate]
+        .into_iter()
+        .filter(|_| rand::random::<f32>() < 0.5)
+        .map(|item| {
+            let mut stack = ItemStack::new(1, item);
+            let trim = TrimImpl {
+                material: TrimMaterial::Copper,
+                pattern,
+            };
+            stack.patch.push((DataComponent::Trim, Some(trim.to_dyn())));
+            for enchantment in [
+                &Enchantment::FIRE_PROTECTION,
+                &Enchantment::PROJECTILE_PROTECTION,
+                &Enchantment::PROTECTION,
+            ] {
+                stack.enchant(enchantment, 4);
+            }
+            stack
+        })
+        .collect()
 }
 
 fn parse_uuid_list(list: &[NbtTag]) -> HashSet<Uuid> {
@@ -1741,8 +2045,11 @@ mod tests {
         );
         let config = TrialSpawnerConfig::from_compound(&nbt);
         assert_eq!(config.items_to_drop_when_ominous, "minecraft:custom/table");
-        assert!(ominous_spawner_item(DEFAULT_OMINOUS_ITEMS_LOOT_TABLE).is_some());
-        assert!(ominous_spawner_item("minecraft:custom/table").is_none());
+        assert_eq!(
+            ominous_dispensing_items(DEFAULT_OMINOUS_ITEMS_LOOT_TABLE).len(),
+            2
+        );
+        assert!(ominous_dispensing_items("minecraft:custom/table").is_empty());
     }
 
     #[test]
@@ -1842,6 +2149,34 @@ mod tests {
         );
     }
 
+    // TrialSpawnerConfigs.java:49-240: only ominous melee husk/zombie/baby_zombie and
+    // ranged/slow_ranged configs carry an equipment table.
+    #[test]
+    fn ominous_equipment_only_on_vanilla_configs() {
+        let table = |key: &str| {
+            built_in_config(key).expect("known key must resolve").spawn_potentials[0]
+                .2
+                .get_compound("equipment")
+                .and_then(|e| e.get_string("loot_table").map(ToString::to_string))
+        };
+        let melee = Some("minecraft:equipment/trial_chamber_melee".to_string());
+        let ranged = Some("minecraft:equipment/trial_chamber_ranged".to_string());
+        assert_eq!(table("minecraft:trial_chamber/small_melee/baby_zombie/ominous"), melee);
+        assert_eq!(table("minecraft:trial_chamber/melee/husk/ominous"), melee);
+        assert_eq!(table("minecraft:trial_chamber/slow_ranged/stray/ominous"), ranged);
+        assert_eq!(table("minecraft:trial_chamber/ranged/skeleton/ominous"), ranged);
+        for key in [
+            "minecraft:trial_chamber/breeze/ominous",
+            "minecraft:trial_chamber/melee/spider/ominous",
+            "minecraft:trial_chamber/small_melee/cave_spider/ominous",
+            "minecraft:trial_chamber/small_melee/silverfish/ominous",
+            "minecraft:trial_chamber/melee/zombie/normal",
+            "minecraft:trial_chamber/small_melee/baby_zombie/normal",
+        ] {
+            assert_eq!(table(key), None, "{key}");
+        }
+    }
+
     // spawners/ominous/trial_chamber/key.json rewards `ominous_trial_key`; the ominous
     // tables were previously matched by their `/key` and `/consumables` suffixes.
     #[test]
@@ -1929,5 +2264,105 @@ mod tests {
     fn from_nbt_falls_back_to_empty_default_for_unresolvable_string() {
         let config = TrialSpawnerConfig::from_nbt(Some(&NbtTag::String("nope".into())));
         assert!(config.spawn_potentials.is_empty());
+    }
+
+    #[test]
+    fn only_an_id_compound_has_no_configuration() {
+        let mut entity = NbtCompound::new();
+        entity.put_string("id", "minecraft:zombie".to_string());
+        assert!(has_no_configuration(&entity));
+        entity.put_bool("IsBaby", true);
+        assert!(!has_no_configuration(&entity));
+    }
+
+    #[test]
+    fn spawn_data_pos_needs_exactly_three_doubles() {
+        let with_pos = |values: Vec<NbtTag>| {
+            let mut entity = NbtCompound::new();
+            entity.put_list("Pos", values);
+            let mut data = NbtCompound::new();
+            data.put_compound("entity", entity);
+            spawn_data_pos(&data)
+        };
+        let pos = with_pos(vec![
+            NbtTag::Double(1.5),
+            NbtTag::Double(2.0),
+            NbtTag::Double(-3.0),
+        ])
+        .expect("three doubles decode");
+        assert_eq!((pos.x, pos.y, pos.z), (1.5, 2.0, -3.0));
+        assert!(with_pos(vec![NbtTag::Double(1.0), NbtTag::Double(2.0)]).is_none());
+        let ints = with_pos(vec![NbtTag::Int(1), NbtTag::Float(2.5), NbtTag::Int(-3)])
+            .expect("any numeric tag decodes");
+        assert_eq!((ints.x, ints.y, ints.z), (1.0, 2.5, -3.0));
+        assert!(spawn_data_pos(&NbtCompound::new()).is_none());
+    }
+
+    #[test]
+    fn trial_chamber_equipment_rolls_trimmed_armor_then_weapon() {
+        use pumpkin_data::data_component_impl::EnchantmentsImpl;
+        assert!(trial_chamber_equipment("minecraft:equipment/other").is_none());
+        for _ in 0..64 {
+            let stacks = trial_chamber_equipment("minecraft:equipment/trial_chamber_ranged")
+                .expect("known table");
+            let (weapon, armor) = stacks.split_last().expect("the weapon pool always rolls");
+            assert!(weapon.item == &Item::BOW);
+            assert!(armor.len() <= 2);
+            for piece in armor {
+                let trim = piece.get_data_component::<TrimImpl>().expect("trimmed");
+                assert_eq!(trim.material, TrimMaterial::Copper);
+                let enchantments = piece
+                    .get_data_component::<EnchantmentsImpl>()
+                    .expect("enchanted");
+                assert_eq!(enchantments.enchantment.len(), 3);
+                assert!(
+                    enchantments
+                        .enchantment
+                        .iter()
+                        .all(|(_, level)| *level == 4)
+                );
+            }
+            let melee = trial_chamber_equipment("minecraft:equipment/trial_chamber_melee")
+                .expect("known table");
+            let sword = melee.last().expect("the weapon pool always rolls");
+            assert!(sword.item == &Item::IRON_SWORD || sword.item == &Item::DIAMOND_SWORD);
+        }
+    }
+
+    #[test]
+    fn equipment_slots_resolve_once_and_read_drop_chances() {
+        let sword = ItemStack::new(1, &Item::IRON_SWORD);
+        let helmet = ItemStack::new(1, &Item::IRON_HELMET);
+        assert!(resolve_equipment_slot(&helmet, &[]) == Some(EquipmentSlot::HEAD));
+        let used = [(EquipmentSlot::MAIN_HAND, sword.clone())];
+        assert!(resolve_equipment_slot(&sword, &used).is_none());
+
+        assert_eq!(
+            slot_drop_chance(Some(&NbtTag::Float(0.0)), &EquipmentSlot::HEAD),
+            Some(0.0)
+        );
+        let mut map = NbtCompound::new();
+        map.put_float("head", 0.25);
+        let map = NbtTag::Compound(map);
+        assert_eq!(
+            slot_drop_chance(Some(&map), &EquipmentSlot::HEAD),
+            Some(0.25)
+        );
+        assert_eq!(slot_drop_chance(Some(&map), &EquipmentSlot::CHEST), None);
+        assert_eq!(slot_drop_chance(None, &EquipmentSlot::HEAD), None);
+    }
+
+    #[test]
+    fn dispensing_items_are_single_copies_weighted_by_count() {
+        for _ in 0..64 {
+            let items = ominous_dispensing_items(DEFAULT_OMINOUS_ITEMS_LOOT_TABLE);
+            assert!(
+                items
+                    .iter()
+                    .all(|(stack, weight)| stack.item_count == 1 && (1..=3).contains(weight))
+            );
+            assert_eq!(pick_weighted(&items).map(|stack| stack.item_count), Some(1));
+        }
+        assert!(pick_weighted(&[]).is_none());
     }
 }

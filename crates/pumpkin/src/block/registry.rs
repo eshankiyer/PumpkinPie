@@ -556,13 +556,18 @@ impl BlockRegistry {
     }
 
     fn entity_blocks_block_placement(entity: &dyn EntityBase) -> bool {
+        !entity
+            .get_entity()
+            .no_clip
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && Self::entity_blocks_building(entity)
+    }
+
+    /// `EntityGetter.isUnobstructed` (`EntityGetter.java:33-48`): a non-removed,
+    /// non-spectator entity whose `blocksBuilding` flag is set.
+    pub(crate) fn entity_blocks_building(entity: &dyn EntityBase) -> bool {
         let base_entity = entity.get_entity();
-        if base_entity.is_removed()
-            || base_entity
-                .no_clip
-                .load(std::sync::atomic::Ordering::Relaxed)
-            || entity.is_spectator()
-        {
+        if base_entity.is_removed() || entity.is_spectator() {
             return false;
         }
 
