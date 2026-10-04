@@ -102,27 +102,7 @@ impl BlockBehaviour for TripwireHookBlock {
             if args.moved {
                 return;
             }
-            let props = TripwireHookProperties::from_state_id(args.old_state_id, args.block);
-            if props.powered || props.attached {
-                Self::update(
-                    args.world,
-                    *args.position,
-                    args.old_state_id,
-                    true,
-                    false,
-                    -1,
-                    None,
-                )
-                .await;
-            }
-            if props.powered {
-                Self::update_neighbors_on_axis(
-                    args.world,
-                    *args.position,
-                    BlockDirection::from_cardinal_direction(props.facing),
-                )
-                .await;
-            }
+            Self::on_removed(args.world, *args.position, args.old_state_id).await;
         })
     }
 
@@ -259,6 +239,19 @@ impl TripwireHookBlock {
                 BlockDirection::from_cardinal_direction(future_hook_facing),
             )
             .await;
+            // `calculateState` (TripWireHookBlock.java:166-169): once the start hook is gone
+            // (it is being broken), only the receiver is rewritten. No sound, no game event at
+            // either hook, and the wires keep their ATTACHED value. `onRemoved` gets the facing-less
+            // `newState`, so its facing is the default NORTH.
+            if world.get_block(&start_hook_pos) != &Block::TRIPWIRE_HOOK {
+                Self::on_removed(
+                    world,
+                    start_hook_pos,
+                    future_hook_state.to_state_id(&Block::TRIPWIRE_HOOK),
+                )
+                .await;
+                return;
+            }
             Self::play_sound(
                 world,
                 &end_hook_pos,
@@ -305,6 +298,13 @@ impl TripwireHookBlock {
                 let current_wrie_pos =
                     start_hook_pos.offset_dir(start_hook_props.facing.to_offset(), l);
                 if let Some(mut lv8) = wires_props[l as usize] {
+                    // TripWireHookBlock.java:186-189 only rewrites a cell that still holds a
+                    // tripwire or hook: a wire just cut with shears is air by now and must stay so.
+                    let current_block = world.get_block(&current_wrie_pos);
+                    if current_block != &Block::TRIPWIRE && current_block != &Block::TRIPWIRE_HOOK
+                    {
+                        continue;
+                    }
                     lv8.attached = future_attached;
                     world
                         .set_block_state(
@@ -313,10 +313,31 @@ impl TripwireHookBlock {
                             BlockFlags::NOTIFY_ALL,
                         )
                         .await;
-                    // if world.get_block(&lv7) != Block::AIR {}
                 }
             }
         }
+    }
+
+    /// `TripWireHookBlock.onRemoved` (TripWireHookBlock.java:233-243).
+    fn on_removed(
+        world: &Arc<World>,
+        pos: BlockPos,
+        state_id: BlockStateId,
+    ) -> BlockFuture<'_, ()> {
+        Box::pin(async move {
+            let props = TripwireHookProperties::from_state_id(state_id, &Block::TRIPWIRE_HOOK);
+            if props.powered || props.attached {
+                Self::update(world, pos, state_id, true, false, -1, None).await;
+            }
+            if props.powered {
+                Self::update_neighbors_on_axis(
+                    world,
+                    pos,
+                    BlockDirection::from_cardinal_direction(props.facing),
+                )
+                .await;
+            }
+        })
     }
 
     #[expect(clippy::fn_params_excessive_bools)]
@@ -329,7 +350,8 @@ impl TripwireHookBlock {
         off: bool,
     ) {
         let cat = SoundCategory::Blocks;
-        let pos = block_pos.to_f64();
+        // `Level.playSound(BlockPos)` and `gameEvent(BlockPos)` both use the block centre.
+        let pos = block_pos.to_centered_f64();
         if on && !off {
             world.play_sound_raw(Sound::BlockTripwireClickOn as u16, cat, &pos, 0.4, 0.6);
             emit_game_event(

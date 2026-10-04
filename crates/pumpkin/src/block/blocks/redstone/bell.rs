@@ -5,7 +5,8 @@ use crate::block::entities::bell::BellBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockHitResult, BrokenArgs, CanPlaceAtArgs, ExplodeArgs,
-    NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
+    NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnProjectileHitArgs, OnSyncedBlockEventArgs,
+    PlacedArgs,
 };
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -33,7 +34,7 @@ async fn ring_bell(
         block_pos: position,
         world: world.clone(),
         direction: hit_direction.map(|d| d.to_block_direction()),
-        entity,
+        entity: entity.clone(),
         cancelled: false,
     };
     if let Some(server) = world.server.upgrade() {
@@ -52,6 +53,11 @@ async fn ring_bell(
         && let Some(be) = block_entity.as_any().downcast_ref::<BellBlockEntity>()
     {
         be.activate(direction);
+        // `BellBlockEntity.onHit` queues block event 1 with the hit side's 3D data value; its
+        // `triggerEvent` (see `on_synced_block_event`) restarts the shake and resonance.
+        world
+            .add_synced_block_event(position, 1, direction.to_block_direction().to_index())
+            .await;
     }
 
     world.play_sound_fine(
@@ -66,7 +72,8 @@ async fn ring_bell(
         world,
         GameEvent::BlockChange,
         position.to_centered_f64(),
-        GameEventContext::none(),
+        // `attemptToRing` names the ringing entity as the vibration source.
+        entity.map_or_else(GameEventContext::none, GameEventContext::of_entity),
     )
     .await;
     true
@@ -254,6 +261,60 @@ impl BlockBehaviour for BellBlock {
             if args.can_trigger_blocks {
                 ring_bell(*args.position, args.world, None, None).await;
             }
+        })
+    }
+
+    /// `BellBlock.onProjectileHit` (BellBlock.java:85-89): a projectile hitting the correct
+    /// side rings the bell, crediting the owner only when it is a player.
+    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let props = BellLikeProperties::from_state_id(args.state.id, args.block);
+            if !is_point_on_bell(args.hit, props.attachment, props.facing) {
+                return;
+            }
+            let owner = crate::entity::projectile::projectile_owner_id(args.projectile)
+                .and_then(|id| args.world.get_entity_by_id(id))
+                .filter(|entity| entity.get_player().is_some());
+            let did_ring = ring_bell(
+                *args.position,
+                args.world,
+                args.hit.face.to_horizontal_facing(),
+                owner.clone(),
+            )
+            .await;
+            if did_ring
+                && let Some(owner) = owner
+                && let Some(player) = owner.get_player()
+            {
+                player
+                    .increment_stat(
+                        pumpkin_data::statistic::StatisticCategory::Custom,
+                        pumpkin_data::statistic::CustomStatistic::BellRing as i32,
+                        1,
+                    )
+                    .await;
+            }
+        })
+    }
+
+    /// `BaseEntityBlock.triggerEvent` forwarding to `BellBlockEntity.triggerEvent`
+    /// (BellBlockEntity.java:43-54); returning true broadcasts the swing to clients.
+    fn on_synced_block_event<'a>(
+        &'a self,
+        args: OnSyncedBlockEventArgs<'a>,
+    ) -> BlockFuture<'a, bool> {
+        Box::pin(async move {
+            if args.r#type != 1 {
+                return false;
+            }
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return false;
+            };
+            let Some(be) = block_entity.as_any().downcast_ref::<BellBlockEntity>() else {
+                return false;
+            };
+            be.trigger_event(args.data);
+            true
         })
     }
 }

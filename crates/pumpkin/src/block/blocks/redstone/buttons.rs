@@ -30,6 +30,7 @@ use crate::block::blocks::abstract_wall_mounting::WallMountedBlock;
 use crate::block::blocks::redstone::lever::LeverLikePropertiesExt;
 use crate::block::registry::BlockActionResult;
 use crate::block::{BlockBehaviour, NormalUseArgs};
+use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -83,20 +84,42 @@ fn is_abstract_arrow(entity_type: &'static pumpkin_data::entity::EntityType) -> 
         || entity_type == &pumpkin_data::entity::EntityType::TRIDENT
 }
 
+/// Vanilla `ticksToStayPressed`: both buttons registered with `BlockSetType.STONE` -
+/// `stone_button` and `polished_blackstone_button` (`Blocks.java:1929,4937`) - pass 20;
+/// every other button passes 30.
+fn ticks_to_stay_pressed(block: &Block) -> u8 {
+    if block == &Block::STONE_BUTTON || block == &Block::POLISHED_BLACKSTONE_BUTTON {
+        20
+    } else {
+        30
+    }
+}
+
+/// `checkPressed` searches `state.getShape(level, pos).bounds()`, the outline shape: buttons
+/// are `noCollision`, so their collision shapes are empty.
+/// Returns the first `AbstractArrow` found, which vanilla uses as the game-event source.
+fn first_arrow_in_button(
+    world: &World,
+    position: &BlockPos,
+    state: &pumpkin_data::BlockState,
+) -> Option<Arc<dyn EntityBase>> {
+    state
+        .get_block_outline_shapes_at(position)
+        .map(|shape| shape.at_pos(*position))
+        .find_map(|shape: BoundingBox| {
+            world
+                .get_entities_at_box(&shape)
+                .into_iter()
+                .find(|entity| is_abstract_arrow(entity.get_entity().entity_type))
+        })
+}
+
 fn has_arrow_in_button(
     world: &World,
     position: &BlockPos,
     state: &pumpkin_data::BlockState,
 ) -> bool {
-    state
-        .get_block_collision_shapes_at(position)
-        .map(|shape| shape.at_pos(*position))
-        .any(|shape: BoundingBox| {
-            world
-                .get_entities_at_box(&shape)
-                .iter()
-                .any(|entity| is_abstract_arrow(entity.get_entity().entity_type))
-        })
+    first_arrow_in_button(world, position, state).is_some()
 }
 
 async fn click_button(
@@ -104,6 +127,7 @@ async fn click_button(
     block_pos: &BlockPos,
     block: &Block,
     player: Option<&Arc<Player>>,
+    arrow: Option<Arc<dyn EntityBase>>,
 ) {
     let (_, state) = world.get_block_and_state_id(block_pos);
 
@@ -117,14 +141,12 @@ async fn click_button(
                 BlockFlags::NOTIFY_ALL,
             )
             .await;
-        // Vanilla `ticksToStayPressed`: 20 for the stone button (`ButtonBlock.java`
-        // registration in `Blocks.java`), 30 for every other set.
-        let delay = if *block == Block::STONE_BUTTON {
-            20
-        } else {
-            30
-        };
-        world.schedule_block_tick(block, *block_pos, delay, TickPriority::Normal);
+        world.schedule_block_tick(
+            block,
+            *block_pos,
+            ticks_to_stay_pressed(block),
+            TickPriority::Normal,
+        );
         ButtonBlock::update_neighbors(world, block_pos, &button_props).await;
 
         // Vanilla `press` (ButtonBlock.java:94-100): click-on sound and a BLOCK_ACTIVATE
@@ -154,9 +176,12 @@ async fn click_button(
                 f64::from(block_pos.0.y) + 0.5,
                 f64::from(block_pos.0.z) + 0.5,
             ),
-            player.map_or_else(GameEventContext::none, |player| {
-                GameEventContext::of_entity(player.clone())
-            }),
+            // `checkPressed` (ButtonBlock.java:162-172) names the first arrow as the source.
+            match (player, arrow) {
+                (Some(player), _) => GameEventContext::of_entity(player.clone()),
+                (None, Some(arrow)) => GameEventContext::of_entity(arrow),
+                (None, None) => GameEventContext::none(),
+            },
         )
         .await;
     }
@@ -176,7 +201,7 @@ impl BlockBehaviour for ButtonBlock {
                 return BlockActionResult::Consume;
             }
 
-            click_button(args.world, args.position, args.block, Some(args.player)).await;
+            click_button(args.world, args.position, args.block, Some(args.player), None).await;
 
             BlockActionResult::Success
         })
@@ -193,15 +218,10 @@ impl BlockBehaviour for ButtonBlock {
             if can_be_activated_by_arrows(args.block)
                 && has_arrow_in_button(args.world, args.position, state)
             {
-                let delay = if *args.block == Block::STONE_BUTTON {
-                    20
-                } else {
-                    30
-                };
                 args.world.schedule_block_tick(
                     args.block,
                     *args.position,
-                    delay,
+                    ticks_to_stay_pressed(args.block),
                     TickPriority::Normal,
                 );
                 return;
@@ -245,8 +265,9 @@ impl BlockBehaviour for ButtonBlock {
     }
 
     /// Vanilla `entityInside` (`ButtonBlock.java:153-160`) checks arrow-activatable button sets
-    /// on the server and delegates to `checkPressed`. `AbstractArrow` entities (arrow, spectral
-    /// arrow, thrown trident) are the only headless-server entities that can trigger this path.
+    /// on the server and delegates to `checkPressed`, which presses only when an
+    /// `AbstractArrow` (arrow, spectral arrow, thrown trident) intersects the button's shape,
+    /// whatever entity is inside.
     fn on_entity_collision<'a>(
         &'a self,
         args: crate::block::OnEntityCollisionArgs<'a>,
@@ -256,13 +277,11 @@ impl BlockBehaviour for ButtonBlock {
                 return;
             }
 
-            if !is_abstract_arrow(args.entity.get_entity().entity_type) {
-                return;
-            }
-
             let props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
-            if !props.powered {
-                click_button(args.world, args.position, args.block, None).await;
+            if !props.powered
+                && let Some(arrow) = first_arrow_in_button(args.world, args.position, args.state)
+            {
+                click_button(args.world, args.position, args.block, None, Some(arrow)).await;
             }
         })
     }
@@ -272,7 +291,7 @@ impl BlockBehaviour for ButtonBlock {
     fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if args.can_trigger_blocks {
-                click_button(args.world, args.position, args.block, None).await;
+                click_button(args.world, args.position, args.block, None, None).await;
             }
         })
     }

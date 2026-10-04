@@ -517,6 +517,12 @@ impl EntityBase for ArrowEntity {
                     if life >= Self::DESPAWN_TIME {
                         entity.remove().await;
                     }
+                    // `AbstractArrow.tick` (AbstractArrow.java:212-215): a lodged arrow still
+                    // applies the inside effects of the blocks it touches (buttons, tripwires,
+                    // pressure plates, fire...) while it is alive.
+                    if !entity.is_removed() {
+                        entity.tick_block_collisions(caller, server).await;
+                    }
                     return;
                 }
             }
@@ -645,36 +651,50 @@ impl EntityBase for ArrowEntity {
                 }
             }
 
-            // Handle hit
-            if let Some(h) = hit {
-                // `Projectile.hitTargetOrDeflectSelf`: a deflected arrow is not consumed. The
-                // arrow has its own hit path, so the dispatch is repeated here for the same
-                // reason `PROJECTILE_LAND` is emitted separately below.
-                if crate::entity::projectile::try_deflect(&h, caller) {
-                    return;
+            // `stepMoveAndHit` (AbstractArrow.java:280-289): the arrow moves to the hit
+            // location and applies block effects while still alive, BEFORE the hit is
+            // dispatched. A piercing entity hit does not stop the arrow, so it keeps its full
+            // step here. Vanilla sweeps every block crossed this tick, this tests only the
+            // final bounding box.
+            if let Some(h) = &hit {
+                let piercing_entity = self.pierce_level.load(Ordering::Relaxed) > 0
+                    && matches!(h, ProjectileHit::Entity { .. });
+                if !piercing_entity {
+                    entity.set_pos(h.hit_pos());
                 }
+            }
+            if !entity.is_removed() {
+                entity.tick_block_collisions(caller, server).await;
+            }
 
+            // Handle hit
+            // `Projectile.hitTargetOrDeflectSelf`: a deflected arrow is not consumed. The
+            // arrow has its own hit path, so the dispatch is repeated here for the same
+            // reason `PROJECTILE_LAND` is emitted separately below.
+            if let Some(h) = hit
+                && !entity.is_removed()
+                && !crate::entity::projectile::try_deflect(&h, caller)
+            {
                 let is_piercing_entity = self.pierce_level.load(Ordering::Relaxed) > 0
                     && matches!(&h, ProjectileHit::Entity { .. });
-                if !is_piercing_entity && self.has_hit.swap(true, Ordering::SeqCst) {
-                    return;
+                if is_piercing_entity || !self.has_hit.swap(true, Ordering::SeqCst) {
+                    // Arrow has its own hit path (doesn't go through
+                    // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
+                    // emission mirroring the one in projectile::mod.
+                    let land_pos = crate::entity::projectile::projectile_land_pos(&h);
+                    if let ProjectileHit::Block {
+                        pos, face, hit_pos, ..
+                    } = &h
+                    {
+                        crate::entity::projectile::on_projectile_block_hit(
+                            &world, server, caller, *pos, *face, *hit_pos,
+                        )
+                        .await;
+                    }
+                    caller.on_hit(h).await;
+                    crate::entity::projectile::emit_projectile_land(&world, caller, land_pos)
+                        .await;
                 }
-
-                // Arrow has its own hit path (doesn't go through
-                // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
-                // emission mirroring the one in projectile::mod.
-                let land_pos = crate::entity::projectile::projectile_land_pos(&h);
-                if let ProjectileHit::Block {
-                    pos, face, hit_pos, ..
-                } = &h
-                {
-                    crate::entity::projectile::on_projectile_block_hit(
-                        &world, server, caller, *pos, *face, *hit_pos,
-                    )
-                    .await;
-                }
-                caller.on_hit(h).await;
-                crate::entity::projectile::emit_projectile_land(&world, caller, land_pos).await;
             }
         })
     }

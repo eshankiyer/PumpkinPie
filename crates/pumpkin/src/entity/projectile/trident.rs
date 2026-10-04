@@ -546,6 +546,12 @@ impl EntityBase for TridentEntity {
             }
 
             if self.tick_loyalty_return(&world).await {
+                // A returning trident is `noPhysics` (ThrownTrident.java:83), and
+                // `AbstractArrow.tick` then moves it and applies block effects
+                // (AbstractArrow.java:258-261).
+                if !entity.is_removed() {
+                    entity.tick_block_collisions(caller, server).await;
+                }
                 return;
             }
 
@@ -556,6 +562,11 @@ impl EntityBase for TridentEntity {
                 // Despawn after enough time
                 if life >= Self::DESPAWN_TIME {
                     entity.remove().await;
+                }
+                // `AbstractArrow.tick` (AbstractArrow.java:212-215): a lodged trident still
+                // applies the inside effects of the blocks it touches while it is alive.
+                if !entity.is_removed() {
+                    entity.tick_block_collisions(caller, server).await;
                 }
                 return;
             }
@@ -599,8 +610,20 @@ impl EntityBase for TridentEntity {
 
             let hit = self.sweep_collision(&world, start_pos, velocity).await;
 
+            // `stepMoveAndHit` (AbstractArrow.java:280-289): the trident moves to the hit
+            // location and applies block effects while still alive, BEFORE the hit is
+            // dispatched. Vanilla sweeps every block crossed this tick, this tests only the
+            // final bounding box.
+            if let Some(h) = &hit {
+                entity.set_pos(h.hit_pos());
+            }
+            if !entity.is_removed() {
+                entity.tick_block_collisions(caller, server).await;
+            }
+
             // Handle hit
             if let Some(h) = hit
+                && !entity.is_removed()
                 && !self.has_hit.swap(true, Ordering::SeqCst)
             {
                 // Trident has its own hit path (doesn't go through
