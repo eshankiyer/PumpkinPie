@@ -5134,6 +5134,10 @@ impl LivingEntity {
         ) {
             return zombie_nautilus.get_swim_sound();
         }
+        // `Hoglin.getSwimSound` (`Hoglin.java:345-348`).
+        if caller.get_entity().entity_type == &EntityType::HOGLIN {
+            return Sound::EntityHostileSwim;
+        }
         Sound::EntityGenericSwim
     }
 
@@ -5237,9 +5241,10 @@ impl LivingEntity {
             };
             let mut rng = rand::rng();
             let pitch = (rng.random::<f32>() - rng.random::<f32>()).mul_add(0.4, 1.0);
+            // `Entity.playSound` uses `getSoundSource` (`Entity.java:1486-1490`).
             self.entity.world.load().play_sound_fine(
                 Self::swim_sound(caller),
-                SoundCategory::Neutral,
+                caller.get_mob().map_or(SoundCategory::Neutral, Mob::get_sound_source),
                 &self.entity.pos.load(),
                 volume,
                 pitch,

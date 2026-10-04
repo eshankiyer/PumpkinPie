@@ -350,15 +350,22 @@ where
 /// Plays a mob's conversion sound at its own position.
 ///
 /// `playConvertedSound` (`PiglinBrute.java:141-144`, `Piglin.java`'s override, and the
-/// inline `makeSound` in `Hoglin.java:152`). Vanilla's `makeSound` uses the mob's own sound
-/// volume and voice pitch; Pumpkin's mobs have no `getVoicePitch` equivalent, so this plays
-/// at the unmodified 1.0/1.0 that `Entity::play_sound` also uses.
-pub fn play_converted_sound(mob: &MobEntity, sound: Sound) {
+/// inline `makeSound` in `Hoglin.java:152`). `makeSound` skips silent mobs and plays at the
+/// mob's sound volume (1.0 for all three) and `getVoicePitch`, which callers pass as
+/// `Mob::get_sound_pitch`. The category stays `Hostile`: the hoglin overrides
+/// `getSoundSource` to it and both piglins are `Monster`s.
+pub fn play_converted_sound(mob: &MobEntity, sound: Sound, pitch: f32) {
     let entity = &mob.living_entity.entity;
-    entity
-        .world
-        .load()
-        .play_sound(sound, SoundCategory::Hostile, &entity.pos.load());
+    if entity.is_silent() {
+        return;
+    }
+    entity.world.load().play_sound_fine(
+        sound,
+        SoundCategory::Hostile,
+        &entity.pos.load(),
+        1.0,
+        pitch,
+    );
 }
 
 #[cfg(test)]

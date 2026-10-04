@@ -1702,6 +1702,14 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Ticks between `MeleeAttackGoal` hits for a mob whose vanilla brain runs
+    /// `MeleeAttack.create(interval)` (the `ATTACK_COOLING_DOWN` expiry,
+    /// `MeleeAttack.java:35`), or `None` for the goal's own 20-tick cooldown. Read at attack
+    /// time, since vanilla picks the behaviour by the current baby state.
+    fn melee_attack_cooldown_ticks(&self) -> Option<i32> {
+        None
+    }
+
     /// A `playStepSound` override that decides its whole footstep, as `(sound, volume, pitch)`
     /// entries played in order, or `None` for the generic path (`get_step_sound`). An empty list
     /// is a silent step. `AbstractHorse.playStepSound` (`AbstractHorse.java:341-363`) is the one

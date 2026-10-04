@@ -1,5 +1,8 @@
 use crate::entity::player::Player;
-use crate::entity::{EntityBase, mob::Mob};
+use crate::entity::{
+    EntityBase,
+    mob::{Mob, hoglin::HoglinEntity, piglin::PiglinEntity},
+};
 use pumpkin_data::entity::EntityType;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -28,6 +31,7 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
 
     mob.set_mob_target(Some(source_arc.clone())).await;
 
+    let source_hoglin = source.cast_any().downcast_ref::<HoglinEntity>();
     let position = entity.pos.load();
     for nearby in world
         .get_nearby_entities(position, ALERT_RADIUS)
@@ -41,6 +45,17 @@ pub async fn retaliate_and_alert_piglins(mob: &dyn Mob, source: &dyn EntityBase)
         let Some(nearby_mob) = nearby.get_mob() else {
             continue;
         };
+        // `PiglinAi.broadcastAngerTarget` (`PiglinAi.java:675`): a hoglin is only passed on
+        // to piglins that can hunt, and only when the hoglin itself can be hunted.
+        if source_hoglin.is_some_and(|hoglin| {
+            !hoglin.can_be_hunted()
+                || !nearby_mob
+                    .cast_any()
+                    .downcast_ref::<PiglinEntity>()
+                    .is_some_and(PiglinEntity::can_hunt)
+        }) {
+            continue;
+        }
         if nearby_mob.get_mob_entity().target.lock().await.is_some() {
             continue;
         }

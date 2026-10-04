@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::entity::EntityType;
+use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
@@ -77,6 +77,9 @@ pub struct HoglinEntity {
     has_attack_target: AtomicBool,
     /// `Hoglin.timeInOverworld`/`IsImmuneToZombification` (`Hoglin.java:69-71`).
     zombification: ZombificationTimer,
+    /// `Hoglin.cannotBeHunted` (`Hoglin.java:72`). Only ever set from NBT; the bastion
+    /// hoglin-stable template ships it as `CannotBeHunted:1b`.
+    cannot_be_hunted: AtomicBool,
 }
 
 impl HoglinEntity {
@@ -89,6 +92,7 @@ impl HoglinEntity {
             repellent_scan_countdown: AtomicI32::new(0),
             has_attack_target: AtomicBool::new(false),
             zombification: ZombificationTimer::new(),
+            cannot_be_hunted: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(hoglin);
         let mob_weak: Weak<dyn Mob> = {
@@ -155,6 +159,13 @@ impl HoglinEntity {
     #[must_use]
     pub fn is_adult(&self) -> bool {
         self.mob_entity.living_entity.entity.age.load(Relaxed) >= 0
+    }
+
+    /// `Hoglin.canBeHunted` (`Hoglin.java:306-308`), the filter
+    /// `PiglinSpecificSensor` applies before a hoglin becomes huntable.
+    #[must_use]
+    pub fn can_be_hunted(&self) -> bool {
+        self.is_adult() && !self.cannot_be_hunted.load(Relaxed)
     }
 
     /// `HoglinAi.isPacified` (200 ticks after a nearby repellent was last seen).
@@ -301,21 +312,22 @@ impl HoglinEntity {
 }
 
 impl NBTStorage for HoglinEntity {
-    /// `Hoglin.addAdditionalSaveData` (`Hoglin.java:273-277`). `CannotBeHunted`
-    /// (`Hoglin.java:275`) is not persisted: nothing in this codebase sets it, because the
-    /// piglin hunting behaviour it gates is not ported (see `PiglinAi.StartHuntingHoglin`).
+    /// `Hoglin.addAdditionalSaveData` (`Hoglin.java:273-278`).
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.zombification.write_nbt(nbt);
+            nbt.put_bool("CannotBeHunted", self.cannot_be_hunted.load(Relaxed));
         })
     }
 
-    /// `Hoglin.readAdditionalSaveData` (`Hoglin.java:280-285`).
+    /// `Hoglin.readAdditionalSaveData` (`Hoglin.java:280-286`).
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.zombification.read_nbt(nbt);
+            self.cannot_be_hunted
+                .store(nbt.get_bool("CannotBeHunted").unwrap_or(false), Relaxed);
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
                     pumpkin_data::tracked_data::hoglin::DATA_IMMUNE_TO_ZOMBIFICATION,
@@ -330,6 +342,24 @@ impl NBTStorage for HoglinEntity {
 impl Mob for HoglinEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Hoglin.getSoundSource` (`Hoglin.java:325-328`): `HOSTILE`, although the hoglin is an
+    /// `Animal` rather than a `Monster`.
+    fn get_sound_source(&self) -> SoundCategory {
+        SoundCategory::Hostile
+    }
+
+    /// `Hoglin.playStepSound` (`Hoglin.java:355-358`): `HOGLIN_STEP` on every block, at the
+    /// default 0.15 volume and 1.0 pitch.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityHoglinStep)
+    }
+
+    /// `HoglinAi.initFightActivity` (`HoglinAi.java:91-92`): `MeleeAttack.create(40)` for
+    /// adults, `MeleeAttack.create(15)` for babies.
+    fn melee_attack_cooldown_ticks(&self) -> Option<i32> {
+        Some(if self.is_adult() { 40 } else { 15 })
     }
 
     /// `HoglinAi.wasHurtBy` (`HoglinAi.java:184-193`), reached from vanilla
@@ -400,19 +430,30 @@ impl Mob for HoglinEntity {
         })
     }
 
-    /// `Hoglin.doHurtTarget` (`Hoglin.java:105-115`): the swing-animation event and
-    /// `attackAnimationRemainingTicks` (L106-107) are client-side only; the server effects
-    /// are the `HOGLIN_ATTACK` sound (L108), the `HoglinAi.onHitTarget` coordination hook
-    /// (L110), and then the `HoglinBase.hurtAndThrowTarget` damage roll/knockback, which
-    /// replaces the generic flat-damage melee path.
+    /// `Hoglin.doHurtTarget` (`Hoglin.java:102-113`): non-living targets are refused
+    /// outright. Otherwise the attack entity event (status 4, which drives the client's
+    /// head-toss animation through `handleEntityEvent`), the `HOGLIN_ATTACK` sound via
+    /// `makeSound`, the `HoglinAi.onHitTarget` coordination hook, and then the
+    /// `HoglinBase.hurtAndThrowTarget` damage roll/knockback, which replaces the generic
+    /// flat-damage melee path. `attackAnimationRemainingTicks` is read only by the client
+    /// model and is not tracked.
     fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
+            if target.get_living_entity().is_none() {
+                return false;
+            }
             let entity = &self.mob_entity.living_entity.entity;
-            entity.world.load().play_sound(
-                Sound::EntityHoglinAttack,
-                SoundCategory::Hostile,
-                &entity.pos.load(),
-            );
+            let world = entity.world.load();
+            world.send_entity_status(entity, EntityStatus::StartAttacking, None);
+            if !entity.is_silent() {
+                world.play_sound_fine(
+                    Sound::EntityHoglinAttack,
+                    self.get_sound_source(),
+                    &entity.pos.load(),
+                    1.0,
+                    self.get_sound_pitch(),
+                );
+            }
             self.on_hit_target(target).await;
             hoglin_gore::try_gore_attack(self, target).await
         })
@@ -438,51 +479,69 @@ impl Mob for HoglinEntity {
         Some(Sound::EntityHoglinAmbient)
     }
 
-    /// `HoglinSpecificSensor.findNearestRepellent` + `BecomePassiveIfMemoryPresent`:
-    /// re-scans for a nearby repellent block every 20 ticks, refreshing the pacify
-    /// timer and clearing the current attack target when one is found.
+    /// `Hoglin.customServerAiStep` (`Hoglin.java:143-158`), in vanilla's order: the brain
+    /// tick (here `HoglinSpecificSensor.findNearestRepellent` + `BecomePassiveIfMemoryPresent`,
+    /// re-scanning for a repellent block every 20 ticks, refreshing the pacify timer and
+    /// clearing the attack target when one is found), then `HoglinAi.updateActivity`, then
+    /// the zombification countdown.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            // `Hoglin.customServerAiStep` (`Hoglin.java:149-157`). Unlike `AbstractPiglin`,
-            // the hoglin plays its converted sound unconditionally -- there is no
-            // peaceful-difficulty guard on this branch.
-            if self.zombification.tick(&self.mob_entity) {
-                zombification::play_converted_sound(
-                    &self.mob_entity,
-                    Sound::EntityHoglinConvertedToZombified,
-                );
-                zombification::convert_to(
-                    &self.mob_entity,
-                    &EntityType::ZOGLIN,
-                    true,
-                    ZoglinEntity::new,
-                )
-                .await;
-                return;
-            }
-
-            // Sampled once per tick for `get_ambient_sound`'s FIGHT branch; see the
-            // field doc for why the sample is not read inline.
-            self.has_attack_target
-                .store(self.mob_entity.target.lock().await.is_some(), Relaxed);
+            let entity = &self.mob_entity.living_entity.entity;
+            let world = entity.world.load();
 
             let countdown = self.repellent_scan_countdown.fetch_sub(1, Relaxed);
             if countdown > 0 {
                 if self.pacify_ticks.load(Relaxed) > 0 {
                     self.pacify_ticks.fetch_sub(1, Relaxed);
                 }
-                return;
+            } else {
+                self.repellent_scan_countdown
+                    .store(REPELLENT_SCAN_INTERVAL_TICKS, Relaxed);
+                if repellent_nearby(&world, entity.block_pos.load()) {
+                    self.pacify_ticks.store(REPELLENT_PACIFY_TICKS, Relaxed);
+                    self.set_mob_target(None).await;
+                } else if self.pacify_ticks.load(Relaxed) > 0 {
+                    self.pacify_ticks.fetch_sub(1, Relaxed);
+                }
             }
-            self.repellent_scan_countdown
-                .store(REPELLENT_SCAN_INTERVAL_TICKS, Relaxed);
 
-            let pos = self.mob_entity.living_entity.entity.block_pos.load();
-            let world = self.mob_entity.living_entity.entity.world.load();
-            if repellent_nearby(&world, pos) {
-                self.pacify_ticks.store(REPELLENT_PACIFY_TICKS, Relaxed);
-                self.set_mob_target(None).await;
-            } else if self.pacify_ticks.load(Relaxed) > 0 {
-                self.pacify_ticks.fetch_sub(1, Relaxed);
+            // `HoglinAi.updateActivity` (`HoglinAi.java:120-130`): FIGHT is active exactly
+            // while an attack target is held, and a change of activity plays the new
+            // activity's sound through `makeSound`. AVOID is not modelled, so IDLE <-> FIGHT
+            // are the only transitions. The sample also feeds `get_ambient_sound`; see the
+            // field doc for why it is not read inline.
+            let has_target = self.mob_entity.target.lock().await.is_some();
+            if self.has_attack_target.swap(has_target, Relaxed) != has_target
+                && !entity.is_silent()
+                && let Some(sound) = self.get_ambient_sound()
+            {
+                world.play_sound_fine(
+                    sound,
+                    self.get_sound_source(),
+                    &entity.pos.load(),
+                    1.0,
+                    self.get_sound_pitch(),
+                );
+            }
+
+            // Unlike `AbstractPiglin`, the hoglin plays its converted sound unconditionally
+            // -- there is no peaceful-difficulty guard on this branch.
+            if self.zombification.tick(&self.mob_entity) {
+                zombification::play_converted_sound(
+                    &self.mob_entity,
+                    Sound::EntityHoglinConvertedToZombified,
+                    self.get_sound_pitch(),
+                );
+                // `ConversionType.convertCommon` copies the baby state
+                // (`ConversionType.java:101-103`), and `Mob.convertTo` never runs the
+                // zoglin's `finalizeSpawn` baby roll, so the constructor's roll is undone.
+                let was_baby = !self.is_adult();
+                zombification::convert_to(&self.mob_entity, &EntityType::ZOGLIN, true, move |e| {
+                    let zoglin = ZoglinEntity::new(e);
+                    zoglin.set_baby(was_baby);
+                    zoglin
+                })
+                .await;
             }
         })
     }

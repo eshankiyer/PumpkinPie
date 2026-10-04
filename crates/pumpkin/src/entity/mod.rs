@@ -1551,6 +1551,12 @@ fn water_splash_sound(entity_type: &'static EntityType, high_speed: bool) -> Sou
         };
     }
 
+    // `getSwimHighSpeedSplashSound` is `GENERIC_SPLASH` for every entity but the player
+    // (`Entity.java:1271-1273`); the overrides below are the low-speed sound only.
+    if high_speed {
+        return Sound::EntityGenericSplash;
+    }
+
     if entity_type == &EntityType::DOLPHIN {
         return Sound::EntityDolphinSplash;
     }
@@ -1564,6 +1570,15 @@ fn water_splash_sound(entity_type: &'static EntityType, high_speed: bool) -> Sou
     }
 
     Sound::EntityGenericSplash
+}
+
+/// The splash volume of `Entity.doWaterSplashEffect` (`Entity.java:1669-1670`): horizontal
+/// movement weighted by 0.2, scaled by the self/passenger volume modifier, capped at 1.
+fn water_splash_speed(movement: Vector3<f64>, volume_modifier: f32) -> f32 {
+    ((movement.x * movement.x * 0.2 + movement.y * movement.y + movement.z * movement.z * 0.2)
+        .sqrt() as f32
+        * volume_modifier)
+        .min(1.0)
 }
 
 /// Current Animal implementations that inherit the base method use the Animal-specific
@@ -3974,25 +3989,52 @@ impl Entity {
             && f64::from(eye_block.0.y) + world.get_fluid_height(&eye_block, fluid, state) >= eye_y
     }
 
-    /// Port of vanilla's `Entity::doWaterSplashEffect`. Simplified: no controlling-passenger
-    /// volume modifier, no firstTick guard, and `play_sound` has no volume/pitch parameters.
+    /// Port of vanilla's `Entity::doWaterSplashEffect` (`Entity.java:1666-1694`). Simplified:
+    /// no firstTick guard, and the particles carry no per-particle velocity.
     async fn do_water_splash_effect(&self, caller: &dyn EntityBase) {
         let pos = self.pos.load();
         let width = self.entity_dimension.load().width;
         let velocity = self.velocity.load();
-        let speed = (velocity.x * velocity.x * 0.2
-            + velocity.y * velocity.y
-            + velocity.z * velocity.z * 0.2)
-            .sqrt()
-            .min(1.0);
+
+        // The controlling passenger's movement at a 0.9 modifier, else this entity's own at
+        // 0.2 (`Entity.java:1667-1670`); the same lookup `water_swim_sound` uses.
+        let controlling_passenger = if let Some(mob) = caller.get_mob() {
+            if mob::Mob::has_controlling_passenger(mob).await {
+                caller.get_entity().passengers.lock().await.first().cloned()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let (movement, volume_modifier) = controlling_passenger.map_or_else(
+            || (velocity, 0.2),
+            |passenger| (passenger.get_entity().velocity.load(), 0.9),
+        );
+        let speed = water_splash_speed(movement, volume_modifier);
 
         // `Entity.doWaterSplashEffect` selects normal/high-speed sounds at speed 0.25
-        // (`Entity.java:1666-1675`), while the sound overrides are defined at
-        // `Entity.java:1263-1272` and the subclass files cited by `water_splash_sound`.
-        self.play_sound(water_splash_sound(
-            caller.get_entity().entity_type,
-            speed >= 0.25,
-        ));
+        // (`Entity.java:1671-1675`) and plays them through `playSound` at `volume = speed`.
+        // `Entity.playSound` skips silent entities; `Player.playSound` does not
+        // (`Player.java:398-400`) and plays in `PLAYERS` (`Player.java:403-405`).
+        let is_player = caller.get_entity().entity_type == &EntityType::PLAYER;
+        if is_player || !self.is_silent() {
+            let category = if is_player {
+                SoundCategory::Players
+            } else {
+                caller
+                    .get_mob()
+                    .map_or(SoundCategory::Neutral, mob::Mob::get_sound_source)
+            };
+            let pitch = (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.4, 1.0);
+            self.world.load().play_sound_fine(
+                water_splash_sound(caller.get_entity().entity_type, speed >= 0.25),
+                category,
+                &pos,
+                speed,
+                pitch,
+            );
+        }
 
         let particle_count = (1.0f32 + width * 20.0) as i32;
         let splash_origin = Vector3::new(pos.x, pos.y.floor() + 1.0, pos.z);
@@ -7395,6 +7437,15 @@ mod tests {
     }
 
     #[test]
+    fn water_splash_speed_applies_the_volume_modifier() {
+        // `Entity.java:1668-1670`: 0.2 for the entity itself, 0.9 for a controlling passenger.
+        let falling = Vector3::new(0.0, -1.0, 0.0);
+        assert!((water_splash_speed(falling, 0.2) - 0.2).abs() < 1e-6);
+        assert!((water_splash_speed(falling, 0.9) - 0.9).abs() < 1e-6);
+        assert!((water_splash_speed(Vector3::new(0.0, -3.0, 0.0), 0.9) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn water_splash_sound_matches_vanilla_overrides() {
         // Vanilla `Entity.doWaterSplashEffect` chooses the speed branch at 0.25
         // (`Entity.java:1666-1675`), and the overrides are `Player.java:383-390`,
@@ -7407,9 +7458,18 @@ mod tests {
             water_splash_sound(&EntityType::PLAYER, true),
             Sound::EntityPlayerSplashHighSpeed
         );
+        // Only the player overrides the high-speed sound (`Entity.java:1271-1273`).
         assert_eq!(
             water_splash_sound(&EntityType::ZOMBIE, true),
+            Sound::EntityGenericSplash
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::ZOMBIE, false),
             Sound::EntityHostileSplash
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::DOLPHIN, true),
+            Sound::EntityGenericSplash
         );
         assert_eq!(
             water_splash_sound(&EntityType::DOLPHIN, false),

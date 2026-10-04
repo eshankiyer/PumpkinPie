@@ -185,6 +185,7 @@ impl Mob for PiglinBruteEntity {
                     zombification::play_converted_sound(
                         &self.mob_entity,
                         Sound::EntityPiglinBruteConvertedToZombified,
+                        self.get_sound_pitch(),
                     );
                 }
                 zombification::convert_to(

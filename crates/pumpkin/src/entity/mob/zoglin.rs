@@ -129,6 +129,12 @@ impl Mob for ZoglinEntity {
         &self.mob_entity
     }
 
+    /// `Zoglin.initFightActivity` (`Zoglin.java:126-127`): `MeleeAttack.create(40)` for
+    /// adults, `MeleeAttack.create(15)` for babies.
+    fn melee_attack_cooldown_ticks(&self) -> Option<i32> {
+        Some(if self.is_baby() { 15 } else { 40 })
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             if self.is_baby() {

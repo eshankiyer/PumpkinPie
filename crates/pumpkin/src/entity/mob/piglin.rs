@@ -21,7 +21,9 @@ use crate::entity::{
         wander_around::WanderAroundGoal,
     },
     mob::{
-        Mob, MobEntity, piglin_shared,
+        Mob, MobEntity,
+        hoglin::HoglinEntity,
+        piglin_shared,
         zombification::{self, ZombificationTimer},
         zombified_piglin::ZombifiedPiglinEntity,
     },
@@ -376,8 +378,8 @@ impl PiglinEntity {
 
         // `StartHuntingHoglin.create()` (`StartHuntingHoglin.java:10-30`), gated on
         // `Piglin.canHunt` (`Piglin.java:264-266`), on the piglin being an adult, and on
-        // `HUNTED_RECENTLY` being absent. The hoglin must be an adult
-        // (`PiglinSpecificSensor.java:66-72`); `TargetData.age` carries the baby flag.
+        // `HUNTED_RECENTLY` being absent. The hoglin must pass `Hoglin.canBeHunted`
+        // (`PiglinSpecificSensor.java:64-71`): an adult without `CannotBeHunted`.
         //
         // NOT ported: `broadcastAngerTarget` and the loop that also puts every visible adult
         // piglin on hunt cooldown (`StartHuntingHoglin.java:22-25`), together with the "no
@@ -391,19 +393,29 @@ impl PiglinEntity {
                 10,
                 true,
                 false,
-                Some(move |target: TargetData, _world: Arc<World>| {
+                Some(move |target: TargetData, world: Arc<World>| {
                     let hunt_gate = is_baby.clone();
                     let hunted = hunted_recently_ticks.clone();
                     let cannot_hunt = cannot_hunt.clone();
                     async move {
                         !hunt_gate()
                             && !cannot_hunt.load(Ordering::Relaxed)
-                            && target.age >= 0
                             && hunted.load(Ordering::Relaxed) <= 0
+                            && world.get_entity_by_id(target.entity_id).is_some_and(|e| {
+                                e.cast_any()
+                                    .downcast_ref::<HoglinEntity>()
+                                    .is_some_and(HoglinEntity::can_be_hunted)
+                            })
                     }
                 }),
             )),
         );
+    }
+
+    /// `Piglin.canHunt` (`Piglin.java:264-266`).
+    #[must_use]
+    pub fn can_hunt(&self) -> bool {
+        !self.cannot_hunt.load(Ordering::Relaxed)
     }
 
     fn is_adult(&self) -> bool {
@@ -768,6 +780,7 @@ impl Mob for PiglinEntity {
                     zombification::play_converted_sound(
                         &self.mob_entity,
                         Sound::EntityPiglinConvertedToZombified,
+                        self.get_sound_pitch(),
                     );
                 }
                 zombification::convert_to(

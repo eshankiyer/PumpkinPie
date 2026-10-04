@@ -210,7 +210,11 @@ impl Goal for MeleeAttackGoal {
             }
             mob.get_mob_entity().set_attacking(true);
             self.update_countdown_ticks = 0;
-            self.cooldown = 0;
+            // Brain mobs (`MeleeAttack.create(n)`) keep ATTACK_COOLING_DOWN across target
+            // changes, so only the goal-based mobs reset the cooldown on start.
+            if mob.melee_attack_cooldown_ticks().is_none() {
+                self.cooldown = 0;
+            }
         })
     }
 
@@ -284,7 +288,9 @@ impl MeleeAttackGoal {
     /// [`Self::tick_movement`] themselves and run their own attack step instead.
     pub async fn check_and_perform_attack(&mut self, mob: &dyn Mob, target: &dyn EntityBase) {
         if self.can_perform_attack(mob, target).await {
-            self.reset_attack_cooldown();
+            self.cooldown = mob
+                .melee_attack_cooldown_ticks()
+                .unwrap_or_else(|| self.get_max_cooldown());
             mob.get_mob_entity().living_entity.swing_hand().await;
             mob.try_attack(target).await;
         }
