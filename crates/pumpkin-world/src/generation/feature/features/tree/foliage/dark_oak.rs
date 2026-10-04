@@ -1,10 +1,6 @@
-use pumpkin_data::BlockState;
-use pumpkin_util::{
-    math::position::BlockPos,
-    random::{RandomGenerator, RandomImpl},
-};
+use pumpkin_util::random::{RandomGenerator, RandomImpl};
 
-use super::{FoliagePlacer, LeaveValidator};
+use super::{FoliagePlacer, FoliageSetter, LeaveValidator};
 use crate::generation::feature::features::tree::TreeNode;
 use crate::generation::proto_chunk::GenerationCache;
 
@@ -20,13 +16,11 @@ impl DarkOakFoliagePlacer {
         _foliage_height: i32,
         radius: i32,
         offset: i32,
-        foliage_provider: &BlockState,
-    ) -> Vec<BlockPos> {
-        let mut foliage_positions = Vec::new();
+        setter: &mut FoliageSetter<'_>,
+    ) {
         let pos = node.center.up_height(offset);
         let is_giant = node.giant_trunk;
         FoliagePlacer::generate_square(
-            &mut foliage_positions,
             self,
             chunk,
             random,
@@ -34,11 +28,10 @@ impl DarkOakFoliagePlacer {
             radius + 2,
             -1,
             node.giant_trunk,
-            foliage_provider,
+            setter,
         );
         if is_giant {
             FoliagePlacer::generate_square(
-                &mut foliage_positions,
                 self,
                 chunk,
                 random,
@@ -46,10 +39,9 @@ impl DarkOakFoliagePlacer {
                 radius + 3,
                 0,
                 node.giant_trunk,
-                foliage_provider,
+                setter,
             );
             FoliagePlacer::generate_square(
-                &mut foliage_positions,
                 self,
                 chunk,
                 random,
@@ -57,11 +49,10 @@ impl DarkOakFoliagePlacer {
                 radius + 2,
                 1,
                 node.giant_trunk,
-                foliage_provider,
+                setter,
             );
             if random.next_bool() {
                 FoliagePlacer::generate_square(
-                    &mut foliage_positions,
                     self,
                     chunk,
                     random,
@@ -69,12 +60,11 @@ impl DarkOakFoliagePlacer {
                     radius,
                     2,
                     node.giant_trunk,
-                    foliage_provider,
+                    setter,
                 );
             }
         } else {
             FoliagePlacer::generate_square(
-                &mut foliage_positions,
                 self,
                 chunk,
                 random,
@@ -82,10 +72,9 @@ impl DarkOakFoliagePlacer {
                 radius + 1,
                 0,
                 node.giant_trunk,
-                foliage_provider,
+                setter,
             );
         }
-        foliage_positions
     }
 
     pub const fn get_random_height(_random: &mut RandomGenerator) -> i32 {

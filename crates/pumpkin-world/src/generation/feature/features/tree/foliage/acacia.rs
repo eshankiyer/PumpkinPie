@@ -1,7 +1,6 @@
-use pumpkin_data::BlockState;
-use pumpkin_util::{math::position::BlockPos, random::RandomGenerator};
+use pumpkin_util::random::RandomGenerator;
 
-use super::{FoliagePlacer, LeaveValidator};
+use super::{FoliagePlacer, FoliageSetter, LeaveValidator};
 use crate::generation::feature::features::tree::TreeNode;
 use crate::generation::proto_chunk::GenerationCache;
 
@@ -17,11 +16,9 @@ impl AcaciaFoliagePlacer {
         foliage_height: i32,
         radius: i32,
         _offset: i32,
-        foliage_provider: &BlockState,
-    ) -> Vec<BlockPos> {
-        let mut foliage_positions = Vec::new();
+        setter: &mut FoliageSetter<'_>,
+    ) {
         FoliagePlacer::generate_square(
-            &mut foliage_positions,
             self,
             chunk,
             random,
@@ -29,10 +26,9 @@ impl AcaciaFoliagePlacer {
             radius + node.foliage_radius,
             -1,
             node.giant_trunk,
-            foliage_provider,
+            setter,
         );
         FoliagePlacer::generate_square(
-            &mut foliage_positions,
             self,
             chunk,
             random,
@@ -40,10 +36,9 @@ impl AcaciaFoliagePlacer {
             radius - 1,
             -foliage_height,
             node.giant_trunk,
-            foliage_provider,
+            setter,
         );
         FoliagePlacer::generate_square(
-            &mut foliage_positions,
             self,
             chunk,
             random,
@@ -51,9 +46,8 @@ impl AcaciaFoliagePlacer {
             radius + node.foliage_radius - 1,
             0,
             node.giant_trunk,
-            foliage_provider,
+            setter,
         );
-        foliage_positions
     }
 
     pub const fn get_random_height(_random: &mut RandomGenerator) -> i32 {

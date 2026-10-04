@@ -1,10 +1,9 @@
-use pumpkin_data::BlockState;
 use pumpkin_util::{
     math::{int_provider::IntProvider, position::BlockPos},
     random::RandomGenerator,
 };
 
-use super::{FoliagePlacer, LeaveValidator};
+use super::{FoliagePlacer, FoliageSetter, LeaveValidator};
 use crate::generation::feature::features::tree::TreeNode;
 use crate::generation::proto_chunk::GenerationCache;
 
@@ -22,9 +21,8 @@ impl MegaPineFoliagePlacer {
         foliage_height: i32,
         radius: i32,
         offset: i32,
-        foliage_provider: &BlockState,
-    ) -> Vec<BlockPos> {
-        let mut foliage_positions = Vec::new();
+        setter: &mut FoliageSetter<'_>,
+    ) {
         let pos = node.center;
         let mut current_radius = 0;
         for y in (pos.0.y - foliage_height + offset)..=(pos.0.y + offset) {
@@ -38,7 +36,6 @@ impl MegaPineFoliagePlacer {
                 computed_radius
             };
             FoliagePlacer::generate_square(
-                &mut foliage_positions,
                 self,
                 chunk,
                 random,
@@ -46,11 +43,10 @@ impl MegaPineFoliagePlacer {
                 r,
                 0,
                 node.giant_trunk,
-                foliage_provider,
+                setter,
             );
             current_radius = computed_radius;
         }
-        foliage_positions
     }
     pub fn get_random_height(&self, random: &mut RandomGenerator, _trunk_height: i32) -> i32 {
         self.crown_height.get(random)

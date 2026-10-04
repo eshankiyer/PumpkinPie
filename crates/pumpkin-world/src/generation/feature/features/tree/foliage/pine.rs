@@ -1,10 +1,9 @@
-use pumpkin_data::BlockState;
 use pumpkin_util::{
-    math::{int_provider::IntProvider, position::BlockPos},
+    math::int_provider::IntProvider,
     random::{RandomGenerator, RandomImpl},
 };
 
-use super::{FoliagePlacer, LeaveValidator};
+use super::{FoliagePlacer, FoliageSetter, LeaveValidator};
 use crate::generation::feature::features::tree::TreeNode;
 use crate::generation::proto_chunk::GenerationCache;
 
@@ -22,13 +21,11 @@ impl PineFoliagePlacer {
         foliage_height: i32,
         iradius: i32,
         offset: i32,
-        foliage_provider: &BlockState,
-    ) -> Vec<BlockPos> {
-        let mut foliage_positions = Vec::new();
+        setter: &mut FoliageSetter<'_>,
+    ) {
         let mut radius = 0;
         for y in (offset - foliage_height..=offset).rev() {
             FoliagePlacer::generate_square(
-                &mut foliage_positions,
                 self,
                 chunk,
                 random,
@@ -36,7 +33,7 @@ impl PineFoliagePlacer {
                 radius,
                 y,
                 node.giant_trunk,
-                foliage_provider,
+                setter,
             );
             if radius >= 1 && y == offset - foliage_height + 1 {
                 radius -= 1;
@@ -44,7 +41,6 @@ impl PineFoliagePlacer {
                 radius += 1;
             }
         }
-        foliage_positions
     }
 
     pub fn get_random_radius(

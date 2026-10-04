@@ -1,9 +1,7 @@
-use pumpkin_data::BlockState;
-use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::square_f32;
 use pumpkin_util::random::RandomGenerator;
 
-use super::{FoliagePlacer, LeaveValidator};
+use super::{FoliagePlacer, FoliageSetter, LeaveValidator};
 use crate::generation::feature::features::tree::TreeNode;
 use crate::generation::proto_chunk::GenerationCache;
 
@@ -21,13 +19,11 @@ impl LargeOakFoliagePlacer {
         foliage_height: i32,
         radius: i32,
         offset: i32,
-        foliage_provider: &BlockState,
-    ) -> Vec<BlockPos> {
-        let mut foliage_positions = Vec::new();
+        setter: &mut FoliageSetter<'_>,
+    ) {
         for y in (offset - foliage_height..=offset).rev() {
             let radius = radius + i32::from(!(y == offset || y == offset - foliage_height));
             FoliagePlacer::generate_square(
-                &mut foliage_positions,
                 self,
                 chunk,
                 random,
@@ -35,10 +31,9 @@ impl LargeOakFoliagePlacer {
                 radius,
                 y,
                 node.giant_trunk,
-                foliage_provider,
+                setter,
             );
         }
-        foliage_positions
     }
 
     pub const fn get_random_height(&self, _random: &mut RandomGenerator) -> i32 {

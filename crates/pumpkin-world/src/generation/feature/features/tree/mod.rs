@@ -1,5 +1,5 @@
 use decorator::TreeDecorator;
-use foliage::FoliagePlacer;
+use foliage::{FoliagePlacer, FoliageSetter};
 use pumpkin_data::BlockState;
 use pumpkin_data::{BlockId, tag};
 use pumpkin_util::{math::position::BlockPos, random::RandomGenerator};
@@ -96,6 +96,14 @@ impl TreeFeature {
         pos: BlockPos,
     ) -> (Vec<BlockPos>, Vec<BlockPos>, Vec<BlockPos>) {
         let height = self.trunk_placer.get_height(random);
+        // Vanilla `TreeFeature.doPlace` (`TreeFeature.java:65-68`) samples the foliage height
+        // and radius right after the tree height, before the trunk origin and free-space checks.
+        let foliage_height = self
+            .foliage_placer
+            .r#type
+            .get_random_height(random, height as i32);
+        let base_height = height as i32 - foliage_height;
+        let foliage_radius = self.foliage_placer.get_random_radius(random, base_height);
 
         let trunk_start = self
             .root_placer
@@ -129,27 +137,20 @@ impl TreeFeature {
             trunk_state,
         );
 
-        let foliage_height = self
-            .foliage_placer
-            .r#type
-            .get_random_height(random, height as i32);
-        let base_height = height as i32 - foliage_height;
-        let foliage_radius = self.foliage_placer.get_random_radius(random, base_height);
-        let foliage_state = self
-            .foliage_provider
-            .get(random, pos, chunk, block_registry);
-        let mut foliage_positions = Vec::new();
+        // One setter for the whole tree (`TreeFeature.java:127,137-148`), so every attachment
+        // shares `isSet` and the decorators see each foliage position once.
+        let mut setter = FoliageSetter::new(&self.foliage_provider, block_registry);
         for node in nodes {
-            foliage_positions.extend(self.foliage_placer.generate(
+            self.foliage_placer.generate(
                 chunk,
                 random,
                 &node,
                 foliage_height,
                 foliage_radius,
-                foliage_state,
-            ));
+                &mut setter,
+            );
         }
-        (logs, root_positions, foliage_positions)
+        (logs, root_positions, setter.into_positions())
     }
 
     fn get_top<T: GenerationCache>(&self, height: u32, chunk: &T, init_pos: BlockPos) -> u32 {
