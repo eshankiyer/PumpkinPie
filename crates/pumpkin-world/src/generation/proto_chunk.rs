@@ -1131,9 +1131,9 @@ impl ProtoChunk {
                                     z: j_z,
                                 }
                             );
-                            let _junction_box = BlockBox::from_pos(BlockPos::new(j_x, j.source_ground_y, j_z));
-                     any_piece_bounding_box = any_piece_bounding_box.map_or(Some(bounding_box), |mut b| {
-                            b.encompass(&bounding_box);
+                            let junction_box = BlockBox::from_pos(BlockPos::new(j_x, j.source_ground_y, j_z));
+                     any_piece_bounding_box = any_piece_bounding_box.map_or(Some(junction_box), |mut b| {
+                            b.encompass(&junction_box);
                              Some(b)
                         });
                         }
@@ -2031,10 +2031,21 @@ impl ProtoChunk {
                             },
                         );
 
+                        // `StructureStart.getBoundingBox` is `Structure.adjustBoundingBox` of the
+                        // piece union, which inflates by 12 for terrain-adapting structures so the
+                        // beardifier of chunks just outside the pieces still sees them.
                         if let Some(start_data) = start_data
-                            && start_data
-                                .get_bounding_box()
-                                .intersects_raw_xz(start_x, start_z, end_x, end_z)
+                            && {
+                                let bbox = start_data.get_bounding_box();
+                                let bbox = if structure.terrain_adaptation
+                                    == pumpkin_data::structures::TerrainAdaptation::None
+                                {
+                                    bbox
+                                } else {
+                                    bbox.expand(12, 12, 12)
+                                };
+                                bbox.intersects_raw_xz(start_x, start_z, end_x, end_z)
+                            }
                         {
                             references.push((entry.structure, start_data.collector.clone()));
                             break;

@@ -10,10 +10,11 @@ use super::{NoiseFunctionComponentRange, StaticIndependentChunkNoiseFunctionComp
 const BEARD_KERNEL_RADIUS: i32 = 12;
 const BEARD_KERNEL_SIZE: i32 = 24;
 
-static BEARD_KERNEL: OnceLock<[f64; 13824]> = OnceLock::new();
+// Vanilla stores the kernel as `float[]`, so every entry is rounded to f32.
+static BEARD_KERNEL: OnceLock<[f32; 13824]> = OnceLock::new();
 
 #[expect(clippy::large_stack_arrays)]
-fn get_beard_kernel() -> &'static [f64; 13824] {
+fn get_beard_kernel() -> &'static [f32; 13824] {
     BEARD_KERNEL.get_or_init(|| {
         let mut kernel = [0.0; 13824];
         for zi in 0..BEARD_KERNEL_SIZE {
@@ -23,12 +24,22 @@ fn get_beard_kernel() -> &'static [f64; 13824] {
                         xi - BEARD_KERNEL_RADIUS,
                         (yi - BEARD_KERNEL_RADIUS) as f64 + 0.5,
                         zi - BEARD_KERNEL_RADIUS,
-                    );
+                    ) as f32;
                 }
             }
         }
         kernel
     })
+}
+
+/// Port of `Mth.fastInvSqrt`: the bit-hack approximation with one Newton step,
+/// not an exact `1 / sqrt(x)`.
+fn fast_inv_sqrt(x: f64) -> f64 {
+    let xhalf = 0.5 * x;
+    // Java's `>>` on a long is an arithmetic shift.
+    let i = 6_910_469_410_427_058_090i64.wrapping_sub((x.to_bits() as i64) >> 1);
+    let y = f64::from_bits(i as u64);
+    y * (1.5 - xhalf * y * y)
 }
 
 fn compute_beard_contribution(dx: i32, dy: f64, dz: i32) -> f64 {
@@ -61,11 +72,10 @@ fn get_beard_contribution(dx: i32, dy: i32, dz: i32, y_to_ground: i32) -> f64 {
         let dy_with_offset = y_to_ground as f64 + 0.5;
         let distance_sqr = (dx as f64).powi(2) + dy_with_offset.powi(2) + (dz as f64).powi(2);
 
-        // Equivalent to: -dyWithOffset * Mth.fastInvSqrt(distanceSqr / 2.0) / 2.0
-        let value = -dy_with_offset * (distance_sqr / 2.0).sqrt().recip() / 2.0;
+        let value = -dy_with_offset * fast_inv_sqrt(distance_sqr / 2.0) / 2.0;
 
         let kernel = get_beard_kernel();
-        value * kernel[(zi * 24 * 24 + xi * 24 + yi) as usize]
+        value * f64::from(kernel[(zi * 24 * 24 + xi * 24 + yi) as usize])
     } else {
         0.0
     }
@@ -213,5 +223,19 @@ impl NoiseFunctionComponentRange for Beardifier {
 
     fn max(&self) -> f64 {
         f64::INFINITY
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::fast_inv_sqrt;
+
+    #[test]
+    fn fast_inv_sqrt_matches_vanilla_bit_hack() {
+        // Expected bits from a Python port of the `Mth.fastInvSqrt` bit-hack;
+        // deliberately not the exact reciprocal sqrt.
+        assert_eq!(fast_inv_sqrt(0.125).to_bits(), 2.827_718_603_181_855_5f64.to_bits());
+        assert_eq!(fast_inv_sqrt(1.0).to_bits(), 0.998_308_142_711_814_5f64.to_bits());
+        assert_eq!(fast_inv_sqrt(2.0).to_bits(), 0.706_929_650_795_463_9f64.to_bits());
     }
 }
