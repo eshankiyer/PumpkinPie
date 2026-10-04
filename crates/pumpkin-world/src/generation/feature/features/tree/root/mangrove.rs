@@ -1,5 +1,5 @@
 use pumpkin_data::{
-    Block, BlockDirection, BlockState, block_properties::HorizontalFacing, fluid::Fluid,
+    Block, BlockDirection, BlockId, BlockState, block_properties::HorizontalFacing, fluid::Fluid,
 };
 use pumpkin_util::{
     math::{int_provider::IntProvider, position::BlockPos},
@@ -195,8 +195,27 @@ impl MangroveRootPlacer {
         pos: BlockPos,
         state: &'static BlockState,
     ) -> &'static BlockState {
+        let raw = GenerationCache::get_block_state(chunk, &pos.0);
         let (fluid, _) = GenerationCache::get_fluid_and_fluid_state(chunk, &pos.0);
-        Self::set_waterlogged(state, fluid == Fluid::WATER)
+        let in_water = Self::is_water_fluid_at(&fluid, raw.to_state(), raw.to_block_id());
+        Self::set_waterlogged(state, in_water)
+    }
+
+    // Vanilla tests `isFluidAtPosition(pos, s -> s.is(FluidTags.WATER))`, i.e. the fluid state of
+    // the block currently there. `#water` is water + flowing water; waterlogged blocks and
+    // seagrass, tall seagrass, kelp, kelp plant and bubble columns all report a water source
+    // (e.g. `SeagrassBlock.java:86-88`), which the worldgen caches do not model.
+    fn is_water_fluid_at(fluid: &Fluid, existing: &BlockState, block: BlockId) -> bool {
+        fluid.matches_type(&Fluid::WATER)
+            || existing.is_waterlogged()
+            || matches!(
+                block,
+                BlockId::SEAGRASS
+                    | BlockId::TALL_SEAGRASS
+                    | BlockId::KELP
+                    | BlockId::KELP_PLANT
+                    | BlockId::BUBBLE_COLUMN
+            )
     }
 
     // Vanilla `RootPlacer.getPotentiallyWaterloggedState` (`RootPlacer.java:78-85`) writes both
@@ -217,7 +236,7 @@ impl MangroveRootPlacer {
 
 #[cfg(test)]
 mod tests {
-    use pumpkin_data::Block;
+    use pumpkin_data::{Block, BlockState, BlockStateId, fluid::Fluid};
 
     use super::MangroveRootPlacer;
 
@@ -229,5 +248,27 @@ mod tests {
         let dry = MangroveRootPlacer::set_waterlogged(wet, false);
         assert!(wet.is_waterlogged());
         assert!(!dry.is_waterlogged());
+    }
+
+    #[test]
+    fn water_fluid_at_matches_fluid_tag_water() {
+        let check = |fluid: &Fluid, state: &BlockState| {
+            MangroveRootPlacer::is_water_fluid_at(fluid, state, state.id.to_block_id())
+        };
+        let wet_roots =
+            MangroveRootPlacer::set_waterlogged(Block::MANGROVE_ROOTS.default_state, true);
+        let dry_roots = MangroveRootPlacer::set_waterlogged(wet_roots, false);
+        let flowing =
+            BlockStateId::new_or_air(Block::WATER.default_state.id.as_u16() + 1).to_state();
+        assert!(check(&Fluid::FLOWING_WATER, wet_roots));
+        assert!(check(&Fluid::EMPTY, wet_roots));
+        assert!(!check(&Fluid::EMPTY, dry_roots));
+        assert!(check(&Fluid::EMPTY, Block::SEAGRASS.default_state));
+        assert!(check(&Fluid::EMPTY, Block::TALL_SEAGRASS.default_state));
+        assert!(check(&Fluid::FLOWING_WATER, flowing));
+        assert!(check(&Fluid::WATER, Block::WATER.default_state));
+        assert!(!check(&Fluid::EMPTY, Block::AIR.default_state));
+        assert!(!check(&Fluid::EMPTY, Block::MUD.default_state));
+        assert!(!check(&Fluid::LAVA, Block::LAVA.default_state));
     }
 }
