@@ -18,7 +18,7 @@ use crate::entity::{
         ranged_crossbow_attack::RangedCrossbowAttackGoal,
         spear_use::SpearUseGoal,
         swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{
         Mob, MobEntity,
@@ -315,7 +315,14 @@ impl PiglinEntity {
         // holding one, which `mob/equipment.rs` already gives it a chance of.
         goal_selector.add_goal(4, Box::new(RangedCrossbowAttackGoal::new(CROSSBOW_RANGE)));
         goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, true)));
-        goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+        // `PiglinAi.java:282` (`createIdleMovementBehaviors`): `RandomStroll.stroll(0.6F)`.
+        goal_selector.add_goal(
+            5,
+            Box::new(WanderAroundGoal::new_brain_stroll(
+                const { &[BrainStroll::land(0.6)] },
+                120,
+            )),
+        );
         goal_selector.add_goal(
             6,
             LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),

@@ -186,7 +186,7 @@ use crate::entity::{
         goal::{
             look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
             melee_attack::MeleeAttackGoal, swim::SwimGoal, track_target::TrackTargetGoal,
-            wander_around::WanderAroundGoal,
+            wander_around::{BrainStroll, WanderAroundGoal},
         },
         pathfinder::node::PathType,
     },
@@ -331,7 +331,14 @@ impl WardenEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         goal_selector.add_goal(0, Box::new(SwimGoal::default()));
         goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, true)));
-        goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(0.5)));
+        // `WardenAi.java:110`: `RandomStroll.stroll(0.5F)`.
+        goal_selector.add_goal(
+            5,
+            Box::new(WanderAroundGoal::new_brain_stroll(
+                const { &[BrainStroll::land(0.5)] },
+                120,
+            )),
+        );
         goal_selector.add_goal(
             6,
             LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),

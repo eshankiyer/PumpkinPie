@@ -23,7 +23,7 @@ use crate::entity::{
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     passive::equine::{
@@ -133,7 +133,13 @@ impl CamelEntity {
             // `RandomStroll.stroll(2.0F)` behind `triggerIf(!refuseToMove)` (`CamelAi.java:84`).
             goal_selector.add_goal(
                 3,
-                RefuseToMoveGate::new(camel_weak, Box::new(WanderAroundGoal::new(2.0))),
+                RefuseToMoveGate::new(
+                    camel_weak,
+                    Box::new(WanderAroundGoal::new_brain_stroll(
+                        const { &[BrainStroll::land(2.0)] },
+                        120,
+                    )),
+                ),
             );
             goal_selector.add_goal(
                 4,

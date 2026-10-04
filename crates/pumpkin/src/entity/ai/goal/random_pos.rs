@@ -18,7 +18,9 @@ use rand::RngExt;
 use rand::rngs::ThreadRng;
 use std::sync::atomic::Ordering;
 
+use crate::block::pathfindable::{PathComputationType, is_pathfindable};
 use crate::entity::mob::Mob;
+use pumpkin_data::fluid::Fluid;
 
 /// `RandomPos.RANDOM_POS_ATTEMPTS` (`RandomPos.java:16`).
 const RANDOM_POS_ATTEMPTS: u32 = 10;
@@ -369,6 +371,117 @@ pub fn land_get_pos_towards(
     })
 }
 
+/// `RandomStroll.SWIM_XY_DISTANCE_TIERS` (`RandomStroll.java:21`): the `(horizontal, vertical)`
+/// reach of each successive swim-target attempt.
+const SWIM_XY_DISTANCE_TIERS: [(i32, i32); 6] = [(1, 1), (3, 3), (5, 5), (6, 5), (7, 7), (10, 7)];
+
+/// `BehaviorUtils.getRandomSwimmablePos` (`BehaviorUtils.java:159-168`): re-rolls
+/// `DefaultRandomPos.getPos` up to ten times until the block is pathfindable for WATER, and
+/// returns the last roll even if it never was.
+fn get_random_swimmable_pos(mob: &dyn Mob, horizontal: i32, vertical: i32) -> Option<Vector3<f64>> {
+    let world = mob.get_mob_entity().living_entity.entity.world.load();
+    let mut target = default_get_pos(mob, horizontal, vertical);
+    let mut count = 0;
+    while let Some(pos) = target {
+        if count >= 10
+            || is_pathfindable(
+                world.get_block_state(&BlockPos::floored_v(pos)),
+                PathComputationType::Water,
+            )
+        {
+            break;
+        }
+        count += 1;
+        target = default_get_pos(mob, horizontal, vertical);
+    }
+    target
+}
+
+/// `Mob.isWithinHome(Vec3)` (`Mob.java:1204-1206`), measured from the home block's center
+/// (`Vec3i.distToCenterSqr`) with vanilla's wrapping `int` radius product.
+#[allow(
+    clippy::suboptimal_flops,
+    reason = "vanilla rounds each multiply and add separately; fusing can flip the `<` at the radius"
+)]
+fn is_within_home_vec(mob: &dyn Mob, pos: Vector3<f64>) -> bool {
+    let mob_entity = mob.get_mob_entity();
+    let radius = mob_entity.position_target_range.load(Ordering::Relaxed);
+    if radius == -1 {
+        return true;
+    }
+    let home = mob_entity.position_target.load();
+    let dx = f64::from(home.0.x) + 0.5 - pos.x;
+    let dy = f64::from(home.0.y) + 0.5 - pos.y;
+    let dz = f64::from(home.0.z) + 0.5 - pos.z;
+    dx * dx + dy * dy + dz * dz < f64::from(radius.wrapping_mul(radius))
+}
+
+/// `position + normalize(vectorTo(fallback)) * (horizontal, vertical, horizontal)`
+/// (`RandomStroll.java:65`), with `Vec3.normalize` collapsing to zero below `1.0E-5F`
+/// (`Vec3.java:83-86`).
+#[allow(
+    clippy::suboptimal_flops,
+    reason = "vanilla `Vec3` rounds each multiply and add separately; the result is floored to a block"
+)]
+fn extend_swim_target(
+    origin: Vector3<f64>,
+    fallback: Vector3<f64>,
+    horizontal: i32,
+    vertical: i32,
+) -> Vector3<f64> {
+    let dx = fallback.x - origin.x;
+    let dy = fallback.y - origin.y;
+    let dz = fallback.z - origin.z;
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+    let (nx, ny, nz) = if dist < f64::from(1.0e-5f32) {
+        (0.0, 0.0, 0.0)
+    } else {
+        (dx / dist, dy / dist, dz / dist)
+    };
+    let horizontal = f64::from(horizontal);
+    Vector3::new(
+        origin.x + nx * horizontal,
+        origin.y + ny * f64::from(vertical),
+        origin.z + nz * horizontal,
+    )
+}
+
+/// `RandomStroll.getTargetSwimPos` (`RandomStroll.java:57-77`).
+///
+/// A swimmable random position within the smallest tier, then pushed outward along the same
+/// direction tier by tier for as long as each extension stays in a fluid and inside the home
+/// restriction.
+pub fn get_target_swim_pos(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    let entity = &mob.get_mob_entity().living_entity.entity;
+    let world = entity.world.load();
+    let mut fallback: Option<Vector3<f64>> = None;
+    let mut target = None;
+    for (horizontal, vertical) in SWIM_XY_DISTANCE_TIERS {
+        target = fallback.map_or_else(
+            || get_random_swimmable_pos(mob, horizontal, vertical),
+            |fallback| {
+                Some(extend_swim_target(
+                    entity.pos.load(),
+                    fallback,
+                    horizontal,
+                    vertical,
+                ))
+            },
+        );
+        let restrict = mob_restricted(mob, f64::from(horizontal));
+        let Some(pos) = target else {
+            return fallback;
+        };
+        if world.get_fluid(&BlockPos::floored_v(pos)).id == Fluid::EMPTY.id
+            || (restrict && !is_within_home_vec(mob, pos))
+        {
+            return fallback;
+        }
+        fallback = Some(pos);
+    }
+    target
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +540,33 @@ mod tests {
             assert!(direction.y.abs() <= 7);
             assert!(direction.z.abs() <= 10);
         }
+    }
+
+    #[test]
+    fn swim_tiers_match_vanilla() {
+        assert_eq!(
+            SWIM_XY_DISTANCE_TIERS,
+            [(1, 1), (3, 3), (5, 5), (6, 5), (7, 7), (10, 7)]
+        );
+    }
+
+    #[test]
+    fn swim_target_extends_along_the_fallback_direction() {
+        let origin = Vector3::new(0.5, 64.0, 0.5);
+        let extended = extend_swim_target(origin, Vector3::new(3.5, 68.0, 0.5), 5, 5);
+        assert!((extended.x - 3.5).abs() < 1e-9);
+        assert!((extended.y - 68.0).abs() < 1e-9);
+        assert!((extended.z - 0.5).abs() < 1e-9);
+        // The vertical tier scales only y: (6, 5) keeps x and z at 6 and y at 5.
+        let extended = extend_swim_target(origin, Vector3::new(0.5, 64.0, 2.5), 6, 5);
+        assert!((extended.z - 6.5).abs() < 1e-9);
+        assert!((extended.y - 64.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn swim_target_with_zero_direction_stays_put() {
+        let origin = Vector3::new(1.0, 2.0, 3.0);
+        let extended = extend_swim_target(origin, origin, 10, 7);
+        assert_eq!((extended.x, extended.y, extended.z), (1.0, 2.0, 3.0));
     }
 }

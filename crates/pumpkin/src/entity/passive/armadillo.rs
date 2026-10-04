@@ -22,7 +22,7 @@ use crate::entity::{
         armadillo_curl_up::ArmadilloCurlUpGoal, breed::BreedGoal, escape_danger::EscapeDangerGoal,
         follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, swim::SwimGoal, tempt::TemptGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     item::ItemEntity,
     mob::{Mob, MobEntity},
@@ -163,7 +163,14 @@ impl ArmadilloEntity {
             goal_selector.add_goal(3, BreedGoal::new(1.0));
             goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, ARMADILLO_FOOD, false).as_brain_follow_temptation()));
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.1)));
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
+            // `ArmadilloAi.java:104`: `RandomStroll.stroll(1.0F)`.
+            goal_selector.add_goal(
+                6,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(1.0)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 7,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),

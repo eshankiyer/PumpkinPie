@@ -24,7 +24,7 @@ use crate::entity::{
         swim::SwimGoal,
         tempt::TemptGoal,
         try_find_land::TryFindLandGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     passive::animal::Animal,
@@ -148,7 +148,18 @@ impl FrogEntity {
             // than vanilla until activity-aware dispatch exists.
             goal_selector.add_goal(2, Box::new(TryFindLandGoal::new(8, 1.5)));
             goal_selector.add_goal(2, BreedGoal::new(1.0));
-            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(1.0)));
+            // `FrogAi.java:124-133` swim activity: `RandomStroll.swim(0.75F)` then
+            // `RandomStroll.stroll(1.0F, true)`; on land the swim entry never runs, leaving the
+            // idle `RandomStroll.stroll(1.0F)` (`FrogAi.java:99`).
+            // DEVIATION: the in-water gate retries every brain tick in vanilla; one goal cannot
+            // carry both that and the idle `RunOne` cadence, so it keeps the 120-tick interval.
+            goal_selector.add_goal(
+                2,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::swim(0.75), BrainStroll::land(1.0)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 3,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),

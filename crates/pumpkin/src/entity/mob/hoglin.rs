@@ -18,7 +18,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        melee_attack::MeleeAttackGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        melee_attack::MeleeAttackGoal, swim::SwimGoal, wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{
         Mob, MobEntity, hoglin_gore,
@@ -122,7 +122,14 @@ impl HoglinEntity {
                 4,
                 Box::new(AvoidEntityGoal::new(&EntityType::PIGLIN, 8.0, 0.4, 1.3)),
             );
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // `HoglinAi.java:116`: `RandomStroll.stroll(0.4F)`.
+            goal_selector.add_goal(
+                5,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(0.4)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),

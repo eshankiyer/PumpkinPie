@@ -1,4 +1,4 @@
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, GoalFuture, random_pos, to_goal_ticks};
 use crate::block::pathfindable::{PathComputationType, is_pathfindable};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::tag::Taggable;
@@ -6,6 +6,71 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 use std::sync::atomic::Ordering;
+
+/// Target search and run condition of one vanilla brain `RandomStroll` behaviour
+/// (`RandomStroll.java:23-41`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrainStrollKind {
+    /// `RandomStroll.stroll`: `LandRandomPos.getPos(body, horizontal, vertical)`, skipped while
+    /// in water unless `may_stroll_from_water`.
+    Land {
+        horizontal: i32,
+        vertical: i32,
+        may_stroll_from_water: bool,
+    },
+    /// `RandomStroll.swim`: `getTargetSwimPos`, only while in water.
+    Swim,
+}
+
+/// One `RandomStroll` entry of a brain `GateBehavior`/`RunOne`, with its speed modifier.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrainStroll {
+    pub kind: BrainStrollKind,
+    pub speed: f64,
+}
+
+impl BrainStroll {
+    /// `RandomStroll.stroll(speed)` (`RandomStroll.java:23-25`).
+    #[must_use]
+    pub const fn land(speed: f64) -> Self {
+        Self::land_range(speed, 10, 7)
+    }
+
+    /// `RandomStroll.stroll(speed, false)` (`RandomStroll.java:27-29`).
+    #[must_use]
+    pub const fn land_not_from_water(speed: f64) -> Self {
+        Self {
+            kind: BrainStrollKind::Land {
+                horizontal: 10,
+                vertical: 7,
+                may_stroll_from_water: false,
+            },
+            speed,
+        }
+    }
+
+    /// `RandomStroll.stroll(speed, maxHorizontal, maxVertical)` (`RandomStroll.java:31-33`).
+    #[must_use]
+    pub const fn land_range(speed: f64, horizontal: i32, vertical: i32) -> Self {
+        Self {
+            kind: BrainStrollKind::Land {
+                horizontal,
+                vertical,
+                may_stroll_from_water: true,
+            },
+            speed,
+        }
+    }
+
+    /// `RandomStroll.swim(speed)` (`RandomStroll.java:39-41`).
+    #[must_use]
+    pub const fn swim(speed: f64) -> Self {
+        Self {
+            kind: BrainStrollKind::Swim,
+            speed,
+        }
+    }
+}
 
 pub struct WanderAroundGoal {
     goal_control: Controls,
@@ -20,6 +85,9 @@ pub struct WanderAroundGoal {
     /// for WATER through `BehaviorUtils.getRandomSwimmablePos`.
     swim_only: bool,
     probability: f32,
+    /// Vanilla brain `RandomStroll` behaviours tried in order (`RandomStroll.strollFlyOrSwim`,
+    /// `RandomStroll.java:43-55`); empty for the `RandomStrollGoal` family.
+    brain_strolls: &'static [BrainStroll],
 }
 
 impl WanderAroundGoal {
@@ -44,6 +112,37 @@ impl WanderAroundGoal {
             avoid_water: false,
             swim_only: false,
             probability: 0.0,
+            brain_strolls: &[],
+        }
+    }
+
+    /// Vanilla brain `RandomStroll.stroll`/`swim` behaviours (`RandomStroll.java:23-55`), tried
+    /// in order like the siblings of an `ORDERED`/`TRY_ALL` `GateBehavior`: an entry whose run
+    /// condition fails, or that finds no target, leaves `WALK_TARGET` absent so the next one
+    /// runs. Unlike `RandomStrollGoal` there is no `noActionTime` gate.
+    ///
+    /// `interval` stands in for the brain's cadence: 1 where the stroll sits in a gate with no
+    /// `DoNothing` sibling (it is retried every brain tick while `WALK_TARGET` is absent).
+    // DEVIATION: inside a `RunOne` the cadence comes from the weighted pick against
+    // `DoNothing`/look-target siblings, which a goal interval cannot reproduce; those callers
+    // keep `RandomStrollGoal`'s 120-tick default.
+    #[must_use]
+    pub const fn new_brain_stroll(strolls: &'static [BrainStroll], interval: i32) -> Self {
+        let speed = if strolls.is_empty() {
+            1.0
+        } else {
+            strolls[0].speed
+        };
+        Self {
+            goal_control: Controls::MOVE,
+            speed,
+            target: None,
+            chance: to_goal_ticks(interval),
+            force_trigger: false,
+            avoid_water: false,
+            swim_only: false,
+            probability: 0.0,
+            brain_strolls: strolls,
         }
     }
 
@@ -59,6 +158,7 @@ impl WanderAroundGoal {
             avoid_water: true,
             swim_only: false,
             probability: 0.001,
+            brain_strolls: &[],
         }
     }
 
@@ -74,6 +174,7 @@ impl WanderAroundGoal {
             avoid_water: true,
             swim_only: false,
             probability,
+            brain_strolls: &[],
         }
     }
 
@@ -91,6 +192,7 @@ impl WanderAroundGoal {
             avoid_water: false,
             swim_only: true,
             probability: 0.0,
+            brain_strolls: &[],
         }
     }
 
@@ -112,6 +214,39 @@ impl WanderAroundGoal {
     /// Vanilla `RandomStrollGoal.trigger` bypasses the interval for the next attempt.
     pub const fn trigger(&mut self) {
         self.force_trigger = true;
+    }
+
+    /// The `RandomStroll` entries of [`Self::new_brain_stroll`], in order; the first to produce a
+    /// target becomes the walk target at its own speed.
+    fn pick_brain_stroll(&mut self, mob: &dyn Mob) -> bool {
+        let in_water = mob.get_entity().was_touching_water.load(Ordering::Relaxed);
+        for stroll in self.brain_strolls {
+            let target = match stroll.kind {
+                BrainStrollKind::Land {
+                    horizontal,
+                    vertical,
+                    may_stroll_from_water,
+                } => {
+                    if !may_stroll_from_water && in_water {
+                        continue;
+                    }
+                    random_pos::land_get_pos(mob, horizontal, vertical)
+                }
+                BrainStrollKind::Swim => {
+                    if !in_water {
+                        continue;
+                    }
+                    random_pos::get_target_swim_pos(mob)
+                }
+            };
+            if let Some(target) = target {
+                self.target = Some(target);
+                self.speed = stroll.speed;
+                self.force_trigger = false;
+                return true;
+            }
+        }
+        false
     }
 
     fn is_within_home(mob: &dyn Mob, pos: &BlockPos) -> bool {
@@ -258,6 +393,13 @@ impl Goal for WanderAroundGoal {
                 return false;
             }
 
+            if !self.brain_strolls.is_empty() {
+                if !self.force_trigger && mob.get_random().random_range(0..self.chance) != 0 {
+                    return false;
+                }
+                return self.pick_brain_stroll(mob);
+            }
+
             if !self.force_trigger {
                 if mob.get_mob_entity().no_action_time.load(Ordering::Relaxed) >= 100 {
                     return false;
@@ -371,5 +513,28 @@ mod tests {
     fn water_avoiding_probability_is_configurable() {
         let goal = WanderAroundGoal::new_water_avoiding_with_probability(0.4, 0.00001);
         assert_eq!(goal.probability, 0.00001);
+    }
+
+    #[test]
+    fn brain_stroll_uses_first_entry_speed_and_interval() {
+        static STROLLS: [BrainStroll; 2] =
+            [BrainStroll::swim(0.5), BrainStroll::land_not_from_water(0.15)];
+        let goal = WanderAroundGoal::new_brain_stroll(&STROLLS, 1);
+        assert_eq!(goal.chance, 1);
+        assert_eq!(goal.speed, 0.5);
+        assert_eq!(
+            STROLLS[1].kind,
+            BrainStrollKind::Land {
+                horizontal: 10,
+                vertical: 7,
+                may_stroll_from_water: false
+            }
+        );
+    }
+
+    #[test]
+    fn plain_goals_have_no_brain_strolls() {
+        assert!(WanderAroundGoal::new(1.0).brain_strolls.is_empty());
+        assert!(WanderAroundGoal::new_water_avoiding(1.0).brain_strolls.is_empty());
     }
 }

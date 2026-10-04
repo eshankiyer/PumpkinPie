@@ -14,7 +14,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{
         Mob, MobEntity, piglin_shared,
@@ -53,7 +53,14 @@ impl PiglinBruteEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, true)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // `PiglinBruteAi.java:103`: `RandomStroll.stroll(0.6F)`.
+            goal_selector.add_goal(
+                5,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(0.6)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),

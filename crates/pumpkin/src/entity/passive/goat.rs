@@ -20,7 +20,7 @@ use crate::entity::{
         breed::BreedGoal, follow_parent::FollowParentGoal, goat_ram::GoatRamGoal,
         long_jump_to_random_pos::LongJumpToRandomPosGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, swim::SwimGoal, tempt::TemptGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -160,7 +160,14 @@ impl GoatEntity {
             goal_selector.add_goal(3, BreedGoal::new(1.0));
             goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false).as_brain_follow_temptation()));
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.25)));
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
+            // `GoatAi.java:98`: `RandomStroll.stroll(1.0F)`.
+            goal_selector.add_goal(
+                6,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(1.0)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 7,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),

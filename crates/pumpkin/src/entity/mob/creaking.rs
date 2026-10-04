@@ -23,7 +23,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -122,7 +122,14 @@ impl CreakingEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, true)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // `CreakingAi.java:47`: `RandomStroll.stroll(0.3F)`.
+            goal_selector.add_goal(
+                5,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(0.3)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),

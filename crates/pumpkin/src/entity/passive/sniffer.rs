@@ -21,7 +21,7 @@ use crate::entity::{
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, sniffer_dig::SnifferDigGoal, swim::SwimGoal,
-        tempt::TemptGoal, wander_around::WanderAroundGoal,
+        tempt::TemptGoal, wander_around::{BrainStroll, WanderAroundGoal},
     },
     ai::pathfinder::{Navigator, node::PathType},
     item::ItemEntity,
@@ -145,7 +145,14 @@ impl SnifferEntity {
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false).as_brain_follow_temptation()));
             goal_selector.add_goal(4, SnifferDigGoal::new(1.0, Arc::downgrade(&mob_arc)));
             goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.0)));
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
+            // `SnifferAi.java:120`: `RandomStroll.stroll(1.0F)`.
+            goal_selector.add_goal(
+                6,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(1.0)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 7,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),

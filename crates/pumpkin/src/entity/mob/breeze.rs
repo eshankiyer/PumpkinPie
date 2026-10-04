@@ -11,7 +11,7 @@ use crate::entity::{
         breeze_shoot::BreezeShootGoal, breeze_shoot_when_stuck::BreezeShootWhenStuckGoal,
         breeze_slide::BreezeSlideGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, revenge::RevengeGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     projectile_deflection::ProjectileDeflectionType,
@@ -67,7 +67,14 @@ impl BreezeEntity {
             goal_selector.add_goal(1, Box::new(BreezeShootGoal::new(breeze_weak.clone())));
             goal_selector.add_goal(2, Box::new(BreezeJumpGoal::new(breeze_weak.clone())));
             goal_selector.add_goal(3, Box::new(BreezeSlideGoal::new(breeze_weak)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // `BreezeAi.java:60`: `RandomStroll.stroll(0.6F)`.
+            goal_selector.add_goal(
+                5,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land(0.6)] },
+                    120,
+                )),
+            );
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),

@@ -30,7 +30,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         interact_with_door::InteractWithDoorGoal, look_at_entity::LookAtEntityGoal,
-        transport_items::TransportItemsGoal, wander_around::WanderAroundGoal,
+        transport_items::TransportItemsGoal, wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
 };
@@ -233,7 +233,14 @@ impl CopperGolemEntity {
                 3,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
             );
-            goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(1.0)));
+            // `CopperGolemAi.java:93`: `RandomStroll.stroll(1.0F, 2, 2)`.
+            goal_selector.add_goal(
+                4,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::land_range(1.0, 2, 2)] },
+                    120,
+                )),
+            );
         }
 
         mob_arc

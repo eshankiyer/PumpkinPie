@@ -31,7 +31,8 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, tempt::TemptGoal, wander_around::WanderAroundGoal,
+        look_at_entity::LookAtEntityGoal, tempt::TemptGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     passive::animal::Animal,
@@ -174,8 +175,18 @@ impl NautilusEntity {
                 2,
                 Box::new(TemptGoal::for_nautilus(1.3, NAUTILUS_TEMPT_ITEMS)),
             );
-            // `NautilusAi.initIdleActivity`: `RandomStroll.swim(1.0F)`.
-            goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(1.0)));
+            // `NautilusAi.initIdleActivity`: `RandomStroll.swim(1.0F)` inside an
+            // `ORDERED`/`TRY_ALL` gate with no `DoNothing` (`NautilusAi.java:88-96`), so it is
+            // retried every tick while there is no walk target (interval 1). DEVIATION: the goal
+            // selector only evaluates `can_start` every other tick, so retries run at half the
+            // vanilla brain cadence.
+            goal_selector.add_goal(
+                4,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::swim(1.0)] },
+                    1,
+                )),
+            );
             goal_selector.add_goal(
                 5,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),

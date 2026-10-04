@@ -125,7 +125,7 @@ use crate::entity::{
     ai::goal::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, revenge::RevengeGoal, tempt::TemptGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     passive::{
@@ -318,10 +318,17 @@ impl ZombieNautilusEntity {
                         .as_brain_follow_temptation(),
                 ),
             );
-            // `ZombieNautilusAi.initIdleActivity` priority 3: `RandomStroll.swim(1.0F)`.
+            // `ZombieNautilusAi.initIdleActivity` priority 3: `RandomStroll.swim(1.0F)` inside an
+            // `ORDERED`/`TRY_ALL` gate with no `DoNothing` (`ZombieNautilusAi.java:56-64`), so it
+            // is retried every tick while there is no walk target (interval 1). DEVIATION: the
+            // goal selector only evaluates `can_start` every other tick, so retries run at half
+            // the vanilla brain cadence.
             goal_selector.add_goal(
                 3,
-                Box::new(WanderAroundGoal::new(SPEED_MULTIPLIER_WHEN_IDLING_IN_WATER)),
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::swim(SPEED_MULTIPLIER_WHEN_IDLING_IN_WATER)] },
+                    1,
+                )),
             );
             // `LookAtTargetSink(45, 90)` in CORE (ZombieNautilusAi.java:41).
             goal_selector.add_goal(

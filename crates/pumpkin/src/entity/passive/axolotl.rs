@@ -24,7 +24,7 @@ use crate::entity::{
         axolotl_play_dead::AxolotlPlayDeadGoal, breed::BreedGoal, follow_parent::FollowParentGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, non_tame_random_target::NonTameRandomTargetGoal,
-        swim::SwimGoal, tempt::TemptGoal, wander_around::WanderAroundGoal,
+        swim::SwimGoal, tempt::TemptGoal, wander_around::{BrainStroll, WanderAroundGoal},
     },
     mob::{Mob, MobEntity},
     passive::animal::{Animal, fill_water_bucket_result},
@@ -213,7 +213,18 @@ impl AxolotlEntity {
             goal_selector.add_goal(3, BreedGoal::new(0.2));
             goal_selector.add_goal(4, Box::new(TemptGoal::new(0.5, TEMPT_ITEMS, false)));
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(0.6)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // `AxolotlAi.java:109-121`: an `ORDERED`/`TRY_ALL` gate with no `DoNothing`, so
+            // `RandomStroll.swim(0.5F)` then `RandomStroll.stroll(0.15F, false)` is retried
+            // every tick while there is no walk target (interval 1). DEVIATION: the goal
+            // selector only evaluates `can_start` every other tick, so retries run at half the
+            // vanilla brain cadence.
+            goal_selector.add_goal(
+                5,
+                Box::new(WanderAroundGoal::new_brain_stroll(
+                    const { &[BrainStroll::swim(0.5), BrainStroll::land_not_from_water(0.15)] },
+                    1,
+                )),
+            );
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
