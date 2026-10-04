@@ -231,12 +231,11 @@ impl ParrotEntity {
             );
             goal_selector.add_goal(2, SitGoal::new());
             goal_selector.add_goal(2, FollowOwnerGoal::new(1.0, 5.0, 1.0));
-            // `Parrot.ParrotWanderGoal` only overrides the flying-navigation position search;
-            // this codebase has no flying-stroll variant, so the water-avoiding stroll stands in.
-            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
-            // `Parrot.java:168`.
+            // `Parrot.java:168`: `ParrotWanderGoal(this, 1.0)`.
+            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_parrot_wander(1.0)));
+            // `Parrot.java:169`.
             goal_selector.add_goal(3, LandOnOwnersShoulderGoal::new());
-            // `Parrot.java:169` -- priority 3 `FollowMobGoal(this, 1.0, 3.0F, 7.0F)`.
+            // `Parrot.java:170` -- priority 3 `FollowMobGoal(this, 1.0, 3.0F, 7.0F)`.
             goal_selector.add_goal(3, FollowMobGoal::new(1.0, 3.0, 7.0));
         };
 

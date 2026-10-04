@@ -88,6 +88,18 @@ pub struct WanderAroundGoal {
     /// Vanilla brain `RandomStroll` behaviours tried in order (`RandomStroll.strollFlyOrSwim`,
     /// `RandomStroll.java:43-55`); empty for the `RandomStrollGoal` family.
     brain_strolls: &'static [BrainStroll],
+    /// Target search of the flying `RandomStrollGoal` subclasses.
+    flight: FlightSearch,
+}
+
+/// Which flying `getPosition()` override, if any, replaces the ground target search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FlightSearch {
+    None,
+    /// `WaterAvoidingRandomFlyingGoal.getPosition` (`WaterAvoidingRandomFlyingGoal.java:14-22`).
+    WaterAvoidingFlying,
+    /// `Parrot.ParrotWanderGoal.getPosition` (`Parrot.java:478-488`).
+    ParrotWander,
 }
 
 impl WanderAroundGoal {
@@ -113,6 +125,7 @@ impl WanderAroundGoal {
             swim_only: false,
             probability: 0.0,
             brain_strolls: &[],
+            flight: FlightSearch::None,
         }
     }
 
@@ -143,6 +156,7 @@ impl WanderAroundGoal {
             swim_only: false,
             probability: 0.0,
             brain_strolls: strolls,
+            flight: FlightSearch::None,
         }
     }
 
@@ -159,6 +173,7 @@ impl WanderAroundGoal {
             swim_only: false,
             probability: 0.001,
             brain_strolls: &[],
+            flight: FlightSearch::None,
         }
     }
 
@@ -175,6 +190,7 @@ impl WanderAroundGoal {
             swim_only: false,
             probability,
             brain_strolls: &[],
+            flight: FlightSearch::None,
         }
     }
 
@@ -193,7 +209,86 @@ impl WanderAroundGoal {
             swim_only: true,
             probability: 0.0,
             brain_strolls: &[],
+            flight: FlightSearch::None,
         }
+    }
+
+    /// Vanilla: `WaterAvoidingRandomFlyingGoal(mob, speedModifier)`, which keeps
+    /// `WaterAvoidingRandomStrollGoal`'s default interval and `0.001` probability.
+    #[must_use]
+    pub const fn new_water_avoiding_flying(speed: f64) -> Self {
+        let mut goal = Self::new_water_avoiding(speed);
+        goal.flight = FlightSearch::WaterAvoidingFlying;
+        goal
+    }
+
+    /// Vanilla: `Parrot.ParrotWanderGoal(mob, speedModifier)` (`Parrot.java:472-475`).
+    #[must_use]
+    pub const fn new_parrot_wander(speed: f64) -> Self {
+        let mut goal = Self::new_water_avoiding(speed);
+        goal.flight = FlightSearch::ParrotWander;
+        goal
+    }
+
+    /// `WaterAvoidingRandomFlyingGoal.getPosition` (`WaterAvoidingRandomFlyingGoal.java:14-22`).
+    /// `getViewVector(0.0F)` takes the head yaw (`LivingEntity.getViewYRot`), so the current head
+    /// look angle stands in for the previous-tick one.
+    fn find_flying_target(mob: &dyn Mob) -> Option<Vector3<f64>> {
+        let view = mob.get_head_look_angle();
+        let cone = f64::from(std::f32::consts::FRAC_PI_2);
+        random_pos::hover_get_pos(mob, 8, 7, view.x, view.z, cone, 3, 1)
+            .or_else(|| random_pos::air_and_water_get_pos(mob, 8, 4, -2, view.x, view.z, cone))
+    }
+
+    /// `Parrot.ParrotWanderGoal.getTreePos` (`Parrot.java:490-512`): the first leaf or log top
+    /// with two air blocks above, scanned in `BlockPos.betweenClosed` order (x fastest, then y,
+    /// then z) - not the nearest one.
+    fn find_tree_pos(mob: &dyn Mob) -> Option<Vector3<f64>> {
+        let entity = mob.get_entity();
+        let pos = entity.pos.load();
+        let world = entity.world.load();
+        let mob_pos = BlockPos::floored_v(pos);
+        for z in (pos.z - 3.0).floor() as i32..=(pos.z + 3.0).floor() as i32 {
+            for y in (pos.y - 6.0).floor() as i32..=(pos.y + 6.0).floor() as i32 {
+                for x in (pos.x - 3.0).floor() as i32..=(pos.x + 3.0).floor() as i32 {
+                    let candidate = BlockPos::new(x, y, z);
+                    if candidate == mob_pos {
+                        continue;
+                    }
+                    // The leaves tag holds exactly vanilla's `LeavesBlock` instances.
+                    let below = world.get_block(&candidate.down());
+                    let can_sit_on = below.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES)
+                        || below.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LOGS);
+                    if can_sit_on
+                        && world.get_block_state(&candidate).is_air()
+                        && world.get_block_state(&candidate.up()).is_air()
+                    {
+                        return Some(Vector3::new(
+                            f64::from(x) + 0.5,
+                            f64::from(y),
+                            f64::from(z) + 0.5,
+                        ));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// `Parrot.ParrotWanderGoal.getPosition` (`Parrot.java:478-488`). As in vanilla, a
+    /// successful tree roll overwrites the in-water land result even when no tree is found.
+    fn find_parrot_target(&self, mob: &dyn Mob) -> Option<Vector3<f64>> {
+        let in_water_pos = if mob.get_entity().was_touching_water.load(Ordering::Relaxed) {
+            random_pos::land_get_pos(mob, 15, 15)
+        } else {
+            None
+        };
+        let pos = if mob.get_random().random::<f32>() >= self.probability {
+            Self::find_tree_pos(mob)
+        } else {
+            in_water_pos
+        };
+        pos.or_else(|| Self::find_flying_target(mob))
     }
 
     /// Vanilla: `RandomStrollGoal#setInterval`, e.g. `ElderGuardian`'s constructor
@@ -410,7 +505,11 @@ impl Goal for WanderAroundGoal {
                 }
             }
 
-            if self.avoid_water {
+            if self.flight == FlightSearch::WaterAvoidingFlying {
+                self.target = Self::find_flying_target(mob);
+            } else if self.flight == FlightSearch::ParrotWander {
+                self.target = self.find_parrot_target(mob);
+            } else if self.avoid_water {
                 let in_water = mob.get_entity().was_touching_water.load(Ordering::Relaxed);
                 self.target = if in_water {
                     Self::find_random_target(mob, 15, 7, true, false)
@@ -530,6 +629,27 @@ mod tests {
                 may_stroll_from_water: false
             }
         );
+    }
+
+    #[test]
+    fn flying_strolls_keep_water_avoiding_timing() {
+        // `WaterAvoidingRandomFlyingGoal` and `ParrotWanderGoal` inherit
+        // `WaterAvoidingRandomStrollGoal(mob, speed)`: interval 120, probability 0.001.
+        for (goal, flight) in [
+            (
+                WanderAroundGoal::new_water_avoiding_flying(1.0),
+                FlightSearch::WaterAvoidingFlying,
+            ),
+            (
+                WanderAroundGoal::new_parrot_wander(1.0),
+                FlightSearch::ParrotWander,
+            ),
+        ] {
+            assert_eq!(goal.chance, to_goal_ticks(120));
+            assert_eq!(goal.probability, 0.001);
+            assert_eq!(goal.flight, flight);
+        }
+        assert_eq!(WanderAroundGoal::new(1.0).flight, FlightSearch::None);
     }
 
     #[test]

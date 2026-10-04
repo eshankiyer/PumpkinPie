@@ -17,6 +17,7 @@ use crate::entity::{
     ai::goal::{
         Controls, Goal, GoalFuture, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, revenge::RevengeGoal, track_target::TrackTargetGoal,
+        wander_around::WanderAroundGoal,
     },
     ai::pathfinder::NavigatorGoal,
     ai::target_predicate::TargetPredicate,
@@ -62,7 +63,7 @@ impl WitherEntity {
             // `WitherBoss.registerGoals` (`boss/wither/WitherBoss.java:98-107`).
             goal_selector.add_goal(0, Box::new(WitherDoNothingGoal));
             goal_selector.add_goal(2, Box::new(WitherRangedAttackGoal::new()));
-            goal_selector.add_goal(5, Box::new(WitherRandomFlightGoal::new()));
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding_flying(1.0)));
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
@@ -201,6 +202,7 @@ impl Mob for WitherEntity {
             let entity = &self.mob_entity.living_entity.entity;
             let age = entity.age.load(Ordering::Relaxed);
             let invulnerable = self.invulnerable_ticks.load(Ordering::Relaxed);
+            // `WitherBoss.customServerAiStep` (`WitherBoss.java:261-348`).
             if invulnerable > 0 {
                 let next = invulnerable - 1;
                 self.set_invulnerable_ticks(next);
@@ -217,36 +219,36 @@ impl Mob for WitherEntity {
                         )
                         .await;
                 }
-                return;
-            }
-
-            if age % 20 == 0 {
+            } else if age % 20 == 0 {
                 self.mob_entity.living_entity.heal(1.0);
             }
 
-            let Some(target) = self.mob_entity.target.lock().await.clone() else {
-                return;
-            };
-            if !target.get_entity().is_alive() {
-                return;
-            }
-
-            let target_pos = target.get_entity().pos.load();
-            let pos = entity.pos.load();
+            // `WitherBoss.aiStep` (`WitherBoss.java:155-177`): the vertical damping and the
+            // yaw update run every tick, with or without a target.
             let mut velocity = entity.velocity.load().multiply(1.0, 0.6, 1.0);
-            if pos.y < target_pos.y || (!self.is_powered() && pos.y < target_pos.y + 5.0) {
-                velocity.y = velocity.y.max(0.0);
-                velocity.y += 0.3 - velocity.y * 0.6;
-            }
+            let target = if invulnerable > 0 {
+                None
+            } else {
+                self.mob_entity.target.lock().await.clone()
+            };
+            if let Some(target) = target.filter(|target| target.get_entity().is_alive()) {
+                let target_pos = target.get_entity().pos.load();
+                let pos = entity.pos.load();
+                if pos.y < target_pos.y || (!self.is_powered() && pos.y < target_pos.y + 5.0) {
+                    velocity.y = velocity.y.max(0.0);
+                    // `0.6F` is a float literal widened to double.
+                    velocity.y += 0.3 - velocity.y * f64::from(0.6f32);
+                }
 
-            let horizontal = Vector3::new(target_pos.x - pos.x, 0.0, target_pos.z - pos.z);
-            if horizontal.length_squared() > 9.0 {
-                let direction = horizontal.normalize();
-                velocity.x += direction.x * 0.3 - velocity.x * 0.6;
-                velocity.z += direction.z * 0.3 - velocity.z * 0.6;
+                let horizontal = Vector3::new(target_pos.x - pos.x, 0.0, target_pos.z - pos.z);
+                if horizontal.length_squared() > 9.0 {
+                    let direction = horizontal.normalize();
+                    velocity.x += direction.x * 0.3 - velocity.x * 0.6;
+                    velocity.z += direction.z * 0.3 - velocity.z * 0.6;
+                }
             }
             entity.set_velocity(velocity);
-            if velocity.horizontal_length() > 0.05 {
+            if velocity.horizontal_length_squared() > 0.05 {
                 entity
                     .yaw
                     .store((velocity.z.atan2(velocity.x).to_degrees() - 90.0) as f32);
@@ -421,59 +423,6 @@ impl Goal for WitherRangedAttackGoal {
 
     fn controls(&self) -> Controls {
         Controls::MOVE | Controls::LOOK
-    }
-}
-
-/// The `WaterAvoidingRandomFlyingGoal` slot from `WitherBoss.registerGoals`.
-/// Wither flight is driven by `WitherBoss.aiStep`; this goal supplies the idle drift when there
-/// is no combat target instead of handing the flying mob to the ground navigator.
-struct WitherRandomFlightGoal {
-    cooldown: i32,
-}
-
-impl WitherRandomFlightGoal {
-    const fn new() -> Self {
-        Self { cooldown: 0 }
-    }
-}
-
-impl Goal for WitherRandomFlightGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            mob.get_mob_entity().target.lock().await.is_none()
-                && mob
-                    .cast_any()
-                    .downcast_ref::<WitherEntity>()
-                    .is_some_and(|wither| wither.invulnerable_ticks() == 0)
-        })
-    }
-
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        self.can_start(mob)
-    }
-
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.cooldown -= 1;
-            if self.cooldown > 0 {
-                return;
-            }
-            let mut rng = mob.get_random();
-            let direction = Vector3::new(
-                rng.random_range(-1.0..=1.0),
-                rng.random_range(-0.5..=0.5),
-                rng.random_range(-1.0..=1.0),
-            )
-            .normalize()
-                * 0.1;
-            let velocity = mob.get_entity().velocity.load().multiply(0.8, 0.8, 0.8) + direction;
-            mob.get_entity().set_velocity(velocity);
-            self.cooldown = rng.random_range(20..60);
-        })
-    }
-
-    fn should_run_every_tick(&self) -> bool {
-        true
     }
 }
 

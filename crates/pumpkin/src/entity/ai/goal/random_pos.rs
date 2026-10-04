@@ -8,8 +8,8 @@
 //! `GolemRandomStrollInVillageGoal`) all need them, so they live here rather than being
 //! re-approximated per goal.
 //!
-//! Deliberately *not* ported: `RandomPos.moveUpToAboveSolid` (flying mobs only) and
-//! `getPosAway` (avoid-goals, which Pumpkin already approximates elsewhere).
+//! Deliberately *not* ported: `getPosAway` (avoid-goals, which Pumpkin already approximates
+//! elsewhere).
 
 use pumpkin_data::tag::Taggable;
 use pumpkin_util::math::position::BlockPos;
@@ -221,6 +221,85 @@ fn move_up_out_of_solid(mob: &dyn Mob, pos: BlockPos) -> BlockPos {
         }
     }
     landing
+}
+
+/// `RandomPos.moveUpToAboveSolid` (`RandomPos.java:63-90`): from a solid `pos`, climb out of
+/// the solid column, then up to `above_solid_amount` more blocks, stopping one short of the next
+/// solid block above. A non-solid `pos` is returned unchanged.
+fn move_up_to_above_solid(
+    pos: BlockPos,
+    above_solid_amount: i32,
+    max_y: i32,
+    solid: impl Fn(BlockPos) -> bool,
+) -> BlockPos {
+    debug_assert!(
+        above_solid_amount >= 0,
+        "aboveSolidAmount was {above_solid_amount}, expected >= 0"
+    );
+    if !solid(pos) {
+        return pos;
+    }
+    let mut landing = pos.up();
+    while landing.0.y <= max_y && solid(landing) {
+        landing = landing.up();
+    }
+    let first_non_solid_y = landing.0.y;
+    while landing.0.y <= max_y && landing.0.y - first_non_solid_y < above_solid_amount {
+        landing = landing.up();
+        if solid(landing) {
+            landing = landing.down();
+            break;
+        }
+    }
+    landing
+}
+
+/// `HoverRandomPos.getPos` (`HoverRandomPos.java:9-44`): a ground candidate in the view cone,
+/// lifted `hover_min_height..=hover_max_height` blocks above the solid block it lands on.
+#[allow(clippy::too_many_arguments, reason = "mirrors vanilla's signature")]
+pub fn hover_get_pos(
+    mob: &dyn Mob,
+    horizontal: i32,
+    vertical: i32,
+    x_dir: f64,
+    z_dir: f64,
+    max_xz_radians_from_dir: f64,
+    hover_max_height: i32,
+    hover_min_height: i32,
+) -> Option<Vector3<f64>> {
+    let restrict = mob_restricted(mob, f64::from(horizontal));
+    generate_random_pos(mob, |rng| {
+        let direction = generate_random_direction_within_radians(
+            rng,
+            0.0,
+            f64::from(horizontal),
+            vertical,
+            x_dir,
+            z_dir,
+            max_xz_radians_from_dir,
+        )?;
+        let candidate =
+            generate_random_pos_toward_direction(mob, f64::from(horizontal), rng, direction);
+        // `LandRandomPos.generateRandomPosTowardDirection` (`LandRandomPos.java:71-78`).
+        if !passes_common_checks(mob, restrict, candidate) {
+            return None;
+        }
+        // Drawn only after the candidate passed, as in vanilla.
+        let amount =
+            rng.random_range(0..=(hover_max_height - hover_min_height)) + hover_min_height;
+        let world = mob.get_mob_entity().living_entity.entity.world.load();
+        let landing = move_up_to_above_solid(candidate, amount, world.get_top_y(), |p| {
+            world.get_block_state(&p).is_solid()
+        });
+        if world
+            .get_fluid(&landing)
+            .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER)
+            || has_malus(mob, landing)
+        {
+            return None;
+        }
+        Some(landing)
+    })
 }
 
 /// `RandomPos.generateRandomPos` (`RandomPos.java:96-112`): ten independent draws, keeping the
@@ -540,6 +619,40 @@ mod tests {
             assert!(direction.y.abs() <= 7);
             assert!(direction.z.abs() <= 10);
         }
+    }
+
+    #[test]
+    fn move_up_to_above_solid_passes_non_solid_through() {
+        let pos = BlockPos::new(0, 64, 0);
+        assert_eq!(move_up_to_above_solid(pos, 3, 320, |_| false), pos);
+    }
+
+    #[test]
+    fn move_up_to_above_solid_climbs_column_then_hovers() {
+        // Solid at y 64..=66; first non-solid is 67, then up to 3 more.
+        let solid = |p: BlockPos| (64..=66).contains(&p.0.y);
+        let landing = move_up_to_above_solid(BlockPos::new(0, 64, 0), 3, 320, solid);
+        assert_eq!(landing.0.y, 70);
+        let landing = move_up_to_above_solid(BlockPos::new(0, 64, 0), 0, 320, solid);
+        assert_eq!(landing.0.y, 67);
+    }
+
+    #[test]
+    fn move_up_to_above_solid_stops_below_ceiling() {
+        // Ground at 64, ceiling at 67: hovering stops at 66, one below the ceiling.
+        let solid = |p: BlockPos| p.0.y == 64 || p.0.y == 67;
+        let landing = move_up_to_above_solid(BlockPos::new(0, 64, 0), 3, 320, solid);
+        assert_eq!(landing.0.y, 66);
+    }
+
+    #[test]
+    fn move_up_to_above_solid_respects_max_y() {
+        let solid = |p: BlockPos| p.0.y == 64;
+        let landing = move_up_to_above_solid(BlockPos::new(0, 64, 0), 3, 66, solid);
+        assert_eq!(landing.0.y, 67);
+        // A solid column reaching past max_y stops one above max_y.
+        let landing = move_up_to_above_solid(BlockPos::new(0, 64, 0), 3, 66, |_| true);
+        assert_eq!(landing.0.y, 67);
     }
 
     #[test]
