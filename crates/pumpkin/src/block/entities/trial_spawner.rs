@@ -1196,34 +1196,123 @@ impl TrialSpawnerBlockEntity {
         let Some(item) = ominous_spawner_item(config.items_to_drop_when_ominous()) else {
             return;
         };
-        let target_id = self.detected_players.lock().await.iter().next().copied();
-        let Some(target_id) = target_id else {
+        let Some(spawn_pos) = self.calculate_position_to_spawn_spawner(world).await else {
             return;
         };
-        let Some(target) = world.get_entity_by_uuid(target_id) else {
-            return;
-        };
-        let target_entity = target.get_entity();
-        if !target_entity.is_alive() {
-            return;
-        }
-        let target_pos = target_entity.pos.load();
-        let target_box = target_entity.bounding_box.load();
-        let spawn_pos = Vector3::new(
-            target_pos.x,
-            target_box.max.y + 2.0 + f64::from(rand::random_range(0..4u8)),
-            target_pos.z,
-        );
         let entity = Entity::new(world.clone(), spawn_pos, &EntityType::OMINOUS_ITEM_SPAWNER);
         let item_spawner = OminousItemSpawnerEntity::create(entity, item);
         world.spawn_entity(item_spawner).await;
-        world.play_block_sound(
+        let pitch = (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.2, 1.0);
+        world.play_sound_fine(
             Sound::BlockTrialSpawnerSpawnItemBegin,
             SoundCategory::Blocks,
-            self.position,
+            &BlockPos::floored(spawn_pos.x, spawn_pos.y, spawn_pos.z).to_centered_f64(),
+            1.0,
+            pitch,
         );
         self.cooldown_ends_at
             .store(game_time + OMINOUS_ITEM_SPAWNER_INTERVAL, Ordering::Relaxed);
+    }
+
+    // TrialSpawnerState.java:176-221: pick a non-creative, non-spectator living detected
+    // player in range (none -> no spawn), then on a coin flip either a living tracked mob in
+    // range or one of those players, and place the item spawner above it. Only the target's
+    // position and bounding-box height are needed, so candidates are kept as that pair.
+    async fn calculate_position_to_spawn_spawner(
+        &self,
+        world: &Arc<World>,
+    ) -> Option<Vector3<f64>> {
+        let center = self.position.to_centered_f64();
+        let range_sq = self.required_player_range * self.required_player_range;
+        let in_range = |pos: Vector3<f64>| pos.squared_distance_to_vec(&center) <= range_sq;
+        let height_of = |entity: &Entity| f64::from(entity.entity_dimension.load().height);
+
+        let nearby_players: Vec<(Vector3<f64>, f64)> = self
+            .detected_players
+            .lock()
+            .await
+            .iter()
+            .filter_map(|id| world.get_player_by_uuid(*id))
+            .filter(|player| {
+                let entity = &player.living_entity.entity;
+                !matches!(
+                    player.gamemode.load(),
+                    GameMode::Creative | GameMode::Spectator
+                ) && !entity.is_removed()
+                    && !player.living_entity.is_dead_or_dying()
+                    && in_range(entity.pos.load())
+            })
+            .map(|player| {
+                let entity = &player.living_entity.entity;
+                (entity.pos.load(), height_of(entity))
+            })
+            .collect();
+        if nearby_players.is_empty() {
+            return None;
+        }
+
+        let eligible = if rand::random::<bool>() {
+            self.current_mobs
+                .lock()
+                .await
+                .iter()
+                .filter_map(|id| world.get_entity_by_uuid(*id))
+                .filter(|mob| {
+                    let entity = mob.get_entity();
+                    !entity.is_removed()
+                        && mob
+                            .get_living_entity()
+                            .is_none_or(|living| !living.is_dead_or_dying())
+                        && in_range(entity.pos.load())
+                })
+                .map(|mob| {
+                    let entity = mob.get_entity();
+                    (entity.pos.load(), height_of(entity))
+                })
+                .collect()
+        } else {
+            nearby_players
+        };
+        let (target_pos, target_height) = match eligible.len() {
+            0 => return None,
+            1 => eligible.first().copied()?,
+            len => eligible.get(rand::random_range(0..len)).copied()?,
+        };
+        Self::calculate_position_above(world, target_pos, target_height).await
+    }
+
+    // TrialSpawnerState.java:198-205: clip (VISUAL, no fluids) from the entity up to
+    // `height + 2 + nextInt(4)` above it and sit one block below the centre of the block that
+    // was hit (or of the end block on a miss); refused when that spot has a collision shape.
+    async fn calculate_position_above(
+        world: &Arc<World>,
+        entity_pos: Vector3<f64>,
+        height: f64,
+    ) -> Option<Vector3<f64>> {
+        let try_spawn_pos = Vector3::new(
+            entity_pos.x,
+            entity_pos.y + height + 2.0 + f64::from(rand::random_range(0..4u8)),
+            entity_pos.z,
+        );
+        let hit_block = world
+            .raycast_collision(
+                entity_pos,
+                try_spawn_pos,
+                async |block_pos, world| blocks_visual_line_of_sight(world, block_pos),
+            )
+            .await
+            .map_or_else(
+                || BlockPos::floored(try_spawn_pos.x, try_spawn_pos.y, try_spawn_pos.z),
+                |(hit, _)| hit,
+            );
+        let center = hit_block.to_centered_f64();
+        let down = Vector3::new(center.x, center.y - 1.0, center.z);
+        let down_block = BlockPos::floored(down.x, down.y, down.z);
+        world
+            .get_block_state(&down_block)
+            .collision_shapes
+            .is_empty()
+            .then_some(down)
     }
 }
 
