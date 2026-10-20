@@ -1,9 +1,6 @@
 use pumpkin_macros::pumpkin_block;
 
-use crate::block::{
-    BlockBehaviour, BlockFuture, OnEntityStepArgs, OnLandedUponArgs,
-    UpdateEntityMovementAfterFallOnArgs, bounce_entity_after_fall,
-};
+use crate::block::{BlockBehaviour, BlockFuture, OnEntityStepArgs, OnLandedUponArgs};
 
 #[pumpkin_block("minecraft:slime_block")]
 pub struct SlimeBlock;
@@ -35,12 +32,5 @@ impl BlockBehaviour for SlimeBlock {
                 entity.set_velocity(velocity.multiply(scale, 1.0, scale));
             }
         })
-    }
-
-    fn update_entity_movement_after_fall_on<'a>(
-        &'a self,
-        args: UpdateEntityMovementAfterFallOnArgs<'a>,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move { bounce_entity_after_fall(args.entity, 1.0) })
     }
 }

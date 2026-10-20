@@ -2212,6 +2212,14 @@ impl LivingEntity {
         effects.get(&effect).cloned()
     }
 
+    /// `LivingEntity.getAirDrag` (`LivingEntity.java:2489-2491`).
+    pub(crate) fn get_air_drag(&self, caller: &dyn EntityBase) -> f64 {
+        modified_friction(
+            if caller.is_flutterer() { 0.91 } else { 0.98 },
+            self.get_attribute_value(&Attributes::AIR_DRAG_MODIFIER),
+        )
+    }
+
     pub fn is_in_fall_damage_resetting(&self) -> (bool, &Block) {
         let block_pos = self.entity.block_pos.load();
         let block = self.entity.world.load().get_block(&block_pos);
@@ -2305,7 +2313,7 @@ impl LivingEntity {
             .has_tag(&tag::EntityType::MINECRAFT_FALL_DAMAGE_IMMUNE)
     }
 
-    async fn get_effective_gravity(&self, caller: &Arc<dyn EntityBase>) -> f64 {
+    pub(crate) async fn get_effective_gravity(&self, caller: &Arc<dyn EntityBase>) -> f64 {
         let final_gravity = caller.get_gravity();
 
         if self.entity.velocity.load().y <= 0.0

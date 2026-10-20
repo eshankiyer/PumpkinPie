@@ -67,7 +67,7 @@ use pumpkin_protocol::{
 use pumpkin_util::math::vector3::Axis;
 use pumpkin_util::math::{
     boundingbox::{BoundingBox, EntityDimensions},
-    get_section_cord,
+    get_section_cord, lerp,
     position::BlockPos,
     vector2::Vector2,
     vector3::Vector3,
@@ -1884,20 +1884,61 @@ fn absolute_snap_rotation(yaw: f32, pitch: f32) -> (f32, f32) {
     (yaw % 360.0, pitch.clamp(-90.0, 90.0) % 360.0)
 }
 
-/// Vanilla `Entity.restituteMovementAfterCollisions` (`Entity.java:803-818`) suppresses
-/// restitution while the entity is stepping carefully or while the block suppresses bounce.
-const fn should_restitute_after_collision(
-    restitution: f64,
-    suppressing_bounce: bool,
-    block_suppresses_bounce: bool,
-) -> bool {
-    restitution > 0.0 && !suppressing_bounce && !block_suppresses_bounce
+/// `Mth.equal` (`Mth.java:162-164`).
+fn mth_equal(a: f64, b: f64) -> bool {
+    (b - a).abs() < f64::from(1.0e-5f32)
 }
 
-/// Vanilla uses the greater of entity and block restitution when a living entity lands
-/// (`Entity.java:815-835,846-856`).
-const fn effective_bounce_restitution(entity: f64, block: f64) -> f64 {
-    if entity > block { entity } else { block }
+/// Inputs read by `Entity.restituteMovementAfterCollisions` (`Entity.java:803-844`).
+#[derive(Clone, Copy)]
+struct BounceInputs {
+    entity: f64,
+    block: Option<f64>,
+    gravity: f64,
+    air_drag: f64,
+}
+
+/// `Entity.restituteMovementAfterCollisions` (`Entity.java:803-844`).
+fn restitute_movement_after_collisions(
+    current: Vector3<f64>,
+    movement_y: f64,
+    x_collision: bool,
+    z_collision: bool,
+    vertical_collision: Option<bool>,
+    bounce: BounceInputs,
+) -> (Vector3<f64>, bool) {
+    let mut restitution = bounce.entity;
+    let mut after_bounce = current;
+    if x_collision {
+        after_bounce.x = -current.x * restitution;
+    }
+    if z_collision {
+        after_bounce.z = -current.z * restitution;
+    }
+
+    let mut bounced = restitution > 0.0 && (x_collision || z_collision);
+    if let Some(below) = vertical_collision {
+        if below {
+            restitution = match bounce.block {
+                Some(block) if -current.y >= bounce.gravity => restitution.max(block),
+                _ => 0.0,
+            };
+        }
+
+        let (gravity_compensation, effective_drag) = if restitution > 0.0 {
+            let portion_with_movement = movement_y / current.y;
+            bounced = true;
+            (
+                portion_with_movement * bounce.gravity,
+                lerp(portion_with_movement, 1.0, bounce.air_drag),
+            )
+        } else {
+            (0.0, 1.0)
+        };
+        after_bounce.y = (gravity_compensation - current.y) * effective_drag * restitution;
+    }
+
+    (after_bounce, bounced)
 }
 
 pub struct Entity {
@@ -4187,6 +4228,8 @@ impl Entity {
     // Move by a delta, adjust for collisions, and send
 
     // Does not send movement. That must be done separately
+    /// `Entity.move` (`Entity.java:712-801`).
+    #[expect(clippy::too_many_lines)]
     pub async fn move_entity<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
@@ -4198,11 +4241,13 @@ impl Entity {
 
         if self.no_clip.load(Ordering::Relaxed) {
             self.move_pos(motion);
+            self.horizontal_collision.store(false, Ordering::SeqCst);
             self.sync_passenger_positions().await;
 
             return;
         }
 
+        let mut current = motion;
         let movement_multiplier = self.movement_multiplier.swap(Vector3::default());
 
         if movement_multiplier.length_squared() > 1.0e-7 {
@@ -4212,6 +4257,7 @@ impl Entity {
                 movement_multiplier.z,
             );
 
+            current = Vector3::default();
             self.velocity.store(Vector3::default());
         }
 
@@ -4219,44 +4265,36 @@ impl Entity {
             .adjust_movement_for_collisions(motion, caller.as_ref())
             .await;
 
-        self.move_pos(final_move);
+        let movement_length = final_move.length_squared();
+        if movement_length > 1.0e-7 || motion.length_squared() - movement_length < 1.0e-7 {
+            if movement_length >= 1.0
+                && let Some(living) = caller.get_living_entity()
+                && living.fall_distance.load() != 0.0
+            {
+                let check_distance = movement_length.sqrt().min(8.0);
+                let from = self.pos.load();
+                let to = from + final_move.normalize() * check_distance;
+                if self.world.load().clip_fall_damage_resetting(from, to).await {
+                    living.fall_distance.store(0.0);
+                }
+            }
+
+            self.move_pos(final_move);
+        }
         self.sync_passenger_positions().await;
 
-        // Vanilla applies `getBlockSpeedFactor` after collision adjustment
-        // (`Entity.java:796-797`).
-        let velocity_multiplier = f64::from(caller.get_block_speed_factor());
+        let x_collision = !mth_equal(motion.x, final_move.x);
+        let z_collision = !mth_equal(motion.z, final_move.z);
+        self.horizontal_collision
+            .store(x_collision || z_collision, Ordering::SeqCst);
+        let moved_vertically = motion.y.abs() > 0.0;
+        let vertical_collision = motion.y != final_move.y;
+        let vertical_collision_below = vertical_collision && motion.y < 0.0;
+        let effect_block = self.get_block_with_y_offset(0.2).1;
 
-        let mut velocity = final_move * velocity_multiplier;
-        if motion.y < 0.0
-            && motion.y != final_move.y
-            && let Some(supporting_block_pos) = self.supporting_block_pos.load()
-        {
-            let world = self.world.load();
-            let block = world.get_block(&supporting_block_pos);
-            let restitution = effective_bounce_restitution(
-                caller.get_entity_bounciness(),
-                crate::block::block_bounce_restitution(block),
-            );
-            if should_restitute_after_collision(
-                restitution,
-                self.is_sneaking(),
-                block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SUPPRESSES_BOUNCE),
-            ) {
-                // `Entity.restituteMovementAfterCollisions` (`Entity.java:803-843`) reflects
-                // downward velocity using the supporting block's restitution; non-living
-                // entities receive the `Entity.java:846-852` 0.8 multiplier.
-                let entity_factor = if caller.get_living_entity().is_some() {
-                    1.0
-                } else {
-                    0.8
-                };
-                velocity.y = -motion.y * restitution * entity_factor;
-            }
-        }
-        self.velocity.store(velocity);
-
+        let living = caller.get_living_entity();
         if !self.touching_unloaded_chunk()
-            && let Some(living) = caller.get_living_entity()
+            && let Some(living) = living
         {
             living
                 .fall(
@@ -4268,14 +4306,70 @@ impl Entity {
                 .await;
         }
 
-        if motion.y != final_move.y {
-            let world = self.world.load();
-            let block = self.get_block_with_y_offset(0.2).1;
-            world
-                .block_registry
-                .update_entity_movement_after_fall_on(block, caller.as_ref())
-                .await;
+        if self.is_removed() {
+            return;
         }
+
+        let mut velocity = current;
+        if (moved_vertically && vertical_collision) || x_collision || z_collision {
+            let suppressing_bounce = self.is_sneaking();
+            let entity_restitution = if suppressing_bounce {
+                0.0
+            } else {
+                caller.get_entity_bounciness()
+            };
+            let block_restitution = (!suppressing_bounce
+                && !effect_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SUPPRESSES_BOUNCE))
+            .then(|| {
+                let restitution = crate::block::block_bounce_restitution(effect_block);
+                if living.is_some() {
+                    restitution
+                } else {
+                    restitution * f64::from(0.8f32)
+                }
+            });
+            let may_bounce = entity_restitution > 0.0 || block_restitution.is_some_and(|r| r > 0.0);
+            let (gravity, air_drag) = if may_bounce && vertical_collision {
+                match living {
+                    Some(living) => (
+                        living.get_effective_gravity(caller).await,
+                        living.get_air_drag(caller.as_ref()),
+                    ),
+                    None => (caller.get_gravity(), self.get_air_drag()),
+                }
+            } else {
+                (0.0, 1.0)
+            };
+
+            let (after_bounce, bounced) = restitute_movement_after_collisions(
+                current,
+                final_move.y,
+                x_collision,
+                z_collision,
+                vertical_collision.then_some(vertical_collision_below),
+                BounceInputs {
+                    entity: entity_restitution,
+                    block: block_restitution,
+                    gravity,
+                    air_drag,
+                },
+            );
+            velocity = after_bounce;
+            if bounced {
+                crate::world::game_event::emit_game_event(
+                    &self.world.load(),
+                    pumpkin_data::game_event::GameEvent::Bounce,
+                    self.pos.load(),
+                    crate::world::game_event::GameEventContext::of_entity(caller.clone()),
+                )
+                .await;
+            }
+        }
+
+        let block_speed_factor = f64::from(caller.get_block_speed_factor());
+        velocity.x *= block_speed_factor;
+        velocity.z *= block_speed_factor;
+        self.velocity.store(velocity);
     }
 
     /// Vanilla `Entity.touchingUnloadedChunk` (`Entity.java:3659-3666`) checks the entity's
@@ -7316,13 +7410,6 @@ mod tests {
     }
 
     #[test]
-    fn entity_bounciness_wins_over_lower_block_restitution() {
-        // Vanilla selects max(entity bounciness, block bounciness) at Entity.java:815-820.
-        assert_eq!(effective_bounce_restitution(0.8, 0.75), 0.8);
-        assert_eq!(effective_bounce_restitution(0.2, 1.0), 1.0);
-    }
-
-    #[test]
     fn equipment_break_status_maps_all_slots() {
         // Status bytes from vanilla EntityEvent: mainhand=47, offhand=48,
         // head=49, chest=50, legs=51, feet=52, body=65, saddle=68.
@@ -7936,17 +8023,123 @@ mod default_dimension_tests {
 
 #[cfg(test)]
 mod collision_restitution_tests {
-    use super::{collides_along_vector, should_restitute_after_collision};
+    use super::{
+        BounceInputs, collides_along_vector, mth_equal, restitute_movement_after_collisions,
+    };
     use pumpkin_util::math::{boundingbox::BoundingBox, vector3::Vector3};
 
-    /// `Entity.restituteMovementAfterCollisions` (`Entity.java:803-818`) does not bounce from
-    /// a collision when either sneaking or the supporting block suppresses bounce.
+    const fn inputs(entity: f64, block: Option<f64>) -> BounceInputs {
+        BounceInputs {
+            entity,
+            block,
+            gravity: 0.08,
+            air_drag: 0.98,
+        }
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "{actual} != {expected}"
+        );
+    }
+
+    /// `Entity.restituteMovementAfterCollisions` zeroes blocked axes at zero restitution (`Entity.java:803-844`).
     #[test]
-    fn sneaking_and_suppressing_blocks_disable_restitution() {
-        assert!(should_restitute_after_collision(0.5, false, false));
-        assert!(!should_restitute_after_collision(0.5, true, false));
-        assert!(!should_restitute_after_collision(0.5, false, true));
-        assert!(!should_restitute_after_collision(0.0, false, false));
+    fn blocked_axes_stop_without_restitution() {
+        let (velocity, bounced) = restitute_movement_after_collisions(
+            Vector3::new(0.3, -0.5, -0.4),
+            -0.2,
+            true,
+            false,
+            Some(true),
+            inputs(0.0, Some(0.0)),
+        );
+        assert_close(velocity.x, 0.0);
+        assert_close(velocity.y, 0.0);
+        assert_close(velocity.z, -0.4);
+        assert!(!bounced);
+    }
+
+    /// A slime landing keeps gravity compensation and air drag (`Entity.java:816-833`).
+    #[test]
+    fn slime_landing_bounces_with_gravity_compensation_and_drag() {
+        let (velocity, bounced) = restitute_movement_after_collisions(
+            Vector3::new(0.0, -0.5, 0.0),
+            -0.2,
+            false,
+            false,
+            Some(true),
+            inputs(0.0, Some(1.0)),
+        );
+        assert_close(velocity.y, (0.4 * 0.08 + 0.5) * (1.0 + 0.4 * (0.98 - 1.0)));
+        assert!(bounced);
+    }
+
+    /// Falling slower than gravity does not bounce, so resting mobs stay put (`Entity.java:817-820`).
+    #[test]
+    fn resting_on_a_bouncy_block_does_not_bounce() {
+        let (velocity, bounced) = restitute_movement_after_collisions(
+            Vector3::new(0.0, -0.0784, 0.0),
+            0.0,
+            false,
+            false,
+            Some(true),
+            inputs(0.0, Some(1.0)),
+        );
+        assert_close(velocity.y, 0.0);
+        assert!(!bounced);
+    }
+
+    /// Entity bounciness beats a lower block restitution on landing (`Entity.java:817-820`).
+    #[test]
+    fn entity_bounciness_wins_over_lower_block_restitution() {
+        let (velocity, bounced) = restitute_movement_after_collisions(
+            Vector3::new(0.0, -0.5, 0.0),
+            -0.5,
+            false,
+            false,
+            Some(true),
+            inputs(0.8, Some(0.75)),
+        );
+        assert_close(velocity.y, (0.08 + 0.5) * 0.98 * 0.8);
+        assert!(bounced);
+    }
+
+    /// Suppressed landings drop all restitution, while ceilings keep the entity's (`Entity.java:804-820`).
+    #[test]
+    fn suppressed_landing_and_ceiling_restitution() {
+        let (landing, landing_bounced) = restitute_movement_after_collisions(
+            Vector3::new(0.0, -0.5, 0.0),
+            -0.2,
+            false,
+            false,
+            Some(true),
+            inputs(0.5, None),
+        );
+        assert_close(landing.y, 0.0);
+        assert!(!landing_bounced);
+
+        let (ceiling, ceiling_bounced) = restitute_movement_after_collisions(
+            Vector3::new(0.0, 0.4, 0.0),
+            0.1,
+            false,
+            false,
+            Some(false),
+            inputs(0.5, None),
+        );
+        assert_close(
+            ceiling.y,
+            (0.25 * 0.08 - 0.4) * (1.0 + 0.25 * (0.98 - 1.0)) * 0.5,
+        );
+        assert!(ceiling_bounced);
+    }
+
+    /// `Mth.equal` tolerates differences below `1.0E-5F` (`Mth.java:162-164`).
+    #[test]
+    fn mth_equal_uses_the_float_epsilon() {
+        assert!(mth_equal(1.0, 1.0 + 5.0e-6));
+        assert!(!mth_equal(1.0, 1.0 + 2.0e-5));
     }
 
     /// `Entity.collidedWithShapeMovingFrom` (`Entity.java:1397-1400`) detects a shape entered

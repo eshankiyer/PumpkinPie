@@ -45,31 +45,6 @@ pub trait FluidMetadata {
 
 pub type BlockFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-pub(crate) fn stop_vertical_movement_after_fall(entity: &dyn EntityBase) {
-    let entity = entity.get_entity();
-    let mut velocity = entity.velocity.load();
-    velocity.y = 0.0;
-    entity.velocity.store(velocity);
-}
-
-pub(crate) fn bounce_entity_after_fall(entity: &dyn EntityBase, bounce_multiplier: f64) {
-    let base_entity = entity.get_entity();
-    let mut velocity = base_entity.velocity.load();
-
-    if base_entity.is_sneaking() {
-        velocity.y = 0.0;
-    } else if velocity.y < 0.0 {
-        let entity_factor = if entity.get_living_entity().is_some() {
-            1.0
-        } else {
-            0.8
-        };
-        velocity.y = -velocity.y * bounce_multiplier * entity_factor;
-    }
-
-    base_entity.velocity.store(velocity);
-}
-
 pub(crate) fn block_bounce_restitution(block: &Block) -> f64 {
     // `Block.getBounceRestitution` (`Block.java:494-499`) returns the property set by
     // `Blocks.java:675-685` for beds and `Blocks.java:2922-2926` for slime blocks.
@@ -388,15 +363,6 @@ pub trait BlockBehaviour: Send + Sync {
         })
     }
 
-    fn update_entity_movement_after_fall_on<'a>(
-        &'a self,
-        args: UpdateEntityMovementAfterFallOnArgs<'a>,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            stop_vertical_movement_after_fall(args.entity);
-        })
-    }
-
     fn broken<'a>(&'a self, _args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async {})
     }
@@ -661,10 +627,6 @@ pub struct OnLandedUponArgs<'a> {
     pub world: &'a Arc<World>,
     pub position: &'a BlockPos,
     pub fall_distance: f32,
-    pub entity: &'a dyn EntityBase,
-}
-
-pub struct UpdateEntityMovementAfterFallOnArgs<'a> {
     pub entity: &'a dyn EntityBase,
 }
 

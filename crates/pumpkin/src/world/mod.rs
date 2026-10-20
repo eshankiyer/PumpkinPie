@@ -7700,6 +7700,56 @@ impl World {
             .await
     }
 
+    /// `BlockGetter.clip` with `FALLDAMAGE_RESETTING` and `Fluid.WATER` (`BlockGetter.java:63-80`, `ClipContext.java:60-80,100`).
+    pub async fn clip_fall_damage_resetting(
+        self: &Arc<Self>,
+        start_pos: Vector3<f64>,
+        end_pos: Vector3<f64>,
+    ) -> bool {
+        self.raycast_with_check(
+            start_pos,
+            end_pos,
+            async |_, _| true,
+            Self::ray_fall_damage_resetting_check,
+        )
+        .await
+        .is_some()
+    }
+
+    /// `VoxelShape.clip` over the fall-reset block and water shapes (`VoxelShape.java:158-177`).
+    fn ray_fall_damage_resetting_check(
+        &self,
+        block_pos: &BlockPos,
+        from: Vector3<f64>,
+        to: Vector3<f64>,
+    ) -> (bool, Option<BlockDirection>) {
+        let height = if self
+            .get_block(block_pos)
+            .has_tag(&tag::Block::MINECRAFT_FALL_DAMAGE_RESETTING)
+        {
+            1.0
+        } else {
+            let (fluid, state) = self.get_fluid_and_fluid_state(block_pos);
+            if fluid.id != Fluid::WATER.id && fluid.id != Fluid::FLOWING_WATER.id {
+                return (false, None);
+            }
+            self.get_fluid_height(block_pos, fluid, state)
+        };
+
+        let min = block_pos.0.to_f64();
+        let max = min.add(&Vector3::new(1.0, height, 1.0));
+        let test_point = from.add(&to.sub(&from).multiply(0.001, 0.001, 0.001));
+        if (min.x..=max.x).contains(&test_point.x)
+            && (min.y..=max.y).contains(&test_point.y)
+            && (min.z..=max.z).contains(&test_point.z)
+        {
+            return (true, Some(BlockDirection::Up));
+        }
+
+        Self::intersects_aabb_with_direction(from, to, min, max)
+            .map_or((false, None), |(direction, _)| (true, Some(direction)))
+    }
+
     async fn raycast_with_check(
         self: &Arc<Self>,
         start_pos: Vector3<f64>,

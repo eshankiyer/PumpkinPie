@@ -21,8 +21,6 @@ use uuid::Uuid;
 
 use crate::block::BlockFuture;
 use crate::block::OnLandedUponArgs;
-use crate::block::UpdateEntityMovementAfterFallOnArgs;
-use crate::block::bounce_entity_after_fall;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BrokenArgs, CanPlaceAtArgs, NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs,
@@ -98,13 +96,6 @@ impl BlockBehaviour for BedBlock {
                     .await;
             }
         })
-    }
-
-    fn update_entity_movement_after_fall_on<'a>(
-        &'a self,
-        args: UpdateEntityMovementAfterFallOnArgs<'a>,
-    ) -> BlockFuture<'a, ()> {
-        Box::pin(async move { bounce_entity_after_fall(args.entity, 0.66) })
     }
 
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {

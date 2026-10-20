@@ -181,7 +181,7 @@ use crate::block::fluid::water::FlowingWater;
 use crate::block::{
     AttackArgs, BlockBehaviour, BlockHitResult, BlockMetadata, BonemealArgs, FluidMetadata,
     GetCloneItemStackArgs, GetInsideCollisionShapeArgs, OnEntityCollisionArgs, OnLandedUponArgs,
-    OnProjectileHitArgs, UpdateEntityMovementAfterFallOnArgs, stop_vertical_movement_after_fall,
+    OnProjectileHitArgs,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -1400,22 +1400,6 @@ impl BlockRegistry {
                     entity,
                 })
                 .await;
-        }
-    }
-
-    pub async fn update_entity_movement_after_fall_on(
-        &self,
-        block: &Block,
-        entity: &dyn EntityBase,
-    ) {
-        if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
-            pumpkin_block
-                .update_entity_movement_after_fall_on(UpdateEntityMovementAfterFallOnArgs {
-                    entity,
-                })
-                .await;
-        } else {
-            stop_vertical_movement_after_fall(entity);
         }
     }
 
