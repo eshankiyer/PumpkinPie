@@ -6,10 +6,9 @@ use std::sync::Arc;
 
 use crate::block::entities::sculk_catalyst::SculkCatalystBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs, OnScheduledTickArgs,
-    PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    SpawnAfterBreakArgs, try_drop_experience,
 };
-use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use crate::world::game_event::{
     GameEventContext, GameEventFuture, GameEventListener, PositionSource,
@@ -30,23 +29,6 @@ use pumpkin_world::world::BlockFlags;
 const PULSE_TICKS: u8 = 8;
 /// `CatalystListener.getListenerRadius()` (lines 74-77).
 const LISTENER_RADIUS: i32 = 8;
-
-/// `SculkCatalystBlock.spawnAfterBreak` delegates to `tryDropExperience` only when the
-/// break supplied `dropExperience` (`SculkCatalystBlock.java:61-66`).
-const fn should_drop_experience(
-    drop_experience: bool,
-    block_drops: bool,
-    game_mode: pumpkin_util::GameMode,
-    silk_touch: bool,
-) -> bool {
-    drop_experience
-        && block_drops
-        && !matches!(
-            game_mode,
-            pumpkin_util::GameMode::Creative | pumpkin_util::GameMode::Spectator
-        )
-        && !silk_touch
-}
 
 pub struct SculkCatalystBlock;
 
@@ -96,21 +78,12 @@ impl BlockBehaviour for SculkCatalystBlock {
         })
     }
 
-    /// `SculkCatalystBlock.spawnAfterBreak` (`SculkCatalystBlock.java:61-66`) awards 5
-    /// experience when the break is allowed to drop experience and the tool lacks Silk Touch.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `SculkCatalystBlock.spawnAfterBreak` (`SculkCatalystBlock.java:61-66`).
+    fn spawn_after_break<'a>(&'a self, args: SpawnAfterBreakArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            let tool = args.player.inventory().held_item().await;
-            if !should_drop_experience(
-                args.drop_experience,
-                args.world.level_info.load().game_rules.block_drops,
-                args.player.gamemode.load(),
-                tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0,
-            ) {
-                return;
+            if args.drop_experience {
+                try_drop_experience(args.world, args.position, args.tool, 5).await;
             }
-
-            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
         })
     }
 }
@@ -233,42 +206,6 @@ async fn bloom(world: &Arc<World>, pos: BlockPos) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pumpkin_util::GameMode;
-
-    #[test]
-    fn catalyst_experience_requires_vanillas_drop_experience_gate() {
-        // `SculkCatalystBlock.spawnAfterBreak` checks `dropExperience` before XP (`SculkCatalystBlock.java:61-66`).
-        assert!(should_drop_experience(
-            true,
-            true,
-            GameMode::Survival,
-            false
-        ));
-        assert!(!should_drop_experience(
-            false,
-            true,
-            GameMode::Survival,
-            false
-        ));
-        assert!(!should_drop_experience(
-            true,
-            true,
-            GameMode::Creative,
-            false
-        ));
-        assert!(!should_drop_experience(
-            true,
-            true,
-            GameMode::Survival,
-            true
-        ));
-        assert!(!should_drop_experience(
-            true,
-            false,
-            GameMode::Survival,
-            false
-        ));
-    }
 
     #[test]
     fn listener_radius_matches_vanilla() {

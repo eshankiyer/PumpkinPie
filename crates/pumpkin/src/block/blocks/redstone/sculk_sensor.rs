@@ -5,12 +5,11 @@ use std::sync::Arc;
 use crate::block::entities::calibrated_sculk_sensor::CalibratedSculkSensorBlockEntity;
 use crate::block::entities::sculk_sensor::SculkSensorBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, EmitsRedstonePowerArgs,
-    GetComparatorOutputArgs, GetRedstonePowerArgs, OnEntityStepArgs, OnPlaceArgs,
-    OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetComparatorOutputArgs,
+    GetRedstonePowerArgs, OnEntityStepArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs,
+    PlacedArgs, SpawnAfterBreakArgs, try_drop_experience,
 };
 use crate::entity::boss::ender_dragon::Vector3Ext;
-use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use crate::world::game_event::{
     GameEventContext, GameEventFuture, GameEventListener, PositionSource,
@@ -348,15 +347,11 @@ impl BlockBehaviour for SculkSensorBlock {
         })
     }
 
-    /// Vanilla `SculkSensorBlock.spawnAfterBreak` (`SculkSensorBlock.java:289-294`): breaking
-    /// a sensor with drops enabled pops 5 experience (`tryDropExperience(ConstantInt.of(5))`).
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `SculkSensorBlock.spawnAfterBreak` (`SculkSensorBlock.java:289-294`).
+    fn spawn_after_break<'a>(&'a self, args: SpawnAfterBreakArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if !matches!(
-                args.player.gamemode.load(),
-                GameMode::Creative | GameMode::Spectator
-            ) {
-                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
+            if args.drop_experience {
+                try_drop_experience(args.world, args.position, args.tool, 5).await;
             }
         })
     }

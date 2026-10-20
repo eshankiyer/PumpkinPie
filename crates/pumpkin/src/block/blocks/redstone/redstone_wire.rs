@@ -99,34 +99,40 @@ impl BlockBehaviour for RedstoneWireBlock {
         })
     }
 
+    /// `RedStoneWireBlock.updateIndirectNeighbourShapes` (`RedStoneWireBlock.java:211-234`).
     fn prepare<'a>(&'a self, args: PrepareArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let wire_props =
                 RedstoneWireLikeProperties::from_state_id(args.state_id, &Block::REDSTONE_WIRE);
 
-            for direction in BlockDirection::horizontal() {
+            for direction in [
+                HorizontalFacing::North,
+                HorizontalFacing::East,
+                HorizontalFacing::South,
+                HorizontalFacing::West,
+            ] {
                 let other_block_pos = args.position.offset(direction.to_offset());
                 let other_block = args.world.get_block(&other_block_pos);
 
                 if wire_props.is_side_connected(direction) && other_block != &Block::REDSTONE_WIRE {
-                    let up_block_pos = other_block_pos.up();
-                    let up_block = args.world.get_block(&up_block_pos);
-                    if up_block == &Block::REDSTONE_WIRE {
-                        args.world
-                            .replace_with_state_for_neighbor_update(
-                                &up_block_pos,
-                                direction.opposite().to_block_direction(),
-                                args.flags,
-                            )
-                            .await;
-                    }
-
                     let down_block_pos = other_block_pos.down();
                     let down_block = args.world.get_block(&down_block_pos);
                     if down_block == &Block::REDSTONE_WIRE {
                         args.world
                             .replace_with_state_for_neighbor_update(
                                 &down_block_pos,
+                                direction.opposite().to_block_direction(),
+                                args.flags,
+                            )
+                            .await;
+                    }
+
+                    let up_block_pos = other_block_pos.up();
+                    let up_block = args.world.get_block(&up_block_pos);
+                    if up_block == &Block::REDSTONE_WIRE {
+                        args.world
+                            .replace_with_state_for_neighbor_update(
+                                &up_block_pos,
                                 direction.opposite().to_block_direction(),
                                 args.flags,
                             )

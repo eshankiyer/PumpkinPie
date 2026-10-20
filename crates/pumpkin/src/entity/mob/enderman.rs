@@ -645,7 +645,6 @@ impl Mob for EndermanEntity {
                     &world,
                     Block::from_state_id(block_state),
                     &block_pos,
-                    false,
                     params,
                 )
                 .await;

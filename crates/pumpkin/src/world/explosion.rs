@@ -15,7 +15,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     block::blocks::fire::fire::FireBlock,
-    block::{ExplodeArgs, drop_loot},
+    block::{ExplodeArgs, drop_loot, spawn_after_break},
     entity::{Entity, EntityBase},
     world::game_event::{GameEventContext, emit_game_event},
     world::loot::LootContextParameters,
@@ -700,7 +700,8 @@ impl Explosion {
                             block_entity,
                             ..Default::default()
                         };
-                        drop_loot(world, block, pos, false, params).await;
+                        spawn_after_break(world, block, state, pos, None, false).await;
+                        drop_loot(world, block, pos, params).await;
                     }
                 }
                 if self.creates_fire {

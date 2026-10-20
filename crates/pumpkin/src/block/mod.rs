@@ -401,6 +401,11 @@ pub trait BlockBehaviour: Send + Sync {
         Box::pin(async {})
     }
 
+    /// `BlockBehaviour.spawnAfterBreak` (`BlockBehaviour.java:359-360`).
+    fn spawn_after_break<'a>(&'a self, _args: SpawnAfterBreakArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     /// Called before a player destroys a block, matching vanilla's
     /// `BlockBehaviour.playerWillDestroy` hook.
     fn player_will_destroy<'a>(&'a self, _args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
@@ -684,6 +689,15 @@ pub struct BrokenArgs<'a> {
     pub block_entity: Option<&'a dyn BlockEntity>,
 }
 
+pub struct SpawnAfterBreakArgs<'a> {
+    pub world: &'a Arc<World>,
+    pub block: &'a Block,
+    pub state: &'a BlockState,
+    pub position: &'a BlockPos,
+    pub tool: Option<&'a ItemStack>,
+    pub drop_experience: bool,
+}
+
 pub struct PlayerWillDestroyArgs<'a> {
     pub block: &'a Block,
     pub player: &'a Arc<Player>,
@@ -783,27 +797,17 @@ pub struct BlockEvent {
     pub data: u8,
 }
 
+/// `BlockBehaviour.getDrops` (`BlockBehaviour.java:272-281`) popped through `Block.popResource`.
 pub async fn drop_loot(
     world: &Arc<World>,
     block: &Block,
     pos: &BlockPos,
-    experience: bool,
     params: LootContextParameters,
 ) {
     // `LootContext.Builder.create` resolves named sequences with the server world seed
     // (`LootContext.java:138-142`; `MinecraftServer.java:1766-1767`).
     let mut params = params;
     params.world_seed = world.level.seed.0;
-    // In 1.21 a tool's `block_experience` enchantment effects are folded over
-    // the sampled amount, and Silk Touch is the only enchantment that defines
-    // one: it sets the result to zero. Special-casing it is equivalent for
-    // now, but a general effect pass would be the faithful implementation.
-    // Read before `params` is moved into the loot table below.
-    let silk_touched = experience
-        && block.experience.is_some()
-        && params.tool.as_ref().is_some_and(|tool| {
-            tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0
-        });
 
     // Vanilla gates both item drops and experience on this rule, in
     // `Block#popResource` and `Block#popExperience` respectively, so with the
@@ -830,14 +834,23 @@ pub async fn drop_loot(
             }
         }
     }
+}
 
-    if block_drops
-        && experience
-        && !silk_touched
+/// `BlockBehaviour.spawnAfterBreak` (`BlockBehaviour.java:779-780`; `DropExperienceBlock.java:30-35`).
+pub async fn spawn_after_break(
+    world: &Arc<World>,
+    block: &Block,
+    state: &BlockState,
+    pos: &BlockPos,
+    tool: Option<&ItemStack>,
+    drop_experience: bool,
+) {
+    if drop_experience
+        && world.level_info.load().game_rules.block_drops
         && let Some(experience) = &block.experience
     {
         let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
-        let amount = experience.experience.get(&mut random);
+        let amount = process_block_experience(tool, experience.experience.get(&mut random));
         if amount > 0 {
             let mut event = crate::plugin::block::block_exp::BlockExpEvent {
                 block_pos: *pos,
@@ -848,9 +861,54 @@ pub async fn drop_loot(
                 server.plugin_manager.fire(&server, &mut event).await;
             }
             if event.exp > 0 {
-                ExperienceOrbEntity::spawn(world, pos.to_f64(), event.exp as u32).await;
+                pop_experience(world, pos, event.exp as u32).await;
             }
         }
+    }
+
+    if let Some(pumpkin_block) = world.block_registry.get_pumpkin_block(block.id) {
+        pumpkin_block
+            .spawn_after_break(SpawnAfterBreakArgs {
+                world,
+                block,
+                state,
+                position: pos,
+                tool,
+                drop_experience,
+            })
+            .await;
+    }
+}
+
+/// `EnchantmentHelper.processBlockExperience` (`EnchantmentHelper.java:102-106`; `Enchantments.java:794`).
+#[must_use]
+pub fn process_block_experience(tool: Option<&ItemStack>, amount: i32) -> i32 {
+    if tool
+        .is_some_and(|tool| tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0)
+    {
+        0
+    } else {
+        amount
+    }
+}
+
+/// `Block.tryDropExperience` (`Block.java:616-621`).
+pub async fn try_drop_experience(
+    world: &Arc<World>,
+    pos: &BlockPos,
+    tool: Option<&ItemStack>,
+    amount: i32,
+) {
+    let experience = process_block_experience(tool, amount);
+    if experience > 0 {
+        pop_experience(world, pos, experience as u32).await;
+    }
+}
+
+/// `Block.popExperience` (`Block.java:446-450`).
+pub async fn pop_experience(world: &Arc<World>, pos: &BlockPos, amount: u32) {
+    if world.level_info.load().game_rules.block_drops {
+        ExperienceOrbEntity::spawn(world, pos.to_centered_f64(), amount).await;
     }
 }
 
@@ -936,6 +994,17 @@ mod tests {
         assert_eq!(block_bounce_restitution(&Block::RED_BED), 0.75);
         assert_eq!(block_bounce_restitution(&Block::SLIME_BLOCK), 1.0);
         assert_eq!(block_bounce_restitution(&Block::STONE), 0.0);
+    }
+
+    /// `EnchantmentHelper.processBlockExperience` (`EnchantmentHelper.java:102-106`; `Enchantments.java:794`).
+    #[test]
+    fn silk_touch_zeroes_block_experience() {
+        let mut silk = ItemStack::new(1, &pumpkin_data::item::Item::DIAMOND_PICKAXE);
+        silk.enchant(&pumpkin_data::Enchantment::SILK_TOUCH, 1);
+        let plain = ItemStack::new(1, &pumpkin_data::item::Item::DIAMOND_PICKAXE);
+        assert_eq!(process_block_experience(Some(&silk), 5), 0);
+        assert_eq!(process_block_experience(Some(&plain), 5), 5);
+        assert_eq!(process_block_experience(None, 5), 5);
     }
 
     /// Vanilla walking and landing use the block `SoundType` step/fall sounds

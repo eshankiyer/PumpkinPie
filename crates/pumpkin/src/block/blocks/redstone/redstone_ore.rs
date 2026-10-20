@@ -1,8 +1,8 @@
 use crate::block::{
-    AttackArgs, BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, NormalUseArgs,
-    OnEntityStepArgs, RandomTickArgs, UseWithItemArgs, registry::BlockActionResult,
+    AttackArgs, BlockBehaviour, BlockFuture, BlockMetadata, NormalUseArgs, OnEntityStepArgs,
+    RandomTickArgs, SpawnAfterBreakArgs, UseWithItemArgs, registry::BlockActionResult,
+    try_drop_experience,
 };
-use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, RedstoneOreLikeProperties};
 use pumpkin_data::particle::Particle;
@@ -168,28 +168,13 @@ impl BlockBehaviour for RedstoneOreBlock {
         })
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `RedStoneOreBlock.spawnAfterBreak` (`RedStoneOreBlock.java:94-99`).
+    fn spawn_after_break<'a>(&'a self, args: SpawnAfterBreakArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            // RedStoneOreBlock.spawnAfterBreak awards 1..=5 XP when normal block drops are
-            // enabled and the break is eligible for drops. Silk Touch is handled by the vanilla
-            // block-experience enchantment effect and therefore suppresses this award.
-            if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
-                || !args.world.level_info.load().game_rules.block_drops
-                || !args
-                    .player
-                    .can_harvest(args.state, Block::from_state_id(args.state.id))
-                    .await
-            {
-                return;
+            if args.drop_experience {
+                let amount = rand::rng().random_range(1..=5);
+                try_drop_experience(args.world, args.position, args.tool, amount).await;
             }
-
-            let tool = args.player.inventory().held_item().await;
-            if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
-                return;
-            }
-
-            let amount = rand::rng().random_range(1..=5);
-            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount).await;
         })
     }
 }

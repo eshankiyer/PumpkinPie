@@ -5891,6 +5891,7 @@ impl World {
         .is_some()
     }
 
+    /// `Level.setBlock` (`Level.java:222-268`).
     #[expect(clippy::too_many_lines)]
     async fn set_block_state_internal(
         self: &Arc<Self>,
@@ -6125,7 +6126,6 @@ impl World {
             if !flags.contains(BlockFlags::FORCE_STATE) {
                 let mut new_flags = flags;
                 new_flags.remove(BlockFlags::NOTIFY_NEIGHBORS);
-                new_flags.remove(BlockFlags::NOTIFY_LISTENERS);
                 self.block_registry
                     .prepare(
                         self,
@@ -6653,7 +6653,7 @@ impl World {
                         position.0.z as f64,
                     )),
                     world_time: self.level_info.load().day_time as u64,
-                    tool,
+                    tool: tool.clone(),
                     // Vanilla `Block.getDrops` adds `LootContextParams.THIS_ENTITY` from its
                     // breaker overload (`Block.java:369-382`); retain the player type for the
                     // existing `LootCondition::EntityProperties` lookup.
@@ -6663,7 +6663,16 @@ impl World {
                     block_entity,
                     ..Default::default()
                 };
-                block::drop_loot(self, broken_block, position, true, params).await;
+                block::drop_loot(self, broken_block, position, params).await;
+                block::spawn_after_break(
+                    self,
+                    broken_block,
+                    crate::block::block_drop_state(broken_block_state),
+                    position,
+                    tool.as_ref(),
+                    true,
+                )
+                .await;
             }
             return Some(new_state_id);
         }

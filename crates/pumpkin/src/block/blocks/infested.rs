@@ -1,9 +1,8 @@
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{BlockId, BlockStateId};
-use pumpkin_util::GameMode;
 
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs};
+use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, OnPlaceArgs, SpawnAfterBreakArgs};
 use crate::entity::r#type::from_type;
 use pumpkin_data::block_properties::{BlockProperties, PaleOakWoodLikeProperties};
 
@@ -45,17 +44,14 @@ impl BlockBehaviour for InfestedBlock {
         })
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `InfestedBlock.spawnAfterBreak` (`InfestedBlock.java:61-66`).
+    fn spawn_after_break<'a>(&'a self, args: SpawnAfterBreakArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if args.player.gamemode.load() == GameMode::Creative {
-                return;
-            }
             if !args.world.level_info.load().game_rules.block_drops {
                 return;
             }
 
-            let tool = args.player.inventory.held_item().await;
-            let prevents_spawn = {
+            let prevents_spawn = args.tool.is_some_and(|tool| {
                 tool.get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
                     .is_some_and(|enchantments| {
                         enchantments.enchantment.iter().any(|(enchantment, _)| {
@@ -63,7 +59,7 @@ impl BlockBehaviour for InfestedBlock {
                                 .has_tag(&tag::Enchantment::MINECRAFT_PREVENTS_INFESTED_SPAWNS)
                         })
                     })
-            };
+            });
             if prevents_spawn {
                 return;
             }

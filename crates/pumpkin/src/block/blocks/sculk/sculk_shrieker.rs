@@ -8,10 +8,9 @@ use std::sync::Arc;
 
 use crate::block::entities::sculk_shrieker::SculkShriekerBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnEntityStepArgs, OnPlaceArgs,
-    OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, OnEntityStepArgs, OnPlaceArgs, OnScheduledTickArgs,
+    OnStateReplacedArgs, PlacedArgs, SpawnAfterBreakArgs, try_drop_experience,
 };
-use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::player::Player;
 use crate::world::World;
 use crate::world::game_event::{
@@ -29,22 +28,6 @@ use pumpkin_world::world::BlockFlags;
 
 /// `SculkShriekerBlockEntity.VibrationUser.LISTENER_RADIUS` (line 176).
 const LISTENER_RADIUS: i32 = 8;
-
-/// `SculkShriekerBlock.spawnAfterBreak` only reaches `tryDropExperience` when the
-/// break supplied `dropExperience`, and Silk Touch's block-experience effect then
-/// reduces the five-point amount to zero (`SculkShriekerBlock.java:128-132`,
-/// `Block.java:616-620`, `EnchantmentHelper.java:102-105`).
-const fn should_drop_experience(
-    drop_experience: bool,
-    block_drops: bool,
-    game_mode: GameMode,
-    silk_touch: bool,
-) -> bool {
-    drop_experience
-        && block_drops
-        && !matches!(game_mode, GameMode::Creative | GameMode::Spectator)
-        && !silk_touch
-}
 
 pub struct SculkShriekerBlock;
 
@@ -149,21 +132,11 @@ async fn try_get_player(
 }
 
 impl BlockBehaviour for SculkShriekerBlock {
-    /// `SculkShriekerBlock.spawnAfterBreak` (`SculkShriekerBlock.java:128-133`): after the
-    /// normal player-break path, a break eligible for experience emits five XP.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `SculkShriekerBlock.spawnAfterBreak` (`SculkShriekerBlock.java:128-133`).
+    fn spawn_after_break<'a>(&'a self, args: SpawnAfterBreakArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            let game_mode = args.player.gamemode.load();
-            let block_drops = args.world.level_info.load().game_rules.block_drops;
-            let silk_touch = args
-                .player
-                .inventory()
-                .held_item()
-                .await
-                .get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH)
-                > 0;
-            if should_drop_experience(args.drop_experience, block_drops, game_mode, silk_touch) {
-                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
+            if args.drop_experience {
+                try_drop_experience(args.world, args.position, args.tool, 5).await;
             }
         })
     }
@@ -243,45 +216,5 @@ impl BlockBehaviour for SculkShriekerBlock {
             };
             shrieker.try_respond(args.world).await;
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_drop_experience;
-    use pumpkin_util::GameMode;
-
-    #[test]
-    fn shrieker_experience_requires_a_valid_non_silk_touch_break() {
-        assert!(should_drop_experience(
-            true,
-            true,
-            GameMode::Survival,
-            false
-        ));
-        assert!(!should_drop_experience(
-            false,
-            true,
-            GameMode::Survival,
-            false
-        ));
-        assert!(!should_drop_experience(
-            true,
-            true,
-            GameMode::Creative,
-            false
-        ));
-        assert!(!should_drop_experience(
-            true,
-            true,
-            GameMode::Survival,
-            true
-        ));
-        assert!(!should_drop_experience(
-            true,
-            false,
-            GameMode::Survival,
-            false
-        ));
     }
 }
