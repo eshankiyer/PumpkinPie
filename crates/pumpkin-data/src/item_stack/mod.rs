@@ -3,11 +3,12 @@ use crate::damage::DamageType;
 use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
-    BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl,
-    CustomNameImpl, DamageImpl, DamageResistantImpl, DamageResistantType, DamageTypeImpl,
-    DataComponentImpl, EnchantableImpl, EnchantmentGlintOverrideImpl, EnchantmentsImpl, IDSet,
-    ItemNameImpl, KineticWeaponImpl, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl,
-    RepairableImpl, ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
+    BeesImpl, BlocksAttacksImpl, BundleContentsImpl, CanBreakImpl, CanPlaceOnImpl,
+    ChargedProjectilesImpl, ConsumableImpl, ContainerImpl, CustomDataImpl, CustomNameImpl,
+    DamageImpl, DamageResistantImpl, DamageResistantType, DamageTypeImpl, DataComponentImpl,
+    EnchantableImpl, EnchantmentGlintOverrideImpl, EnchantmentsImpl, IDSet, ItemNameImpl,
+    KineticWeaponImpl, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl,
+    ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -559,6 +560,48 @@ impl ItemStack {
         self.item_count == 0 || self.item.id == Item::AIR.id
     }
 
+    /// `ItemStack.validateStrict` (`ItemStack.java:158-167`).
+    pub fn validate_strict(&self) -> Result<(), String> {
+        self.validate_components()?;
+        let max_stack_size = self.get_max_stack_size();
+        if self.item_count > max_stack_size {
+            return Err(format!(
+                "Item stack with stack size of {} was larger than maximum: {max_stack_size}",
+                self.item_count
+            ));
+        }
+        Ok(())
+    }
+
+    /// `ItemStack.validateComponents` (`ItemStack.java:270-305`).
+    fn validate_components(&self) -> Result<(), String> {
+        if self.get_max_damage().is_some() && self.get_max_stack_size() > 1 {
+            return Err("Item cannot be both damageable and stackable".to_string());
+        }
+        if let Some(container) = self.get_data_component::<ContainerImpl>() {
+            validate_contained_item_sizes(
+                container
+                    .items
+                    .iter()
+                    .map(|(_, stack)| stack)
+                    .filter(|stack| !stack.is_empty()),
+            )?;
+        }
+        if let Some(bundle) = self.get_data_component::<BundleContentsImpl>() {
+            validate_contained_item_sizes(bundle.items.iter())?;
+            bundle_content_weight(&bundle.items)?;
+        }
+        if let Some(charged) = self.get_data_component::<ChargedProjectilesImpl>() {
+            let projectiles: Vec<Self> = charged
+                .projectiles
+                .iter()
+                .filter_map(Self::read_item_stack)
+                .collect();
+            validate_contained_item_sizes(projectiles.iter())?;
+        }
+        Ok(())
+    }
+
     pub fn set_custom_name(&mut self, name: String) {
         use crate::data_component_impl::CustomNameImpl;
         let component = Some(
@@ -1037,6 +1080,96 @@ impl ItemStack {
 
         Some(item_stack)
     }
+}
+
+/// `ItemStack.validateContainedItemSizes` (`ItemStack.java:307-317`).
+fn validate_contained_item_sizes<'a>(
+    items: impl Iterator<Item = &'a ItemStack>,
+) -> Result<(), String> {
+    for item in items {
+        let max_stack_size = item.get_max_stack_size();
+        if item.item_count > max_stack_size {
+            return Err(format!(
+                "Item stack with count of {} was larger than maximum: {max_stack_size}",
+                item.item_count
+            ));
+        }
+    }
+    Ok(())
+}
+
+const EXCESSIVE_BUNDLE_WEIGHT: &str = "Excessive total bundle weight";
+
+/// `BundleContents.computeContentWeight` (`BundleContents.java:50-66`).
+fn bundle_content_weight(items: &[ItemStack]) -> Result<(u64, u64), String> {
+    let mut weight = (0, 1);
+    for stack in items {
+        let item_weight = bundle_item_weight(stack)?;
+        let stack_weight = fraction_multiply(item_weight, (u64::from(stack.item_count), 1))
+            .ok_or(EXCESSIVE_BUNDLE_WEIGHT)?;
+        weight = fraction_add(weight, stack_weight).ok_or(EXCESSIVE_BUNDLE_WEIGHT)?;
+    }
+    Ok(weight)
+}
+
+/// `BundleContents.getWeight` (`BundleContents.java:69-77`).
+fn bundle_item_weight(stack: &ItemStack) -> Result<(u64, u64), String> {
+    if let Some(bundle) = stack.get_data_component::<BundleContentsImpl>() {
+        let nested = bundle_content_weight(&bundle.items)?;
+        return fraction_add(nested, (1, 16)).ok_or_else(|| EXCESSIVE_BUNDLE_WEIGHT.to_string());
+    }
+    if stack
+        .get_data_component::<BeesImpl>()
+        .is_some_and(|bees| !bees.bees.is_empty())
+    {
+        return Ok((1, 1));
+    }
+    match stack.get_max_stack_size() {
+        0 => Err(EXCESSIVE_BUNDLE_WEIGHT.to_string()),
+        max_stack_size => Ok((1, u64::from(max_stack_size))),
+    }
+}
+
+const fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+const fn fraction_fits((numerator, denominator): (u64, u64)) -> Option<(u64, u64)> {
+    if numerator <= i32::MAX as u64 && denominator <= i32::MAX as u64 {
+        Some((numerator, denominator))
+    } else {
+        None
+    }
+}
+
+/// commons-lang3 3.20.0 `Fraction.addSub`, bundled by vanilla 26.2, for non-negative operands.
+const fn fraction_add(left: (u64, u64), right: (u64, u64)) -> Option<(u64, u64)> {
+    if left.0 == 0 {
+        return Some(right);
+    }
+    if right.0 == 0 {
+        return Some(left);
+    }
+    let d1 = gcd(left.1, right.1);
+    let t = left.0 * (right.1 / d1) + right.0 * (left.1 / d1);
+    let d2 = gcd(t, d1);
+    fraction_fits((t / d2, (left.1 / d1) * (right.1 / d2)))
+}
+
+/// commons-lang3 3.20.0 `Fraction.multiplyBy`, bundled by vanilla 26.2, for non-negative operands.
+const fn fraction_multiply(left: (u64, u64), right: (u64, u64)) -> Option<(u64, u64)> {
+    if left.0 == 0 || right.0 == 0 {
+        return Some((0, 1));
+    }
+    let d1 = gcd(left.0, right.1);
+    let d2 = gcd(right.0, left.1);
+    fraction_fits((
+        (left.0 / d1) * (right.0 / d2),
+        (left.1 / d2) * (right.1 / d1),
+    ))
 }
 
 fn block_name_matches_predicate(name: &str, block: &'static Block) -> bool {
@@ -2150,5 +2283,97 @@ mod tests {
         let mut empty = ItemStack::EMPTY.clone();
         empty.limit_size(0);
         assert!(empty.is_empty());
+    }
+
+    fn with_max_stack_size(mut stack: ItemStack, size: u8) -> ItemStack {
+        stack.patch.push((
+            DataComponent::MaxStackSize,
+            Some(MaxStackSizeImpl { size }.to_dyn()),
+        ));
+        stack
+    }
+
+    #[test]
+    fn validate_strict_rejects_overstacked_and_damageable_stackable_stacks() {
+        assert!(iron_sword().validate_strict().is_ok());
+        assert!(
+            ItemStack::new(16, &Item::ENDER_PEARL)
+                .validate_strict()
+                .is_ok()
+        );
+        assert_eq!(
+            ItemStack::new(17, &Item::ENDER_PEARL).validate_strict(),
+            Err("Item stack with stack size of 17 was larger than maximum: 16".to_string())
+        );
+        assert_eq!(
+            with_max_stack_size(iron_sword(), 64).validate_strict(),
+            Err("Item cannot be both damageable and stackable".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_strict_checks_contained_item_sizes() {
+        let mut shulker = ItemStack::new(1, &Item::SHULKER_BOX);
+        shulker.patch.push((
+            DataComponent::Container,
+            Some(
+                ContainerImpl {
+                    items: vec![(0, ItemStack::new(17, &Item::ENDER_PEARL))],
+                }
+                .to_dyn(),
+            ),
+        ));
+        assert_eq!(
+            shulker.validate_strict(),
+            Err("Item stack with count of 17 was larger than maximum: 16".to_string())
+        );
+
+        let mut arrow = NbtCompound::new();
+        arrow.put_string("id", "minecraft:arrow".to_string());
+        arrow.put_int("count", 65);
+        let mut crossbow = ItemStack::new(1, &Item::CROSSBOW);
+        crossbow.patch.push((
+            DataComponent::ChargedProjectiles,
+            Some(
+                ChargedProjectilesImpl {
+                    projectiles: vec![arrow],
+                }
+                .to_dyn(),
+            ),
+        ));
+        assert_eq!(
+            crossbow.validate_strict(),
+            Err("Item stack with count of 65 was larger than maximum: 64".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_strict_rejects_bundle_weight_overflow() {
+        let bundle_of = |items: Vec<ItemStack>| {
+            let mut bundle = ItemStack::new(1, &Item::BUNDLE);
+            bundle.patch.push((
+                DataComponent::BundleContents,
+                Some(
+                    BundleContentsImpl {
+                        items,
+                        selected_item: -1,
+                    }
+                    .to_dyn(),
+                ),
+            ));
+            bundle
+        };
+        let primes = |limit: u8| {
+            [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+                .into_iter()
+                .filter(|&size| size <= limit)
+                .map(|size| with_max_stack_size(ItemStack::new(1, &Item::STONE), size))
+                .collect::<Vec<_>>()
+        };
+        assert!(bundle_of(primes(23)).validate_strict().is_ok());
+        assert_eq!(
+            bundle_of(primes(29)).validate_strict(),
+            Err("Excessive total bundle weight".to_string())
+        );
     }
 }

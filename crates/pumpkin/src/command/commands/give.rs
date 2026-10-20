@@ -36,6 +36,7 @@ impl CommandExecutor for Executor {
             let targets = PlayersArgumentConsumer.find_arg_default_name(args)?;
 
             let (item_name, parsed_stack) = ItemArgumentConsumer::find_arg(args, ARG_ITEM)?;
+            let parsed_stack = ItemArgumentConsumer::create_item_stack(&parsed_stack, 1)?;
 
             let item_count = match item_count_consumer().find_arg_default_name(args) {
                 Err(_) => 1,

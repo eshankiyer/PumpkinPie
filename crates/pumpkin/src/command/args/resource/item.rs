@@ -47,6 +47,7 @@ impl ItemArgumentConsumer {
         let mut result = stack.clone();
         result.item_count = u8::try_from(count)
             .map_err(|_| malformed_item_error(format!("invalid item count {count}")))?;
+        result.validate_strict().map_err(malformed_item_error)?;
         Ok(result)
     }
 }
@@ -342,6 +343,14 @@ mod test {
         let stack = ItemStack::new(1, &Item::ENDER_PEARL);
         assert!(ItemArgumentConsumer::create_item_stack(&stack, 17).is_err());
         assert!(ItemArgumentConsumer::create_item_stack(&stack, 16).is_ok());
+    }
+
+    #[test]
+    fn reject_damageable_stackable_item_input() {
+        let mut args = HashMap::new();
+        args.insert("item", Arg::Item("diamond_sword[max_stack_size=64]"));
+        let (_, stack) = ItemArgumentConsumer::find_arg(&args, "item").unwrap();
+        assert!(ItemArgumentConsumer::create_item_stack(&stack, 1).is_err());
     }
 
     #[test]
