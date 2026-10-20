@@ -3,6 +3,7 @@ use crate::{entity::EntityBaseFuture, server::Server};
 use core::f32;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::data_component_impl::BundleContentsImpl;
 use pumpkin_data::data_component_impl::ContainerImpl;
 use pumpkin_data::packet::CURRENT_MC_VERSION;
@@ -16,7 +17,7 @@ use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_protocol::java::client::play::{CSetEntityMetadata, Metadata};
 use pumpkin_util::math::atomic_f32::AtomicF32;
-use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_util::math::vector3::Vector3;
 use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 
 use std::sync::{
@@ -402,9 +403,7 @@ impl ItemEntity {
         velo
     }
 
-    /// Vanilla `BundleItem.onDestroyed` (`BundleItem.java:248-255`) and
-    /// `BlockItem.onDestroyed` (`BlockItem.java:198-204`) empty container contents and scatter
-    /// them when the dropped item entity is destroyed.
+    /// `Item.onDestroyed` overrides `BlockItem` (`BlockItem.java:198-204`) and `BundleItem` (`BundleItem.java:248-255`) via `ItemUtils.onContainerDestroyed` (`ItemUtils.java:44-49`).
     async fn drop_container_contents_if_item(&self) {
         let contents: Option<Vec<ItemStack>> = {
             let mut item_stack = self.item_stack.lock().await;
@@ -417,10 +416,12 @@ impl ItemEntity {
                             .map(|(_, stack)| stack)
                             .collect()
                     })
-            } else {
+            } else if item_stack.item.has_tag(&tag::Item::MINECRAFT_BUNDLES) {
                 item_stack
                     .get_data_component_mut::<BundleContentsImpl>()
                     .map(|bundle| std::mem::take(&mut bundle.items))
+            } else {
+                None
             }
         };
 
@@ -428,10 +429,13 @@ impl ItemEntity {
             return;
         };
         let world = self.entity.world.load();
-        let position = BlockPos::floored_v(self.entity.pos.load());
+        let position = self.entity.pos.load();
         for stack in contents {
             if !stack.is_empty() {
-                world.drop_stack(&position, stack).await;
+                let entity = Entity::new(world.clone(), position, &EntityType::ITEM);
+                let item_entity = Arc::new(Self::new(entity, stack));
+                item_entity.set_pickup_delay(0);
+                world.spawn_entity(item_entity).await;
             }
         }
     }

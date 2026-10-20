@@ -106,6 +106,7 @@ impl JavaClient {
         }}
     }
 
+    /// `Item.use` (`Item.java:189-212`) with `Equippable.swapWithEquipmentSlot` (`Equippable.java:128-158`).
     async fn prepare_hand_item_for_use(
         &self,
         player: &Arc<Player>,
@@ -114,53 +115,78 @@ impl JavaClient {
     ) {
         let inventory = player.inventory();
 
-        // Vanilla `Item.use` starts consumables, shields, and kinetic weapons
-        // (`Item.java:189-209`); all three use the stack's long-use duration
-        // (`Item.java:310-316`).
-        if held.get_data_component::<ConsumableImpl>().is_some()
-            || held.get_data_component::<BlocksAttacksImpl>().is_some()
-            || held.get_data_component::<KineticWeaponImpl>().is_some()
-        {
-            // If its food we want to make sure we can actually consume it
-            if let Some(food) = held.get_data_component::<FoodImpl>() {
-                if player.abilities.lock().await.invulnerable
-                    || food.can_always_eat
-                    || player.hunger_manager.level.load() < 20
-                {
-                    player
-                        .living_entity
-                        .set_active_hand(hand, held.clone(), held.get_max_use_time())
-                        .await;
+        if held.get_data_component::<ConsumableImpl>().is_some() {
+            let can_consume = match held.get_data_component::<FoodImpl>() {
+                Some(food) => {
+                    player.abilities.lock().await.invulnerable
+                        || food.can_always_eat
+                        || player.hunger_manager.level.load() < 20
                 }
-            } else {
+                None => true,
+            };
+            if can_consume {
                 player
                     .living_entity
                     .set_active_hand(hand, held.clone(), held.get_max_use_time())
                     .await;
             }
+            return;
         }
-        let equipment_slot = held
-            .get_data_component::<EquippableImpl>()
-            .map(|equippable| equippable.slot.clone());
-        if let Some(slot) = equipment_slot {
+
+        if let Some(equippable) = held.get_data_component::<EquippableImpl>()
+            && equippable.swappable
+        {
+            let slot = equippable.slot.clone();
+            let creative = player.gamemode.load() == GameMode::Creative;
             // The equipment lock has to be released before touching the hand again:
             // the off hand lives in the same map, so holding it here would deadlock.
             let current_equipped = inventory.entity_equipment.lock().await.get(&slot);
-            if current_equipped.are_items_and_components_equal(held) {
+            if !equip_swap_allowed(equippable, held, &current_equipped, creative) {
                 return;
             }
 
-            player.enqueue_equipment_change(&slot, held).await;
-
-            let equipped = if current_equipped.is_empty() {
-                let equipped = held.clone();
-                held.decrement_unless_creative(player.gamemode.load(), 1);
-                equipped
+            if held.item_count <= 1 {
+                let to_equipment = held.clone();
+                let to_hand = if !current_equipped.is_empty() {
+                    current_equipped
+                } else if creative {
+                    held.clone()
+                } else {
+                    ItemStack::EMPTY.clone()
+                };
+                player.enqueue_equipment_change(&slot, &to_equipment).await;
+                inventory
+                    .entity_equipment
+                    .lock()
+                    .await
+                    .put(&slot, to_equipment);
+                *held = to_hand;
             } else {
-                std::mem::replace(held, current_equipped)
-            };
-            inventory.entity_equipment.lock().await.put(&slot, equipped);
+                let to_equipment = held.copy_with_count(1);
+                held.decrement_unless_creative(player.gamemode.load(), 1);
+                player.enqueue_equipment_change(&slot, &to_equipment).await;
+                inventory
+                    .entity_equipment
+                    .lock()
+                    .await
+                    .put(&slot, to_equipment);
+                if !current_equipped.is_empty() {
+                    inventory
+                        .offer_or_drop_stack(current_equipped, player.as_ref())
+                        .await;
+                }
+            }
             inventory.set_stack_in_hand(hand, held.clone()).await;
+            return;
+        }
+
+        if held.get_data_component::<BlocksAttacksImpl>().is_some()
+            || held.get_data_component::<KineticWeaponImpl>().is_some()
+        {
+            player
+                .living_entity
+                .set_active_hand(hand, held.clone(), held.get_max_use_time())
+                .await;
         }
     }
 
@@ -187,5 +213,81 @@ impl JavaClient {
         );
         server.plugin_manager.fire(server, &mut fish_event).await;
         !fish_event.cancelled
+    }
+}
+
+/// `Item.use` equippable gates (`Item.java:195-196`, `Equippable.java:129-132,175-177`).
+fn equip_swap_allowed(
+    equippable: &EquippableImpl,
+    in_hand: &ItemStack,
+    in_slot: &ItemStack,
+    creative: bool,
+) -> bool {
+    use pumpkin_data::data_component_impl::IDSet;
+    use pumpkin_data::entity::EntityType;
+    use pumpkin_data::tag::Taggable;
+
+    equippable.swappable
+        && equippable
+            .allowed_entities
+            .as_ref()
+            .is_none_or(|allowed| match allowed {
+                IDSet::IDs(ids) => ids
+                    .iter()
+                    .any(|entity_type| entity_type.id == EntityType::PLAYER.id),
+                IDSet::Tag(tag) => EntityType::PLAYER.is_tagged_with(tag).unwrap_or(false),
+            })
+        && (creative
+            || in_slot.get_enchantment_level(&pumpkin_data::Enchantment::BINDING_CURSE) <= 0)
+        && !ItemStack::is_same_item_same_components(in_hand, in_slot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::equip_swap_allowed;
+    use pumpkin_data::Enchantment;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::{EnchantmentsImpl, EquippableImpl};
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+
+    fn equippable(stack: &ItemStack) -> &EquippableImpl {
+        stack.get_data_component::<EquippableImpl>().unwrap()
+    }
+
+    fn cursed(item: &'static Item) -> ItemStack {
+        let mut stack = ItemStack::new(1, item);
+        stack.patch.push((
+            DataComponent::Enchantments,
+            Some(Box::new(EnchantmentsImpl {
+                enchantment: std::borrow::Cow::from(vec![(&Enchantment::BINDING_CURSE, 1)]),
+            })),
+        ));
+        stack
+    }
+
+    #[test]
+    fn equip_swap_follows_vanilla_gates() {
+        let empty = ItemStack::EMPTY.clone();
+        let helmet = ItemStack::new(1, &Item::DIAMOND_HELMET);
+        assert!(equip_swap_allowed(equippable(&helmet), &helmet, &empty, false));
+        assert!(!equip_swap_allowed(equippable(&helmet), &helmet, &helmet.clone(), false));
+
+        let cursed_helmet = cursed(&Item::IRON_HELMET);
+        assert!(!equip_swap_allowed(equippable(&helmet), &helmet, &cursed_helmet, false));
+        assert!(equip_swap_allowed(equippable(&helmet), &helmet, &cursed_helmet, true));
+
+        for item in [&Item::CARVED_PUMPKIN, &Item::CREEPER_HEAD, &Item::SHIELD] {
+            let stack = ItemStack::new(1, item);
+            assert!(!equip_swap_allowed(equippable(&stack), &stack, &empty, false));
+        }
+
+        for item in [&Item::SADDLE, &Item::WHITE_CARPET, &Item::WHITE_HARNESS, &Item::WOLF_ARMOR] {
+            let stack = ItemStack::new(1, item);
+            assert!(!equip_swap_allowed(equippable(&stack), &stack, &empty, false));
+        }
+
+        let elytra = ItemStack::new(1, &Item::ELYTRA);
+        assert!(equip_swap_allowed(equippable(&elytra), &elytra, &helmet, false));
     }
 }

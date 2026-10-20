@@ -1329,22 +1329,21 @@ pub trait ScreenHandler: Send + Sync {
                                 }
                         }
 
-                        if !intercepted && slot_stack.is_empty()
+                        // `BundleItem.overrideStackedOnOther` (`BundleItem.java:80-91`).
+                        if !intercepted
+                            && slot_stack.is_empty()
                             && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                && let Some(extracted) = bundle.try_extract() {
-                                    // `BundleItem.overrideStackedOnOther` delegates the
-                                    // extracted stack to `Slot.safeInsert`, preserving slot
-                                    // limits and returning any remainder to the bundle
-                                    // (`BundleItem.java:59-81`).
-                                    let mut remainder = slot.insert_stack(extracted).await;
-                                    if !remainder.is_empty()
-                                        && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                    {
-                                        let _ = bundle.try_insert(&mut remainder);
-                                    }
+                        {
+                            if let Some(extracted) = bundle.try_extract() {
+                                let mut remainder = slot.insert_stack(extracted).await;
+                                if remainder.is_empty() {
                                     player.play_sound(Sound::ItemBundleRemoveOne).await;
-                                    intercepted = true;
+                                } else if let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>() {
+                                    let _ = bundle.try_insert(&mut remainder);
                                 }
+                            }
+                            intercepted = true;
+                        }
 
                         if intercepted {
                             if cursor_stack.item_count == 0 {

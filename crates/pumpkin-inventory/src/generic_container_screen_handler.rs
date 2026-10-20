@@ -618,4 +618,47 @@ mod tests {
         player.in_range = false;
         assert!(handler.can_use(&player));
     }
+
+    /// `BundleItem.overrideStackedOnOther` (`BundleItem.java:80-91`) consumes a secondary click
+    /// onto an empty slot even when the bundle is empty, and otherwise moves one item out.
+    #[tokio::test]
+    async fn bundle_secondary_click_on_empty_slot_is_always_consumed() {
+        use pumpkin_data::data_component_impl::BundleContentsImpl;
+        use pumpkin_protocol::java::server::play::SlotActionType;
+
+        let (mut handler, inventory, player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+        *handler.get_behaviour().cursor_stack.lock().await = ItemStack::new(1, &Item::BUNDLE);
+        handler
+            .on_slot_click(0, 1, SlotActionType::Pickup, &player)
+            .await;
+        assert!(inventory.get_stack(0).await.is_empty());
+        assert_eq!(
+            handler.get_behaviour().cursor_stack.lock().await.item.id,
+            Item::BUNDLE.id
+        );
+
+        let mut bundle = ItemStack::new(1, &Item::BUNDLE);
+        let mut stone = ItemStack::new(1, &Item::STONE);
+        assert!(
+            bundle
+                .get_data_component_mut::<BundleContentsImpl>()
+                .unwrap()
+                .try_insert(&mut stone)
+        );
+        *handler.get_behaviour().cursor_stack.lock().await = bundle;
+        handler
+            .on_slot_click(1, 1, SlotActionType::Pickup, &player)
+            .await;
+        assert_eq!(inventory.get_stack(1).await.item.id, Item::STONE.id);
+        let cursor = handler.get_behaviour().cursor_stack.lock().await.clone();
+        assert_eq!(cursor.item.id, Item::BUNDLE.id);
+        assert_eq!(
+            cursor
+                .get_data_component::<BundleContentsImpl>()
+                .unwrap()
+                .items
+                .len(),
+            0
+        );
+    }
 }
