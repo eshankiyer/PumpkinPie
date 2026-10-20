@@ -142,6 +142,61 @@ fn impulse_limited_fall_distance(fall_distance: f32, entity_y: f64, impact_y: f6
     fall_distance.min((impact_y - entity_y) as f32)
 }
 
+/// `LivingEntity.checkFallDamage` (`LivingEntity.java:370-386`).
+fn fall_landing_particles(
+    fall_power: f64,
+    entity_pos: Vector3<f64>,
+    entity_block: BlockPos,
+    on_pos: BlockPos,
+) -> Option<(Vector3<f64>, i32)> {
+    let power = f64::from((fall_power.floor() as i32).max(0));
+    if power <= 0.0 {
+        return None;
+    }
+    let (mut x, mut z) = (entity_pos.x, entity_pos.z);
+    if on_pos.0.x != entity_block.0.x || on_pos.0.z != entity_block.0.z {
+        let x_diff = x - f64::from(on_pos.0.x) - 0.5;
+        let z_diff = z - f64::from(on_pos.0.z) - 0.5;
+        let max_diff = x_diff.abs().max(z_diff.abs());
+        x = f64::from(on_pos.0.x) + 0.5 + x_diff / max_diff * 0.5;
+        z = f64::from(on_pos.0.z) + 0.5 + z_diff / max_diff * 0.5;
+    }
+    let scale = (f64::from(0.2f32) + power / 15.0).min(2.5);
+    Some((Vector3::new(x, entity_pos.y, z), (150.0 * scale) as i32))
+}
+
+/// `LivingEntity.baseTick` (`LivingEntity.java:489-496`).
+const fn should_forget_last_hurt_by_mob(attacker_alive: bool, ticks_since_hurt: i32) -> bool {
+    !attacker_alive || ticks_since_hurt > 100
+}
+
+/// Empty `checkFallDamage` overrides (`Bat.java:189`, `Bee.java:609`, `HappyGhast.java:167`, `Allay.java:178`, `Phantom.java:139`, `Parrot.java:313`, `Ghast.java:87`).
+fn has_empty_check_fall_damage(entity_type: &EntityType) -> bool {
+    [
+        &EntityType::BAT,
+        &EntityType::BEE,
+        &EntityType::HAPPY_GHAST,
+        &EntityType::ALLAY,
+        &EntityType::PHANTOM,
+        &EntityType::PARROT,
+        &EntityType::GHAST,
+    ]
+    .iter()
+    .any(|candidate| candidate.id == entity_type.id)
+}
+
+/// `ServerPlayer.checkFallDamage` (`ServerPlayer.java:1292-1297`).
+fn extra_fall_particles(on_pos: BlockPos, fall_distance: f64) -> (Vector3<f64>, i32) {
+    (
+        Vector3::new(
+            f64::from(on_pos.0.x) + 0.5,
+            f64::from(on_pos.0.y) + 0.5 + 0.5,
+            f64::from(on_pos.0.z) + 0.5,
+        ),
+        (50.0 * fall_distance).clamp(0.0, 200.0) as i32,
+    )
+}
+
 /// Vanilla `LivingEntity.canBeSeenAsEnemy` (`LivingEntity.java:952-958`) combines the base
 /// invulnerability/visibility checks with the entity-specific targetability override.
 const fn can_be_seen_as_enemy_state(
@@ -422,6 +477,8 @@ pub struct LivingEntity {
     pub last_attacker_id: AtomicI32,
     /// The tick at which this entity was last attacked (entity age).
     pub last_attacked_time: AtomicI32,
+    /// `LivingEntity.tickCount - lastHurtByMobTimestamp` (`LivingEntity.java:493`).
+    ticks_since_last_hurt_by_mob: AtomicI32,
     /// Packed tick and panic-causing flag for vanilla's last damage source.
     pub last_damage_state: AtomicCell<(u64, i64, bool)>,
     last_damage_sequence: AtomicU64,
@@ -686,6 +743,7 @@ impl LivingEntity {
             climbing_pos: AtomicCell::new(None),
             last_attacker_id: AtomicI32::new(0),
             last_attacked_time: AtomicI32::new(0),
+            ticks_since_last_hurt_by_mob: AtomicI32::new(0),
             last_damage_state: AtomicCell::new((0, 0, false)),
             last_damage_sequence: AtomicU64::new(0),
             last_attacking_id: AtomicI32::new(0),
@@ -898,23 +956,26 @@ impl LivingEntity {
         self.soul_speed_active.store(false, Relaxed);
     }
 
-    /// `EnchantmentHelper.runLocationChangedEffects` as driven by
-    /// `LivingEntity.onChangedBlock` (`LivingEntity.java:547-549`): the equipment's
-    /// `location_changed` effects run when the entity's block position changes, not every
-    /// tick.
-    ///
-    /// Frost Walker freezes water under the wearer, and Soul Speed rolls its boot damage,
-    /// through this path. Both evaluators existed with no caller until this hook.
+    /// `LivingEntity.baseTick` (`LivingEntity.java:460-464`).
     async fn tick_location_changed_effects(&self, caller: &dyn EntityBase) {
         let pos = self.entity.block_pos.load();
         if self.last_effect_block_pos.swap(Some(pos)) == Some(pos) {
             return;
         }
+        self.on_changed_block(caller).await;
+    }
+
+    /// `LivingEntity.onChangedBlock` (`LivingEntity.java:547-549`; `ServerPlayer.java:1283-1288`).
+    async fn on_changed_block(&self, caller: &dyn EntityBase) {
+        if caller.is_spectator() {
+            return;
+        }
 
         let boots = self.entity_equipment.lock().await.get(&EquipmentSlot::FEET);
+        let on_ground = self.entity.on_ground.load(SeqCst);
 
         let frost_level = boots.get_enchantment_level(&Enchantment::FROST_WALKER);
-        if frost_level > 0 {
+        if frost_level > 0 && on_ground && !self.entity.has_vehicle().await {
             crate::enchantment::apply_frost_walker(
                 &self.entity.world.load(),
                 self.entity.pos.load(),
@@ -926,6 +987,7 @@ impl LivingEntity {
 
         let soul_level = boots.get_enchantment_level(&Enchantment::SOUL_SPEED);
         if soul_level > 0
+            && on_ground
             && let Some((chance, amount)) =
                 crate::enchantment::location_based_item_damage(&Enchantment::SOUL_SPEED, soul_level)
             && self
@@ -1814,6 +1876,31 @@ impl LivingEntity {
         self.last_attacked_time.load(Relaxed)
     }
 
+    /// `LivingEntity.baseTick` (`LivingEntity.java:489-496`).
+    fn tick_last_hurt_by_mob(&self) {
+        let attacker_id = self.last_attacker_id.load(Relaxed);
+        if attacker_id == 0 {
+            return;
+        }
+        let ticks = self.ticks_since_last_hurt_by_mob.fetch_add(1, Relaxed) + 1;
+        let attacker_alive = self
+            .entity
+            .world
+            .load()
+            .get_entity_by_id(attacker_id)
+            .is_some_and(|attacker| {
+                !attacker.get_entity().is_removed()
+                    && attacker
+                        .get_living_entity()
+                        .is_none_or(|living| !living.is_dead_or_dying())
+            });
+        if should_forget_last_hurt_by_mob(attacker_alive, ticks) {
+            let _ = self
+                .last_attacker_id
+                .compare_exchange(attacker_id, 0, Relaxed, Relaxed);
+        }
+    }
+
     /// Vanilla `LivingEntity.getLastHurtMobTimestamp` exposes the tick at which this entity
     /// last damaged another living entity (`LivingEntity.java:655-657`).
     #[must_use]
@@ -2493,7 +2580,6 @@ impl LivingEntity {
         // normal air/fluid travel exactly like vanilla's `travel` re-check.
         self.tick_glide_state(caller).await;
 
-        let old_y = self.entity.pos.load().y;
         let effective_ai = caller.is_effective_ai();
 
         let custom_travel = if no_ai || !effective_ai {
@@ -2527,18 +2613,6 @@ impl LivingEntity {
                 self.travel_in_air(caller).await;
             }
         }
-
-        // Vanilla `Entity.move` calls `doCheckFallDamage`, which dispatches to
-        // `LivingEntity.checkFallDamage` after collision resolution (`Entity.java:1543-1550`;
-        // `LivingEntity.java:363-390`). The existing `fall` method is that dispatch's live
-        // equivalent; invoke it for every movement path, including custom travel.
-        self.fall(
-            caller.clone(),
-            self.entity.pos.load().y - old_y,
-            self.entity.on_ground.load(SeqCst),
-            false,
-        )
-        .await;
 
         // TODO: Apply Soul Speed boot durability when tick_block_underneath is implemented.
         //self.entity.tick_block_underneath(&caller);
@@ -3178,6 +3252,7 @@ impl LivingEntity {
         strength
     }
 
+    /// `LivingEntity.checkFallDamage` (`LivingEntity.java:363-394`; `Entity.java:1550-1568`; `Strider.java:290-296`).
     pub async fn fall(
         &self,
         caller: Arc<dyn EntityBase>,
@@ -3185,9 +3260,10 @@ impl LivingEntity {
         ground: bool,
         dont_damage: bool,
     ) {
-        // HappyGhast.checkFallDamage (`HappyGhast.java:167-168`) is an empty override: neither
-        // fall distance nor landing damage is accumulated for this flying mob.
-        if caller.get_entity().entity_type == &EntityType::HAPPY_GHAST {
+        let entity_type = caller.get_entity().entity_type;
+        if has_empty_check_fall_damage(entity_type)
+            || (entity_type == &EntityType::STRIDER && self.entity.touching_lava.load(SeqCst))
+        {
             self.fall_distance.store(0.0);
             return;
         }
@@ -3199,6 +3275,24 @@ impl LivingEntity {
         if self.entity.has_vehicle().await {
             self.fall_distance.store(0.0);
             return;
+        }
+
+        let landing_fall_distance = self.fall_distance.load();
+        if ground && landing_fall_distance > 0.0 {
+            self.land_after_fall(&caller, f64::from(landing_fall_distance))
+                .await;
+        }
+
+        if height_difference < 0.0 {
+            let new_fall_distance = if !self.should_prevent_fall_damage()
+                && !self.should_prevent_fall_damage_in_area()
+            {
+                let distance = self.fall_distance.load();
+                distance - (height_difference as f32)
+            } else {
+                0f32
+            };
+            self.fall_distance.store(new_fall_distance);
         }
 
         if ground {
@@ -3257,16 +3351,53 @@ impl LivingEntity {
                 ),
             )
             .await;
-        } else if height_difference < 0.0 {
-            let new_fall_distance = if !self.should_prevent_fall_damage()
-                && !self.should_prevent_fall_damage_in_area()
-            {
-                let distance = self.fall_distance.load();
-                distance - (height_difference as f32)
-            } else {
-                0f32
-            };
-            self.fall_distance.store(new_fall_distance);
+        }
+    }
+
+    /// `LivingEntity.checkFallDamage` (`LivingEntity.java:368-388`; `ServerPlayer.java:1291-1298`).
+    async fn land_after_fall(&self, caller: &Arc<dyn EntityBase>, fall_distance: f64) {
+        let world = self.entity.world.load();
+        let on_pos = self.entity.get_pos_with_y_offset(0.2).0;
+        let on_state = world.get_block_state(&on_pos);
+        let mut particle_data = Vec::new();
+        let has_particle_data = particle_data
+            .write_var_int(&VarInt(i32::from(on_state.id.as_u16())))
+            .is_ok();
+
+        if let Some(player) = caller.get_player()
+            && player.spawn_extra_particles_on_fall.swap(false, Relaxed)
+            && has_particle_data
+        {
+            let (position, count) = extra_fall_particles(on_pos, fall_distance);
+            world.spawn_particle_with_data(
+                position,
+                Vector3::new(0.3, 0.3, 0.3),
+                0.15,
+                count,
+                Particle::Block,
+                &particle_data,
+            );
+        }
+
+        self.on_changed_block(caller.as_ref()).await;
+
+        if has_particle_data
+            && !on_state.is_air()
+            && let Some((position, count)) = fall_landing_particles(
+                fall_distance + 1.0e-6 - self.get_attribute_value(&Attributes::SAFE_FALL_DISTANCE),
+                self.entity.pos.load(),
+                self.entity.block_pos.load(),
+                on_pos,
+            )
+        {
+            world.spawn_particle_with_data(
+                position,
+                Vector3::new(0.0, 0.0, 0.0),
+                0.15,
+                count,
+                Particle::Block,
+                &particle_data,
+            );
         }
     }
 
@@ -6537,6 +6668,7 @@ impl EntityBase for LivingEntity {
 
                 // Track attacker for RevengeGoal (only after confirming damage)
                 if let Some(attacker) = cause.or(source) {
+                    self.ticks_since_last_hurt_by_mob.store(0, Relaxed);
                     self.last_attacker_id
                         .store(attacker.get_entity().entity_id, Relaxed);
                     self.last_attacked_time
@@ -6597,6 +6729,7 @@ impl EntityBase for LivingEntity {
 
                 // Track attacker for RevengeGoal (only after confirming damage)
                 if let Some(attacker) = cause.or(source) {
+                    self.ticks_since_last_hurt_by_mob.store(0, Relaxed);
                     self.last_attacker_id
                         .store(attacker.get_entity().entity_id, Relaxed);
                     self.last_attacked_time
@@ -6758,7 +6891,6 @@ impl EntityBase for LivingEntity {
             tick_equipment_items(self, caller.as_ref(), server).await;
             self.tick_equipment_attributes(caller.as_ref()).await;
             self.tick_soul_speed(caller.as_ref()).await;
-            self.tick_location_changed_effects(caller.as_ref()).await;
             let was_alive_before_air =
                 !self.dead.load(Relaxed) && self.health.load() > 0.0 && !self.entity.is_removed();
             if self.entity.entity_type == &EntityType::PLAYER
@@ -6771,6 +6903,9 @@ impl EntityBase for LivingEntity {
                 player.handle_shoulder_entities().await;
             }
             self.tick_air_supply(caller, was_alive_before_air).await;
+            if was_alive_before_air {
+                self.tick_location_changed_effects(caller.as_ref()).await;
+            }
 
             // Only tick movement if the entity is alive. This prevents a dead "corpse"
             // from continuing to be simulated (accumulating fall_distance/velocity).
@@ -7121,6 +7256,7 @@ impl EntityBase for LivingEntity {
                 if self.get_last_hurt_by_player_memory_time() > 0 {
                     self.last_hurt_by_player_time.fetch_sub(1, Relaxed);
                 }
+                self.tick_last_hurt_by_mob();
                 if self.is_dead_or_dying() {
                     let time = self
                         .death_time
@@ -9165,5 +9301,81 @@ mod equip_event_tests {
         assert!(does_emit_equip_event(true, &EquipmentSlot::HEAD));
         assert!(!does_emit_equip_event(true, &EquipmentSlot::MAIN_HAND));
         assert!(does_emit_equip_event(false, &EquipmentSlot::MAIN_HAND));
+    }
+}
+
+#[cfg(test)]
+mod fall_landing_tests {
+    use super::{
+        extra_fall_particles, fall_landing_particles, has_empty_check_fall_damage,
+        should_forget_last_hurt_by_mob,
+    };
+    use pumpkin_data::entity::EntityType;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn a_fall_within_the_safe_distance_spawns_no_particles() {
+        let pos = Vector3::new(0.5, 64.0, 0.5);
+        let block = BlockPos::new(0, 64, 0);
+        assert_eq!(
+            fall_landing_particles(0.999, pos, block, BlockPos::new(0, 63, 0)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_count_widens_the_float_literal_like_java() {
+        let pos = Vector3::new(0.5, 64.0, 0.5);
+        let block = BlockPos::new(0, 64, 0);
+        let on = BlockPos::new(0, 63, 0);
+        assert_eq!(
+            fall_landing_particles(1.000_001, pos, block, on),
+            Some((pos, 40))
+        );
+        assert_eq!(
+            fall_landing_particles(19.5, pos, block, on),
+            Some((pos, 220))
+        );
+        assert_eq!(
+            fall_landing_particles(500.0, pos, block, on),
+            Some((pos, 375))
+        );
+    }
+
+    #[test]
+    fn landing_on_a_neighbouring_block_moves_the_burst_to_its_edge() {
+        let pos = Vector3::new(10.9, 64.0, 5.5);
+        let block = BlockPos::new(10, 64, 5);
+        let on = BlockPos::new(11, 63, 5);
+        let (position, _) = fall_landing_particles(2.0, pos, block, on).unwrap();
+        assert!((position.x - 11.0).abs() < 1.0e-9);
+        assert!((position.z - 5.5).abs() < 1.0e-9);
+        assert!((position.y - 64.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn mace_landing_particles_sit_above_the_block_and_cap_at_two_hundred() {
+        let on = BlockPos::new(3, 70, -4);
+        assert_eq!(
+            extra_fall_particles(on, 1.0),
+            (Vector3::new(3.5, 71.0, -3.5), 50)
+        );
+        assert_eq!(extra_fall_particles(on, 10.0).1, 200);
+    }
+
+    #[test]
+    fn the_last_attacker_is_forgotten_after_one_hundred_ticks_or_death() {
+        assert!(!should_forget_last_hurt_by_mob(true, 100));
+        assert!(should_forget_last_hurt_by_mob(true, 101));
+        assert!(should_forget_last_hurt_by_mob(false, 1));
+    }
+
+    #[test]
+    fn flying_mobs_with_an_empty_fall_check_skip_landing() {
+        assert!(has_empty_check_fall_damage(&EntityType::PARROT));
+        assert!(has_empty_check_fall_damage(&EntityType::HAPPY_GHAST));
+        assert!(!has_empty_check_fall_damage(&EntityType::CHICKEN));
+        assert!(!has_empty_check_fall_damage(&EntityType::PLAYER));
     }
 }
