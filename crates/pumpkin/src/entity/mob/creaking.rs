@@ -445,6 +445,15 @@ impl Mob for CreakingEntity {
         &self.mob_entity
     }
 
+    /// `CreakingBodyRotationControl.clientTick` (`Creaking.java:524-528`).
+    fn tick_body_rotation(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            if self.can_move() {
+                self.default_tick_body_rotation().await;
+            }
+        })
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;

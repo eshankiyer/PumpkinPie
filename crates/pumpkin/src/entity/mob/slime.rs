@@ -366,10 +366,6 @@ impl SlimeEntity {
         }
     }
 
-    fn get_sound_volume(&self) -> f32 {
-        0.4 * self.get_size() as f32
-    }
-
     fn get_sound_pitch(&self) -> f32 {
         let pitch_adjuster = if self.is_tiny() { 1.4 } else { 0.8 };
         (rand::random_range(0.0..1.0) - rand::random_range(0.0..1.0)) * 0.2 + 1.0 * pitch_adjuster
@@ -407,6 +403,11 @@ impl NBTStorage for SlimeEntity {
 impl Mob for SlimeEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity
+    }
+
+    /// `AbstractCubeMob.getSoundVolume` (`AbstractCubeMob.java:275-277`).
+    fn get_sound_volume(&self) -> f32 {
+        0.4 * self.get_size() as f32
     }
 
     /// `set_size` runs from `new`/`randomize_size` and from NBT load, both before the entity

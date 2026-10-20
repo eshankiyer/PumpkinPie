@@ -133,6 +133,9 @@ impl Mob for BreezeEntity {
         &self.mob_entity
     }
 
+    /// `Breeze.playAmbientSound` (`Breeze.java:184-188`) only plays a client-local sound (`Level.java:478-479`).
+    fn play_ambient_sound(&self) {}
+
     /// `Breeze.deflection` (`Breeze.java:196-202`): a breeze bats away every projectile except
     /// wind charges, its own included. The tag test mirrors vanilla's
     /// `is(EntityTypeTags.DEFLECTS_PROJECTILES)`, which today matches only the breeze; it is kept

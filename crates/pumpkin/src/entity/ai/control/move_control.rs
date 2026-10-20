@@ -161,6 +161,20 @@ impl MoveControlTrait for MoveControl {
     fn get_speed_modifier(&self) -> f64 {
         Self::get_speed_modifier(self)
     }
+
+    fn transfer_request_to(&mut self, target: &mut dyn MoveControlTrait) {
+        match self.operation {
+            Operation::Strafe => target.strafe(self.strafe_forwards, self.strafe_right),
+            Operation::MoveTo => target.set_wanted_position(
+                self.wanted_x,
+                self.wanted_y,
+                self.wanted_z,
+                self.speed_modifier,
+            ),
+            Operation::Wait | Operation::Jumping => return,
+        }
+        self.operation = Operation::Wait;
+    }
 }
 
 fn should_jump(
@@ -210,7 +224,39 @@ impl MoveControl {
 
 #[cfg(test)]
 mod tests {
-    use super::should_jump;
+    use super::{MoveControl, Operation, should_jump};
+    use crate::entity::ai::control::MoveControlTrait;
+
+    #[test]
+    fn rider_strafe_is_handed_to_vehicle_control() {
+        let mut rider = MoveControl::default();
+        let mut vehicle = MoveControl::default();
+        rider.strafe(-0.5, 0.5);
+        MoveControlTrait::transfer_request_to(&mut rider, &mut vehicle);
+        assert!(rider.operation == Operation::Wait);
+        assert!(vehicle.operation == Operation::Strafe);
+        assert_eq!(vehicle.strafe_forwards, -0.5);
+        assert_eq!(vehicle.strafe_right, 0.5);
+        assert_eq!(vehicle.speed_modifier, 0.25);
+    }
+
+    #[test]
+    fn rider_move_to_is_handed_to_vehicle_control() {
+        let mut rider = MoveControl::default();
+        let mut vehicle = MoveControl::default();
+        rider.set_wanted_position(1.0, 2.0, 3.0, 1.2);
+        MoveControlTrait::transfer_request_to(&mut rider, &mut vehicle);
+        assert!(rider.operation == Operation::Wait);
+        assert!(vehicle.has_wanted());
+        assert_eq!(
+            (vehicle.wanted_x, vehicle.wanted_y, vehicle.wanted_z),
+            (1.0, 2.0, 3.0)
+        );
+        assert_eq!(vehicle.speed_modifier, 1.2);
+
+        MoveControlTrait::transfer_request_to(&mut rider, &mut vehicle);
+        assert!(vehicle.has_wanted());
+    }
 
     #[test]
     fn grounded_collision_requests_a_jump_without_a_height_delta() {

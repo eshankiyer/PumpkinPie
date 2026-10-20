@@ -193,6 +193,15 @@ impl Mob for PhantomEntity {
         &self.mob_entity
     }
 
+    /// `PhantomBodyRotationControl.clientTick` (`Phantom.java:304-308`).
+    fn tick_body_rotation(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            entity.head_yaw.store(entity.body_yaw.load());
+            entity.body_yaw.store(entity.yaw.load());
+        })
+    }
+
     fn get_mob_gravity(&self) -> f64 {
         0.0
     }

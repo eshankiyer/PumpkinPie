@@ -97,7 +97,11 @@ async fn spawn_egg_mob(
         .await;
 
     // Broadcast the new mob to all players
-    world.spawn_entity(mob).await;
+    world.spawn_entity(mob.clone()).await;
+    // `EntityType.spawn` (`EntityType.java:167-174`).
+    if let Some(mob) = mob.get_mob() {
+        mob.play_ambient_sound();
+    }
 
     // `SpawnEggItem.spawn` emits ENTITY_PLACE after a successful spawn (`SpawnEggItem.java:90-93`).
     if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {

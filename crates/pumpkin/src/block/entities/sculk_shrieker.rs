@@ -454,6 +454,8 @@ impl SculkShriekerBlockEntity {
         // tracking the entity until `spawn_entity` returns.
         world.spawn_entity(warden.clone()).await;
         warden.start_emerging();
+        // `SpawnUtil.trySpawnMob` (`SpawnUtil.java:42-45`).
+        crate::entity::mob::Mob::play_ambient_sound(warden.as_ref());
         true
     }
 }

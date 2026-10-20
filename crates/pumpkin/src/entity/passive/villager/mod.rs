@@ -1558,7 +1558,9 @@ impl VillagerEntity {
             &EntityType::IRON_GOLEM,
         );
         let golem = crate::entity::passive::iron_golem::IronGolemEntity::new(entity);
-        world.spawn_entity(golem).await;
+        world.spawn_entity(golem.clone()).await;
+        // `SpawnUtil.trySpawnMob` (`SpawnUtil.java:42-45`).
+        crate::entity::mob::Mob::play_ambient_sound(golem.as_ref());
 
         // `nearbyVillagers.forEach(GolemSensor::golemDetected)` (`Villager.java:844`) --
         // every villager in the *unfiltered* nearby list is suppressed, not just the ones

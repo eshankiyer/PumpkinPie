@@ -6798,12 +6798,18 @@ impl EntityBase for LivingEntity {
             // `LivingEntity.tickHeadTurn` queries the virtual head limit after movement
             // (`LivingEntity.java:3018-3025`); `Player` narrows it while blocking
             // (`Player.java:288-290`).
-            let max_head_rotation = if let Some(player) = caller.get_player() {
-                player.get_max_head_rotation_relative_to_body().await
+            if let Some(mob) = caller.get_mob()
+                && mob.get_entity().entity_id == self.entity.entity_id
+            {
+                mob.tick_body_rotation().await;
             } else {
-                50.0
-            };
-            self.tick_head_turn(max_head_rotation);
+                let max_head_rotation = if let Some(player) = caller.get_player() {
+                    player.get_max_head_rotation_relative_to_body().await
+                } else {
+                    50.0
+                };
+                self.tick_head_turn(max_head_rotation);
+            }
 
             // TODO
             let player = caller.get_player();

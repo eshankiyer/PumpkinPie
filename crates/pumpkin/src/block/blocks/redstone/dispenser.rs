@@ -739,7 +739,11 @@ impl DispenserBlock {
         mob.get_entity().set_rotation(yaw, 0.0);
         apply_entity_variant(item, mob.as_ref());
 
-        ctx.world.spawn_entity(mob).await;
+        ctx.world.spawn_entity(mob.clone()).await;
+        // `EntityType.spawn` (`EntityType.java:167-174`).
+        if let Some(mob) = mob.get_mob() {
+            mob.play_ambient_sound();
+        }
 
         ctx.world
             .sync_world_event(WorldEvent::SoundDispenserDispense, *ctx.position, 0);

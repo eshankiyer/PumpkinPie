@@ -374,6 +374,11 @@ impl Mob for ShulkerEntity {
         &self.mob_entity
     }
 
+    /// `ShulkerBodyRotationControl.clientTick` (`Shulker.java:648-650`).
+    fn tick_body_rotation(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async {})
+    }
+
     fn can_be_collided_with(&self) -> bool {
         true
     }

@@ -614,7 +614,11 @@ async fn spawn_mob_bucket_entity(
         // the from-bucket marker.
         cube.set_from_bucket(true);
     }
-    world.spawn_entity(entity).await;
+    world.spawn_entity(entity.clone()).await;
+    // `MobBucketItem.spawn` (`MobBucketItem.java:54-57`).
+    if let Some(mob) = entity.get_mob() {
+        mob.play_ambient_sound();
+    }
     // Vanilla `MobBucketItem#playEmptySound`: `level.playSound(user, pos, emptySound, NEUTRAL,
     // 1.0F, 1.0F)`. `emptyContents` returns from the evaporation branch before reaching it, while
     // `checkExtraContent` still spawns the mob, so an evaporated mob bucket is silent.

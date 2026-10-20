@@ -354,6 +354,15 @@ impl Mob for ArmadilloEntity {
         &self.mob_entity
     }
 
+    /// `Armadillo.createBodyControl` (`Armadillo.java:379-388`).
+    fn tick_body_rotation(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            if !self.is_scared() {
+                self.default_tick_body_rotation().await;
+            }
+        })
+    }
+
     fn modify_incoming_damage(&self, amount: f32, _damage_type: DamageType) -> f32 {
         if self.is_scared() {
             (amount - 1.0).max(0.0) / 2.0

@@ -1,6 +1,7 @@
 use crate::entity::mob::Mob;
 use pumpkin_util::math::subtract_angles;
 
+pub mod body_rotation_control;
 pub mod drowned_move_control;
 pub mod flying_move_control;
 pub mod ghast_move_control;
@@ -56,4 +57,7 @@ pub trait MoveControlTrait: Control {
     fn get_wanted_z(&self) -> f64 {
         0.0
     }
+
+    /// `Mob.getMoveControl` (`Mob.java:208-210`): hands a controlled rider's pending STRAFE or MOVE_TO request to its vehicle's controller.
+    fn transfer_request_to(&mut self, _target: &mut dyn MoveControlTrait) {}
 }

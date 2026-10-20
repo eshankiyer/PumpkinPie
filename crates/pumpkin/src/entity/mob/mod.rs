@@ -8,6 +8,7 @@ use super::{
 use crate::entity::EntityBaseFuture;
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::control::MoveControlTrait;
+use crate::entity::ai::control::body_rotation_control::BodyRotationControl;
 use crate::entity::ai::control::look_control::LookControl;
 use crate::entity::ai::control::move_control::MoveControl;
 use crate::entity::ai::goal::Controls;
@@ -210,6 +211,7 @@ pub struct MobEntity {
     pub target: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     pub look_control: std::sync::Mutex<LookControl>,
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
+    pub body_rotation_control: std::sync::Mutex<BodyRotationControl>,
     pub position_target: AtomicCell<BlockPos>,
     pub position_target_range: AtomicI32,
     /// Whether the shared home restriction currently comes from a leash. Vanilla clears that
@@ -393,6 +395,7 @@ impl MobEntity {
             target: tokio::sync::Mutex::new(None),
             look_control: std::sync::Mutex::new(LookControl::default()),
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
+            body_rotation_control: std::sync::Mutex::new(BodyRotationControl::default()),
             position_target: AtomicCell::new(BlockPos::ZERO),
             position_target_range: AtomicI32::new(-1),
             leash_home_active: AtomicBool::new(false),
@@ -1771,15 +1774,70 @@ pub trait Mob: EntityBase + Send + Sync {
             mob_entity
                 .ambient_sound_time
                 .store(-self.get_ambient_sound_interval(), Relaxed);
-            if let Some(sound) = self.get_ambient_sound() {
-                entity.world.load().play_sound_fine(
-                    sound,
-                    self.get_sound_source(),
-                    &entity.pos.load(),
-                    1.0,
-                    self.get_sound_pitch(),
-                );
+            self.play_ambient_sound();
+        }
+    }
+
+    /// `Mob.playAmbientSound` (`Mob.java:278-280`).
+    fn play_ambient_sound(&self) {
+        self.make_sound(self.get_ambient_sound());
+    }
+
+    /// `LivingEntity.makeSound` (`LivingEntity.java:1431-1435`) through `Entity.playSound` (`Entity.java:1486-1490`).
+    fn make_sound(&self, sound: Option<Sound>) {
+        let Some(sound) = sound else {
+            return;
+        };
+        let entity = self.get_entity();
+        if entity.is_silent() {
+            return;
+        }
+        entity.world.load().play_sound_fine(
+            sound,
+            self.get_sound_source(),
+            &entity.pos.load(),
+            self.get_sound_volume(),
+            self.get_sound_pitch(),
+        );
+    }
+
+    /// `LivingEntity.getSoundVolume` (`LivingEntity.java:2317-2319`) and its fixed per-mob overrides (e.g. `Bat.java:61-63`).
+    fn get_sound_volume(&self) -> f32 {
+        let entity = self.get_entity();
+        match entity.entity_type.id {
+            id if id == EntityType::BAT.id => 0.1,
+            id if id == EntityType::ALLAY.id
+                || id == EntityType::BEE.id
+                || id == EntityType::COW.id
+                || id == EntityType::MOOSHROOM.id
+                || id == EntityType::SQUID.id
+                || id == EntityType::GLOW_SQUID.id
+                || id == EntityType::WOLF.id =>
+            {
+                0.4
             }
+            id if id == EntityType::HORSE.id
+                || id == EntityType::DONKEY.id
+                || id == EntityType::MULE.id
+                || id == EntityType::SKELETON_HORSE.id
+                || id == EntityType::ZOMBIE_HORSE.id
+                || id == EntityType::LLAMA.id
+                || id == EntityType::TRADER_LLAMA.id
+                || id == EntityType::CAMEL.id
+                || id == EntityType::CAMEL_HUSK.id =>
+            {
+                0.8
+            }
+            id if id == EntityType::HAPPY_GHAST.id => {
+                if entity.age.load(Relaxed) < 0 {
+                    1.0
+                } else {
+                    4.0
+                }
+            }
+            id if id == EntityType::ENDER_DRAGON.id || id == EntityType::GHAST.id => 5.0,
+            id if id == EntityType::WARDEN.id => 4.0,
+            _ => 1.0,
         }
     }
 
@@ -1811,6 +1869,30 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn get_max_head_rotation(&self) -> f32 {
         75.0
+    }
+
+    /// `Mob.tickHeadTurn` (`Mob.java:359-361`): a mob turns its body with its `BodyRotationControl` instead of `LivingEntity.tickHeadTurn`.
+    fn tick_body_rotation(&self) -> EntityBaseFuture<'_, ()> {
+        self.default_tick_body_rotation()
+    }
+
+    /// `Mob.createBodyControl` (`Mob.java:200-202`): the plain `BodyRotationControl.clientTick`, callable from overrides without re-entering them.
+    fn default_tick_body_rotation(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let mob_entity = self.get_mob_entity();
+            let entity = &mob_entity.living_entity.entity;
+            let carrying_mob_passenger = entity
+                .passengers
+                .lock()
+                .await
+                .first()
+                .is_some_and(|passenger| passenger.get_mob().is_some());
+            mob_entity.body_rotation_control.lock().unwrap().client_tick(
+                entity,
+                self.get_max_head_rotation(),
+                carrying_mob_passenger,
+            );
+        })
     }
 
     fn get_mob_entity(&self) -> &MobEntity;
@@ -3150,6 +3232,12 @@ pub(crate) fn tick_mob_ai<'a>(
 
         drop(goals_selector);
         drop(target_selector);
+
+        if let Some(vehicle_mob) = controlled_vehicle {
+            let mut rider_control = mob_entity.move_control.lock().unwrap();
+            let mut vehicle_control = vehicle_mob.get_mob_entity().move_control.lock().unwrap();
+            rider_control.transfer_request_to(&mut **vehicle_control);
+        }
 
         let mut navigator = MutexTakeGuard::new(&mob_entity.navigator);
         // `Mob.onPathfindingStart/Done` surround evaluator preparation and cleanup

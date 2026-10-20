@@ -272,6 +272,10 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
         Uuid::new_v4(),
     );
     world.spawn_entity(trader.clone()).await;
+    // `EntityType.spawn` (`EntityType.java:167-174`).
+    if let Some(mob) = trader.get_mob() {
+        mob.play_ambient_sound();
+    }
 
     for _ in 0..2 {
         if let Some(llama_pos) =
@@ -289,6 +293,9 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
                 Uuid::new_v4(),
             );
             world.spawn_entity(llama.clone()).await;
+            if let Some(mob) = llama.get_mob() {
+                mob.play_ambient_sound();
+            }
             llama.get_entity().leash_to(trader.clone()).await;
         }
     }

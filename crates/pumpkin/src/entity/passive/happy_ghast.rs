@@ -492,6 +492,19 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    /// `HappyGhastBodyRotationControl.clientTick` (`HappyGhast.java:618-625`).
+    fn tick_body_rotation(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            if !entity.passengers.lock().await.is_empty() {
+                let yaw = entity.yaw.load();
+                entity.head_yaw.store(yaw);
+                entity.body_yaw.store(yaw);
+            }
+            self.default_tick_body_rotation().await;
+        })
+    }
+
     /// `HappyGhast.customServerAiStep` (`HappyGhast.java:400-409`) runs the Brain for babies;
     /// adults use the goal selector registered by `registerGoals`.
     fn should_tick_brain(&self) -> bool {
@@ -724,23 +737,6 @@ impl Mob for HappyGhastEntity {
         Box::pin(async move {
             if !self.mob_entity.living_entity.entity.is_alive() {
                 return;
-            }
-
-            // `HappyGhastBodyRotationControl.clientTick` keeps a vehicle's head and body
-            // aligned to its yaw (`HappyGhast.java:612-625`; `Mob.java:358-361`). Apply the same
-            // invariant on the server's live mob tick before the shared head-turn pass.
-            if !self
-                .mob_entity
-                .living_entity
-                .entity
-                .passengers
-                .lock()
-                .await
-                .is_empty()
-            {
-                let yaw = self.get_entity().yaw.load();
-                self.get_entity().head_yaw.store(yaw);
-                self.get_entity().body_yaw.store(yaw);
             }
 
             // Vanilla `HappyGhast.aiStep` updates `requiresPrecisePosition` from
