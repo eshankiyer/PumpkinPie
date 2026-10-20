@@ -7134,48 +7134,14 @@ impl World {
         }
     }
 
+    /// `Block.updateFromNeighbourShapes` (`Block.java:201-210`)
     pub async fn update_from_neighbor_shapes(
         self: &Arc<Self>,
         state_id: BlockStateId,
         pos: &BlockPos,
     ) -> BlockStateId {
         let mut current_state_id = state_id;
-        let block = Block::from_state_id(state_id);
-        for direction in BlockDirection::all() {
-            let neighbor_pos = pos.offset(direction.to_offset());
-            let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
-            current_state_id = self
-                .block_registry
-                .get_state_for_neighbor_update(
-                    self,
-                    block,
-                    current_state_id,
-                    pos,
-                    direction,
-                    &neighbor_pos,
-                    neighbor_state_id,
-                )
-                .await;
-        }
-        current_state_id
-    }
-
-    pub async fn update_from_neighbor_shapes_vanilla(
-        self: &Arc<Self>,
-        state_id: BlockStateId,
-        pos: &BlockPos,
-    ) -> BlockStateId {
-        let mut current_state_id = state_id;
-        let directions = [
-            BlockDirection::West,
-            BlockDirection::East,
-            BlockDirection::North,
-            BlockDirection::South,
-            BlockDirection::Down,
-            BlockDirection::Up,
-        ];
-
-        for direction in directions {
+        for direction in BlockDirection::abstract_block_update_order() {
             let neighbor_pos = pos.offset(direction.to_offset());
             let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
             let block = Block::from_state_id(current_state_id);

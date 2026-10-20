@@ -80,7 +80,7 @@ impl Goal for PlaceBlockGoal {
             }
 
             let carried_state_id = world
-                .update_from_neighbor_shapes_vanilla(block_state_id, &target_pos)
+                .update_from_neighbor_shapes(block_state_id, &target_pos)
                 .await;
             let carried_block = Block::from_state_id(carried_state_id);
             let carried_state = BlockState::from_id(carried_state_id);

@@ -442,4 +442,14 @@ mod tests {
             "unreachable horizontal direction: {seen_horizontal:?}"
         );
     }
+
+    /// `BlockBehaviour.UPDATE_SHAPE_ORDER` (`BlockBehaviour.java:86-88`)
+    #[test]
+    fn abstract_block_update_order_matches_update_shape_order() {
+        use BlockDirection::{Down, East, North, South, Up, West};
+        assert_eq!(
+            BlockDirection::abstract_block_update_order(),
+            [West, East, North, South, Down, Up]
+        );
+    }
 }
