@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 92,
+    "elsewhere_in_workspace": 75,
+    "absent_workspace_wide": [
+      "distanceTo",
+      "doCheckFallDamage",
+      "emitsAnything",
+      "emitsEvents",
+      "emitsSounds",
+      "entityTags",
+      "equals",
+      "fillCrashReportCategory",
+      "fireImmune",
+      "fixupDimensions",
+      "forceSetRotation",
+      "fudgePositionAfterSizeChange",
+      "gameEvent",
+      "getAddEntityPacket",
+      "getAirDrag",
+      "getAttachments",
+      "getBlockJumpFactor",
+      "getBlockPosBelowThatAffectsMyMovement",
+      "getBlockStateOn",
+      "getBlockX"
+    ],
+    "note": "round11 leads 41-60 of 254 for Entity"
+  }
+]

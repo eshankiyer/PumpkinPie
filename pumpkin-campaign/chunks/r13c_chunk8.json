@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "LecternBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/LecternBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/lectern.rs",
+    "total_methods": 24,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 10,
+    "absent_workspace_wide": [
+      "clearContent",
+      "createMenu",
+      "getContainerSize",
+      "getRedstoneSignal",
+      "hasBook",
+      "preRemoveSideEffects",
+      "removeItem",
+      "removeItemNoUpdate",
+      "setBook",
+      "setChanged",
+      "stillValid"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for LecternBlockEntity"
+  }
+]

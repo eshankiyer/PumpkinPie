@@ -1,0 +1,38 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "SulfurCube",
+    "vanilla_path": "net/minecraft/world/entity/monster/cubemob/SulfurCube.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/sulfur_cube.rs",
+    "total_methods": 70,
+    "in_declaring_file": 23,
+    "elsewhere_in_workspace": 23,
+    "absent_workspace_wide": [
+      "addBehaviourGoals",
+      "addTargetingGoals",
+      "applyImplicitComponent",
+      "canBePickedUpWithBucket",
+      "canExplode",
+      "checkSulfurCubeSpawnRules",
+      "createSulfurCubeAttributes",
+      "customServerAiStep",
+      "doPush",
+      "getBucketItemStack",
+      "getFluidJumpThreshold",
+      "getPickupSound",
+      "loadFromBucketTag",
+      "matchingArchetypes",
+      "maxUpStep",
+      "navigateTowards",
+      "omnidirectionalAirMover",
+      "onSyncedDataUpdated",
+      "playStepSound",
+      "primeTime",
+      "saveToBucketTag",
+      "setUpSplitCube",
+      "setcubeMobHealth",
+      "stopNavigation"
+    ],
+    "note": "round12 broader pool: leads 1-24 of 24 for SulfurCube"
+  }
+]

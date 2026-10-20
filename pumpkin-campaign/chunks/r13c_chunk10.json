@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "CopperGolem",
+    "vanilla_path": "net/minecraft/world/entity/animal/golem/CopperGolem.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/copper_golem.rs",
+    "total_methods": 33,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 10,
+    "absent_workspace_wide": [
+      "actuallyHurt",
+      "customServerAiStep",
+      "getIdleAnimationState",
+      "getInteractionDropItemAnimationState",
+      "getInteractionDropNoItemAnimationState",
+      "getInteractionGetItemAnimationState",
+      "getInteractionGetNoItemAnimationState",
+      "playSpawnSound",
+      "playStepSound",
+      "thunderHit"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for CopperGolem"
+  }
+]

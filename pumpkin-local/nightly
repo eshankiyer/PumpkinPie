@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# Standalone parity loop: phases a, b, c and f of the campaign, with no operator.
+#
+#   a. health-check both servers, restart what is unhealthy, and only then trust
+#      any measurement
+#   b. oracle sweep, and record a fresh probe baseline
+#   c. local model works the spec queue under the Phase 2 gate
+#   f. keep the artefacts and roll the logs
+#
+# Nothing here pushes and nothing here opens a PR. Every artefact is left for
+# review. The point is that clean diffs keep accumulating while nobody is
+# watching, not that changes ship unattended.
+#
+# Run it detached:
+#   setsid ~/pumpkin-local/nightly </dev/null >/dev/null 2>&1 &
+set -uo pipefail
+
+LOCAL=/home/eshanki/pumpkin-local
+ORACLE=$LOCAL/oracle
+KEEP=/tmp/pumpkin_keep
+LOG=${NIGHTLY_LOG:-/tmp/pumpkin_nightly.log}
+ROUNDS="${ROUNDS:-6}"
+
+exec >>"$LOG" 2>&1
+echo "=============================================================="
+echo "nightly start $(date '+%F %T')"
+
+# --- the model must be up, and must be on the GPU ----------------------------
+# serve.sh re-runs the stray kill and the VRAM assertion every time, and aborts
+# if the CUDA backend did not load. Calling it unconditionally is cheap and it
+# is the only thing standing between us and a night of CPU inference.
+if ! curl -sf http://127.0.0.1:11434/health >/dev/null 2>&1; then
+  echo "[model] not serving, starting"
+  bash "$LOCAL/serve.sh" || { echo "[model] FAILED to start, aborting night"; exit 1; }
+fi
+
+health() {
+  # Exit 0 only if both servers answer a probe whose answer we already know.
+  # A server that is up enough to accept a connection but has exhausted its file
+  # descriptors still answers, with nonsense, and nonsense measured against
+  # vanilla reads as a parity bug. That has already happened twice.
+  python3 - <<'PY'
+import sys
+sys.path.insert(0, "/home/eshanki/pumpkin-local/oracle")
+from differential import SERVERS, Rcon
+bad = []
+for name, cfg in SERVERS.items():
+    try:
+        r = Rcon(cfg["host"], cfg["port"], cfg["password"], timeout=15)
+        if "Seed:" not in r.cmd("seed"):
+            bad.append(f"{name}: answered but unhealthy")
+        r.close()
+    except Exception as e:
+        bad.append(f"{name}: {e}")
+print("; ".join(bad) if bad else "both healthy")
+sys.exit(1 if bad else 0)
+PY
+}
+
+restart_servers() {
+  echo "[health] restarting containers on the NUC"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 eshan@192.168.1.93 \
+    'docker restart pumpkin-live vanilla-oracle' 2>&1 | tail -2
+  sleep 90
+}
+
+for round in $(seq 1 "$ROUNDS"); do
+  echo ""
+  echo "---- round $round of $ROUNDS  $(date '+%T') ----"
+
+  # ---- (a) health ------------------------------------------------------------
+  echo "[health]"
+  if ! health; then
+    restart_servers
+    if ! health; then
+      echo "[health] still unhealthy after restart, skipping measurement this round"
+      MEASURE=0
+    else
+      MEASURE=1
+    fi
+  else
+    MEASURE=1
+  fi
+
+  # ---- (a1) disk ---------------------------------------------------------------
+  # Cargo target directories are the largest thing this pipeline produces and
+  # nothing else deletes them: 48 of them reached 382 GB before this existed. A
+  # full disk fails builds with errors that point anywhere except at the disk,
+  # which is a miserable thing to debug from a morning log. reap.py never touches
+  # a worktree whose spec is still running.
+  # Floor is 400 GB, not a crisis threshold. On a 1 TB disk the pipeline should
+  # be a guest, not the main tenant: build directories reached 382 GB before
+  # anything reaped them. Deleting one costs a single cold rebuild, and with
+  # CARGO_INCREMENTAL=0 and debug info off a rebuilt directory is roughly a
+  # quarter the size of the ones this replaced.
+  echo "[reap]"
+  timeout 1800 python3 "$LOCAL/reap.py" --run --floor-gb 400 --retire-worktrees 2>&1 | tail -8
+  FREE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+  if [ "${FREE_GB:-0}" -lt 60 ]; then
+    echo "[reap] ABORT: only ${FREE_GB} GB free after reaping, stopping the night"
+    exit 1
+  fi
+
+  # ---- (a2) track upstream ---------------------------------------------------
+  # Fetch Pumpkin-MC/Pumpkin, rebase every spec worktree onto it, and retire
+  # branches whose PR merged. Drafting against a stale base wastes a whole round
+  # and produces diffs that conflict on arrival. Conflicts are never resolved
+  # unattended: the worktree resets to the new base and the spec regenerates,
+  # which costs one cheap round instead of silently reverting someone's fix.
+  echo "[sync]"
+  timeout 3600 python3 "$LOCAL/sync.py" --run 2>&1 | tail -30
+
+  # ---- (b) sweep -------------------------------------------------------------
+  if [ "$MEASURE" = "1" ]; then
+    echo "[sweep]"
+    timeout 900 python3 "$ORACLE/sweep.py" 2>&1 | tail -40
+    cp /tmp/pumpkin_sweep.json "/tmp/pumpkin_sweep_round${round}.json" 2>/dev/null
+    # A fresh baseline is what the Phase 2 probe gate compares against. Without
+    # it the gate cannot tell "fixed" from "never diverged".
+    timeout 900 python3 "$ORACLE/probe_gate.py" --write-baseline 2>&1 | tail -20
+  else
+    echo "[sweep] skipped, servers not trustworthy"
+  fi
+
+  # ---- (c) agent -------------------------------------------------------------
+  # Reset every worktree a spec names, so a failed round cannot poison the next.
+  for wt in $(grep -h '^WORKTREE:' "$LOCAL"/specs/*.md 2>/dev/null | awk '{print $2}' | sort -u); do
+    (cd "$wt" 2>/dev/null && git checkout -- . 2>/dev/null)
+  done
+  rm -f /tmp/pumpkin_*.diff /tmp/pumpkin_*_reply.txt /tmp/pumpkin_run_DONE.txt
+
+  # ---- (b2) design pass ------------------------------------------------------
+  # Convert one subsystem row from WORKQUEUE into a skeleton, unit tests and a
+  # chain of FUNC specs, so the local model has subsystem work to churn through
+  # instead of only small fixes. Rejected mechanically if the scaffold does not
+  # compile, if the tests pass against the todo!() (which means it implemented
+  # instead of specified), or if a spec's FUNC does not locate a function. Runs
+  # only when the queue is running dry, so scaffolding never starves filling.
+  PENDING_SPECS=$(python3 - <<'PY'
+import glob, json, os
+state = {}
+try:
+    state = json.load(open("/tmp/pumpkin_run_status.json"))
+except Exception:
+    pass
+n = 0
+for s in glob.glob("/home/eshanki/pumpkin-local/specs/[0-9]*.md"):
+    name = os.path.basename(s)[:-3]
+    if state.get(name, {}).get("phase") not in ("candidate", "clean"):
+        n += 1
+print(n)
+PY
+)
+  echo "[scaffold] $PENDING_SPECS spec(s) still unfilled"
+  if [ "$PENDING_SPECS" -lt 6 ]; then
+    timeout 7200 python3 "$LOCAL/scaffold.py" --run 2>&1 | tail -20
+  else
+    echo "[scaffold] queue is deep enough, skipping the design pass this round"
+  fi
+
+  echo "[agent]"
+  timeout 21600 python3 "$LOCAL/run_all.py" "$LOCAL"/specs/*.md \
+    --builds 2 --max-iters 6 2>&1 | tail -40
+
+  # ---- escalation tier -------------------------------------------------------
+  # Specs the 30B could not finish get exactly one attempt from Claude Code on
+  # sonnet, hardest-first, three per night. escalate.py probes quota before each
+  # one and stops the night's escalation on any rate-limit signal rather than
+  # retrying into it. A failed escalation goes to PENDING_SESSION.md and is not
+  # tried again. After escalating, re-run the queue so edited worktrees go
+  # through the same gate as everything else; nothing skips the gate.
+  echo "[escalate]"
+  if timeout 300 python3 "$LOCAL/escalate.py" --probe 2>&1 | tail -2; then
+    timeout 10800 python3 "$LOCAL/escalate.py" --run 2>&1 | tail -30
+    timeout 10800 python3 "$LOCAL/run_all.py" "$LOCAL"/specs/*.md \
+      --builds 2 --max-iters 2 2>&1 | tail -20
+  else
+    echo "[escalate] unavailable this round, skipping"
+  fi
+
+  # ---- (Phase 4) ship whatever passed ---------------------------------------
+  # Local remotes always, upstream only when the divergence reproduced across
+  # two separate rounds and the daily cap allows. ship.py enforces both.
+  echo "[ship]"
+  timeout 1800 python3 "$LOCAL/ship.py" --run 2>&1 | tail -25
+
+  # ---- (Phase 4) score -------------------------------------------------------
+  # The objective function, measured rather than asserted. Logged before and
+  # after each round so a session can cite a number instead of a feeling.
+  echo "[score]"
+  timeout 900 python3 "$LOCAL/score.py" --write 2>&1 | grep -E "^\*\*SCORE|written to" || true
+
+  # ---- (f) keep the artefacts ------------------------------------------------
+  mkdir -p "$KEEP"
+  for d in /tmp/pumpkin_*.diff; do
+    [ -e "$d" ] || continue
+    cp "$d" "$KEEP/round${round}_$(basename "$d")"
+  done
+  cp /tmp/pumpkin_run_status.json "$KEEP/round${round}_status.json" 2>/dev/null
+
+  echo "[round $round done $(date '+%T')]"
+done
+
+echo ""
+echo "nightly finished $(date '+%F %T')"
+echo "clean diffs kept in $KEEP"
+echo "sweep reports in /tmp/pumpkin_sweep_round*.json"

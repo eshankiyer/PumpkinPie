@@ -1,0 +1,87 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "SpawnEggItem",
+    "vanilla_path": "net/minecraft/world/item/SpawnEggItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/spawn_egg.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "shouldPrintOpWarning",
+      "spawnOffspringFromSpawnEgg",
+      "spawnsEntity",
+      "use",
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "TreeDecorator",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/treedecorators/TreeDecorator.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/decorator/mod.rs",
+    "total_methods": 9,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "checkBlock",
+      "leaves",
+      "level",
+      "logs",
+      "roots"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TrialSpawnerState",
+    "vanilla_path": "net/minecraft/world/level/block/entity/trialspawner/TrialSpawnerState.java",
+    "rust_file": "crates/pumpkin-data/src/generated/block.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "emitParticles",
+      "hasSpinningMob",
+      "isCapableOfSpawning",
+      "lightLevel",
+      "spinningMobSpeed"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "WanderingTrader",
+    "vanilla_path": "net/minecraft/world/entity/npc/wanderingtrader/WanderingTrader.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/wandering_trader.rs",
+    "total_methods": 21,
+    "in_declaring_file": 11,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getConsumeSound",
+      "getNotifyTradeSound",
+      "getTradeUpdatedSound",
+      "rewardTradeXp",
+      "showProgressBar"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "WeightedPressurePlateBlock",
+    "vanilla_path": "net/minecraft/world/level/block/WeightedPressurePlateBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/pressure_plate/weighted.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getPressedTime",
+      "getSignalForState",
+      "getSignalStrength",
+      "setSignalForState"
+    ]
+  }
+]

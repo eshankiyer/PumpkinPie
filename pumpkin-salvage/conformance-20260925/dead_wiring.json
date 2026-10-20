@@ -1,0 +1,1862 @@
+{
+ "generated_by": "conformance/dead_wiring.py",
+ "calibration": {
+  "measured": "2026-08-06",
+  "sample_size": 20,
+  "seed": 4903,
+  "real_gap": 7,
+  "narrow_real_gap": 2,
+  "dead_code_not_a_bug": 8,
+  "false_positive": 3,
+  "strict_precision_pct": 35.0,
+  "loose_precision_pct": 45.0,
+  "note": "see module docstring MEASURED PRECISION section for the worked examples and the detector bugs this sample found and fixed (turbofish calls, generic fn defs, proc-macro attrs, bare fn-pointer references)."
+ },
+ "counts": {
+  "dead_packets": 0,
+  "dead_pub_fns": 187,
+  "empty_trait_impls": 66
+ },
+ "dead_packets": [],
+ "dead_pub_fns": [
+  {
+   "kind": "dead_pub_fn",
+   "fn": "unwrap_or_partial",
+   "file": "crates/pumpkin-codecs/src/data_result.rs",
+   "line": 239,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "promote_partial",
+   "file": "crates/pumpkin-codecs/src/data_result.rs",
+   "line": 451,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_partial",
+   "file": "crates/pumpkin-codecs/src/data_result.rs",
+   "line": 469,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "bench_has_random_ticks",
+   "file": "crates/pumpkin-data/benches/has_random_ticks.rs",
+   "line": 31,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_node_from_idx",
+   "file": "crates/pumpkin-data/src/advancement_data.rs",
+   "line": 177,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_idx",
+   "file": "crates/pumpkin-data/src/advancement_data.rs",
+   "line": 181,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "new_drag",
+   "file": "crates/pumpkin-inventory/src/drag_handler.rs",
+   "line": 22,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "apply_drag",
+   "file": "crates/pumpkin-inventory/src/drag_handler.rs",
+   "line": 60,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "has_tracker",
+   "file": "crates/pumpkin-inventory/src/player/ender_chest_inventory.rs",
+   "line": 63,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_tracker",
+   "file": "crates/pumpkin-inventory/src/player/ender_chest_inventory.rs",
+   "line": 68,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_in_hotbar",
+   "file": "crates/pumpkin-inventory/src/player/player_screen_handler.rs",
+   "line": 65,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "bench_nbt",
+   "file": "crates/pumpkin-nbt/benches/nbt.rs",
+   "line": 40,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "write_unnamed_to_writer",
+   "file": "crates/pumpkin-nbt/src/lib.rs",
+   "line": 207,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "to_stack",
+   "file": "crates/pumpkin-protocol/src/codec/item_stack_seralizer.rs",
+   "line": 272,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "encode_async",
+   "file": "crates/pumpkin-protocol/src/codec/var_int.rs",
+   "line": 91,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "encode_async",
+   "file": "crates/pumpkin-protocol/src/codec/var_uint.rs",
+   "line": 93,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_path",
+   "file": "crates/pumpkin-util/src/identifier.rs",
+   "line": 209,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "prefix_path",
+   "file": "crates/pumpkin-util/src/identifier.rs",
+   "line": 217,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "suffix_path",
+   "file": "crates/pumpkin-util/src/identifier.rs",
+   "line": 225,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "map_path",
+   "file": "crates/pumpkin-util/src/identifier.rs",
+   "line": 233,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "view",
+   "file": "crates/pumpkin-util/src/identifier.rs",
+   "line": 317,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_pumpkin_then",
+   "file": "crates/pumpkin-util/src/identifier.rs",
+   "line": 345,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "new_default",
+   "file": "crates/pumpkin-util/src/math/boundingbox.rs",
+   "line": 63,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "from_block_raw",
+   "file": "crates/pumpkin-util/src/math/boundingbox.rs",
+   "line": 370,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "magnitude",
+   "file": "crates/pumpkin-util/src/math/mod.rs",
+   "line": 112,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "section_relative_position",
+   "file": "crates/pumpkin-util/src/math/position.rs",
+   "line": 336,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "to_f32",
+   "file": "crates/pumpkin-util/src/math/vector3.rs",
+   "line": 569,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "to_vec2_i32",
+   "file": "crates/pumpkin-util/src/math/vector3.rs",
+   "line": 598,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "floor_to_vec2_i32",
+   "file": "crates/pumpkin-util/src/math/vector3.rs",
+   "line": 628,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "remove_attachment",
+   "file": "crates/pumpkin-util/src/permission.rs",
+   "line": 241,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "from_content",
+   "file": "crates/pumpkin-util/src/text/mod.rs",
+   "line": 828,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "add_translation",
+   "file": "crates/pumpkin-util/src/translation.rs",
+   "line": 78,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "find_best_spawn_position",
+   "file": "crates/pumpkin-world/src/biome/position_finder.rs",
+   "line": 12,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "add_force_ticket",
+   "file": "crates/pumpkin-world/src/chunk_system/chunk_loading.rs",
+   "line": 295,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "remove_force_ticket",
+   "file": "crates/pumpkin-world/src/chunk_system/chunk_loading.rs",
+   "line": 301,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "fast_drop_node",
+   "file": "crates/pumpkin-world/src/chunk_system/dag.rs",
+   "line": 52,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "take_pending_block_entities",
+   "file": "crates/pumpkin-world/src/generation/proto_chunk.rs",
+   "line": 446,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "adjust_to_min_height",
+   "file": "crates/pumpkin-world/src/generation/structure/shiftable_piece.rs",
+   "line": 77,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "add_direct",
+   "file": "crates/pumpkin-world/src/generation/structure/structures/jigsaw_placement.rs",
+   "line": 69,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "add_random",
+   "file": "crates/pumpkin-world/src/generation/structure/structures/jigsaw_placement.rs",
+   "line": 73,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "preload",
+   "file": "crates/pumpkin-world/src/generation/structure/template/cache.rs",
+   "line": 99,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "has_block_entities",
+   "file": "crates/pumpkin-world/src/generation/structure/template/structure_template.rs",
+   "line": 585,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_chain_length",
+   "file": "crates/pumpkin-world/src/generation/structure/template/template_piece.rs",
+   "line": 82,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "rotated_size",
+   "file": "crates/pumpkin-world/src/generation/structure/template/template_piece.rs",
+   "line": 97,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "mark_chunk_as_not_watched",
+   "file": "crates/pumpkin-world/src/level.rs",
+   "line": 491,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "clean_entity_chunk",
+   "file": "crates/pumpkin-world/src/level.rs",
+   "line": 622,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "write_chunks",
+   "file": "crates/pumpkin-world/src/level.rs",
+   "line": 905,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_entity_chunk_sync",
+   "file": "crates/pumpkin-world/src/level.rs",
+   "line": 988,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_or_fetch_entity_chunk",
+   "file": "crates/pumpkin-world/src/level.rs",
+   "line": 994,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "try_get_entity_chunk",
+   "file": "crates/pumpkin-world/src/level.rs",
+   "line": 1006,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "update_block_light",
+   "file": "crates/pumpkin-world/src/lighting/engine.rs",
+   "line": 448,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "run_light_updates",
+   "file": "crates/pumpkin-world/src/lighting/engine.rs",
+   "line": 475,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_block_light_level_sync",
+   "file": "crates/pumpkin-world/src/lighting/runtime.rs",
+   "line": 430,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_sky_light_level_sync",
+   "file": "crates/pumpkin-world/src/lighting/runtime.rs",
+   "line": 449,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "mark_clean",
+   "file": "crates/pumpkin-world/src/poi/mod.rs",
+   "line": 207,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "loaded_region_count",
+   "file": "crates/pumpkin-world/src/poi/mod.rs",
+   "line": 675,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "total_poi_count",
+   "file": "crates/pumpkin-world/src/poi/mod.rs",
+   "line": 681,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "can_place_on",
+   "file": "crates/pumpkin/src/block/blocks/fire/mod.rs",
+   "line": 38,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "diode_get_input_strength",
+   "file": "crates/pumpkin/src/block/blocks/redstone/mod.rs",
+   "line": 190,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "same_space_spread_from_random_face",
+   "file": "crates/pumpkin/src/block/blocks/sculk_vein.rs",
+   "line": 568,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_hunting",
+   "file": "crates/pumpkin/src/block/entities/conduit.rs",
+   "line": 183,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_active_rotation",
+   "file": "crates/pumpkin/src/block/entities/conduit.rs",
+   "line": 188,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "remove_statue",
+   "file": "crates/pumpkin/src/block/entities/copper_golem_statue.rs",
+   "line": 72,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "block_entity_from_generic",
+   "file": "crates/pumpkin/src/block/entities/mod.rs",
+   "line": 169,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "has_triggered",
+   "file": "crates/pumpkin/src/block/entities/test_block.rs",
+   "line": 141,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_message",
+   "file": "crates/pumpkin/src/block/entities/test_block.rs",
+   "line": 149,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_mode",
+   "file": "crates/pumpkin/src/block/entities/test_block.rs",
+   "line": 155,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "use_with_item_fluid",
+   "file": "crates/pumpkin/src/block/registry.rs",
+   "line": 901,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "post_process_state",
+   "file": "crates/pumpkin/src/block/registry.rs",
+   "line": 1163,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "find_spawnable_arg",
+   "file": "crates/pumpkin/src/command/args/position_block.rs",
+   "line": 183,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "consume_tag_start",
+   "file": "crates/pumpkin/src/command/argument_types/entity_selector/parser.rs",
+   "line": 414,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_last_child",
+   "file": "crates/pumpkin/src/command/context/command_context.rs",
+   "line": 122,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_top_context",
+   "file": "crates/pumpkin/src/command/context/command_context.rs",
+   "line": 363,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_top_context_mut",
+   "file": "crates/pumpkin/src/command/context/command_context.rs",
+   "line": 372,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "last_child",
+   "file": "crates/pumpkin/src/command/context/command_context.rs",
+   "line": 506,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_output",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 166,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_world",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 185,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_entity",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 204,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_position",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 225,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "merge_command_result_taker",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 263,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_silent",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 271,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_entity_anchor",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 309,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_looking_at_entity",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 329,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "executed_by_player",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 401,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "has_permission_from_option",
+   "file": "crates/pumpkin/src/command/context/command_source.rs",
+   "line": 495,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "slice_from_reader",
+   "file": "crates/pumpkin/src/command/context/string_range.rs",
+   "line": 40,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "substring_slice",
+   "file": "crates/pumpkin/src/command/context/string_range.rs",
+   "line": 47,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_requirement",
+   "file": "crates/pumpkin/src/command/node/attached.rs",
+   "line": 293,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_modifier",
+   "file": "crates/pumpkin/src/command/node/attached.rs",
+   "line": 304,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_all_permitted_commands",
+   "file": "crates/pumpkin/src/command/node/dispatcher.rs",
+   "line": 618,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "can_read_byte",
+   "file": "crates/pumpkin/src/command/string_reader.rs",
+   "line": 89,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "filter_and_suggest_lowercase",
+   "file": "crates/pumpkin/src/command/suggestion/suggestions.rs",
+   "line": 117,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "run_one",
+   "file": "crates/pumpkin/src/entity/ai/brain/behavior/gate.rs",
+   "line": 75,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "of_block",
+   "file": "crates/pumpkin/src/entity/ai/brain/memory.rs",
+   "line": 139,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_registered",
+   "file": "crates/pumpkin/src/entity/ai/brain/memory.rs",
+   "line": 312,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_active_activity_if_possible",
+   "file": "crates/pumpkin/src/entity/ai/brain/mod.rs",
+   "line": 298,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_active_activity_to_first_valid",
+   "file": "crates/pumpkin/src/entity/ai/brain/mod.rs",
+   "line": 308,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "stop_all",
+   "file": "crates/pumpkin/src/entity/ai/brain/mod.rs",
+   "line": 346,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "change_cost",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/binary_heap.rs",
+   "line": 109,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_heap",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/binary_heap.rs",
+   "line": 165,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_blocked",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/node.rs",
+   "line": 314,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_position_in_bounds",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/node_evaluator.rs",
+   "line": 186,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_end_node",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 53,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "truncate_nodes",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 62,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "replace_node",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 71,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_next_node_index",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 87,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_next_entity_pos",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 113,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_next_node",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 123,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_previous_node",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 128,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "same_as",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 137,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_nodes",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 169,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_remaining_nodes",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 174,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "calculate_length",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path.rs",
+   "line": 179,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_or_compute",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path_type_cache.rs",
+   "line": 26,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "invalidate",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/path_type_cache.rs",
+   "line": 81,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "with_cache",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/pathfinding_context.rs",
+   "line": 44,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "clear_caches",
+   "file": "crates/pumpkin/src/entity/ai/pathfinder/pathfinding_context.rs",
+   "line": 262,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_base_value",
+   "file": "crates/pumpkin/src/entity/attributes.rs",
+   "line": 205,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_overrides_for_entity",
+   "file": "crates/pumpkin/src/entity/attributes.rs",
+   "line": 216,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "register_builder",
+   "file": "crates/pumpkin/src/entity/attributes.rs",
+   "line": 249,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "yaw_toward",
+   "file": "crates/pumpkin/src/entity/boss/ender_dragon.rs",
+   "line": 437,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_small",
+   "file": "crates/pumpkin/src/entity/decoration/armor_stand.rs",
+   "line": 112,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_show_arms",
+   "file": "crates/pumpkin/src/entity/decoration/armor_stand.rs",
+   "line": 120,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_hide_base_plate",
+   "file": "crates/pumpkin/src/entity/decoration/armor_stand.rs",
+   "line": 128,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_marker",
+   "file": "crates/pumpkin/src/entity/decoration/armor_stand.rs",
+   "line": 136,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "can_use_slot",
+   "file": "crates/pumpkin/src/entity/decoration/armor_stand.rs",
+   "line": 154,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_slot_disabled",
+   "file": "crates/pumpkin/src/entity/decoration/armor_stand.rs",
+   "line": 167,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_profile",
+   "file": "crates/pumpkin/src/entity/decoration/mannequin.rs",
+   "line": 142,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_profile",
+   "file": "crates/pumpkin/src/entity/decoration/mannequin.rs",
+   "line": 146,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_current_dimensions",
+   "file": "crates/pumpkin/src/entity/decoration/painting.rs",
+   "line": 367,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "pick_random_variant",
+   "file": "crates/pumpkin/src/entity/decoration/painting.rs",
+   "line": 376,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_variant_with_dimensions",
+   "file": "crates/pumpkin/src/entity/decoration/painting.rs",
+   "line": 386,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "raid_wave",
+   "file": "crates/pumpkin/src/entity/living.rs",
+   "line": 409,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_transient",
+   "file": "crates/pumpkin/src/entity/mob/creaking.rs",
+   "line": 93,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_pacified",
+   "file": "crates/pumpkin/src/entity/mob/hoglin.rs",
+   "line": 125,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_attacking",
+   "file": "crates/pumpkin/src/entity/mob/mod.rs",
+   "line": 158,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_left_handed",
+   "file": "crates/pumpkin/src/entity/mob/mod.rs",
+   "line": 162,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_left_handed",
+   "file": "crates/pumpkin/src/entity/mob/mod.rs",
+   "line": 174,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "add_target_goal",
+   "file": "crates/pumpkin/src/entity/mob/mod.rs",
+   "line": 205,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_ordered_to_sit",
+   "file": "crates/pumpkin/src/entity/mob/mod.rs",
+   "line": 275,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_spawn_size",
+   "file": "crates/pumpkin/src/entity/mob/sulfur_cube.rs",
+   "line": 178,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "send_rotation",
+   "file": "crates/pumpkin/src/entity/mod.rs",
+   "line": 1477,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_damage_immunity",
+   "file": "crates/pumpkin/src/entity/mod.rs",
+   "line": 3280,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "check_block_collision",
+   "file": "crates/pumpkin/src/entity/mod.rs",
+   "line": 3297,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_rolling",
+   "file": "crates/pumpkin/src/entity/passive/bee.rs",
+   "line": 202,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "drop_off_nectar",
+   "file": "crates/pumpkin/src/entity/passive/bee.rs",
+   "line": 207,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_stay_out_of_hive_countdown",
+   "file": "crates/pumpkin/src/entity/passive/bee.rs",
+   "line": 219,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_pouncing",
+   "file": "crates/pumpkin/src/entity/passive/fox.rs",
+   "line": 371,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_standing",
+   "file": "crates/pumpkin/src/entity/passive/polar_bear.rs",
+   "line": 140,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_max_group_size_reached",
+   "file": "crates/pumpkin/src/entity/passive/tropical_fish.rs",
+   "line": 265,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "count_food_points_in_inventory",
+   "file": "crates/pumpkin/src/entity/passive/villager/mod.rs",
+   "line": 209,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "eat_until_full",
+   "file": "crates/pumpkin/src/entity/passive/villager/mod.rs",
+   "line": 221,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "push_chunk",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 352,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "push_entity",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 362,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "next_entity",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 390,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_tab_list",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 803,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "fire_packet_sent",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 2331,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "start_using_item",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 4654,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "stop_using_item",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 4662,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_item_use_ticks",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 4668,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "reload",
+   "file": "crates/pumpkin/src/entity/player/advancement.rs",
+   "line": 255,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "set_pierce_level",
+   "file": "crates/pumpkin/src/entity/projectile/arrow.rs",
+   "line": 258,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "log_info",
+   "file": "crates/pumpkin/src/lib.rs",
+   "line": 215,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "write_game_packet_to_set",
+   "file": "crates/pumpkin/src/net/bedrock/mod.rs",
+   "line": 608,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "handle_config_keep_alive",
+   "file": "crates/pumpkin/src/net/java/config.rs",
+   "line": 246,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "closed",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 153,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "java_version",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 160,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "bedrock_version",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 167,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "try_enqueue_packet_editioned",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 210,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "enqueue_be_packet",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 227,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "try_enqueue_be_packet",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 239,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "send_be_packet_now",
+   "file": "crates/pumpkin/src/net/mod.rs",
+   "line": 265,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "for_each_player",
+   "file": "crates/pumpkin/src/server/mod.rs",
+   "line": 833,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "has_n_players",
+   "file": "crates/pumpkin/src/server/mod.rs",
+   "line": 890,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "new_container_id",
+   "file": "crates/pumpkin/src/server/mod.rs",
+   "line": 902,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "add_diameter",
+   "file": "crates/pumpkin/src/world/border.rs",
+   "line": 125,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "replace_bossbar",
+   "file": "crates/pumpkin/src/world/custom_bossbar.rs",
+   "line": 84,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "on_crystal_destroyed",
+   "file": "crates/pumpkin/src/world/dragon_fight.rs",
+   "line": 387,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "try_respawn",
+   "file": "crates/pumpkin/src/world/dragon_fight.rs",
+   "line": 401,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_lighting_config",
+   "file": "crates/pumpkin/src/world/mod.rs",
+   "line": 491,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "send_add_mob_effect",
+   "file": "crates/pumpkin/src/world/mod.rs",
+   "line": 587,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "broadcast_packet_all_sync",
+   "file": "crates/pumpkin/src/world/mod.rs",
+   "line": 703,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_fluid_collisions",
+   "file": "crates/pumpkin/src/world/mod.rs",
+   "line": 1726,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "check_outline",
+   "file": "crates/pumpkin/src/world/mod.rs",
+   "line": 1879,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "get_players_by_pos",
+   "file": "crates/pumpkin/src/world/mod.rs",
+   "line": 4380,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "is_tracked",
+   "file": "crates/pumpkin/src/world/scoreboard.rs",
+   "line": 484,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  },
+  {
+   "kind": "dead_pub_fn",
+   "fn": "list_scores_for_objective",
+   "file": "crates/pumpkin/src/world/scoreboard.rs",
+   "line": 613,
+   "note": "no call-shaped occurrence of this name anywhere outside its own declaration line(s)"
+  }
+ ],
+ "empty_trait_impls": [
+  {
+   "kind": "empty_trait_impl",
+   "trait": "BlockBehaviour",
+   "type": "SculkBlock",
+   "file": "crates/pumpkin/src/block/blocks/sculk.rs",
+   "line": 29,
+   "note": "impl BlockBehaviour for SculkBlock {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "AreaEffectCloudEntity",
+   "file": "crates/pumpkin/src/entity/area_effect_cloud.rs",
+   "line": 144,
+   "note": "impl NBTStorage for AreaEffectCloudEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EnderDragonPart",
+   "file": "crates/pumpkin/src/entity/boss/ender_dragon.rs",
+   "line": 193,
+   "note": "impl NBTStorage for EnderDragonPart {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "WitherEntity",
+   "file": "crates/pumpkin/src/entity/boss/wither.rs",
+   "line": 39,
+   "note": "impl NBTStorage for WitherEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EndCrystalEntity",
+   "file": "crates/pumpkin/src/entity/decoration/end_crystal.rs",
+   "line": 31,
+   "note": "impl NBTStorage for EndCrystalEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "LeashKnotEntity",
+   "file": "crates/pumpkin/src/entity/decoration/leash_knot.rs",
+   "line": 87,
+   "note": "impl NBTStorage for LeashKnotEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "MarkerEntity",
+   "file": "crates/pumpkin/src/entity/marker.rs",
+   "line": 29,
+   "note": "impl NBTStorage for MarkerEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "BlazeEntity",
+   "file": "crates/pumpkin/src/entity/mob/blaze.rs",
+   "line": 66,
+   "note": "impl NBTStorage for BlazeEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "BreezeEntity",
+   "file": "crates/pumpkin/src/entity/mob/breeze.rs",
+   "line": 115,
+   "note": "impl NBTStorage for BreezeEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "CaveSpiderEntity",
+   "file": "crates/pumpkin/src/entity/mob/cave_spider.rs",
+   "line": 30,
+   "note": "impl NBTStorage for CaveSpiderEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "CreakingEntity",
+   "file": "crates/pumpkin/src/entity/mob/creaking.rs",
+   "line": 233,
+   "note": "impl NBTStorage for CreakingEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ElderGuardianEntity",
+   "file": "crates/pumpkin/src/entity/mob/elder_guardian.rs",
+   "line": 159,
+   "note": "impl NBTStorage for ElderGuardianEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EvokerEntity",
+   "file": "crates/pumpkin/src/entity/mob/evoker.rs",
+   "line": 87,
+   "note": "impl NBTStorage for EvokerEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "GhastEntity",
+   "file": "crates/pumpkin/src/entity/mob/ghast.rs",
+   "line": 69,
+   "note": "impl NBTStorage for GhastEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "GiantEntity",
+   "file": "crates/pumpkin/src/entity/mob/giant.rs",
+   "line": 21,
+   "note": "impl NBTStorage for GiantEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "GuardianEntity",
+   "file": "crates/pumpkin/src/entity/mob/guardian.rs",
+   "line": 71,
+   "note": "impl NBTStorage for GuardianEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "HoglinEntity",
+   "file": "crates/pumpkin/src/entity/mob/hoglin.rs",
+   "line": 130,
+   "note": "impl NBTStorage for HoglinEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "IllusionerEntity",
+   "file": "crates/pumpkin/src/entity/mob/illusioner.rs",
+   "line": 107,
+   "note": "impl NBTStorage for IllusionerEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "MagmaCubeEntity",
+   "file": "crates/pumpkin/src/entity/mob/magma_cube.rs",
+   "line": 31,
+   "note": "impl NBTStorage for MagmaCubeEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "PiglinEntity",
+   "file": "crates/pumpkin/src/entity/mob/piglin.rs",
+   "line": 99,
+   "note": "impl NBTStorage for PiglinEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "PiglinBruteEntity",
+   "file": "crates/pumpkin/src/entity/mob/piglin_brute.rs",
+   "line": 64,
+   "note": "impl NBTStorage for PiglinBruteEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SilverfishEntity",
+   "file": "crates/pumpkin/src/entity/mob/silverfish.rs",
+   "line": 68,
+   "note": "impl NBTStorage for SilverfishEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ParchedSkeletonEntity",
+   "file": "crates/pumpkin/src/entity/mob/skeleton/parched.rs",
+   "line": 20,
+   "note": "impl NBTStorage for ParchedSkeletonEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SkeletonEntity",
+   "file": "crates/pumpkin/src/entity/mob/skeleton/skeleton.rs",
+   "line": 20,
+   "note": "impl NBTStorage for SkeletonEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "StraySkeletonEntity",
+   "file": "crates/pumpkin/src/entity/mob/skeleton/stray.rs",
+   "line": 20,
+   "note": "impl NBTStorage for StraySkeletonEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "WitherSkeletonEntity",
+   "file": "crates/pumpkin/src/entity/mob/skeleton/wither.rs",
+   "line": 20,
+   "note": "impl NBTStorage for WitherSkeletonEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SpiderEntity",
+   "file": "crates/pumpkin/src/entity/mob/spider.rs",
+   "line": 227,
+   "note": "impl NBTStorage for SpiderEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "VexEntity",
+   "file": "crates/pumpkin/src/entity/mob/vex.rs",
+   "line": 143,
+   "note": "impl NBTStorage for VexEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "WardenEntity",
+   "file": "crates/pumpkin/src/entity/mob/warden.rs",
+   "line": 505,
+   "note": "impl NBTStorage for WardenEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "WitchEntity",
+   "file": "crates/pumpkin/src/entity/mob/witch.rs",
+   "line": 239,
+   "note": "impl NBTStorage for WitchEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "DrownedEntity",
+   "file": "crates/pumpkin/src/entity/mob/zombie/drowned.rs",
+   "line": 149,
+   "note": "impl NBTStorage for DrownedEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "AllayEntity",
+   "file": "crates/pumpkin/src/entity/passive/allay.rs",
+   "line": 240,
+   "note": "impl NBTStorage for AllayEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ArmadilloEntity",
+   "file": "crates/pumpkin/src/entity/passive/armadillo.rs",
+   "line": 48,
+   "note": "impl NBTStorage for ArmadilloEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "AxolotlEntity",
+   "file": "crates/pumpkin/src/entity/passive/axolotl.rs",
+   "line": 122,
+   "note": "impl NBTStorage for AxolotlEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "CamelEntity",
+   "file": "crates/pumpkin/src/entity/passive/camel.rs",
+   "line": 100,
+   "note": "impl NBTStorage for CamelEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "CodEntity",
+   "file": "crates/pumpkin/src/entity/passive/cod.rs",
+   "line": 56,
+   "note": "impl NBTStorage for CodEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "GoatEntity",
+   "file": "crates/pumpkin/src/entity/passive/goat.rs",
+   "line": 48,
+   "note": "impl NBTStorage for GoatEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "MooshroomEntity",
+   "file": "crates/pumpkin/src/entity/passive/mooshroom.rs",
+   "line": 48,
+   "note": "impl NBTStorage for MooshroomEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "NautilusEntity",
+   "file": "crates/pumpkin/src/entity/passive/nautilus.rs",
+   "line": 64,
+   "note": "impl NBTStorage for NautilusEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "OcelotEntity",
+   "file": "crates/pumpkin/src/entity/passive/ocelot.rs",
+   "line": 62,
+   "note": "impl NBTStorage for OcelotEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "PandaEntity",
+   "file": "crates/pumpkin/src/entity/passive/panda.rs",
+   "line": 48,
+   "note": "impl NBTStorage for PandaEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ParrotEntity",
+   "file": "crates/pumpkin/src/entity/passive/parrot.rs",
+   "line": 95,
+   "note": "impl NBTStorage for ParrotEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SnowGolemEntity",
+   "file": "crates/pumpkin/src/entity/passive/snow_golem.rs",
+   "line": 56,
+   "note": "impl NBTStorage for SnowGolemEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SquidEntity",
+   "file": "crates/pumpkin/src/entity/passive/squid.rs",
+   "line": 72,
+   "note": "impl NBTStorage for SquidEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "TadpoleEntity",
+   "file": "crates/pumpkin/src/entity/passive/tadpole.rs",
+   "line": 53,
+   "note": "impl NBTStorage for TadpoleEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EggEntity",
+   "file": "crates/pumpkin/src/entity/projectile/egg.rs",
+   "line": 67,
+   "note": "impl NBTStorage for EggEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EnderPearlEntity",
+   "file": "crates/pumpkin/src/entity/projectile/ender_pearl.rs",
+   "line": 48,
+   "note": "impl NBTStorage for EnderPearlEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EvokerFangsEntity",
+   "file": "crates/pumpkin/src/entity/projectile/evoker_fangs.rs",
+   "line": 91,
+   "note": "impl NBTStorage for EvokerFangsEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ExperienceBottleEntity",
+   "file": "crates/pumpkin/src/entity/projectile/experience_bottle.rs",
+   "line": 45,
+   "note": "impl NBTStorage for ExperienceBottleEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "EyeOfEnder",
+   "file": "crates/pumpkin/src/entity/projectile/eye_of_ender.rs",
+   "line": 121,
+   "note": "impl NBTStorage for EyeOfEnder {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "FireballEntity",
+   "file": "crates/pumpkin/src/entity/projectile/fireball.rs",
+   "line": 47,
+   "note": "impl NBTStorage for FireballEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "FireworkRocketEntity",
+   "file": "crates/pumpkin/src/entity/projectile/firework_rocket.rs",
+   "line": 256,
+   "note": "impl NBTStorage for FireworkRocketEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "FishingBobberEntity",
+   "file": "crates/pumpkin/src/entity/projectile/fishing_bobber.rs",
+   "line": 431,
+   "note": "impl NBTStorage for FishingBobberEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "LingeringPotionEntity",
+   "file": "crates/pumpkin/src/entity/projectile/lingering_potion.rs",
+   "line": 63,
+   "note": "impl NBTStorage for LingeringPotionEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "LlamaSpitEntity",
+   "file": "crates/pumpkin/src/entity/projectile/llama_spit.rs",
+   "line": 49,
+   "note": "impl NBTStorage for LlamaSpitEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ThrownItemEntity",
+   "file": "crates/pumpkin/src/entity/projectile/mod.rs",
+   "line": 258,
+   "note": "impl NBTStorage for ThrownItemEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "ShulkerBulletEntity",
+   "file": "crates/pumpkin/src/entity/projectile/shulker_bullet.rs",
+   "line": 274,
+   "note": "impl NBTStorage for ShulkerBulletEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SmallFireballEntity",
+   "file": "crates/pumpkin/src/entity/projectile/small_fireball.rs",
+   "line": 39,
+   "note": "impl NBTStorage for SmallFireballEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SnowballEntity",
+   "file": "crates/pumpkin/src/entity/projectile/snowball.rs",
+   "line": 43,
+   "note": "impl NBTStorage for SnowballEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "SplashPotionEntity",
+   "file": "crates/pumpkin/src/entity/projectile/splash_potion.rs",
+   "line": 56,
+   "note": "impl NBTStorage for SplashPotionEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "TridentEntity",
+   "file": "crates/pumpkin/src/entity/projectile/trident.rs",
+   "line": 160,
+   "note": "impl NBTStorage for TridentEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "WindChargeEntity",
+   "file": "crates/pumpkin/src/entity/projectile/wind_charge.rs",
+   "line": 114,
+   "note": "impl NBTStorage for WindChargeEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "TNTEntity",
+   "file": "crates/pumpkin/src/entity/tnt.rs",
+   "line": 34,
+   "note": "impl NBTStorage for TNTEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "BoatEntity",
+   "file": "crates/pumpkin/src/entity/vehicle/boat.rs",
+   "line": 56,
+   "note": "impl NBTStorage for BoatEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "NBTStorage",
+   "type": "MinecartEntity",
+   "file": "crates/pumpkin/src/entity/vehicle/minecart.rs",
+   "line": 55,
+   "note": "impl NBTStorage for MinecartEntity {} -- trait has a no-op default method, so this silently opts out"
+  },
+  {
+   "kind": "empty_trait_impl",
+   "trait": "ScreenHandlerListener",
+   "type": "ScreenListener",
+   "file": "crates/pumpkin/src/entity/player.rs",
+   "line": 638,
+   "note": "impl ScreenHandlerListener for ScreenListener {} -- trait has a no-op default method, so this silently opts out"
+  }
+ ]
+}

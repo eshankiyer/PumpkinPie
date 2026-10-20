@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "ShulkerBoxBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/shulker_box.rs",
+    "total_methods": 20,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 6,
+    "absent_workspace_wide": [
+      "canPlaceItemThroughFace",
+      "canTakeItemThroughFace",
+      "createMenu",
+      "getContainerSize",
+      "loadFromTag",
+      "preRemoveSideEffects",
+      "setItems",
+      "startOpen",
+      "stopOpen"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for ShulkerBoxBlockEntity"
+  }
+]

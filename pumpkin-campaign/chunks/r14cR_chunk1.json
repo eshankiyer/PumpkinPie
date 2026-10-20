@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "Enchantments",
+    "vanilla_path": "net/minecraft/world/item/enchantment/Enchantments.java",
+    "rust_file": "crates/pumpkin-data/src/generated/enchantments.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "bootstrap"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "EndCrystalItem",
+    "vanilla_path": "net/minecraft/world/item/EndCrystalItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/end_crystal.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "EndPlatformFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/EndPlatformFeature.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/end_platform.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createEndPlatform"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EnderDragonPart",
+    "vanilla_path": "net/minecraft/world/entity/boss/enderdragon/EnderDragonPart.java",
+    "rust_file": "crates/pumpkin/src/entity/boss/ender_dragon.rs",
+    "total_methods": 9,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getAddEntityPacket"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "EnderpearlItem",
+    "vanilla_path": "net/minecraft/world/item/EnderpearlItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/ender_pearl.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "use"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EntityDimensions",
+    "vanilla_path": "net/minecraft/world/entity/EntityDimensions.java",
+    "rust_file": "crates/pumpkin-util/src/math/boundingbox.rs",
+    "total_methods": 6,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "withAttachments"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "ExecuteCommand",
+    "vanilla_path": "net/minecraft/server/commands/ExecuteCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/execute.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "scheduleFunctionConditionsAndTest"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "FetchProfileCommand",
+    "vanilla_path": "net/minecraft/server/commands/FetchProfileCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/fetchprofile.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "printForAvatar"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "FishingRodItem",
+    "vanilla_path": "net/minecraft/world/item/FishingRodItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/fishing_rod.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "use"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "FleeSunGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/FleeSunGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/flee_sun.rs",
+    "total_methods": 4,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setWantedPos"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "FlintAndSteelItem",
+    "vanilla_path": "net/minecraft/world/item/FlintAndSteelItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/ignite/flint_and_steel.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "FollowFlockLeaderGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/FollowFlockLeaderGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/follow_flock_leader.rs",
+    "total_methods": 6,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "nextStartTick"
+    ]
+  },
+  {
+    "subsystem": "food",
+    "vanilla_class": "FoodConstants",
+    "vanilla_path": "net/minecraft/world/food/FoodConstants.java",
+    "rust_file": "crates/pumpkin/src/entity/hunger.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "saturationByModifier"
+    ]
+  },
+  {
+    "subsystem": "food",
+    "vanilla_class": "FoodData",
+    "vanilla_path": "net/minecraft/world/food/FoodData.java",
+    "rust_file": "crates/pumpkin/src/entity/hunger.rs",
+    "total_methods": 11,
+    "in_declaring_file": 8,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSaturationLevel"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "FrogVariant",
+    "vanilla_path": "net/minecraft/world/entity/animal/frog/FrogVariant.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/frog.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "selectors"
+    ]
+  }
+]

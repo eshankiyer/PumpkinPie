@@ -1,0 +1,26 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "ComposterBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ComposterBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/composter.rs",
+    "total_methods": 22,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 10,
+    "absent_workspace_wide": [
+      "bootStrap",
+      "canPlaceItemThroughFace",
+      "canTakeItemThroughFace",
+      "createBlockStateDefinition",
+      "extractProduce",
+      "getCollisionShape",
+      "getInteractionShape",
+      "handleFill",
+      "hasAnalogOutputSignal",
+      "setChanged",
+      "useItemOn",
+      "useWithoutItem"
+    ],
+    "note": "round12 broader pool: leads 1-12 of 12 for ComposterBlock"
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "MerchantMenu",
+    "vanilla_path": "net/minecraft/world/inventory/MerchantMenu.java",
+    "rust_file": "crates/pumpkin-inventory/src/merchant/merchant_screen_handler.rs",
+    "total_methods": 18,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 0,
+    "absent_workspace_wide": [
+      "canRestock",
+      "canTakeItemForPickAll",
+      "getOffers",
+      "getTraderLevel",
+      "getTraderXp",
+      "quickMoveStack",
+      "removed",
+      "setCanRestock",
+      "setMerchantLevel",
+      "setOffers",
+      "setSelectionHint",
+      "setShowProgressBar",
+      "setXp",
+      "showProgressBar",
+      "slotsChanged",
+      "stillValid"
+    ],
+    "note": "round12 broader pool: leads 1-16 of 16 for MerchantMenu"
+  }
+]

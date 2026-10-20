@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 44,
+    "elsewhere_in_workspace": 59,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "getArmorValue",
+      "getArrowCount",
+      "getAttackAnim",
+      "getAttackRangeWith",
+      "getAttributeBaseValue",
+      "getAttributes",
+      "getBlockSpeedFactor",
+      "getCombatTracker",
+      "getComfortableFallDistance",
+      "getDamageAfterArmorAbsorb",
+      "getDamageAfterMagicAbsorb",
+      "getDismountPoses",
+      "getEffectBlendFactor",
+      "getEntityBounciness",
+      "getEquipSound",
+      "getFallFlyingTicks",
+      "getFallSounds",
+      "getFluidFallingAdjustedMovement",
+      "getHitbox",
+      "getInterpolation"
+    ],
+    "note": "leads 41-60 of 200 for LivingEntity"
+  }
+]

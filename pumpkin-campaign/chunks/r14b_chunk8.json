@@ -1,0 +1,211 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "TwistingVinesBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TwistingVinesBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/twisting_vines.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBlocksToGrowWhenBonemealed",
+      "getBodyBlock"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "TwoLayersFeatureSize",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/featuresize/TwoLayersFeatureSize.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/size.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSizeAtHeight",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "UpwardsBranchingTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/UpwardsBranchingTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/upwards_branching.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "VaultBlock",
+    "vanilla_path": "net/minecraft/world/level/block/VaultBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/vault.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "useItemOn"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "VehicleEntity",
+    "vanilla_path": "net/minecraft/world/entity/vehicle/VehicleEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/vehicle/vehicle.rs",
+    "total_methods": 13,
+    "in_declaring_file": 7,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "ignoreExplosion",
+      "shouldSourceDestroy"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "VillagerType",
+    "vanilla_path": "net/minecraft/world/entity/npc/villager/VillagerType.java",
+    "rust_file": "crates/pumpkin-data/src/generated/villager.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "bootstrap",
+      "byBiome"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "VineBlock",
+    "vanilla_path": "net/minecraft/world/level/block/VineBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/vine.rs",
+    "total_methods": 12,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getPropertyForFace"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "WallBlock",
+    "vanilla_path": "net/minecraft/world/level/block/WallBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/walls.rs",
+    "total_methods": 11,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 8,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getCollisionShape"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "WeepingVinesBlock",
+    "vanilla_path": "net/minecraft/world/level/block/WeepingVinesBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/weeping_vines.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBlocksToGrowWhenBonemealed",
+      "getBodyBlock"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "WitherRoseBlock",
+    "vanilla_path": "net/minecraft/world/level/block/WitherRoseBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/wither_rose.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick",
+      "getBeeInteractionEffect"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "WitherSkull",
+    "vanilla_path": "net/minecraft/world/entity/projectile/hurtingprojectile/WitherSkull.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/wither_skull.rs",
+    "total_methods": 11,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 9,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getInertia",
+      "shouldBurn"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "WorldCoordinate",
+    "vanilla_path": "net/minecraft/commands/arguments/coordinates/WorldCoordinate.java",
+    "rust_file": "crates/pumpkin/src/command/argument_types/coordinates/mod.rs",
+    "total_methods": 4,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "parseDouble",
+      "parseInt"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "WorldGenSettings",
+    "vanilla_path": "net/minecraft/world/level/levelgen/WorldGenSettings.java",
+    "rust_file": "crates/pumpkin-world/src/world_info/mod.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "hashCode",
+      "options"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "ZombieNautilus",
+    "vanilla_path": "net/minecraft/world/entity/animal/nautilus/ZombieNautilus.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/zombie_nautilus.rs",
+    "total_methods": 22,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "applyImplicitComponent",
+      "customServerAiStep"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AbstractChestedHorse",
+    "vanilla_path": "net/minecraft/world/entity/animal/equine/AbstractChestedHorse.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/equine/mod.rs",
+    "total_methods": 15,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 8,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBaseChestedHorseAttributes"
+    ]
+  }
+]

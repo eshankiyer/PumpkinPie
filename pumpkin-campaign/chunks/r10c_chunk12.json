@@ -1,0 +1,22 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "ItemStack",
+    "vanilla_path": "net/minecraft/world/item/ItemStack.java",
+    "rust_file": "crates/pumpkin-data/src/item_stack/mod.rs",
+    "total_methods": 98,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 18,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "transmuteCopy",
+      "typeHolder",
+      "use",
+      "useOn",
+      "useOnRelease",
+      "validateStrict",
+      "validatedStreamCodec"
+    ],
+    "note": "leads 61-67 of 67 for ItemStack"
+  }
+]

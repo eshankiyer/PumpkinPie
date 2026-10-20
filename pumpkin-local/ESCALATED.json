@@ -1,0 +1,40 @@
+{
+  "runs": [
+    {
+      "date": "2026-07-27",
+      "spec": "22-locate-horizontal-distance",
+      "rc": 0,
+      "value": 55
+    },
+    {
+      "date": "2026-07-27",
+      "spec": "21-locate-sets-containing",
+      "rc": 0,
+      "value": 55
+    },
+    {
+      "date": "2026-07-27",
+      "spec": "20-locate-structure-by-name",
+      "rc": 0,
+      "value": 55
+    },
+    {
+      "date": "2026-07-28",
+      "spec": "22-locate-horizontal-distance",
+      "rc": 0,
+      "value": 55
+    },
+    {
+      "date": "2026-07-28",
+      "spec": "21-locate-sets-containing",
+      "rc": 0,
+      "value": 55
+    },
+    {
+      "date": "2026-07-28",
+      "spec": "20-locate-structure-by-name",
+      "rc": 0,
+      "value": 55
+    }
+  ]
+}

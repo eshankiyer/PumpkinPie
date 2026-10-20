@@ -1,0 +1,29 @@
+diff --git a/crates/pumpkin/src/block/entities/decorated_pot.rs b/crates/pumpkin/src/block/entities/decorated_pot.rs
+index 3c79b695..2f7f694d 100644
+--- a/crates/pumpkin/src/block/entities/decorated_pot.rs
++++ b/crates/pumpkin/src/block/entities/decorated_pot.rs
+@@ -100,6 +100,24 @@ impl BlockEntity for DecoratedPotBlockEntity {
+         Some(nbt)
+     }
+ 
++    /// Vanilla `BlockEntity.preRemoveSideEffects` drops contents for block entities implementing
++    /// `Container` (`BlockEntity.java:233-237`); decorated pots implement
++    /// `ContainerSingleItem.BlockContainerSingleItem` (`DecoratedPotBlockEntity.java:27`).
++    fn on_block_replaced<'a>(
++        self: Arc<Self>,
++        world: Arc<World>,
++        position: BlockPos,
++    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
++    where
++        Self: 'a,
++    {
++        Box::pin(async move {
++            if let Some(item) = self.take_item().await {
++                world.drop_stack(&position, item).await;
++            }
++        })
++    }
++
+     fn as_any(&self) -> &dyn std::any::Any {
+         self
+     }

@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Mob",
+    "vanilla_path": "net/minecraft/world/entity/Mob.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/mod.rs",
+    "total_methods": 126,
+    "in_declaring_file": 55,
+    "elsewhere_in_workspace": 19,
+    "absent_workspace_wide": [
+      "getLootTable",
+      "getMainArm",
+      "getMoveControl",
+      "getNavigation",
+      "getSensing",
+      "getTheItem",
+      "handleEntityEvent",
+      "hasHome",
+      "isAggressive",
+      "isWithinMeleeAttackRange",
+      "jumpInLiquid",
+      "leashTooFarBehaviour",
+      "onAttributeUpdated",
+      "playAmbientSound",
+      "playHurtSound",
+      "populateDefaultEquipmentEnchantments",
+      "populateDefaultEquipmentSlots",
+      "registerDebugValues",
+      "removeAfterChangingDimensions",
+      "removeAllGoals"
+    ],
+    "note": "round13 leads 21-40 of 52 for Mob"
+  }
+]

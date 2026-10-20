@@ -1,0 +1,78 @@
+[
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "WoodlandMansionPieces",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/structures/WoodlandMansionPieces.java",
+    "method_count": 18,
+    "methods": [
+      "addAdditionalSaveData",
+      "createMansion",
+      "edgesTo",
+      "generateMansion",
+      "get",
+      "get1x1",
+      "get1x1Secret",
+      "get1x2FrontEntrance",
+      "get1x2Secret",
+      "get1x2SideEntrance",
+      "get2x2",
+      "get2x2Secret",
+      "handleDataMarker",
+      "isHouse",
+      "isRoomId",
+      "makeTemplateLocation",
+      "set",
+      "setif"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "NewMinecartBehavior",
+    "vanilla_path": "net/minecraft/world/entity/vehicle/minecart/NewMinecartBehavior.java",
+    "method_count": 17,
+    "methods": [
+      "MinecartStep",
+      "adjustToRails",
+      "cartHasPosRotLerp",
+      "getCartLerpMovements",
+      "getCartLerpPosition",
+      "getCartLerpXRot",
+      "getCartLerpYRot",
+      "getMaxSpeed",
+      "getSlowdownFactor",
+      "moveAlongTrack",
+      "pickupEntities",
+      "pushAndPickupEntities",
+      "pushEntities",
+      "setOldLerpValues",
+      "shouldIterate",
+      "stepAlongTrack",
+      "tick"
+    ]
+  },
+  {
+    "subsystem": "storage",
+    "vanilla_class": "LootContext",
+    "vanilla_path": "net/minecraft/world/level/storage/loot/LootContext.java",
+    "method_count": 17,
+    "methods": [
+      "addDynamicDrops",
+      "contextParam",
+      "create",
+      "createVisitedEntry",
+      "getByName",
+      "getLevel",
+      "getLuck",
+      "getParameter",
+      "getRandom",
+      "getResolver",
+      "getSerializedName",
+      "hasParameter",
+      "hasVisitedElement",
+      "popVisitedElement",
+      "pushVisitedElement",
+      "withOptionalRandomSeed",
+      "withOptionalRandomSource"
+    ]
+  }
+]

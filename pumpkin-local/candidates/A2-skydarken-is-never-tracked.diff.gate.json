@@ -1,0 +1,7 @@
+{
+  "pass": false,
+  "item": "A2",
+  "stage_failed": "static",
+  "reason": "escape_artifact:u00xx:'u0026'",
+  "log_tail": ""
+}

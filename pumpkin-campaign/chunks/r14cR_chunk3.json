@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "JigsawPlacement",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java",
+    "rust_file": "crates/pumpkin-world/src/generation/structure/structures/jigsaw_placement.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "generateJigsaw"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "KnowledgeBookItem",
+    "vanilla_path": "net/minecraft/world/item/KnowledgeBookItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/knowledge_book.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "use"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "LadderBlock",
+    "vanilla_path": "net/minecraft/world/level/block/LadderBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/ladder.rs",
+    "total_methods": 8,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "LanternBlock",
+    "vanilla_path": "net/minecraft/world/level/block/LanternBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/lanterns.rs",
+    "total_methods": 8,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "LeadItem",
+    "vanilla_path": "net/minecraft/world/item/LeadItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/lead.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "LeafLitterBlock",
+    "vanilla_path": "net/minecraft/world/level/block/LeafLitterBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/leaf_litter.rs",
+    "total_methods": 8,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "LocateCommand",
+    "vanilla_path": "net/minecraft/server/commands/LocateCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/locate.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "showLocateResult"
+    ]
+  },
+  {
+    "subsystem": "storage",
+    "vanilla_class": "LootItem",
+    "vanilla_path": "net/minecraft/world/level/storage/loot/entries/LootItem.java",
+    "rust_file": "crates/pumpkin/src/command/commands/loot.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "lootTableItem"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "MacroFunction",
+    "vanilla_path": "net/minecraft/commands/functions/MacroFunction.java",
+    "rust_file": "crates/pumpkin/src/data/datapack/macro_function.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "instantiate"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "MagmaBlock",
+    "vanilla_path": "net/minecraft/world/level/block/MagmaBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/magma.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "stepOn"
+    ]
+  },
+  {
+    "subsystem": "saveddata",
+    "vanilla_class": "MapDecorationType",
+    "vanilla_path": "net/minecraft/world/level/saveddata/maps/MapDecorationType.java",
+    "rust_file": "crates/pumpkin-data/src/generated/map_decoration.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "hasMapColor"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "MatchingBlockTagPredicate",
+    "vanilla_path": "net/minecraft/world/level/levelgen/blockpredicates/MatchingBlockTagPredicate.java",
+    "rust_file": "crates/pumpkin-world/src/generation/block_predicate.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "MinecartItem",
+    "vanilla_path": "net/minecraft/world/item/MinecartItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/minecart.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "Mirror",
+    "vanilla_path": "net/minecraft/world/level/block/Mirror.java",
+    "rust_file": "crates/pumpkin-data/src/block_rotation.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "symbol"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "MultifaceSpreader",
+    "vanilla_path": "net/minecraft/world/level/block/MultifaceSpreader.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/multiface_spreader.rs",
+    "total_methods": 11,
+    "in_declaring_file": 9,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "spreadToFace"
+    ]
+  }
+]

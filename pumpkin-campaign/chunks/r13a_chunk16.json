@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "ShelfBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ShelfBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/shelf.rs",
+    "total_methods": 23,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 11,
+    "absent_workspace_wide": [
+      "affectNeighborsAfterRemoval",
+      "createBlockStateDefinition",
+      "getColumns",
+      "getMaxChainLength",
+      "getRows",
+      "getSideChainPart",
+      "setSideChainPart",
+      "useItemOn",
+      "useShapeForLightOcclusion"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for ShelfBlock"
+  }
+]

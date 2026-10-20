@@ -1,0 +1,81 @@
+[
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "CrafterMenu",
+    "vanilla_path": "net/minecraft/world/inventory/CrafterMenu.java",
+    "rust_file": "crates/pumpkin-inventory/src/crafter_screen_handler.rs",
+    "total_methods": 8,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "dataChanged",
+      "quickMoveStack",
+      "slotChanged",
+      "stillValid"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "FunctionCommand",
+    "vanilla_path": "net/minecraft/server/commands/FunctionCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/function.rs",
+    "total_methods": 7,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "modifySenderForExecution",
+      "queueFunctions",
+      "runGuarded",
+      "signalResult"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "HoneyBlock",
+    "vanilla_path": "net/minecraft/world/level/block/HoneyBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/honey.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "fallOn",
+      "getCollisionShape",
+      "showJumpParticles",
+      "showSlideParticles"
+    ]
+  },
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "NonInteractiveResultSlot",
+    "vanilla_path": "net/minecraft/world/inventory/NonInteractiveResultSlot.java",
+    "rust_file": "crates/pumpkin-inventory/src/crafter_screen_handler.rs",
+    "total_methods": 11,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mayPlace",
+      "onQuickCraft",
+      "safeInsert",
+      "tryRemove"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "BrushItem",
+    "vanilla_path": "net/minecraft/world/item/BrushItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/brush.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "fromDirection",
+      "getUseAnimation",
+      "useOn"
+    ]
+  }
+]

@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundCustomChatCompletionsPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundCustomChatCompletionsPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/custom_chat_completions.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundCustomPayloadPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundCustomPayloadPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/custom_payload.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundCustomReportDetailsPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundCustomReportDetailsPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/config/custom_report_details.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDamageEventPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDamageEventPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/damage_event.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDebugBlockValuePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDebugBlockValuePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/debug_block_value.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDebugChunkValuePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDebugChunkValuePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/debug_chunk_value.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDebugEntityValuePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDebugEntityValuePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/debug_entity_value.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDebugEventPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDebugEventPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/debug_event.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDebugSamplePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDebugSamplePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/debug_sample.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundDeleteChatPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundDeleteChatPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/delete_chat.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundEntityPositionSyncPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundEntityPositionSyncPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/entity_position_sync.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundGameRuleValuesPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundGameRuleValuesPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/game_rule_values.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundGameTestHighlightPosPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundGameTestHighlightPosPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/game_test_highlight_pos.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundHurtAnimationPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundHurtAnimationPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/hurt_animation.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundKeepAlivePacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundKeepAlivePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/keep_alive.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  }
+]

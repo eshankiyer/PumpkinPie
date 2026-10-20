@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "EndRodBlock",
+    "vanilla_path": "net/minecraft/world/level/block/EndRodBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/end_rod.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick",
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EnderDragonPhase",
+    "vanilla_path": "net/minecraft/world/entity/boss/enderdragon/phases/EnderDragonPhase.java",
+    "rust_file": "crates/pumpkin/src/entity/boss/ender_dragon/phase/mod.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createInstance",
+      "getConstructor"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "EnderEyeItem",
+    "vanilla_path": "net/minecraft/world/item/EnderEyeItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/ender_eye.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "use",
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EntityEquipment",
+    "vanilla_path": "net/minecraft/world/entity/EntityEquipment.java",
+    "rust_file": "crates/pumpkin-inventory/src/entity_equipment.rs",
+    "total_methods": 7,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "dropAll",
+      "setAll"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EvokerFangs",
+    "vanilla_path": "net/minecraft/world/entity/projectile/EvokerFangs.java",
+    "rust_file": "crates/pumpkin/src/entity/projectile/evoker_fangs.rs",
+    "total_methods": 8,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getAnimationProgress",
+      "handleEntityEvent"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "FeatureSize",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/featuresize/FeatureSize.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/size.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "minClippedHeight",
+      "minClippedHeightCodec"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "FlowerBlock",
+    "vanilla_path": "net/minecraft/world/level/block/FlowerBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/flower.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSuspiciousEffects",
+      "makeEffectList"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "FlowerPotBlock",
+    "vanilla_path": "net/minecraft/world/level/block/FlowerPotBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/flower_pots.rs",
+    "total_methods": 11,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useItemOn",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "ForkingTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/ForkingTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/forking.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "FrogspawnBlock",
+    "vanilla_path": "net/minecraft/world/level/block/FrogspawnBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/frogspawn.rs",
+    "total_methods": 9,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setDefaultHatchDelay",
+      "setHatchDelay"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "FurnaceBlock",
+    "vanilla_path": "net/minecraft/world/level/block/FurnaceBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/furnace.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick",
+      "newBlockEntity"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "GiantTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/GiantTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/giant.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "GlowLichenBlock",
+    "vanilla_path": "net/minecraft/world/level/block/GlowLichenBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/glow_lichen.rs",
+    "total_methods": 7,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "emission",
+      "getSpreader"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "GlowSquid",
+    "vanilla_path": "net/minecraft/world/entity/animal/squid/GlowSquid.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/glow_squid.rs",
+    "total_methods": 12,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "checkGlowSquidSpawnRules",
+      "getDarkTicksRemaining"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "HurtByTargetGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/target/HurtByTargetGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/revenge.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "alertOther",
+      "setAlertOthers"
+    ]
+  }
+]

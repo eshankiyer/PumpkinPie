@@ -1,0 +1,228 @@
+diff --git a/crates/pumpkin-inventory/src/screen_handler.rs b/crates/pumpkin-inventory/src/screen_handler.rs
+index 422db929..67c38db2 100644
+--- a/crates/pumpkin-inventory/src/screen_handler.rs
++++ b/crates/pumpkin-inventory/src/screen_handler.rs
+@@ -36,6 +36,7 @@ use pumpkin_data::{
+     Block, Enchantment,
+     data_component_impl::{EquipmentSlot, EquipmentType, EquippableImpl},
+     screen::WindowType,
++    sound::Sound,
+     statistic::StatisticCategory,
+ };
+ use pumpkin_protocol::{
+@@ -156,6 +157,9 @@ pub trait InventoryPlayer: Send + Sync {
+     /// Gets the player's inventory.
+     fn get_inventory(&self) -> Arc<PlayerInventory>;
+ 
++    /// Plays a sound at the player's own position, broadcast to nearby players.
++    fn play_sound(&self, sound: Sound);
++
+     /// Checks if the player has infinite materials (creative mode).
+     fn has_infinite_materials(&self) -> bool;
+ 
+@@ -1120,6 +1124,7 @@ pub trait ScreenHandler: Send + Sync {
+                             && let Some(extracted) = bundle.try_extract() {
+                                 *cursor_stack = extracted;
+                                 slot.set_stack(inner_slot_stack);
++                                player.play_sound(Sound::ItemBundleRemoveOne);
+                                 intercepted = true;
+                             }
+                     }
+@@ -1128,6 +1133,7 @@ pub trait ScreenHandler: Send + Sync {
+                         && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                         && let Some(extracted) = bundle.try_extract() {
+                             slot.set_stack(extracted);
++                            player.play_sound(Sound::ItemBundleRemoveOne);
+                             intercepted = true;
+                         }
+ 
+@@ -1382,6 +1388,7 @@ impl ScreenHandlerBehaviour {
+ mod container_access_tests {
+     use super::ContainerAccess;
+     use pumpkin_data::Block;
++    use pumpkin_data::tag::Taggable;
+     #[test]
+     fn access_families_match_vanilla() {
+         assert!(!ContainerAccess::None.requires_position());
+@@ -1393,6 +1400,42 @@ mod container_access_tests {
+         assert!(anvil.accepts_block(&Block::DAMAGED_ANVIL));
+         assert!(!anvil.accepts_block(&Block::STONE));
+     }
++
++    #[test]
++    fn null_access_has_no_position() {
++        assert!(!ContainerAccess::None.requires_position());
++        assert!(ContainerAccess::None.accepts_block(&Block::STONE));
++    }
++
++    #[test]
++    fn block_entity_family_checks_range_but_not_identity() {
++        let access = ContainerAccess::RangeOnly;
++        assert!(access.requires_position());
++        // `Container.stillValidBlockEntity` (`Container.java:94-101`) compares block
++        // entities, never block ids, so any block passes the block half here.
++        assert!(access.accepts_block(&Block::STONE));
++    }
++
++    #[test]
++    fn block_family_rejects_a_replaced_block() {
++        let access = ContainerAccess::Block(|block| block.id == Block::CRAFTING_TABLE.id);
++        assert!(access.requires_position());
++        assert!(access.accepts_block(&Block::CRAFTING_TABLE));
++        assert!(!access.accepts_block(&Block::STONE));
++    }
++
++    /// `AnvilMenu.isValidBlock` tests `BlockTags.ANVIL` (`AnvilMenu.java:65-67`), so a
++    /// chipped or damaged anvil must keep the menu open while any other block closes it.
++    #[test]
++    fn anvil_family_accepts_every_damage_stage() {
++        let access = ContainerAccess::Block(|block| {
++            block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_ANVIL)
++        });
++        assert!(access.accepts_block(&Block::ANVIL));
++        assert!(access.accepts_block(&Block::CHIPPED_ANVIL));
++        assert!(access.accepts_block(&Block::DAMAGED_ANVIL));
++        assert!(!access.accepts_block(&Block::STONE));
++    }
+     // `ContainerLevelAccess.java:10-15`, `Container.java:94-101`,
+     // `AbstractContainerMenu.java:93-95`, `Player.java:2014-2016`,
+     // `ItemCombinerMenu.java:110-112`, `ItemCombinerMenu.java:32`,
+diff --git a/crates/pumpkin/src/entity/passive/wandering_trader.rs b/crates/pumpkin/src/entity/passive/wandering_trader.rs
+index d809165d..69e77090 100644
+--- a/crates/pumpkin/src/entity/passive/wandering_trader.rs
++++ b/crates/pumpkin/src/entity/passive/wandering_trader.rs
+@@ -70,6 +70,29 @@ use crate::world::World;
+ 
+ const DEFAULT_DESPAWN_DELAY: i32 = 0;
+ 
++/// The seven `AvoidEntityGoal`s of `WanderingTrader.registerGoals`
++/// (`WanderingTrader.java:80-86`), each at priority 1 with speeds `0.5, 0.5`.
++///
++/// Vanilla matches `Zombie.class` by class hierarchy, so it also covers every subclass:
++/// `Drowned.java:67`, `Husk.java:31`, `ZombieVillager.java:61` and `ZombifiedPiglin.java:48`
++/// all `extends Zombie`. `AvoidEntityGoal`'s `FleeSelector::Type` matches one exact entity
++/// type, so those four are listed explicitly at the same 8.0 radius. The other six vanilla
++/// classes here have no subclasses (verified by grepping `extends <Class>` over the decompile).
++#[cfg(test)]
++const AVOIDED: &[(&EntityType, f64)] = &[
++    (&EntityType::ZOMBIE, 8.0),
++    (&EntityType::DROWNED, 8.0),
++    (&EntityType::HUSK, 8.0),
++    (&EntityType::ZOMBIE_VILLAGER, 8.0),
++    (&EntityType::ZOMBIFIED_PIGLIN, 8.0),
++    (&EntityType::EVOKER, 12.0),
++    (&EntityType::VINDICATOR, 8.0),
++    (&EntityType::VEX, 8.0),
++    (&EntityType::PILLAGER, 15.0),
++    (&EntityType::ILLUSIONER, 12.0),
++    (&EntityType::ZOGLIN, 10.0),
++];
++
+ fn create_invisibility_potion() -> ItemStack {
+     let mut stack = ItemStack::new(1, &Item::POTION);
+     apply_potion(&mut stack, "invisibility");
+@@ -1284,6 +1307,7 @@ impl Goal for WanderingTraderUseItemGoal {
+ #[allow(clippy::expect_used, clippy::unwrap_used)]
+ mod tests {
+     use super::*;
++    use pumpkin_data::entity::EntityType;
+ 
+     #[test]
+     fn default_wandering_trader_despawn_delay_is_zero() {
+@@ -1301,6 +1325,37 @@ mod tests {
+         assert_eq!(offers.len(), 9);
+     }
+ 
++    /// `WanderingTrader.registerGoals` (`WanderingTrader.java:80-86`) registers exactly seven
++    /// `AvoidEntityGoal`s, and the flee radii are not uniform -- pillagers are feared from
++    /// 15 blocks, evokers and illusioners from 12, zoglins from 10, the rest from 8.
++    #[test]
++    fn avoided_table_matches_vanilla() {
++        // Six single classes plus `Zombie` and its four subclasses.
++        assert_eq!(AVOIDED.len(), 11);
++        let radius = |ty: &EntityType| {
++            AVOIDED
++                .iter()
++                .find(|(t, _)| t.id == ty.id)
++                .map(|(_, d)| *d)
++                .expect("entity type missing from AVOIDED")
++        };
++        for zombie in [
++            &EntityType::ZOMBIE,
++            &EntityType::DROWNED,
++            &EntityType::HUSK,
++            &EntityType::ZOMBIE_VILLAGER,
++            &EntityType::ZOMBIFIED_PIGLIN,
++        ] {
++            assert!((radius(zombie) - 8.0).abs() < f64::EPSILON);
++        }
++        assert!((radius(&EntityType::EVOKER) - 12.0).abs() < f64::EPSILON);
++        assert!((radius(&EntityType::VINDICATOR) - 8.0).abs() < f64::EPSILON);
++        assert!((radius(&EntityType::VEX) - 8.0).abs() < f64::EPSILON);
++        assert!((radius(&EntityType::PILLAGER) - 15.0).abs() < f64::EPSILON);
++        assert!((radius(&EntityType::ILLUSIONER) - 12.0).abs() < f64::EPSILON);
++        assert!((radius(&EntityType::ZOGLIN) - 10.0).abs() < f64::EPSILON);
++    }
++
+     #[test]
+     fn wander_target_distance_check() {
+         let target = BlockPos::new(10, 64, 10);
+diff --git a/crates/pumpkin/src/entity/projectile/arrow.rs b/crates/pumpkin/src/entity/projectile/arrow.rs
+index 139f63d1..21f42d5e 100644
+--- a/crates/pumpkin/src/entity/projectile/arrow.rs
++++ b/crates/pumpkin/src/entity/projectile/arrow.rs
+@@ -637,7 +637,7 @@ impl EntityBase for ArrowEntity {
+                 // Calculate damage
+                 let velocity = entity.velocity.load();
+                 let power = velocity.length();
+-                let mut damage = (power * self.base_damage.load()).ceil() as i32;
++                let mut damage = calculate_arrow_damage(power, self.base_damage.load());
+ 
+                 // Apply critical hit bonus
+                 if self.is_critical.load(Ordering::Relaxed) {
+@@ -842,6 +842,10 @@ const fn piercing_hit_limit(pierce: u8) -> usize {
+     usize::from(pierce) + 1
+ }
+ 
++const fn calculate_arrow_damage(power: f64, base_damage: f64) -> i32 {
++    (power * base_damage).ceil() as i32
++}
++
+ /// Ray intersection algorithm for AABBs
+ fn calculate_ray_intersection(
+     start: &Vector3<f64>,
+@@ -896,7 +900,7 @@ fn get_hit_face(hit_pos: Vector3<f64>, block_pos: BlockPos) -> pumpkin_data::Blo
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::ArrowEntity;
++    use super::{ArrowEntity, calculate_arrow_damage, piercing_hit_limit};
+     use pumpkin_data::data_component::DataComponent;
+     use pumpkin_data::data_component_impl::{
+         DataComponentImpl, PotionContentsImpl, PotionDurationScaleImpl,
+@@ -984,4 +988,25 @@ mod tests {
+         assert!(!ArrowEntity::should_apply_post_hurt_effects(false));
+         assert!(ArrowEntity::should_apply_post_hurt_effects(true));
+     }
++
++    #[test]
++    fn arrow_damage_uses_configured_base_damage() {
++        assert_eq!(calculate_arrow_damage(1.5, 2.0), 3);
++        assert_eq!(calculate_arrow_damage(1.5, 4.0), 6);
++    }
++
++    #[test]
++    fn piercing_hits_allow_one_more_target_than_the_level() {
++        assert_eq!(piercing_hit_limit(1), 2);
++        assert_eq!(piercing_hit_limit(4), 5);
++    }
++
++    #[test]
++    fn arrow_effect_duration_scale_floors_and_clamps_to_one_tick() {
++        assert_eq!(ArrowEntity::scale_arrow_effect_duration(900, 0.125), 112);
++        assert_eq!(ArrowEntity::scale_arrow_effect_duration(160, 0.125), 20);
++        assert_eq!(ArrowEntity::scale_arrow_effect_duration(1, 0.125), 1);
++        assert_eq!(ArrowEntity::scale_arrow_effect_duration(-1, 0.125), -1);
++        assert_eq!(ArrowEntity::scale_arrow_effect_duration(0, 0.125), 0);
++    }
+ }

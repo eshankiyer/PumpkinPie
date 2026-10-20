@@ -1,0 +1,51 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AbstractChestBoat",
+    "vanilla_path": "net/minecraft/world/entity/vehicle/boat/AbstractChestBoat.java",
+    "rust_file": "crates/pumpkin/src/entity/vehicle/chest_boat.rs",
+    "total_methods": 24,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "clearContent",
+      "clearItemStacks",
+      "getContainerLootTableSeed",
+      "getContainerSize",
+      "getItemStacks",
+      "getMaxPassengers",
+      "getSinglePassengerXOffset",
+      "removeItem",
+      "removeItemNoUpdate",
+      "setChanged",
+      "setContainerLootTable",
+      "setContainerLootTableSeed",
+      "stillValid",
+      "stopOpen"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "AbstractFurnaceBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/furnace.rs",
+    "total_methods": 21,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 10,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "awardUsedRecipes",
+      "awardUsedRecipesAndPopExperience",
+      "canPlaceItemThroughFace",
+      "canTakeItemThroughFace",
+      "fillStackedContents",
+      "getBurnDuration",
+      "getContainerSize",
+      "getRecipesToAwardAndPopExperience",
+      "preRemoveSideEffects",
+      "setItems",
+      "setRecipeUsed"
+    ]
+  }
+]

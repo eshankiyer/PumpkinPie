@@ -1,0 +1,30 @@
+[
+  {
+    "subsystem": "commands",
+    "vanilla_class": "Commands",
+    "vanilla_path": "net/minecraft/commands/Commands.java",
+    "rust_file": "crates/pumpkin/src/command/commands/mod.rs",
+    "total_methods": 23,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 7,
+    "absent_workspace_wide": [
+      "createCompilationContext",
+      "createValidationContext",
+      "createValidator",
+      "enabledFeatures",
+      "executeCommandInContext",
+      "getDispatcher",
+      "getOrThrow",
+      "isExecutable",
+      "isRestricted",
+      "listRegistryKeys",
+      "mapSource",
+      "parent",
+      "performPrefixedCommand",
+      "sendCommands",
+      "trimOptionalPrefix",
+      "validateParseResults"
+    ],
+    "note": "round12 broader pool: leads 1-16 of 16 for Commands"
+  }
+]

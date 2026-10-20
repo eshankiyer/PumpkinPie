@@ -1,0 +1,21 @@
+diff --git a/pumpkin/src/entity/living.rs b/pumpkin/src/entity/living.rs
+index 6f56270..531b84c 100644
+--- a/pumpkin/src/entity/living.rs
++++ b/pumpkin/src/entity/living.rs
+@@ -461,13 +461,13 @@ impl LivingEntity {
+         self.entity.entity_id
+     }
+ 
+-    pub async fn add_effect(&self, effect: Effect) {
++    pub async fn add_effect(&self, effect: Effect, scale: f32) {
+         // Apply instant effects immediately before storing
+         if effect.effect_type == &StatusEffect::INSTANT_HEALTH {
+-            let heal_amount = 4.0 * (1 << effect.amplifier) as f32;
++            let heal_amount = 4.0 * (1 << effect.amplifier) as f32 * scale;
+             self.heal(heal_amount);
+         } else if effect.effect_type == &StatusEffect::INSTANT_DAMAGE {
+-            let damage_amount = 6.0 * (1 << effect.amplifier) as f32;
++            let damage_amount = 6.0 * (1 << effect.amplifier) as f32 * scale;
+             if let Some(dyn_self) = self
+                 .entity
+                 .world

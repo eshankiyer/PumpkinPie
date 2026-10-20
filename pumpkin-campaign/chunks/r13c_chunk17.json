@@ -1,0 +1,22 @@
+[
+  {
+    "subsystem": "storage",
+    "vanilla_class": "LootTable",
+    "vanilla_path": "net/minecraft/world/level/storage/loot/LootTable.java",
+    "rust_file": "crates/pumpkin-util/src/loot_table.rs",
+    "total_methods": 13,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 4,
+    "absent_workspace_wide": [
+      "createStackSplitter",
+      "getParamSet",
+      "getRandomItems",
+      "getRandomItemsRaw",
+      "lootTable",
+      "setParamSet",
+      "setRandomSequence",
+      "withPool"
+    ],
+    "note": "round13 broader pool: leads 1-8 of 8 for LootTable"
+  }
+]

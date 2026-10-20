@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "DispenserBlock",
+    "vanilla_path": "net/minecraft/world/level/block/DispenserBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/dispenser.rs",
+    "total_methods": 17,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 7,
+    "absent_workspace_wide": [
+      "affectNeighborsAfterRemoval",
+      "createBlockStateDefinition",
+      "dispenseFrom",
+      "getDispenseMethod",
+      "getDispensePosition",
+      "newBlockEntity",
+      "registerBehavior",
+      "registerProjectileBehavior",
+      "useWithoutItem"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for DispenserBlock"
+  }
+]

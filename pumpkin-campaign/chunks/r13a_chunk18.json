@@ -1,0 +1,22 @@
+[
+  {
+    "subsystem": "material",
+    "vanilla_class": "FlowingFluid",
+    "vanilla_path": "net/minecraft/world/level/material/FlowingFluid.java",
+    "rust_file": "crates/pumpkin/src/block/fluid/flowing_trait.rs",
+    "total_methods": 21,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 8,
+    "absent_workspace_wide": [
+      "createFluidStateDefinition",
+      "equals",
+      "getFlow",
+      "getLegacyLevel",
+      "getOwnHeight",
+      "getSlopeDistance",
+      "hashCode",
+      "rehash"
+    ],
+    "note": "round13 broader pool: leads 1-8 of 8 for FlowingFluid"
+  }
+]

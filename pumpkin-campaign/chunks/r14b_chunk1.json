@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Activity",
+    "vanilla_path": "net/minecraft/world/entity/schedule/Activity.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/mod.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "equals",
+      "hashCode"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AngerManagement",
+    "vanilla_path": "net/minecraft/world/entity/monster/warden/AngerManagement.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/warden_anger.rs",
+    "total_methods": 7,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "compare",
+      "getActiveEntity"
+    ]
+  },
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "AnvilMenu",
+    "vanilla_path": "net/minecraft/world/inventory/AnvilMenu.java",
+    "rust_file": "crates/pumpkin-inventory/src/anvil/anvil_screen_handler.rs",
+    "total_methods": 7,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isValidBlock",
+      "setItemName"
+    ]
+  },
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "ArmorSlot",
+    "vanilla_path": "net/minecraft/world/inventory/ArmorSlot.java",
+    "rust_file": "crates/pumpkin-inventory/src/slot.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mayPlace",
+      "setByPlayer"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "ArrowItem",
+    "vanilla_path": "net/minecraft/world/item/ArrowItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/arrow.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "asProjectile",
+      "createArrow"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BeaconBlock",
+    "vanilla_path": "net/minecraft/world/level/block/BeaconBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/beacon.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "newBlockEntity",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Behavior",
+    "vanilla_path": "net/minecraft/world/entity/ai/behavior/Behavior.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/behavior/mod.rs",
+    "total_methods": 13,
+    "in_declaring_file": 11,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "debugString",
+      "hasRequiredMemories"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "BendingTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/BendingTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/bending.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BigDripleafBlock",
+    "vanilla_path": "net/minecraft/world/level/block/BigDripleafBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/big_dripleaf.rs",
+    "total_methods": 19,
+    "in_declaring_file": 8,
+    "elsewhere_in_workspace": 9,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getCollisionShape"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlastFurnaceBlock",
+    "vanilla_path": "net/minecraft/world/level/block/BlastFurnaceBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/blast_furnace.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick",
+      "newBlockEntity"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlastFurnaceBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/BlastFurnaceBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/blast_furnace.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createMenu",
+      "getBurnDuration"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "BlendingData",
+    "vanilla_path": "net/minecraft/world/level/levelgen/blending/BlendingData.java",
+    "rust_file": "crates/pumpkin-world/src/generation/blender/blending_data.rs",
+    "total_methods": 9,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getAreaWithOldGeneration",
+      "sideByGenerationAge"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BrushableBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/BrushableBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/brushable_block.rs",
+    "total_methods": 8,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getUpdatePacket",
+      "getUpdateTag"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CactusBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CactusBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/cactus.rs",
+    "total_methods": 10,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getCollisionShape"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CalibratedSculkSensorBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/CalibratedSculkSensorBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/calibrated_sculk_sensor.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "canReceiveVibration",
+      "createVibrationUser"
+    ]
+  }
+]

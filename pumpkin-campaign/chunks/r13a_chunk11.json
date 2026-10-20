@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "StonecutterMenu",
+    "vanilla_path": "net/minecraft/world/inventory/StonecutterMenu.java",
+    "rust_file": "crates/pumpkin-inventory/src/stonecutter_screen_handler.rs",
+    "total_methods": 15,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "getNumberOfVisibleRecipes",
+      "getSelectedRecipeIndex",
+      "getVisibleRecipes",
+      "hasInputItem",
+      "mayPlace",
+      "quickMoveStack",
+      "registerUpdateListener",
+      "removed",
+      "setChanged",
+      "slotsChanged",
+      "stillValid"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for StonecutterMenu"
+  }
+]

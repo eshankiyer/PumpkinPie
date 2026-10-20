@@ -1,0 +1,77 @@
+[
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "StructurePlaceSettings",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/templatesystem/StructurePlaceSettings.java",
+    "rust_file": "crates/pumpkin-world/src/generation/structure/template/structure_template.rs",
+    "total_methods": 23,
+    "in_declaring_file": 18,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "popProcessor",
+      "setLiquidSettings",
+      "setRandom"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SweetBerryBushBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SweetBerryBushBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/sweet_berry_bush.rs",
+    "total_methods": 12,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "useItemOn",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "TemptGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/TemptGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/tempt.rs",
+    "total_methods": 9,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "canScare",
+      "navigateTowards",
+      "stopNavigation"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TestBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TestBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/test_block.rs",
+    "total_methods": 9,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "setModeOnStack",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TripWireBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TripWireBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/tripwire.rs",
+    "total_methods": 14,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "affectNeighborsAfterRemoval",
+      "createBlockStateDefinition",
+      "getEntityInsideCollisionShape"
+    ]
+  }
+]

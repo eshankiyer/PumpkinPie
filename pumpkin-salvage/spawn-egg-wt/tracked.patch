@@ -1,0 +1,325 @@
+diff --git a/crates/pumpkin/src/entity/passive/bee.rs b/crates/pumpkin/src/entity/passive/bee.rs
+index 425c4bc5..370818d4 100644
+--- a/crates/pumpkin/src/entity/passive/bee.rs
++++ b/crates/pumpkin/src/entity/passive/bee.rs
+@@ -17,22 +17,26 @@ use pumpkin_data::{Block, effect::StatusEffect, potion::Effect};
+ use pumpkin_data::{entity::EntityType, meta_data_type::MetaDataType, tracked_data::TrackedData};
+ use pumpkin_nbt::compound::NbtCompound;
+ use pumpkin_nbt::tag::NbtTag;
+-use pumpkin_protocol::java::client::play::Metadata;
++use pumpkin_protocol::java::client::play::{CWorldEvent, Metadata};
+ use pumpkin_util::Difficulty;
+ use pumpkin_util::math::position::BlockPos;
+ use pumpkin_util::math::vector3::Vector3;
++use pumpkin_world::world::BlockFlags;
+ use rand::RngExt;
+ 
+ use crate::entity::{
+     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+     ai::goal::{
+-        Controls, Goal, GoalFuture, look_around::RandomLookAroundGoal,
+-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
+-        swim::SwimGoal, wander_around::WanderAroundGoal,
++        Controls, Goal, GoalFuture, active_target::ActiveTargetGoal,
++        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
++        melee_attack::MeleeAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
++        wander_around::WanderAroundGoal,
+     },
+     ai::pathfinder::NavigatorGoal,
+     mob::{Mob, MobEntity},
++    persistent_anger::PersistentAnger,
+ };
++use crate::{block::entities::beehive::BeehiveBlockEntity, world::World};
+ 
+ /// `Bee.FLAG_ROLL`, `Bee.FLAG_HAS_STUNG`, `Bee.FLAG_HAS_NECTAR`.
+ const FLAG_ROLL: u8 = 2;
+@@ -98,6 +102,8 @@ pub struct BeeEntity {
+     under_water_ticks: AtomicI32,
+     /// `Bee.remainingCooldownBeforeLocatingNewFlower`.
+     flower_cooldown: AtomicI32,
++    /// `Bee`'s `NeutralMob` persistent anger state.
++    pub persistent_anger: PersistentAnger,
+ }
+ 
+ impl BeeEntity {
+@@ -117,6 +123,7 @@ impl BeeEntity {
+                 rand::rng()
+                     .random_range(MIN_FIND_FLOWER_RETRY_COOLDOWN..=MAX_FIND_FLOWER_RETRY_COOLDOWN),
+             ),
++            persistent_anger: PersistentAnger::default(),
+         };
+         let mob_arc = Arc::new(bee);
+         let bee_weak = Arc::downgrade(&mob_arc);
+@@ -134,19 +141,48 @@ impl BeeEntity {
+ 
+             goal_selector.add_goal(0, Box::new(BeeAttackGoal::new(bee_weak.clone())));
+             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
+-            goal_selector.add_goal(2, Box::new(BeePollinateGoal::new(bee_weak)));
+-            goal_selector.add_goal(3, Box::new(WanderAroundGoal::new(1.0)));
++            goal_selector.add_goal(2, Box::new(BeePollinateGoal::new(bee_weak.clone())));
++            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(1.0)));
++            goal_selector.add_goal(7, Box::new(BeeGrowCropGoal::new(bee_weak.clone())));
+             goal_selector.add_goal(
+                 4,
+-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
++                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 6.0),
+             );
+             goal_selector.add_goal(5, Box::new(RandomLookAroundGoal::default()));
+ 
+             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+-            // `Bee.BeeHurtByOtherGoal extends HurtByTargetGoal`. Its `setAlertOthers` alerting of
+-            // nearby bees and `BeeBecomeAngryTargetGoal` both need the per-player persistent
+-            // anger state Pumpkin does not track yet, so only the revenge part is ported.
+             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
++            let angry_weak = mob_weak.clone();
++            target_selector.add_goal(
++                2,
++                Box::new(ActiveTargetGoal::new(
++                    &mob_arc.mob_entity,
++                    &EntityType::PLAYER,
++                    10,
++                    true,
++                    false,
++                    Some(
++                        move |target: crate::entity::ai::target_predicate::TargetData,
++                              world: Arc<World>| {
++                            let angry_weak = angry_weak.clone();
++                            async move {
++                                let Some(mob) = angry_weak.upgrade() else {
++                                    return false;
++                                };
++                                let Some(anger) = mob.persistent_anger() else {
++                                    return false;
++                                };
++                                if anger.is_angry_at(target.entity_uuid).await {
++                                    return true;
++                                }
++                                let universal_anger =
++                                    world.level_info.load().game_rules.universal_anger;
++                                anger.is_angry_at_all_players(universal_anger).await
++                            }
++                        },
++                    ),
++                )),
++            );
+         };
+ 
+         mob_arc
+@@ -240,6 +276,28 @@ impl BeeEntity {
+     fn reset_ticks_without_nectar(&self) {
+         self.ticks_without_nectar.store(0, Relaxed);
+     }
++
++    /// `Bee.isHiveValid`: the remembered position must still resolve to a beehive block entity
++    /// and remain within vanilla's 48-block limit.
++    fn is_hive_valid(&self, world: &World) -> bool {
++        let Some(hive_pos) = self.hive_pos.load() else {
++            return false;
++        };
++        let bee_pos = self.mob_entity.living_entity.entity.block_pos.load();
++        let dx = i64::from(hive_pos.0.x - bee_pos.0.x);
++        let dy = i64::from(hive_pos.0.y - bee_pos.0.y);
++        let dz = i64::from(hive_pos.0.z - bee_pos.0.z);
++        if dx * dx + dy * dy + dz * dz >= 48 * 48 {
++            return false;
++        }
++        world
++            .get_block_entity(&hive_pos)
++            .is_some_and(|entity| entity.as_any().is::<BeehiveBlockEntity>())
++    }
++
++    fn increment_crops_grown_since_pollination(&self) {
++        self.crops_grown_since_pollination.fetch_add(1, Relaxed);
++    }
+ }
+ 
+ /// `Bee.attractsBees`.
+@@ -282,11 +340,23 @@ impl BeeAttackGoal {
+ 
+ impl Goal for BeeAttackGoal {
+     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+-        Box::pin(async move { self.can_sting() && self.melee.can_start(mob).await })
++        Box::pin(async move {
++            let Some(bee) = self.bee.upgrade() else {
++                return false;
++            };
++            bee.persistent_anger.is_angry() && self.can_sting() && self.melee.can_start(mob).await
++        })
+     }
+ 
+     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+-        Box::pin(async move { self.can_sting() && self.melee.should_continue(mob).await })
++        Box::pin(async move {
++            let Some(bee) = self.bee.upgrade() else {
++                return false;
++            };
++            bee.persistent_anger.is_angry()
++                && self.can_sting()
++                && self.melee.should_continue(mob).await
++        })
+     }
+ 
+     fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+@@ -334,6 +404,143 @@ pub struct BeePollinateGoal {
+     pollinating_ticks: i32,
+ }
+ 
++/// `Bee.BeeGrowCropGoal`.
++pub struct BeeGrowCropGoal {
++    bee: Weak<BeeEntity>,
++}
++
++impl BeeGrowCropGoal {
++    #[must_use]
++    pub const fn new(bee: Weak<BeeEntity>) -> Self {
++        Self { bee }
++    }
++
++    fn can_grow(block: &Block, state: &BlockState) -> Option<pumpkin_data::BlockStateId> {
++        if !block.has_tag(&tag::Block::MINECRAFT_BEE_GROWABLES) {
++            return None;
++        }
++
++        if block.id == Block::CAVE_VINES.id {
++            return None;
++        }
++        if block.id == Block::CAVE_VINES_PLANT.id {
++            let props = block.properties(state.id)?.to_props();
++            if props
++                .iter()
++                .any(|(name, value)| *name == "berries" && *value == "true")
++            {
++                return None;
++            }
++            let new_props: Vec<(&str, &str)> = props
++                .iter()
++                .map(|(name, value)| {
++                    if *name == "berries" {
++                        (*name, "true")
++                    } else {
++                        (*name, *value)
++                    }
++                })
++                .collect();
++            return Some(block.from_properties(&new_props).to_state_id(block));
++        }
++
++        let props = block.properties(state.id)?.to_props();
++        let age = props
++            .iter()
++            .find(|(name, _)| *name == "age")
++            .and_then(|(_, value)| value.parse::<u8>().ok())?;
++        if block.id == Block::PITCHER_CROP.id {
++            return None;
++        }
++        let max_age = match block.id {
++            id if id == Block::BEETROOTS.id || id == Block::SWEET_BERRY_BUSH.id => 3,
++            id if id == Block::TORCHFLOWER_CROP.id => 1,
++            _ => 7,
++        };
++        if age >= max_age {
++            return None;
++        }
++
++        let next_age = (age + 1).to_string();
++        let new_props: Vec<(&str, &str)> = props
++            .iter()
++            .map(|(name, value)| {
++                if *name == "age" {
++                    (*name, next_age.as_str())
++                } else {
++                    (*name, *value)
++                }
++            })
++            .collect();
++        Some(block.from_properties(&new_props).to_state_id(block))
++    }
++}
++
++impl Goal for BeeGrowCropGoal {
++    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
++        Box::pin(async move {
++            let Some(bee) = self.bee.upgrade() else {
++                return false;
++            };
++            if bee.persistent_anger.is_angry()
++                || bee.crops_grown_since_pollination.load(Relaxed) >= 10
++                || mob.get_random().random::<f32>() < 0.3
++            {
++                return false;
++            }
++            bee.has_nectar() && bee.is_hive_valid(&mob.get_entity().world.load())
++        })
++    }
++
++    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
++        self.can_start(mob)
++    }
++
++    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
++        Box::pin(async move {
++            let Some(bee) = self.bee.upgrade() else {
++                return;
++            };
++            if mob.get_random().random_range(0..30) != 0 {
++                return;
++            }
++
++            let world = mob.get_entity().world.load_full();
++            let origin = mob.get_entity().block_pos.load();
++            for distance in 1..=2 {
++                let target = BlockPos::new(origin.0.x, origin.0.y - distance, origin.0.z);
++                let (block, state) = world.get_block_and_state_id(&target);
++                let state = BlockState::from_id(state);
++                let Some(new_state_id) = Self::can_grow(block, &state) else {
++                    continue;
++                };
++
++                if block.id == Block::CAVE_VINES_PLANT.id {
++                    world
++                        .set_block_state(&target, new_state_id, BlockFlags::NOTIFY_LISTENERS)
++                        .await;
++                }
++                world.broadcast_to_chunk(
++                    target.chunk_position(),
++                    &CWorldEvent::new(2011, target, 15, false),
++                );
++                world
++                    .set_block_state(&target, new_state_id, BlockFlags::NOTIFY_ALL)
++                    .await;
++                bee.increment_crops_grown_since_pollination();
++            }
++        })
++    }
++
++    fn should_run_every_tick(&self) -> bool {
++        true
++    }
++
++    fn controls(&self) -> Controls {
++        Controls::MOVE
++    }
++}
++
+ /// `BeePollinateGoal.MIN_POLLINATION_TICKS`.
+ const MIN_POLLINATION_TICKS: i32 = 400;
+ /// `BeePollinateGoal.MAX_POLLINATING_TICKS`.
+@@ -607,6 +814,7 @@ impl NBTStorage for BeeEntity {
+             );
+             self.hive_pos.store(block_pos_from_nbt(nbt, "hive_pos"));
+             self.flower_pos.store(block_pos_from_nbt(nbt, "flower_pos"));
++            self.persistent_anger.read_nbt(nbt).await;
+         })
+     }
+ }
+@@ -616,6 +824,10 @@ impl Mob for BeeEntity {
+         &self.mob_entity
+     }
+ 
++    fn persistent_anger(&self) -> Option<&PersistentAnger> {
++        Some(&self.persistent_anger)
++    }
++
+     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+         Box::pin(async move {
+             self.mob_entity.living_entity.entity.send_meta_data(

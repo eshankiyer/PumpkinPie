@@ -1,0 +1,5 @@
+| Class | NOT_A_GAP (existing file) OR methods IMPLEMENTED | vanilla file:lines read | new call sites wired |
+|---|---|---|---|
+| TrialSpawnerStateData | NOT_A_GAP (`crates/pumpkin/src/block/entities/trial_spawner.rs`) | `net/minecraft/world/level/block/entity/trialspawner/TrialSpawnerStateData.java:41-323` | N/A; existing `TrialSpawnerBlockEntity` ticker, persistence, and trial-spawner block registration |
+| AbstractMinecartContainer | NOT_A_GAP (`crates/pumpkin/src/entity/vehicle/minecart/container.rs`, dispatched by `crates/pumpkin/src/entity/vehicle/minecart.rs`) | `net/minecraft/world/entity/vehicle/minecart/AbstractMinecartContainer.java:25-166` | N/A; existing chest/hopper minecart dispatch, NBT, interaction, slowdown, comparator, and drops |
+| MapItemSavedData | NOT_A_GAP (`crates/pumpkin/src/world/map.rs`, with `crates/pumpkin/src/block/entities/map.rs`) | `net/minecraft/world/level/saveddata/maps/MapItemSavedData.java:43-613` | N/A; existing `MapManager`, map-item post-processing/banner use, and `Player::tick_maps` call sites |

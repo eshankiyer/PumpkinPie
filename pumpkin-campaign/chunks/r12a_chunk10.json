@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "Block",
+    "vanilla_path": "net/minecraft/world/level/block/Block.java",
+    "rust_file": "crates/pumpkin-data/src/blocks.rs",
+    "total_methods": 59,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 11,
+    "absent_workspace_wide": [
+      "animateTick",
+      "asBlock",
+      "asItem",
+      "box",
+      "boxZ",
+      "boxes",
+      "builtInRegistryHolder",
+      "byItem",
+      "canSupportCenter",
+      "canSupportRigidBlock",
+      "column",
+      "createBlockStateDefinition",
+      "cube",
+      "defaultBlockState",
+      "dropFromBlockInteractLootTable",
+      "dropFromExplosion",
+      "dropFromLootTable",
+      "dropResources",
+      "equals",
+      "fallOn",
+      "getBounceRestitution",
+      "getDrops",
+      "getExplosionResistance",
+      "getFriction",
+      "getJumpFactor"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 48 for Block"
+  }
+]

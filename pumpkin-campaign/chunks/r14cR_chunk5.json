@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "RandomStrollGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/RandomStrollGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/wander_around.rs",
+    "total_methods": 6,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setInterval"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "RangedBowAttackGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/RangedBowAttackGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/ranged_bow_attack.rs",
+    "total_methods": 8,
+    "in_declaring_file": 7,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setMinAttackInterval"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "RedstoneLampBlock",
+    "vanilla_path": "net/minecraft/world/level/block/RedstoneLampBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/redstone_lamp.rs",
+    "total_methods": 4,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "RootedDirtBlock",
+    "vanilla_path": "net/minecraft/world/level/block/RootedDirtBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/rooted_dirt.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getParticlePos"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "Rotation",
+    "vanilla_path": "net/minecraft/world/level/block/Rotation.java",
+    "rust_file": "crates/pumpkin-data/src/block_rotation.rs",
+    "total_methods": 6,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getShuffled"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "RuleTest",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/templatesystem/RuleTest.java",
+    "rust_file": "crates/pumpkin-world/src/generation/rule/mod.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "testAgainstWorldState"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SaplingBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SaplingBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/sapling.rs",
+    "total_methods": 8,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "ScaffoldingBlockItem",
+    "vanilla_path": "net/minecraft/world/item/ScaffoldingBlockItem.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/scaffolding.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mustSurvive"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SculkVeinBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SculkVeinBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/sculk_vein.rs",
+    "total_methods": 10,
+    "in_declaring_file": 8,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSpreader"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SeaPickleBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SeaPickleBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/sea_pickles.rs",
+    "total_methods": 13,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 10,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundAcceptCodeOfConductPacket",
+    "vanilla_path": "net/minecraft/network/protocol/configuration/ServerboundAcceptCodeOfConductPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/config/accept_code_of_conduct.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundAttackPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundAttackPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/attack.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundChangeDifficultyPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundChangeDifficultyPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/change_difficulty.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundChangeGameModePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundChangeGameModePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/change_game_mode.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundChatAckPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundChatAckPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/chat_ack.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  }
+]

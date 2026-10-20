@@ -1,0 +1,15 @@
+{
+  "name": "pumpkin-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "dependencies": {
+    "mineflayer": "^4.37.1",
+    "rcon-client": "^4.2.5"
+  }
+}

@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "ItemStack",
+    "vanilla_path": "net/minecraft/world/item/ItemStack.java",
+    "rust_file": "crates/pumpkin-data/src/item_stack/mod.rs",
+    "total_methods": 98,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 18,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isEnchantable",
+      "isEnchanted",
+      "isItemEnabled",
+      "isSameItem",
+      "isSameItemSameComponents",
+      "lenientOptionalFieldOf",
+      "limitSize",
+      "listMatches",
+      "matchesIgnoringComponents",
+      "mineBlock",
+      "onCraftedBy",
+      "onCraftedBySystem",
+      "onDestroyed",
+      "overrideOtherStackedOnMe",
+      "overrideStackedOnOther",
+      "postHurtEnemy",
+      "releaseUsing",
+      "setDamageValue",
+      "setPopTime",
+      "shrink"
+    ],
+    "note": "leads 41-60 of 67 for ItemStack"
+  }
+]

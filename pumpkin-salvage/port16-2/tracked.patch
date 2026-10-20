@@ -1,0 +1,243 @@
+diff --git a/crates/pumpkin-world/src/generation/feature/features/coral/coral_mushroom.rs b/crates/pumpkin-world/src/generation/feature/features/coral/coral_mushroom.rs
+index 2a1c6538..aaa3cd61 100644
+--- a/crates/pumpkin-world/src/generation/feature/features/coral/coral_mushroom.rs
++++ b/crates/pumpkin-world/src/generation/feature/features/coral/coral_mushroom.rs
+@@ -31,25 +31,29 @@ impl CoralMushroomFeature {
+         for m in 0..=j {
+             for n in 0..=i {
+                 for o in 0..=k {
+-                    let mut pos = pos;
+-                    pos = pos.offset(Vector3::new(m, n, o));
+-                    pos = pos.down_height(l);
++                    // Vanilla CoralMushroomFeature.placeFeature sets the mutable position
++                    // from the untouched origin on every iteration (CoralMushroomFeature.java:22-28).
++                    let candidate = pos.offset(Vector3::new(m, n, o)).down_height(l);
+ 
+                     let condition_a = (m != 0 && m != j) || (n != 0 && n != i);
+                     let condition_b = (o != 0 && o != k) || (n != 0 && n != i);
+                     let condition_c = (m != 0 && m != j) || (o != 0 && o != k);
+                     let condition_d = m == 0 || m == j || n == 0 || n == i || o == 0 || o == k;
+-                    let random_check = random.next_f32() < 0.1f32;
+ 
+-                    if !((condition_a && condition_b && condition_c && condition_d)
+-                        && !random_check
++                    // Vanilla CoralMushroomFeature.placeFeature draws nextFloat only after
++                    // all four shape checks pass (CoralMushroomFeature.java:29-34).
++                    if condition_a
++                        && condition_b
++                        && condition_c
++                        && condition_d
++                        && random.next_f32() >= 0.1f32
+                         && CoralFeature::generate_coral_piece(
+                             chunk,
+                             block_registry,
+                             random,
+                             block,
+-                            pos,
+-                        ))
++                            candidate,
++                        )
+                     {}
+                 }
+             }
+@@ -57,3 +61,21 @@ impl CoralMushroomFeature {
+         true
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn candidate_position_is_origin_relative_not_self_fed() {
++        // This test covers the origin-relative assignment in CoralMushroomFeature.java:22-28.
++        let origin = BlockPos::new(100, 64, -200);
++        let (m, n, o, l) = (2, 1, 3, 2);
++
++        let candidate = origin.offset(Vector3::new(m, n, o)).down_height(l);
++
++        assert_eq!(candidate.0.x, origin.0.x + m);
++        assert_eq!(candidate.0.y, origin.0.y + n - l);
++        assert_eq!(candidate.0.z, origin.0.z + o);
++    }
++}
+diff --git a/crates/pumpkin/src/block/blocks/coral/coral_fan.rs b/crates/pumpkin/src/block/blocks/coral/coral_fan.rs
+index 43af2397..41af68ef 100644
+--- a/crates/pumpkin/src/block/blocks/coral/coral_fan.rs
++++ b/crates/pumpkin/src/block/blocks/coral/coral_fan.rs
+@@ -2,7 +2,7 @@ use crate::{
+     block::{
+         BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, CanPlaceAtArgs,
+         GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+-        blocks::coral::{is_dead_coral, scan_for_water, try_schedule_die_tick},
++        blocks::coral::{is_dead_coral, scan_for_water_waterlogged, try_schedule_die_tick},
+     },
+     entity::EntityBase,
+ };
+@@ -107,7 +107,13 @@ impl BlockBehaviour for CoralFanBlock {
+ 
+     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+         Box::pin(async move {
+-            if !scan_for_water(args.world, args.position).await {
++            if !scan_for_water_waterlogged(
++                args.block.is_waterlogged(args.state_id),
++                args.world,
++                args.position,
++            )
++            .await
++            {
+                 try_schedule_die_tick(args.block, args.world, args.position).await;
+             }
+         })
+@@ -115,9 +121,15 @@ impl BlockBehaviour for CoralFanBlock {
+ 
+     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
+         Box::pin(async move {
+-            if !scan_for_water(args.world, args.position).await && !is_dead_coral(args.block) {
+-                let current_state = args.world.get_block_state(args.position);
+-
++            let current_state = args.world.get_block_state(args.position);
++            if !scan_for_water_waterlogged(
++                args.block.is_waterlogged(current_state.id),
++                args.world,
++                args.position,
++            )
++            .await
++                && !is_dead_coral(args.block)
++            {
+                 let Some(dead_block) = get_dead_type(args.block.id) else {
+                     return;
+                 };
+@@ -174,6 +186,19 @@ impl BlockBehaviour for CoralFanBlock {
+                 }
+             }
+ 
++            // Vanilla CoralFanBlock.updateShape calls tryScheduleDieTick on every neighbor
++            // update after the survival check (CoralFanBlock.java:45-64).
++            if !is_dead_coral(args.block)
++                && !scan_for_water_waterlogged(
++                    args.block.is_waterlogged(args.state_id),
++                    args.world,
++                    args.position,
++                )
++                .await
++            {
++                try_schedule_die_tick(args.block, args.world, args.position).await;
++            }
++
+             args.state_id
+         })
+     }
+diff --git a/crates/pumpkin/src/block/blocks/coral/coral_plant.rs b/crates/pumpkin/src/block/blocks/coral/coral_plant.rs
+index c5e70965..3e47c636 100644
+--- a/crates/pumpkin/src/block/blocks/coral/coral_plant.rs
++++ b/crates/pumpkin/src/block/blocks/coral/coral_plant.rs
+@@ -8,7 +8,7 @@ use pumpkin_world::world::BlockFlags;
+ use crate::block::{
+     BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+     OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+-    blocks::coral::{is_dead_coral, scan_for_water, try_schedule_die_tick},
++    blocks::coral::{is_dead_coral, scan_for_water_waterlogged, try_schedule_die_tick},
+ };
+ pub struct CoralPlantBlock;
+ impl BlockMetadata for CoralPlantBlock {
+@@ -35,15 +35,29 @@ impl BlockBehaviour for CoralPlantBlock {
+     }
+     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+         Box::pin(async move {
+-            if !scan_for_water(args.world, args.position).await && !is_dead_coral(args.block) {
++            if !scan_for_water_waterlogged(
++                args.block.is_waterlogged(args.state_id),
++                args.world,
++                args.position,
++            )
++            .await
++                && !is_dead_coral(args.block)
++            {
+                 try_schedule_die_tick(args.block, args.world, args.position).await;
+             }
+         })
+     }
+     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
+         Box::pin(async move {
+-            if !scan_for_water(args.world, args.position).await && !is_dead_coral(args.block) {
+-                let current_state = args.world.get_block_state(args.position);
++            let current_state = args.world.get_block_state(args.position);
++            if !scan_for_water_waterlogged(
++                args.block.is_waterlogged(current_state.id),
++                args.world,
++                args.position,
++            )
++            .await
++                && !is_dead_coral(args.block)
++            {
+                 let dead_block_state_id = {
+                     let props =
+                         CoralPlantLikeProperties::from_state_id(current_state.id, args.block);
+@@ -74,6 +88,20 @@ impl BlockBehaviour for CoralPlantBlock {
+                     return BlockStateId::AIR;
+                 }
+             }
++
++            // Vanilla CoralPlantBlock.updateShape calls tryScheduleDieTick on every neighbor
++            // update after the survival check (CoralPlantBlock.java:49-68).
++            if !is_dead_coral(args.block)
++                && !scan_for_water_waterlogged(
++                    args.block.is_waterlogged(args.state_id),
++                    args.world,
++                    args.position,
++                )
++                .await
++            {
++                try_schedule_die_tick(args.block, args.world, args.position).await;
++            }
++
+             args.state_id
+         })
+     }
+diff --git a/crates/pumpkin/src/block/blocks/coral/mod.rs b/crates/pumpkin/src/block/blocks/coral/mod.rs
+index a4658e66..98cee811 100644
+--- a/crates/pumpkin/src/block/blocks/coral/mod.rs
++++ b/crates/pumpkin/src/block/blocks/coral/mod.rs
+@@ -1,5 +1,3 @@
+-use std::sync::Arc;
+-
+ use pumpkin_data::Block;
+ use pumpkin_data::BlockDirection;
+ use pumpkin_data::tag::Taggable;
+@@ -12,7 +10,9 @@ pub mod coral_block;
+ pub mod coral_fan;
+ pub mod coral_plant;
+ 
+-pub async fn scan_for_water(world: &Arc<World>, pos: &BlockPos) -> bool {
++/// Scans neighboring fluid states as in the non-waterlogged branch of
++/// `BaseCoralPlantTypeBlock.scanForWater` (BaseCoralPlantTypeBlock.java:43-54).
++pub async fn scan_for_water(world: &World, pos: &BlockPos) -> bool {
+     for direction in BlockDirection::all() {
+         let neighbor_pos = pos.offset(direction.to_offset());
+         let block = world.get_fluid(&neighbor_pos);
+@@ -22,6 +22,12 @@ pub async fn scan_for_water(world: &Arc<World>, pos: &BlockPos) -> bool {
+     }
+     false
+ }
++
++/// Includes the block's own waterlogged state, matching vanilla's
++/// `BaseCoralPlantTypeBlock.scanForWater` (BaseCoralPlantTypeBlock.java:43-54).
++pub async fn scan_for_water_waterlogged(waterlogged: bool, world: &World, pos: &BlockPos) -> bool {
++    waterlogged || scan_for_water(world, pos).await
++}
+ fn is_dead_coral(block: &Block) -> bool {
+     block == &Block::DEAD_BRAIN_CORAL
+         || block == &Block::DEAD_BUBBLE_CORAL
+@@ -44,7 +50,9 @@ fn is_dead_coral(block: &Block) -> bool {
+         || block == &Block::DEAD_TUBE_CORAL_FAN
+         || block == &Block::DEAD_TUBE_CORAL_WALL_FAN
+ }
+-async fn try_schedule_die_tick(block: &Block, world: &Arc<World>, pos: &BlockPos) {
++/// Schedules the same 60-to-99 tick delay used by vanilla coral blocks
++/// (BaseCoralPlantTypeBlock.java:35-40).
++async fn try_schedule_die_tick(block: &Block, world: &World, pos: &BlockPos) {
+     let tick_delay = 60 + rand::rng().random_range(0..40);
+     world.schedule_block_tick(
+         block,

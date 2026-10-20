@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "SculkShriekerBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/SculkShriekerBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/sculk_shrieker.rs",
+    "total_methods": 15,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 1,
+    "absent_workspace_wide": [
+      "canReceiveVibration",
+      "getListenableEvents",
+      "getListener",
+      "getPositionSource",
+      "getVibrationData",
+      "getVibrationUser",
+      "onDataChanged",
+      "onReceiveVibration",
+      "preRemoveSideEffects",
+      "requiresAdjacentChunksToBeTicking"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for SculkShriekerBlockEntity"
+  }
+]

@@ -1,0 +1,5 @@
+ M crates/pumpkin/src/command/argument_types/mod.rs
+ M crates/pumpkin/src/command/commands/scoreboard.rs
+?? WAVE_REPORT.md
+?? WORKLIST.json
+?? crates/pumpkin/src/command/argument_types/score_holder.rs

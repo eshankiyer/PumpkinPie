@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "ItemEntity",
+    "vanilla_path": "net/minecraft/world/entity/item/ItemEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/item.rs",
+    "total_methods": 35,
+    "in_declaring_file": 16,
+    "elsewhere_in_workspace": 8,
+    "absent_workspace_wide": [
+      "fireImmune",
+      "getBlockPosBelowThatAffectsMyMovement",
+      "getSpin",
+      "getVisualRotationYInDegrees",
+      "ignoreExplosion",
+      "restoreFrom",
+      "setDefaultPickUpDelay",
+      "setNeverPickUp",
+      "setNoPickUpDelay",
+      "setPickUpDelay"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for ItemEntity"
+  }
+]

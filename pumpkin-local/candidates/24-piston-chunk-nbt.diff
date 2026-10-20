@@ -1,0 +1,23 @@
+diff --git a/pumpkin/src/block/entities/piston.rs b/pumpkin/src/block/entities/piston.rs
+index fececac..82e7c72 100644
+--- a/pumpkin/src/block/entities/piston.rs
++++ b/pumpkin/src/block/entities/piston.rs
+@@ -310,7 +310,17 @@ impl BlockEntity for PistonBlockEntity {
+ 
+     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
+         let mut nbt = NbtCompound::new();
+-        // TODO: pushed_block_state
++        let (block, _) = BlockState::from_id_with_block(self.pushed_block_state.id);
++        let mut child = NbtCompound::new();
++        child.put_string("Name", block.name.to_string());
++        if let Some(props) = block.properties(self.pushed_block_state.id) {
++            let mut properties = NbtCompound::new();
++            for (key, value) in props.to_props() {
++                properties.put_string(key, value.to_string());
++            }
++            child.put_compound("Properties", properties);
++        }
++        nbt.put_compound("blockState", child);
+         nbt.put_byte(FACING, self.facing.to_index() as i8);
+         nbt.put_float(LAST_PROGRESS, self.last_progress.load());
+         nbt.put_bool(EXTENDING, self.extending);

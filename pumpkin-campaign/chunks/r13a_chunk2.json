@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 109,
+    "elsewhere_in_workspace": 77,
+    "absent_workspace_wide": [
+      "getEntityData",
+      "getFluidJumpThreshold",
+      "getIndirectPassengers",
+      "getInputVector",
+      "getLightProbePosition",
+      "getLookAngle",
+      "getLootTable",
+      "getMotionDirection",
+      "getNearestViewDirection",
+      "getOnPos",
+      "getOnPosLegacy",
+      "getPassengerAttachmentPoint",
+      "getPassengerRidingPosition",
+      "getPassengersAndSelf",
+      "getPistonPushReaction",
+      "getPositionCodec",
+      "getPreciseBodyRotation",
+      "getPrimaryStepSoundBlockPos",
+      "getQuadLeashHolderOffsets",
+      "getRandomX"
+    ],
+    "note": "round13 leads 61-80 of 235 for Entity"
+  }
+]

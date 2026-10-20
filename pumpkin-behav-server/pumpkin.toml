@@ -1,0 +1,23 @@
+seed = "20260925"
+
+[networking.java]
+address = "127.0.0.1:25567"
+online_mode = false
+encryption = false
+view_distance = 6
+simulation_distance = 6
+
+[networking.bedrock]
+enabled = false
+
+[networking.query]
+enabled = false
+
+[networking.rcon]
+enabled = true
+address = "127.0.0.1:25577"
+password = "pumpkintest"
+max_connections = 0
+
+[networking.lan_broadcast]
+enabled = false

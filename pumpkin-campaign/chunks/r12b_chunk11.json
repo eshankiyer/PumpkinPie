@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/BlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/mod.rs",
+    "total_methods": 39,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 7,
+    "absent_workspace_wide": [
+      "addEntityType",
+      "applyComponents",
+      "clearRemoved",
+      "collectComponents",
+      "collectImplicitComponents",
+      "components",
+      "fillCrashReportCategory",
+      "getNameForReporting",
+      "getOrDefault",
+      "getPosFromTag",
+      "getUpdateTag",
+      "hasLevel",
+      "loadCustomOnly",
+      "loadWithComponents",
+      "preRemoveSideEffects",
+      "problemPath",
+      "registerDebugValues",
+      "removeComponentsFromTag",
+      "saveCustomOnly",
+      "saveWithFullMetadata",
+      "saveWithId",
+      "saveWithoutMetadata",
+      "setChanged",
+      "setComponents",
+      "setRemoved"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 26 for BlockEntity"
+  }
+]

@@ -1,0 +1,148 @@
+diff --git a/pumpkin/src/entity/living.rs b/pumpkin/src/entity/living.rs
+index 6f56270..e69ffdb 100644
+--- a/pumpkin/src/entity/living.rs
++++ b/pumpkin/src/entity/living.rs
+@@ -30,6 +30,7 @@ use crate::entity::attributes::AttributeInstance;
+ use crate::entity::attributes::Modifier;
+ use crate::entity::attributes::ModifierOperation;
+ use crate::entity::mob::slime::SlimeEntity;
++use crate::entity::player::is_undead;
+ use crate::entity::player::statistics::{CustomStatistic, StatisticCategory};
+ use crate::entity::{EntityBaseFuture, NbtFuture};
+ use crate::server::Server;
+@@ -465,10 +466,25 @@ impl LivingEntity {
+         // Apply instant effects immediately before storing
+         if effect.effect_type == &StatusEffect::INSTANT_HEALTH {
+             let heal_amount = 4.0 * (1 << effect.amplifier) as f32;
+-            self.heal(heal_amount);
++            if is_undead(self.entity.entity_type.id) {
++                if let Some(dyn_self) = self
++                    .entity
++                    .world
++                    .load()
++                    .get_entity_by_id(self.entity.entity_id)
++                {
++                    dyn_self
++                        .damage(&*dyn_self, heal_amount, DamageType::MAGIC)
++                        .await;
++                }
++            } else {
++                self.heal(heal_amount);
++            }
+         } else if effect.effect_type == &StatusEffect::INSTANT_DAMAGE {
+             let damage_amount = 6.0 * (1 << effect.amplifier) as f32;
+-            if let Some(dyn_self) = self
++            if is_undead(self.entity.entity_type.id) {
++                self.heal(damage_amount);
++            } else if let Some(dyn_self) = self
+                 .entity
+                 .world
+                 .load()
+diff --git a/pumpkin/src/entity/player.rs b/pumpkin/src/entity/player.rs
+index 32a83b4..0feb65c 100644
+--- a/pumpkin/src/entity/player.rs
++++ b/pumpkin/src/entity/player.rs
+@@ -413,6 +413,25 @@ pub struct ItemCooldown {
+     pub duration: i32,
+ }
+ 
++/// The undead classification used by the Smite enchantment (also relevant to
++/// how Instant Health/Instant Damage effects invert for these entity types).
++pub fn is_undead(entity_type_id: u16) -> bool {
++    entity_type_id == EntityType::ZOMBIE.id
++        || entity_type_id == EntityType::DROWNED.id
++        || entity_type_id == EntityType::HUSK.id
++        || entity_type_id == EntityType::ZOMBIE_VILLAGER.id
++        || entity_type_id == EntityType::ZOMBIFIED_PIGLIN.id
++        || entity_type_id == EntityType::SKELETON.id
++        || entity_type_id == EntityType::BOGGED.id
++        || entity_type_id == EntityType::PARCHED.id
++        || entity_type_id == EntityType::WITHER_SKELETON.id
++        || entity_type_id == EntityType::STRAY.id
++        || entity_type_id == EntityType::PHANTOM.id
++        || entity_type_id == EntityType::WITHER.id
++        || entity_type_id == EntityType::ZOMBIE_HORSE.id
++        || entity_type_id == EntityType::SKELETON_HORSE.id
++}
++
+ pub struct Player {
+     /// The underlying living entity object that represents the player.
+     pub living_entity: LivingEntity,
+@@ -954,22 +973,7 @@ impl Player {
+                     if **enchantment == Enchantment::SHARPNESS {
+                         extra_ench_damage += 0.5 * f64::from(*level) + 0.5;
+                     } else if **enchantment == Enchantment::SMITE {
+-                        let target_type = victim_entity.entity_type.id;
+-                        let is_undead = target_type == EntityType::ZOMBIE.id
+-                            || target_type == EntityType::DROWNED.id
+-                            || target_type == EntityType::HUSK.id
+-                            || target_type == EntityType::ZOMBIE_VILLAGER.id
+-                            || target_type == EntityType::ZOMBIFIED_PIGLIN.id
+-                            || target_type == EntityType::SKELETON.id
+-                            || target_type == EntityType::BOGGED.id
+-                            || target_type == EntityType::PARCHED.id
+-                            || target_type == EntityType::WITHER_SKELETON.id
+-                            || target_type == EntityType::STRAY.id
+-                            || target_type == EntityType::PHANTOM.id
+-                            || target_type == EntityType::WITHER.id
+-                            || target_type == EntityType::ZOMBIE_HORSE.id
+-                            || target_type == EntityType::SKELETON_HORSE.id;
+-                        if is_undead {
++                        if is_undead(victim_entity.entity_type.id) {
+                             extra_ench_damage += 2.5 * f64::from(*level);
+                         }
+                     } else if **enchantment == Enchantment::BANE_OF_ARTHROPODS {
+diff --git a/pumpkin/src/item/potion.rs b/pumpkin/src/item/potion.rs
+index 3df45b6..24a132f 100644
+--- a/pumpkin/src/item/potion.rs
++++ b/pumpkin/src/item/potion.rs
+@@ -1,5 +1,6 @@
+ use crate::entity::EntityBase;
+ use crate::entity::living::LivingEntity;
++use crate::entity::player::is_undead;
+ use pumpkin_data::effect::StatusEffect;
+ use pumpkin_data::item_stack::ItemStack;
+ 
+@@ -135,19 +136,34 @@ impl PotionContents {
+                 };
+ 
+                 // Apply instant effects logic directly as they don't tick
++                let target_is_undead = is_undead(target.entity.entity_type.id);
+                 if effect_type.id == pumpkin_data::effect::StatusEffect::INSTANT_HEALTH.id {
+                     let amount = (4 * ((amplifier as i32) + 1)) as f32 * instant_scale;
+-                    target.heal(amount);
++                    if target_is_undead {
++                        target
++                            .damage(
++                                target.get_entity(),
++                                amount,
++                                pumpkin_data::damage::DamageType::MAGIC,
++                            )
++                            .await;
++                    } else {
++                        target.heal(amount);
++                    }
+                 } else if effect_type.id == pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id {
+                     let amount = (6 * ((amplifier as i32) + 1)) as f32 * instant_scale;
+ 
+-                    target
+-                        .damage(
+-                            target.get_entity(),
+-                            amount,
+-                            pumpkin_data::damage::DamageType::MAGIC,
+-                        )
+-                        .await;
++                    if target_is_undead {
++                        target.heal(amount);
++                    } else {
++                        target
++                            .damage(
++                                target.get_entity(),
++                                amount,
++                                pumpkin_data::damage::DamageType::MAGIC,
++                            )
++                            .await;
++                    }
+                 }
+ 
+                 // For instant effects, still add a short visual effect entry as before

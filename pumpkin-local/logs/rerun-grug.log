@@ -1,0 +1,166 @@
+rerunning: 01-skylight-bounds 02-growth-rates 03-nether-wart 10-instant-undead 11-lightning-raining-at 13-aec-nbt 15-tripwire-avoid-traps 16-tripwire-shears-durability 20-locate-structure-by-name 21-locate-sets-containing 22-locate-horizontal-distance 23-piston-write-nbt 24-piston-chunk-nbt 25-piston-from-nbt
+[serve] VRAM 13/8151 MiB used, 8138 MiB free
+[serve] starting: ctx=16384 ncmoe=0 port=11434 reasoning=on/-1
+[serve] ready after 9s
+6447 MiB
+running 12 specs, gpu=1 builds=2
+
+[02-growth-rates] resetting worktree left dirty by an earlier spec
+[02-growth-rates] iter 1: generating
+[03-nether-wart] resetting worktree left dirty by an earlier spec
+[11-lightning-raining-at] resetting worktree left dirty by an earlier spec
+[15-tripwire-avoid-traps] resetting worktree left dirty by an earlier spec
+[20-locate-structure-by-name] resetting worktree left dirty by an earlier spec
+[21-locate-sets-containing] waiting for worktree /home/eshanki/pumpkin-wt/locate
+[22-locate-horizontal-distance] waiting for worktree /home/eshanki/pumpkin-wt/locate
+[24-piston-chunk-nbt] waiting for worktree /home/eshanki/pumpkin-wt/pistonstate
+[25-piston-from-nbt] waiting for worktree /home/eshanki/pumpkin-wt/pistonstate
+[02-growth-rates] iter 1: replied in 75s
+[03-nether-wart] iter 1: generating
+[02-growth-rates] iter 1: applied 1, failed 0
+[02-growth-rates] iter 1: building
+[03-nether-wart] iter 1: replied in 20s
+[13-aec-nbt] iter 1: generating
+[03-nether-wart] iter 1: applied 1, failed 0
+[03-nether-wart] iter 1: building
+[02-growth-rates] assertions failed: ASSERT_ABSENT still present: random_range(0..5)
+[03-nether-wart] iter 1: cargo test (full suite)
+[03-nether-wart] BUILD AND TESTS CLEAN, probe=NONE
+[13-aec-nbt] iter 1: replied in 760s
+[11-lightning-raining-at] iter 1: generating
+[13-aec-nbt] iter 1: applied 1, failed 0
+[13-aec-nbt] iter 1: building
+[13-aec-nbt] iter 1: build failed, 900 chars back to model
+[13-aec-nbt]     err: error[E0433]: cannot find `List` in `pumpkin_nbt`
+[13-aec-nbt]     injecting real API of ItemStack
+[13-aec-nbt]     injecting real API of StatusEffect
+[11-lightning-raining-at] iter 1: replied in 216s
+[15-tripwire-avoid-traps] iter 1: generating
+[11-lightning-raining-at] iter 1: applied 1, failed 0
+[11-lightning-raining-at] iter 1: building
+[11-lightning-raining-at] iter 1: build failed, 373 chars back to model
+[11-lightning-raining-at]     err: error[E0599]: no method named `is_raining_at_unchecked` found for reference `&std::sync::Arc<world::World>` in the current scope
+[11-lightning-raining-at]     injecting real API of World
+[15-tripwire-avoid-traps] iter 1: replied in 135s
+[16-tripwire-shears-durability] iter 1: generating
+[15-tripwire-avoid-traps] iter 1: applied 1, failed 0
+[15-tripwire-avoid-traps] iter 1: building
+[16-tripwire-shears-durability] iter 1: replied in 17s
+[16-tripwire-shears-durability] iter 1: applied 0, failed 1
+[16-tripwire-shears-durability]     why: CANNOT: no visible item-durability helper in the provided API listing
+[16-tripwire-shears-durability] iter 2: generating
+[16-tripwire-shears-durability] iter 2: replied in 13s
+[16-tripwire-shears-durability] iter 2: applied 0, failed 1
+[16-tripwire-shears-durability]     why: CANNOT: no visible item-durability helper in the provided API listing
+[23-piston-write-nbt] iter 1: generating
+[15-tripwire-avoid-traps] iter 1: build failed, 818 chars back to model
+[15-tripwire-avoid-traps]     err: error[E0407]: method `entity_ignores_block_triggers` is not a member of trait `BlockBehaviour`
+[15-tripwire-avoid-traps]     injecting real API of EntityBase
+[23-piston-write-nbt] iter 1: replied in 94s
+[02-growth-rates] iter 2: generating
+[23-piston-write-nbt] iter 1: applied 1, failed 0
+[23-piston-write-nbt] iter 1: building
+[02-growth-rates] iter 2: replied in 26s
+[02-growth-rates] iter 2: applied 0, failed 1
+[02-growth-rates]     why: CANNOT: the shown function no longer contains random_range(0..5)
+[13-aec-nbt] iter 2: generating
+[23-piston-write-nbt] iter 1: cargo test (full suite)
+[23-piston-write-nbt] BUILD AND TESTS CLEAN, probe=NONE
+[24-piston-chunk-nbt] resetting worktree left dirty by an earlier spec
+[13-aec-nbt] iter 2: replied in 1250s
+[11-lightning-raining-at] iter 2: generating
+[13-aec-nbt] iter 2: applied 0, failed 2
+[13-aec-nbt]     why: diff 0: could not apply (error: pumpkin/src/entity/area_effect_cloud.rs: does not match index)
+[13-aec-nbt]     why: context not found or not unique, starting: use std::collections::HashMap;
+[11-lightning-raining-at] iter 2: replied in 29s
+[11-lightning-raining-at] iter 2: applied 0, failed 1
+[11-lightning-raining-at]     why: CANNOT: is_raining_at_unchecked is not in the visible World API
+[20-locate-structure-by-name] iter 1: generating
+[20-locate-structure-by-name] iter 1: replied in 43s
+[20-locate-structure-by-name] iter 1: applied 1, failed 0
+[20-locate-structure-by-name] iter 1: building
+[16-tripwire-shears-durability] triage at iter 3: BLINDSPOT: The same missing item-durability helper blocks both iterations, and FUNC mode cannot return that helper.
+[15-tripwire-avoid-traps] iter 2: generating
+[20-locate-structure-by-name] iter 1: cargo test locate::tests::structure_by_name
+[15-tripwire-avoid-traps] iter 2: replied in 114s
+[15-tripwire-avoid-traps] iter 2: applied 1, failed 0
+[15-tripwire-avoid-traps] iter 2: building
+[20-locate-structure-by-name] BUILD AND TESTS CLEAN, probe=NONE
+[21-locate-sets-containing] resetting worktree left dirty by an earlier spec
+[02-growth-rates] triage at iter 3: ESCALATE: ASSERT_ABSENT for random_range(0..5) repeated across iterations, then the shown function no longer contained the target text.
+[24-piston-chunk-nbt] iter 1: generating
+[15-tripwire-avoid-traps] iter 2: build failed, 794 chars back to model
+[15-tripwire-avoid-traps]     err: error[E0407]: method `entity_ignores_block_triggers` is not a member of trait `BlockBehaviour`
+[15-tripwire-avoid-traps]     injecting real API of Entity
+[24-piston-chunk-nbt] iter 1: replied in 90s
+[24-piston-chunk-nbt] iter 1: applied 1, failed 0
+[24-piston-chunk-nbt] iter 1: building
+[13-aec-nbt] triage at iter 3: ESCALATE: iter 1 repeated invented NBT types and async misuse, then iter 2 diff context not found.
+[24-piston-chunk-nbt] iter 1: build failed, 284 chars back to model
+[24-piston-chunk-nbt]     err: error[E0308]: mismatched types
+[11-lightning-raining-at] triage at iter 3: BADSPEC: iter 1 E0599 and iter 2 CANNOT both show is_raining_at_unchecked is not in the visible World API, contradicting the spec premise.
+[21-locate-sets-containing] iter 1: generating
+[21-locate-sets-containing] iter 1: replied in 28s
+[21-locate-sets-containing] iter 1: applied 0, failed 1
+[21-locate-sets-containing]     why: CANNOT: StructureSet::ALL, StructureSet::structures, and WeightedEntry::structure are not visible in the provided API listing
+[21-locate-sets-containing] iter 2: generating
+[21-locate-sets-containing] iter 2: replied in 17s
+[21-locate-sets-containing] iter 2: applied 0, failed 1
+[21-locate-sets-containing]     why: CANNOT: StructureSet::ALL, StructureSet::structures, and WeightedEntry::structure are not visible in the provided API listing
+[21-locate-sets-containing] triage at iter 3: BLINDSPOT: iter 1 and iter 2 both failed with CANNOT because StructureSet::ALL, StructureSet::structures, and WeightedEntry::structure are not visible 
+[15-tripwire-avoid-traps] triage at iter 3: BLINDSPOT: E0407 repeats across iterations because FUNC mode cannot add a trait member to `BlockBehaviour`.
+[24-piston-chunk-nbt] iter 2: generating
+[24-piston-chunk-nbt] iter 2: replied in 85s
+[22-locate-horizontal-distance] iter 1: generating
+[24-piston-chunk-nbt] iter 2: applied 1, failed 0
+[24-piston-chunk-nbt] iter 2: building
+[24-piston-chunk-nbt] iter 2: cargo test (full suite)
+[22-locate-horizontal-distance] iter 1: replied in 71s
+[22-locate-horizontal-distance] iter 1: applied 1, failed 0
+[22-locate-horizontal-distance] iter 1: building
+[22-locate-horizontal-distance] iter 1: cargo test locate::tests::horizontal_distance
+[24-piston-chunk-nbt] BUILD AND TESTS CLEAN, probe=NONE
+[25-piston-from-nbt] resetting worktree left dirty by an earlier spec
+[25-piston-from-nbt] iter 1: generating
+[22-locate-horizontal-distance] BUILD AND TESTS CLEAN, probe=NONE
+[25-piston-from-nbt] iter 1: replied in 159s
+[25-piston-from-nbt] iter 1: applied 1, failed 0
+[25-piston-from-nbt] iter 1: building
+[25-piston-from-nbt] iter 1: build failed, 481 chars back to model
+[25-piston-from-nbt]     err: error[E0599]: no method named `iter` found for reference `&pumpkin_nbt::NbtCompound` in the current scope
+[25-piston-from-nbt]     injecting real API of NbtCompound
+[25-piston-from-nbt] iter 2: generating
+[25-piston-from-nbt] iter 2: replied in 25s
+[25-piston-from-nbt] iter 2: applied 0, failed 1
+[25-piston-from-nbt]     why: CANNOT: NbtCompound lacks iter and from_props missing
+[25-piston-from-nbt] triage at iter 3: RETRY: iter 1 failed with NbtCompound lacking iter and from_props missing, not a mode blindspot.
+[25-piston-from-nbt] iter 3: generating
+[25-piston-from-nbt] iter 3: replied in 16s
+[25-piston-from-nbt] iter 3: applied 0, failed 1
+[25-piston-from-nbt]     why: CANNOT: NbtCompound lacks iter and from_props missing
+[25-piston-from-nbt] iter 4: generating
+[25-piston-from-nbt] iter 4: replied in 12s
+[25-piston-from-nbt] iter 4: applied 0, failed 1
+[25-piston-from-nbt]     why: CANNOT: NbtCompound lacks iter and from_props missing
+[25-piston-from-nbt] triage at iter 5: ESCALATE: The same `NbtCompound` `iter` and missing `from_props` errors repeated across iterations 1 through 4.
+
+===== ALL DONE =====
+0/12 specs built clean in 60 min
+
+ESCALATE  02-growth-rates  ASSERT_ABSENT for random_range(0..5) repeated across iterations, then the shown function no longer contained the target text.
+NOPROBE   03-nether-wart   1 file changed, 1 insertion(+), 1 deletion(-)
+BADSPEC   11-lightning-raining-at  iter 1 E0599 and iter 2 CANNOT both show is_raining_at_unchecked is not in the visible World API, contradicting the spec premise.
+ESCALATE  13-aec-nbt  iter 1 repeated invented NBT types and async misuse, then iter 2 diff context not found.
+BLINDSPOT 15-tripwire-avoid-traps  E0407 repeats across iterations because FUNC mode cannot add a trait member to `BlockBehaviour`.
+BLINDSPOT 16-tripwire-shears-durability  The same missing item-durability helper blocks both iterations, and FUNC mode cannot return that helper.
+NOPROBE   20-locate-structure-by-name   1 file changed, 6 insertions(+), 6 deletions(-)
+BLINDSPOT 21-locate-sets-containing  iter 1 and iter 2 both failed with CANNOT because StructureSet::ALL, StructureSet::structures, and WeightedEntry::structure are not visible in the provided API listing
+NOPROBE   22-locate-horizontal-distance   1 file changed, 4 insertions(+), 6 deletions(-)
+NOPROBE   23-piston-write-nbt   1 file changed, 16 insertions(+), 1 deletion(-)
+NOPROBE   24-piston-chunk-nbt   1 file changed, 11 insertions(+), 1 deletion(-)
+ESCALATE  25-piston-from-nbt  The same `NbtCompound` `iter` and missing `from_props` errors repeated across iterations 1 through 4.
+
+Diffs: /home/eshanki/pumpkin-local/candidates/<name>.diff
+Nothing was pushed. Review, then: python3 driver.py --rebase-only
+
+Marker written to /tmp/pumpkin_run_DONE.txt

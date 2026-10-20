@@ -1,0 +1,22 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "LeavesBlock",
+    "vanilla_path": "net/minecraft/world/level/block/LeavesBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/leaves.rs",
+    "total_methods": 14,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 4,
+    "absent_workspace_wide": [
+      "animateTick",
+      "createBlockStateDefinition",
+      "decaying",
+      "getBlockSupportShape",
+      "getLightDampening",
+      "getOptionalDistanceAt",
+      "setCutoutLeaves",
+      "skipRendering"
+    ],
+    "note": "round13 broader pool: leads 1-8 of 8 for LeavesBlock"
+  }
+]

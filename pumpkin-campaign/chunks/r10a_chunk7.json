@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 67,
+    "elsewhere_in_workspace": 73,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "onExplosionHit",
+      "onGround",
+      "onInsideBlock",
+      "onInsideBubbleColumn",
+      "onPassengerTurned",
+      "onRemoval",
+      "onSyncedDataUpdated",
+      "pick",
+      "placePortalTicket",
+      "playCombinationStepSounds",
+      "playEntityOnFireExtinguishedSound",
+      "playMuffledStepSound",
+      "playStepSound",
+      "playSwimSound",
+      "problemPath",
+      "processFlappingMovement",
+      "processPortalCooldown",
+      "reapplyPosition",
+      "recreateFromPacket",
+      "registerDebugValues"
+    ],
+    "note": "leads 201-220 of 281 for Entity"
+  }
+]

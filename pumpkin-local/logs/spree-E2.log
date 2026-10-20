@@ -1,0 +1,956 @@
+This is mini-swe-agent version 2.4.6.
+Check the v2 migration guide at https://klieret.short.gy/mini-v2-migration
+Loading global config from '/home/eshanki/.config/mini-swe-agent/.env'
+Warning: Input is not a terminal (fd=0).
+Building agent config from specs: 
+['/home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-package
+s/minisweagent/config/mini.yaml']
+
+System:
+You are a helpful assistant that can interact with a computer.
+
+User:
+Please solve this issue: You are fixing a Minecraft-parity bug in the Pumpkin 
+server (Rust, target MC 26.2). Work only inside this repo.
+
+Bug E2: Villagers never breed
+Files: `entity/passive/villager/mod.rs`
+What is wrong: No `BreedGoal` in the goal set, though a generic one exists and 
+is wired up for cows, pigs, sheep and wolves. `eat_until_full` has zero callers,
+so `food_level` accumulates and can never trigger anything.
+Verified vanilla behaviour: 
+The change to make: Wire willingness and breeding.
+Be careful: 
+
+Make the smallest change that fixes exactly this. Do not touch unrelated code. 
+When done, run `cargo build -p pumpkin` and make sure it compiles, then stop. Do
+not commit.
+
+--- RULEBOOK (lessons paid for by past failures; every rule here is mandatory) 
+---
+# Rulebook
+
+Rules distilled from repeated gate failures. Each was paid for by the same 
+mistake landing at least twice. night_run.py injects this whole file into every 
+local and sonnet prompt, so the loop learns once and never relearns.
+
+Do not delete a rule to make a diff pass; that is fixing the code to dodge the 
+process. Rules are keyed by an HTML comment so they are appended once.
+
+<!-- rule:check:cargo_check_error -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 5x. example: `check: cargo_check_error`
+
+<!-- rule:static:escape_artifact:u00xx:'u0026' -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 4x. example: `static: escape_artifact:u00xx:'u0026'`
+
+<!-- rule:structure:orphan_code:<file>:curly_unbalanced_by_-<n> -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 3x. example: `structure: 
+orphan_code:pumpkin/src/item/potion.rs:curly_unbalanced_by_-2`
+
+<!-- rule:apply:git_apply_check_failed -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 3x. example: `apply: git_apply_check_failed`
+
+<!-- rule:clippy:clippy_warning -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 2x. example: `clippy: clippy_warning`
+
+--- REFERENCE (clean-room, Apache-2.0 only; describes behaviour to reimplement, 
+never to copy) ---
+REFERENCE  (SECONDARY - oracle + wiki remain authoritative for 26.2)
+  Reference, do not copy: take the algorithm and control flow, write the
+  Rust yourself. Pumpkin is MIT; verbatim Apache-2.0 would need an
+  attribution/NOTICE trail this project does not carry. Cuberite is
+  ~1.12 and Minestom omits most gameplay, so confirm every specific
+  (numbers, timings, block ids) against the differential oracle.
+  keywords: e2 villagers never breed `entity/passive/villager/mod.rs`
+
+  == Minestom (Apache-2.0 Java; recent protocol, minimal vanilla gameplay) ==
+     ! /home/eshanki/pumpkin-local/refs/Minestom/src missing; clone the 
+reference first
+
+  == Cuberite (Apache-2.0 C++; ~1.12-era behaviour, NOT 26.2) ==
+     ! /home/eshanki/pumpkin-local/refs/Cuberite/src missing; clone the 
+reference first
+
+  No usable reference. Rely on the oracle and the wiki.
+
+You can execute bash commands and edit files to implement the necessary changes.
+
+## Recommended Workflow
+
+This workflow should be done step-by-step so that you can iterate on your 
+changes and any possible problems.
+
+1. Analyze the codebase by finding and reading relevant files
+2. Create a script to reproduce the issue
+3. Edit the source code to resolve the issue
+4. Verify your fix works by running your script again
+5. Test edge cases to ensure your fix is robust
+6. Submit your changes and finish your work by issuing the following command: 
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+   Do not combine it with any other command. <important>After this command, you 
+cannot continue working on this task.</important>
+
+## Command Execution Rules
+
+You are operating in an environment where
+
+1. You issue at least one command
+2. The system executes the command(s) in a subshell
+3. You see the result(s)
+4. You write your next command(s)
+
+Each response should include:
+
+1. **Reasoning text** where you explain your analysis and plan
+2. At least one tool call with your command
+
+**CRITICAL REQUIREMENTS:**
+
+- Your response SHOULD include reasoning text explaining what you're doing
+- Your response MUST include AT LEAST ONE bash tool call
+- Directory or environment variable changes are not persistent. Every action is 
+executed in a new subshell.
+- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd 
+/path/to/working/dir && ...` or write/load environment variables from files
+- Submit your changes and finish your work by issuing the following command: 
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+  Do not combine it with any other command. <important>After this command, you 
+cannot continue working on this task.</important>
+
+Example of a CORRECT response:
+<example_response>
+I need to understand the structure of the repository first. Let me check what 
+files are in the current directory to get a better understanding of the 
+codebase.
+
+[Makes bash tool call with {"command": "ls -la"} as arguments]
+</example_response>
+
+<system_information>
+Linux 7.1.5-1-cachyos #1 SMP PREEMPT_DYNAMIC Mon, 27 Jul 2026 14:05:40 +0000 
+x86_64
+</system_information>
+
+## Useful command examples
+
+### Create a new file:
+
+```bash
+cat <<'EOF' > newfile.py
+import numpy as np
+hello = "world"
+print(hello)
+EOF
+```
+
+### Edit files with sed:```bash
+# Replace all occurrences
+sed -i 's/old_string/new_string/g' filename.py
+
+# Replace only first occurrence
+sed -i 's/old_string/new_string/' filename.py
+
+# Replace first occurrence on line 1
+sed -i '1s/old_string/new_string/' filename.py
+
+# Replace all occurrences in lines 1-10
+sed -i '1,10s/old_string/new_string/g' filename.py
+```
+
+### View file content:
+
+```bash
+# View specific lines with numbers
+nl -ba filename.py | sed -n '10,20p'
+```
+
+### Any other command you want to run
+
+```bash
+anything
+```
+────────────────────────────────────────────────────────────────────────────────
+Retrying <unknown> in 4 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 4 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 4 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 8 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 16 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 32 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 60 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 60 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+Retrying <unknown> in 60 seconds as it raised InternalServerError: litellm.InternalServerError: InternalServerError: OpenAIException - Connection error..
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+Exit:
+litellm.InternalServerError: InternalServerError: OpenAIException - Connection 
+error.
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_transports/default.py:101 in map_httpcore_exceptions              │
+│                                                                              │
+│    98 │   if len(HTTPCORE_EXC_MAP) == 0:                                     │
+│    99 │   │   HTTPCORE_EXC_MAP = _load_httpcore_exceptions()                 │
+│   100 │   try:                                                               │
+│ ❱ 101 │   │   yield                                                          │
+│   102 │   except Exception as exc:                                           │
+│   103 │   │   mapped_exc = None                                              │
+│   104                                                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_transports/default.py:250 in handle_request                       │
+│                                                                              │
+│   247 │   │   │   extensions=request.extensions,                             │
+│   248 │   │   )                                                              │
+│   249 │   │   with map_httpcore_exceptions():                                │
+│ ❱ 250 │   │   │   resp = self._pool.handle_request(req)                      │
+│   251 │   │                                                                  │
+│   252 │   │   assert isinstance(resp.stream, typing.Iterable)                │
+│   253                                                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_sync/connection_pool.py:256 in handle_request                  │
+│                                                                              │
+│   253 │   │   │   │   closing = self._assign_requests_to_connections()       │
+│   254 │   │   │                                                              │
+│   255 │   │   │   self._close_connections(closing)                           │
+│ ❱ 256 │   │   │   raise exc from None                                        │
+│   257 │   │                                                                  │
+│   258 │   │   # Return the response. Note that in this case we still have to │
+│       manage                                                                 │
+│   259 │   │   # the point at which the response is closed.                   │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_sync/connection_pool.py:236 in handle_request                  │
+│                                                                              │
+│   233 │   │   │   │                                                          │
+│   234 │   │   │   │   try:                                                   │
+│   235 │   │   │   │   │   # Send the request on the assigned connection.     │
+│ ❱ 236 │   │   │   │   │   response = connection.handle_request(              │
+│   237 │   │   │   │   │   │   pool_request.request                           │
+│   238 │   │   │   │   │   )                                                  │
+│   239 │   │   │   │   except ConnectionNotAvailable:                         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_sync/connection.py:101 in handle_request                       │
+│                                                                              │
+│    98 │   │   │   │   │   │   )                                              │
+│    99 │   │   except BaseException as exc:                                   │
+│   100 │   │   │   self._connect_failed = True                                │
+│ ❱ 101 │   │   │   raise exc                                                  │
+│   102 │   │                                                                  │
+│   103 │   │   return self._connection.handle_request(request)                │
+│   104                                                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_sync/connection.py:78 in handle_request                        │
+│                                                                              │
+│    75 │   │   try:                                                           │
+│    76 │   │   │   with self._request_lock:                                   │
+│    77 │   │   │   │   if self._connection is None:                           │
+│ ❱  78 │   │   │   │   │   stream = self._connect(request)                    │
+│    79 │   │   │   │   │                                                      │
+│    80 │   │   │   │   │   ssl_object = stream.get_extra_info("ssl_object")   │
+│    81 │   │   │   │   │   http2_negotiated = (                               │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_sync/connection.py:124 in _connect                             │
+│                                                                              │
+│   121 │   │   │   │   │   │   "socket_options": self._socket_options,        │
+│   122 │   │   │   │   │   }                                                  │
+│   123 │   │   │   │   │   with Trace("connect_tcp", logger, request, kwargs) │
+│       as trace:                                                              │
+│ ❱ 124 │   │   │   │   │   │   stream =                                       │
+│       self._network_backend.connect_tcp(**kwargs)                            │
+│   125 │   │   │   │   │   │   trace.return_value = stream                    │
+│   126 │   │   │   │   else:                                                  │
+│   127 │   │   │   │   │   kwargs = {                                         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_backends/sync.py:207 in connect_tcp                            │
+│                                                                              │
+│   204 │   │   │   OSError: ConnectError,                                     │
+│   205 │   │   }                                                              │
+│   206 │   │                                                                  │
+│ ❱ 207 │   │   with map_exceptions(exc_map):                                  │
+│   208 │   │   │   sock = socket.create_connection(                           │
+│   209 │   │   │   │   address,                                               │
+│   210 │   │   │   │   timeout,                                               │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/py │
+│ thon3.12/contextlib.py:158 in __exit__                                       │
+│                                                                              │
+│   155 │   │   │   │   # tell if we get the same exception back               │
+│   156 │   │   │   │   value = typ()                                          │
+│   157 │   │   │   try:                                                       │
+│ ❱ 158 │   │   │   │   self.gen.throw(value)                                  │
+│   159 │   │   │   except StopIteration as exc:                               │
+│   160 │   │   │   │   # Suppress StopIteration *unless* it's the same        │
+│       exception that                                                         │
+│   161 │   │   │   │   # was passed to throw().  This prevents a              │
+│       StopIteration                                                          │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpcore/_exceptions.py:14 in map_exceptions                             │
+│                                                                              │
+│   11 │   except Exception as exc:  # noqa: PIE786                            │
+│   12 │   │   for from_exc, to_exc in map.items():                            │
+│   13 │   │   │   if isinstance(exc, from_exc):                               │
+│ ❱ 14 │   │   │   │   raise to_exc(exc) from exc                              │
+│   15 │   │   raise  # pragma: nocover                                        │
+│   16                                                                         │
+│   17                                                                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ConnectError: [Errno 111] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_base_client.py:1065 in request                                   │
+│                                                                              │
+│   1062 │   │   │                                                             │
+│   1063 │   │   │   response = None                                           │
+│   1064 │   │   │   try:                                                      │
+│ ❱ 1065 │   │   │   │   response = self._send_request(                        │
+│   1066 │   │   │   │   │   request,                                          │
+│   1067 │   │   │   │   │   stream=stream or                                  │
+│        self._should_stream_response_body(request=request),                   │
+│   1068 │   │   │   │   │   **kwargs,                                         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_client.py:483 in _send_request                                   │
+│                                                                              │
+│    480 │   │   stream: bool,                                                 │
+│    481 │   │   **kwargs: Unpack[HttpxSendArgs],                              │
+│    482 │   ) -> httpx.Response:                                              │
+│ ❱  483 │   │   response = self._send_with_auth_retry(request, stream=stream, │
+│        **kwargs)                                                             │
+│    484 │   │   if self._provider_runtime is not None and                     │
+│        self._provider_runtime.normalize_response is not None:                │
+│    485 │   │   │   response =                                                │
+│        self._provider_runtime.normalize_response(response)                   │
+│    486 │   │   return response                                               │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_client.py:461 in _send_with_auth_retry                           │
+│                                                                              │
+│    458 │   │   │   │   request.headers["Authorization"] = f"Bearer           │
+│        {self._workload_identity_auth.get_token()}"                           │
+│    459 │   │   │   │   used_workload_identity_auth = True                    │
+│    460 │   │                                                                 │
+│ ❱  461 │   │   response = super()._send_request(request, stream=stream,      │
+│        **kwargs)                                                             │
+│    462 │   │   if (                                                          │
+│    463 │   │   │   response.status_code == 401                               │
+│    464 │   │   │   and self._workload_identity_auth is not None              │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_base_client.py:990 in _send_request                              │
+│                                                                              │
+│    987 │   │   stream: bool,                                                 │
+│    988 │   │   **kwargs: Unpack[HttpxSendArgs],                              │
+│    989 │   ) -> httpx.Response:                                              │
+│ ❱  990 │   │   return self._client.send(request, stream=stream, **kwargs)    │
+│    991 │                                                                     │
+│    992 │   @overload                                                         │
+│    993 │   def request(                                                      │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_client.py:914 in send                                             │
+│                                                                              │
+│    911 │   │                                                                 │
+│    912 │   │   auth = self._build_request_auth(request, auth)                │
+│    913 │   │                                                                 │
+│ ❱  914 │   │   response = self._send_handling_auth(                          │
+│    915 │   │   │   request,                                                  │
+│    916 │   │   │   auth=auth,                                                │
+│    917 │   │   │   follow_redirects=follow_redirects,                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_client.py:942 in _send_handling_auth                              │
+│                                                                              │
+│    939 │   │   │   request = next(auth_flow)                                 │
+│    940 │   │   │                                                             │
+│    941 │   │   │   while True:                                               │
+│ ❱  942 │   │   │   │   response = self._send_handling_redirects(             │
+│    943 │   │   │   │   │   request,                                          │
+│    944 │   │   │   │   │   follow_redirects=follow_redirects,                │
+│    945 │   │   │   │   │   history=history,                                  │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_client.py:979 in _send_handling_redirects                         │
+│                                                                              │
+│    976 │   │   │   for hook in self._event_hooks["request"]:                 │
+│    977 │   │   │   │   hook(request)                                         │
+│    978 │   │   │                                                             │
+│ ❱  979 │   │   │   response = self._send_single_request(request)             │
+│    980 │   │   │   try:                                                      │
+│    981 │   │   │   │   for hook in self._event_hooks["response"]:            │
+│    982 │   │   │   │   │   hook(response)                                    │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_client.py:1014 in _send_single_request                            │
+│                                                                              │
+│   1011 │   │   │   )                                                         │
+│   1012 │   │                                                                 │
+│   1013 │   │   with request_context(request=request):                        │
+│ ❱ 1014 │   │   │   response = transport.handle_request(request)              │
+│   1015 │   │                                                                 │
+│   1016 │   │   assert isinstance(response.stream, SyncByteStream)            │
+│   1017                                                                       │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_transports/default.py:249 in handle_request                       │
+│                                                                              │
+│   246 │   │   │   content=request.stream,                                    │
+│   247 │   │   │   extensions=request.extensions,                             │
+│   248 │   │   )                                                              │
+│ ❱ 249 │   │   with map_httpcore_exceptions():                                │
+│   250 │   │   │   resp = self._pool.handle_request(req)                      │
+│   251 │   │                                                                  │
+│   252 │   │   assert isinstance(resp.stream, typing.Iterable)                │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/py │
+│ thon3.12/contextlib.py:158 in __exit__                                       │
+│                                                                              │
+│   155 │   │   │   │   # tell if we get the same exception back               │
+│   156 │   │   │   │   value = typ()                                          │
+│   157 │   │   │   try:                                                       │
+│ ❱ 158 │   │   │   │   self.gen.throw(value)                                  │
+│   159 │   │   │   except StopIteration as exc:                               │
+│   160 │   │   │   │   # Suppress StopIteration *unless* it's the same        │
+│       exception that                                                         │
+│   161 │   │   │   │   # was passed to throw().  This prevents a              │
+│       StopIteration                                                          │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/httpx/_transports/default.py:118 in map_httpcore_exceptions              │
+│                                                                              │
+│   115 │   │   │   raise                                                      │
+│   116 │   │                                                                  │
+│   117 │   │   message = str(exc)                                             │
+│ ❱ 118 │   │   raise mapped_exc(message) from exc                             │
+│   119                                                                        │
+│   120                                                                        │
+│   121 class ResponseStream(SyncByteStream):                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ConnectError: [Errno 111] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/llms/openai/openai.py:812 in completion                          │
+│                                                                              │
+│    809 │   │   │   │   │   elif "unknown field: parameter index is not a     │
+│        valid field" in str(e):                                               │
+│    810 │   │   │   │   │   │                                                 │
+│        litellm.remove_index_from_tool_calls(messages=messages)               │
+│    811 │   │   │   │   │   else:                                             │
+│ ❱  812 │   │   │   │   │   │   raise e                                       │
+│    813 │   │   except OpenAIError as e:                                      │
+│    814 │   │   │   raise e                                                   │
+│    815 │   │   except Exception as e:                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/llms/openai/openai.py:748 in completion                          │
+│                                                                              │
+│    745 │   │   │   │   │   │   (                                             │
+│    746 │   │   │   │   │   │   │   headers,                                  │
+│    747 │   │   │   │   │   │   │   response,                                 │
+│ ❱  748 │   │   │   │   │   │   ) =                                           │
+│        self.make_sync_openai_chat_completion_request(                        │
+│    749 │   │   │   │   │   │   │   openai_client=openai_client,              │
+│    750 │   │   │   │   │   │   │   data=data,                                │
+│    751 │   │   │   │   │   │   │   timeout=timeout,                          │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/litellm_core_utils/logging_utils.py:336 in sync_wrapper          │
+│                                                                              │
+│   333 │   │   │   parent_otel_span =                                         │
+│       _get_parent_otel_span_from_logging_obj(logging_obj)                    │
+│   334 │   │   │                                                              │
+│   335 │   │   │   try:                                                       │
+│ ❱ 336 │   │   │   │   result = func(*args, **kwargs)                         │
+│   337 │   │   │   │   return result                                          │
+│   338 │   │   │   finally:                                                   │
+│   339 │   │   │   │   end_time = datetime.now()                              │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/llms/openai/openai.py:487 in                                     │
+│ make_sync_openai_chat_completion_request                                     │
+│                                                                              │
+│    484 │   │   │   │   │   )                                                 │
+│    485 │   │   │   │   )                                                     │
+│    486 │   │   │   else:                                                     │
+│ ❱  487 │   │   │   │   raise e                                               │
+│    488 │                                                                     │
+│    489 │   async def _call_agentic_completion_hooks_openai(                  │
+│    490 │   │   self,                                                         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/llms/openai/openai.py:464 in                                     │
+│ make_sync_openai_chat_completion_request                                     │
+│                                                                              │
+│    461 │   │   """                                                           │
+│    462 │   │   raw_response = None                                           │
+│    463 │   │   try:                                                          │
+│ ❱  464 │   │   │   raw_response =                                            │
+│        openai_client.chat.completions.with_raw_response.create(**data,       │
+│        timeout=timeout)                                                      │
+│    465 │   │   │                                                             │
+│    466 │   │   │   if hasattr(raw_response, "headers"):                      │
+│    467 │   │   │   │   headers = dict(raw_response.headers)                  │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_legacy_response.py:369 in wrapped                                │
+│                                                                              │
+│   366 │   │                                                                  │
+│   367 │   │   kwargs["extra_headers"] = extra_headers                        │
+│   368 │   │                                                                  │
+│ ❱ 369 │   │   return cast(LegacyAPIResponse[R], func(*args, **kwargs))       │
+│   370 │                                                                      │
+│   371 │   return wrapped                                                     │
+│   372                                                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_utils/_utils.py:298 in wrapper                                   │
+│                                                                              │
+│   295 │   │   │   │   │   else:                                              │
+│   296 │   │   │   │   │   │   msg = f"Missing required argument:             │
+│       {quote(missing[0])}"                                                   │
+│   297 │   │   │   │   raise TypeError(msg)                                   │
+│ ❱ 298 │   │   │   return func(*args, **kwargs)                               │
+│   299 │   │                                                                  │
+│   300 │   │   return wrapper  # type: ignore                                 │
+│   301                                                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/resources/chat/completions/completions.py:1284 in create          │
+│                                                                              │
+│   1281 │   │   timeout: float | httpx.Timeout | None | NotGiven = not_given, │
+│   1282 │   ) -> ChatCompletion | Stream[ChatCompletionChunk]:                │
+│   1283 │   │   validate_response_format(response_format)                     │
+│ ❱ 1284 │   │   return self._post(                                            │
+│   1285 │   │   │   "/chat/completions",                                      │
+│   1286 │   │   │   body=maybe_transform(                                     │
+│   1287 │   │   │   │   {                                                     │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_base_client.py:1360 in post                                      │
+│                                                                              │
+│   1357 │   │   opts = FinalRequestOptions.construct(                         │
+│   1358 │   │   │   method="post", url=path, json_data=body, content=content, │
+│        files=to_httpx_files(files), **options                                │
+│   1359 │   │   )                                                             │
+│ ❱ 1360 │   │   return cast(ResponseT, self.request(cast_to, opts,            │
+│        stream=stream, stream_cls=stream_cls))                                │
+│   1361 │                                                                     │
+│   1362 │   def patch(                                                        │
+│   1363 │   │   self,                                                         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/openai/_base_client.py:1100 in request                                   │
+│                                                                              │
+│   1097 │   │   │   │   │   continue                                          │
+│   1098 │   │   │   │                                                         │
+│   1099 │   │   │   │   log.debug("Raising connection error")                 │
+│ ❱ 1100 │   │   │   │   raise APIConnectionError(request=request) from err    │
+│   1101 │   │   │                                                             │
+│   1102 │   │   │   log.debug(                                                │
+│   1103 │   │   │   │   'HTTP Response: %s %s "%i %s" %s',                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+APIConnectionError: Connection error.
+
+During handling of the above exception, another exception occurred:
+
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/main.py:5555 in completion                                       │
+│                                                                              │
+│   5552 │   │   ):  # allow user to make an openai call with a custom base    │
+│   5553 │   │   │   # note: if a user sets a custom base - we should ensure   │
+│        this works                                                            │
+│   5554 │   │   │   # allow for the setting of dynamic and stateful api-bases │
+│ ❱ 5555 │   │   │   response = _complete_custom_openai(_dispatch_ctx)         │
+│   5556 │   │                                                                 │
+│   5557 │   │   elif custom_llm_provider == "mistral":                        │
+│   5558 │   │   │   response = _complete_mistral(_dispatch_ctx)               │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/main.py:2474 in _complete_custom_openai                          │
+│                                                                              │
+│   2471 │   │   │   original_response=str(e),                                 │
+│   2472 │   │   │   additional_args={"headers": headers},                     │
+│   2473 │   │   )                                                             │
+│ ❱ 2474 │   │   raise e                                                       │
+│   2475 │                                                                     │
+│   2476 │   if optional_params.get("stream", False):                          │
+│   2477 │   │   ## LOGGING                                                    │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/main.py:2446 in _complete_custom_openai                          │
+│                                                                              │
+│   2443 │   │   │   │   provider_config=provider_config,                      │
+│   2444 │   │   │   )                                                         │
+│   2445 │   │   else:                                                         │
+│ ❱ 2446 │   │   │   response = openai_chat_completions.completion(            │
+│   2447 │   │   │   │   model=model,                                          │
+│   2448 │   │   │   │   messages=messages,                                    │
+│   2449 │   │   │   │   headers=headers,                                      │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/llms/openai/openai.py:823 in completion                          │
+│                                                                              │
+│    820 │   │   │   error_body = getattr(e, "body", None)                     │
+│    821 │   │   │   if error_headers is None and error_response:              │
+│    822 │   │   │   │   error_headers = getattr(error_response, "headers",    │
+│        None)                                                                 │
+│ ❱  823 │   │   │   raise OpenAIError(                                        │
+│    824 │   │   │   │   status_code=status_code,                              │
+│    825 │   │   │   │   message=error_text,                                   │
+│    826 │   │   │   │   headers=error_headers,                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+OpenAIError: Connection error.
+
+During handling of the above exception, another exception occurred:
+
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/run/mini.py:102 in main                                     │
+│                                                                              │
+│    99 │   model = get_model(config=config.get("model", {}))                  │
+│   100 │   env = get_environment(config.get("environment", {}),               │
+│       default_type="local")                                                  │
+│   101 │   agent = get_agent(model, env, config.get("agent", {}),             │
+│       default_type="interactive")                                            │
+│ ❱ 102 │   agent.run(run_task)                                                │
+│   103 │   if (output_path := config.get("agent", {}).get("output_path")):    │
+│   104 │   │   console.print(f"Saved trajectory to [bold                      │
+│       green]'{output_path}'[/bold green]")                                   │
+│   105 │   return agent                                                       │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/agents/default.py:98 in run                                 │
+│                                                                              │
+│    95 │   │   )                                                              │
+│    96 │   │   while True:                                                    │
+│    97 │   │   │   try:                                                       │
+│ ❱  98 │   │   │   │   self.step()                                            │
+│    99 │   │   │   │   self.n_consecutive_format_errors = 0  # reset on any   │
+│       clean step                                                             │
+│   100 │   │   │   except FormatError as e:                                   │
+│   101 │   │   │   │   # The call was billed before parsing failed, so        │
+│       query() never got to charge it.                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/agents/interactive.py:113 in step                           │
+│                                                                              │
+│   110 │   │   # Override the step method to handle user interruption         │
+│   111 │   │   try:                                                           │
+│   112 │   │   │   console.print(Rule())                                      │
+│ ❱ 113 │   │   │   return super().step()                                      │
+│   114 │   │   except KeyboardInterrupt:                                      │
+│   115 │   │   │   interruption_message =                                     │
+│       self._prompt_and_handle_slash_commands(                                │
+│   116 │   │   │   │   "\n\n[bold yellow]Interrupted.[/bold yellow] "         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/agents/default.py:128 in step                               │
+│                                                                              │
+│   125 │                                                                      │
+│   126 │   def step(self) -> list[dict]:                                      │
+│   127 │   │   """Query the LM, execute actions."""                           │
+│ ❱ 128 │   │   return self.execute_actions(self.query())                      │
+│   129 │                                                                      │
+│   130 │   def query(self) -> dict:                                           │
+│   131 │   │   """Query the model and return model messages. Override to add  │
+│       hooks."""                                                              │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/agents/interactive.py:74 in query                           │
+│                                                                              │
+│    71 │   │   │   │   │   return msg                                         │
+│    72 │   │   try:                                                           │
+│    73 │   │   │   with console.status("Waiting for the LM to respond..."):   │
+│ ❱  74 │   │   │   │   return super().query()                                 │
+│    75 │   │   except TimeExceeded:                                           │
+│    76 │   │   │   # A wall-clock limit can't be lifted by raising the        │
+│       step/cost limits                                                       │
+│    77 │   │   │   # (the next query re-checks the clock and raises again),   │
+│       so prompting                                                           │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/agents/default.py:149 in query                              │
+│                                                                              │
+│   146 │   │   │   │   }                                                      │
+│   147 │   │   │   )                                                          │
+│   148 │   │   self.n_calls += 1                                              │
+│ ❱ 149 │   │   message = self.model.query(self.messages)                      │
+│   150 │   │   self.cost += message.get("extra", {}).get("cost", 0.0)         │
+│   151 │   │   self.add_messages(message)                                     │
+│   152 │   │   return message                                                 │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/models/litellm_model.py:82 in query                         │
+│                                                                              │
+│    79 │   │   return set_cache_control(prepared,                             │
+│       mode=self.config.set_cache_control)                                    │
+│    80 │                                                                      │
+│    81 │   def query(self, messages: list[dict[str, str]], **kwargs) -> dict: │
+│ ❱  82 │   │   for attempt in retry(logger=logger,                            │
+│       abort_exceptions=self.abort_exceptions):                               │
+│    83 │   │   │   with attempt:                                              │
+│    84 │   │   │   │   response =                                             │
+│       self._query(self._prepare_messages_for_api(messages), **kwargs)        │
+│    85 │   │   cost_output = self._calculate_cost(response)                   │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/tenacity/__init__.py:438 in __iter__                                     │
+│                                                                              │
+│   435 │   │                                                                  │
+│   436 │   │   retry_state = RetryCallState(self, fn=None, args=(),           │
+│       kwargs={})                                                             │
+│   437 │   │   while True:                                                    │
+│ ❱ 438 │   │   │   do = self.iter(retry_state=retry_state)                    │
+│   439 │   │   │   if isinstance(do, DoAttempt):                              │
+│   440 │   │   │   │   yield AttemptManager(retry_state=retry_state)          │
+│   441 │   │   │   elif isinstance(do, DoSleep):                              │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/tenacity/__init__.py:371 in iter                                         │
+│                                                                              │
+│   368 │   │   self._begin_iter(retry_state)                                  │
+│   369 │   │   result = None                                                  │
+│   370 │   │   for action in self.iter_state.actions:                         │
+│ ❱ 371 │   │   │   result = action(retry_state)                               │
+│   372 │   │   return result                                                  │
+│   373 │                                                                      │
+│   374 │   def _begin_iter(self, retry_state: "RetryCallState") -> None:  #   │
+│       noqa                                                                   │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/tenacity/__init__.py:413 in exc_check                                    │
+│                                                                              │
+│   410 │   │   │   │   fut = t.cast(Future, rs.outcome)                       │
+│   411 │   │   │   │   retry_exc = self.retry_error_cls(fut)                  │
+│   412 │   │   │   │   if self.reraise:                                       │
+│ ❱ 413 │   │   │   │   │   raise retry_exc.reraise()                          │
+│   414 │   │   │   │   raise retry_exc from fut.exception()                   │
+│   415 │   │   │                                                              │
+│   416 │   │   │   self._add_action_func(exc_check)                           │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/tenacity/__init__.py:184 in reraise                                      │
+│                                                                              │
+│   181 │                                                                      │
+│   182 │   def reraise(self) -> t.NoReturn:                                   │
+│   183 │   │   if self.last_attempt.failed:                                   │
+│ ❱ 184 │   │   │   raise self.last_attempt.result()                           │
+│   185 │   │   raise self                                                     │
+│   186 │                                                                      │
+│   187 │   def __str__(self) -> str:                                          │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/py │
+│ thon3.12/concurrent/futures/_base.py:449 in result                           │
+│                                                                              │
+│   446 │   │   │   │   if self._state in [CANCELLED, CANCELLED_AND_NOTIFIED]: │
+│   447 │   │   │   │   │   raise CancelledError()                             │
+│   448 │   │   │   │   elif self._state == FINISHED:                          │
+│ ❱ 449 │   │   │   │   │   return self.__get_result()                         │
+│   450 │   │   │   │                                                          │
+│   451 │   │   │   │   self._condition.wait(timeout)                          │
+│   452                                                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/py │
+│ thon3.12/concurrent/futures/_base.py:401 in __get_result                     │
+│                                                                              │
+│   398 │   def __get_result(self):                                            │
+│   399 │   │   if self._exception:                                            │
+│   400 │   │   │   try:                                                       │
+│ ❱ 401 │   │   │   │   raise self._exception                                  │
+│   402 │   │   │   finally:                                                   │
+│   403 │   │   │   │   # Break a reference cycle with the exception in        │
+│       self._exception                                                        │
+│   404 │   │   │   │   self = None                                            │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/models/litellm_model.py:84 in query                         │
+│                                                                              │
+│    81 │   def query(self, messages: list[dict[str, str]], **kwargs) -> dict: │
+│    82 │   │   for attempt in retry(logger=logger,                            │
+│       abort_exceptions=self.abort_exceptions):                               │
+│    83 │   │   │   with attempt:                                              │
+│ ❱  84 │   │   │   │   response =                                             │
+│       self._query(self._prepare_messages_for_api(messages), **kwargs)        │
+│    85 │   │   cost_output = self._calculate_cost(response)                   │
+│    86 │   │   GLOBAL_MODEL_STATS.add(cost_output["cost"])                    │
+│    87 │   │   # Note: all model.query() implementations must persist the     │
+│       response and cost on FormatError.                                      │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/minisweagent/models/litellm_model.py:66 in _query                        │
+│                                                                              │
+│    63 │                                                                      │
+│    64 │   def _query(self, messages: list[dict[str, str]], **kwargs):        │
+│    65 │   │   try:                                                           │
+│ ❱  66 │   │   │   return litellm.completion(                                 │
+│    67 │   │   │   │   model=self.config.model_name,                          │
+│    68 │   │   │   │   messages=messages,                                     │
+│    69 │   │   │   │   tools=[BASH_TOOL],                                     │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/utils.py:1578 in wrapper                                         │
+│                                                                              │
+│   1575 │   │   │   │   logging_obj.failure_handler(                          │
+│   1576 │   │   │   │   │   e, traceback_exception, start_time, end_time      │
+│   1577 │   │   │   │   )  # DO NOT MAKE THREADED - router retry fallback     │
+│        relies on this!                                                       │
+│ ❱ 1578 │   │   │   raise e                                                   │
+│   1579 │                                                                     │
+│   1580 │   @wraps(original_function)                                         │
+│   1581 │   async def wrapper_async(*args, **kwargs):                         │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/utils.py:1426 in wrapper                                         │
+│                                                                              │
+│   1423 │   │   │   │   except Exception as e:                                │
+│   1424 │   │   │   │   │   print_verbose(f"Error while checking max token    │
+│        limit: {str(e)}")                                                     │
+│   1425 │   │   │   # MODEL CALL                                              │
+│ ❱ 1426 │   │   │   result = original_function(*args, **kwargs)               │
+│   1427 │   │   │   end_time = datetime.datetime.now()                        │
+│   1428 │   │   │   if _is_streaming_request(                                 │
+│   1429 │   │   │   │   kwargs=kwargs,                                        │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/main.py:5684 in completion                                       │
+│                                                                              │
+│   5681 │   │   return response                                               │
+│   5682 │   except Exception as e:                                            │
+│   5683 │   │   ## Map to OpenAI Exception                                    │
+│ ❱ 5684 │   │   raise exception_type(                                         │
+│   5685 │   │   │   model=model,                                              │
+│   5686 │   │   │   custom_llm_provider=custom_llm_provider,                  │
+│   5687 │   │   │   original_exception=e,                                     │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/litellm_core_utils/exception_mapping_utils.py:2510 in            │
+│ exception_type                                                               │
+│                                                                              │
+│   2507 │   │   │   for error_type in litellm.LITELLM_EXCEPTION_TYPES:        │
+│   2508 │   │   │   │   if isinstance(e, error_type):                         │
+│   2509 │   │   │   │   │   setattr(e, "litellm_response_headers",            │
+│        litellm_response_headers)                                             │
+│ ❱ 2510 │   │   │   │   │   raise e  # it's already mapped                    │
+│   2511 │   │   │   raised_exc = APIConnectionError(                          │
+│   2512 │   │   │   │   message="{}\n{}".format(                              │
+│   2513 │   │   │   │   │   original_exception,                               │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/litellm_core_utils/exception_mapping_utils.py:2276 in            │
+│ exception_type                                                               │
+│                                                                              │
+│   2273 │   │   │   │   or custom_llm_provider in                             │
+│        litellm.openai_compatible_providers                                   │
+│   2274 │   │   │   │   or custom_llm_provider == "mistral"                   │
+│   2275 │   │   │   ):                                                        │
+│ ❱ 2276 │   │   │   │   _map_openai_exception(                                │
+│   2277 │   │   │   │   │   model=model,                                      │
+│   2278 │   │   │   │   │   original_exception=mappable_exception,            │
+│   2279 │   │   │   │   │   custom_llm_provider=custom_llm_provider,          │
+│                                                                              │
+│ /home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-packa │
+│ ges/litellm/litellm_core_utils/exception_mapping_utils.py:442 in             │
+│ _map_openai_exception                                                        │
+│                                                                              │
+│    439 │   │   │   │   litellm_debug_info=extra_information,                 │
+│    440 │   │   │   )                                                         │
+│    441 │   │   elif original_exception.status_code == 500:                   │
+│ ❱  442 │   │   │   raise InternalServerError(                                │
+│    443 │   │   │   │   message=f"InternalServerError: {exception_provider} - │
+│        {message}",                                                           │
+│    444 │   │   │   │   model=model,                                          │
+│    445 │   │   │   │   llm_provider=custom_llm_provider,                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+InternalServerError: litellm.InternalServerError: InternalServerError: 
+OpenAIException - Connection error.

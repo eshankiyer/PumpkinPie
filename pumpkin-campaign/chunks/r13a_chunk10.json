@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "PotionContents",
+    "vanilla_path": "net/minecraft/world/item/alchemy/PotionContents.java",
+    "rust_file": "crates/pumpkin/src/item/potion.rs",
+    "total_methods": 17,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 4,
+    "absent_workspace_wide": [
+      "addPotionTooltip",
+      "addToTooltip",
+      "applyToLivingEntity",
+      "customEffects",
+      "forEachEffect",
+      "getAllEffects",
+      "getPotionDescription",
+      "hasEffects",
+      "onConsume",
+      "withEffectAdded",
+      "withPotion"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for PotionContents"
+  }
+]

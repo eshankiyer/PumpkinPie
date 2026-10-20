@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "CampfireBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/CampfireBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/campfire.rs",
+    "total_methods": 14,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 3,
+    "absent_workspace_wide": [
+      "clearContent",
+      "cookTick",
+      "cooldownTick",
+      "getUpdatePacket",
+      "getUpdateTag",
+      "particleTick",
+      "placeFood",
+      "preRemoveSideEffects",
+      "removeComponentsFromTag"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for CampfireBlockEntity"
+  }
+]

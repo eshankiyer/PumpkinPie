@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 44,
+    "elsewhere_in_workspace": 59,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "onLeaveCombat",
+      "onRemoval",
+      "onSyncedDataUpdated",
+      "playAttackSound",
+      "playBlockFallSound",
+      "playHurtSound",
+      "recreateFromPacket",
+      "releaseUsingItem",
+      "rememberStabbedEntity",
+      "removeEffectParticles",
+      "removeFrost",
+      "resetForwardDirectionOfRelativePortalPosition",
+      "resolveMobResponsibleForDamage",
+      "rideTick",
+      "sanitizeScale",
+      "sendEffectToPassengers",
+      "serverAiStep",
+      "setAbsorptionAmount",
+      "setArrowCount",
+      "setDiscardFriction"
+    ],
+    "note": "leads 141-160 of 200 for LivingEntity"
+  }
+]

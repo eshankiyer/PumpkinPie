@@ -1,0 +1,4 @@
+ M crates/pumpkin-inventory/src/screen_handler.rs
+ M crates/pumpkin/src/entity/passive/wandering_trader.rs
+ M crates/pumpkin/src/entity/projectile/arrow.rs
+?? FIX_WORKLIST.json

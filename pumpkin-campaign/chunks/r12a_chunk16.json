@@ -1,0 +1,31 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "HappyGhast",
+    "vanilla_path": "net/minecraft/world/entity/animal/happyghast/HappyGhast.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/happy_ghast.rs",
+    "total_methods": 57,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 27,
+    "absent_workspace_wide": [
+      "checkFallDamage",
+      "clientTick",
+      "createBodyControl",
+      "customServerAiStep",
+      "getAgeScale",
+      "getDismountLocationForPassenger",
+      "getQuadLeashHolderOffsets",
+      "getVoicePitch",
+      "isFlyingVehicle",
+      "isLeashHolder",
+      "onClimbable",
+      "playStepSound",
+      "sanitizeScale",
+      "staysStill",
+      "supportQuadLeashAsHolder",
+      "tickRidden",
+      "travel"
+    ],
+    "note": "round12 broader pool: leads 1-17 of 17 for HappyGhast"
+  }
+]

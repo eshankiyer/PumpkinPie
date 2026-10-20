@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 97,
+    "elsewhere_in_workspace": 76,
+    "absent_workspace_wide": [
+      "getPercentFrozen",
+      "getPickRadius",
+      "getPistonPushReaction",
+      "getPositionCodec",
+      "getPreciseBodyRotation",
+      "getPrimaryStepSoundBlockPos",
+      "getQuadLeashHolderOffsets",
+      "getRandomX",
+      "getRandomY",
+      "getRandomZ",
+      "getRelativePortalPosition",
+      "getRemainingFireTicks",
+      "getRootVehicle",
+      "getRopeHoldPosition",
+      "getScoreboardName",
+      "getSelfAndPassengers",
+      "getSharedFlag",
+      "getStringUUID",
+      "getSwimHighSpeedSplashSound",
+      "getSwimSplashSound"
+    ],
+    "note": "round12 leads 81-100 of 248 for Entity"
+  }
+]

@@ -1,0 +1,37 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "StructureBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/StructureBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/structure_block.rs",
+    "total_methods": 45,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 22,
+    "absent_workspace_wide": [
+      "createdBy",
+      "detectSize",
+      "getMetaData",
+      "getRenderableBox",
+      "getStructureName",
+      "getStructurePos",
+      "getStructureSize",
+      "getUpdatePacket",
+      "getUpdateTag",
+      "hasStructureName",
+      "isStrict",
+      "isStructureLoadable",
+      "placeStructureIfSameSize",
+      "renderMode",
+      "setIntegrity",
+      "setMetaData",
+      "setShowAir",
+      "setShowBoundingBox",
+      "setStrict",
+      "setStructureName",
+      "setStructurePos",
+      "setStructureSize",
+      "usedBy"
+    ],
+    "note": "round12 broader pool: leads 1-23 of 23 for StructureBlockEntity"
+  }
+]

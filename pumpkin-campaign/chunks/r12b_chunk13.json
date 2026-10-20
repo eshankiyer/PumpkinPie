@@ -1,0 +1,37 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Projectile",
+    "vanilla_path": "net/minecraft/world/entity/projectile/Projectile.java",
+    "rust_file": "crates/pumpkin/src/entity/projectile/mod.rs",
+    "total_methods": 37,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 13,
+    "absent_workspace_wide": [
+      "applyOnProjectileSpawned",
+      "checkLeftOwner",
+      "getAddEntityPacket",
+      "getDimensionChangingDelay",
+      "getEffectSource",
+      "getMovementToShoot",
+      "getPickRadius",
+      "hitTargetOrDeflectSelf",
+      "mayBreak",
+      "mayInteract",
+      "onAboveBubbleColumn",
+      "onHitBlock",
+      "onInsideBubbleColumn",
+      "onItemBreak",
+      "ownedBy",
+      "recreateFromPacket",
+      "restoreFrom",
+      "shootFromRotation",
+      "shouldBounceOnWorldBorder",
+      "spawnProjectile",
+      "spawnProjectileFromRotation",
+      "spawnProjectileUsingShoot",
+      "updateRotation"
+    ],
+    "note": "round12 broader pool: leads 1-23 of 23 for Projectile"
+  }
+]

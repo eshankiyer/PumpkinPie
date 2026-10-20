@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "ItemStack",
+    "vanilla_path": "net/minecraft/world/item/ItemStack.java",
+    "rust_file": "crates/pumpkin-data/src/item_stack/mod.rs",
+    "total_methods": 98,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 18,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getPrototype",
+      "getRarity",
+      "getStyledHoverName",
+      "getSwingAnimation",
+      "getTooltipImage",
+      "getTooltipLines",
+      "getUseAnimation",
+      "hasFoil",
+      "hasNonDefault",
+      "hashItemAndComponents",
+      "hashStackList",
+      "hurtAndBreak",
+      "hurtAndConvertOnBreak",
+      "hurtEnemy",
+      "hurtWithoutBreaking",
+      "immutableComponents",
+      "interactLivingEntity",
+      "isBarVisible",
+      "isCorrectToolForDrops",
+      "isDamageableItem"
+    ],
+    "note": "leads 21-40 of 67 for ItemStack"
+  }
+]

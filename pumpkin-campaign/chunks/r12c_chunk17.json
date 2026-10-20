@@ -1,0 +1,27 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "ItemFrame",
+    "vanilla_path": "net/minecraft/world/entity/decoration/ItemFrame.java",
+    "rust_file": "crates/pumpkin/src/entity/decoration/item_frame.rs",
+    "total_methods": 34,
+    "in_declaring_file": 12,
+    "elsewhere_in_workspace": 8,
+    "absent_workspace_wide": [
+      "getAddEntityPacket",
+      "getAddItemSound",
+      "getBreakSound",
+      "getFrameItemStack",
+      "getPlaceSound",
+      "getRemoveItemSound",
+      "getRotateItemSound",
+      "getVisualRotationYInDegrees",
+      "hasFramedMap",
+      "move",
+      "onSyncedDataUpdated",
+      "recreateFromPacket",
+      "setDirection"
+    ],
+    "note": "round12 broader pool: leads 1-13 of 13 for ItemFrame"
+  }
+]

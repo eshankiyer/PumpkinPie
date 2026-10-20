@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "ItemStack",
+    "vanilla_path": "net/minecraft/world/item/ItemStack.java",
+    "rust_file": "crates/pumpkin-data/src/item_stack/mod.rs",
+    "total_methods": 98,
+    "in_declaring_file": 18,
+    "elsewhere_in_workspace": 18,
+    "absent_workspace_wide": [
+      "isSameItemSameComponents",
+      "lenientOptionalFieldOf",
+      "limitSize",
+      "listMatches",
+      "matchesIgnoringComponents",
+      "mineBlock",
+      "onCraftedBy",
+      "onCraftedBySystem",
+      "onDestroyed",
+      "overrideOtherStackedOnMe",
+      "overrideStackedOnOther",
+      "postHurtEnemy",
+      "releaseUsing",
+      "setDamageValue",
+      "setPopTime",
+      "shrink",
+      "typeHolder",
+      "use",
+      "useOn",
+      "useOnRelease"
+    ],
+    "note": "round11 leads 41-60 of 62 for ItemStack"
+  }
+]

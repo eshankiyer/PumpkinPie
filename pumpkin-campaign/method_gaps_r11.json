@@ -1,0 +1,39 @@
+indexed 3504 rust type declarations, 11766 distinct fn names
+analysed 830 covered classes (121 unresolved to a Rust file)
+method name-match (file or workspace): 3910/7223 = 54.13%
+absent workspace-wide (the actionable leads): 3295
+  block: 1508/2551 = 59.11%
+  border: 23/40 = 57.5%
+  chunk: 34/87 = 39.08%
+  commands: 129/203 = 63.55%
+  entity: 1515/2636 = 57.47%
+  food: 10/12 = 83.33%
+  gameevent: 8/13 = 61.54%
+  inventory: 48/136 = 35.29%
+  item: 133/509 = 26.13%
+  lighting: 3/29 = 10.34%
+  material: 31/55 = 56.36%
+  protocol: 224/424 = 52.83%
+  saveddata: 4/14 = 28.57%
+  server_level: 7/36 = 19.44%
+  storage: 20/37 = 54.05%
+  worldgen: 213/441 = 48.3%
+
+top 15 classes by workspace-wide absent methods:
+  Entity                           absent 254 of 422  crates/pumpkin/src/entity/mod.rs
+  LivingEntity                     absent 178 of 304  crates/pumpkin/src/entity/living.rs
+  Player                           absent 126 of 201  crates/pumpkin/src/entity/player.rs
+  BlockBehaviour                   absent 83  of 124  crates/pumpkin/src/block/mod.rs
+  Item                             absent 72  of 83   crates/pumpkin-data/src/generated/item.rs
+  Mob                              absent 66  of 126  crates/pumpkin/src/entity/mob/mod.rs
+  ItemStack                        absent 62  of 98   crates/pumpkin-data/src/item_stack/mod.rs
+  Block                            absent 48  of 59   crates/pumpkin-data/src/blocks.rs
+  Enchantment                      absent 41  of 55   crates/pumpkin-data/src/generated/enchantment.rs
+  EntityType                       absent 38  of 50   crates/pumpkin-data/src/generated/entity_type.rs
+  TestInstanceBlockEntity          absent 33  of 44   crates/pumpkin/src/block/entities/test_instance_block.rs
+  ArmorStand                       absent 32  of 58   crates/pumpkin/src/entity/decoration/armor_stand.rs
+  AbstractHorse                    absent 27  of 88   crates/pumpkin/src/entity/passive/equine/mod.rs
+  BlockEntity                      absent 26  of 39   crates/pumpkin/src/block/entities/mod.rs
+  Inventory                        absent 26  of 38   crates/pumpkin-world/src/inventory/inventory.rs
+
+-> /home/eshanki/pumpkin-wt/staging/conformance/method_gaps.json

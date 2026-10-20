@@ -1,0 +1,26 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EnderDragon",
+    "vanilla_path": "net/minecraft/world/entity/boss/enderdragon/EnderDragon.java",
+    "rust_file": "crates/pumpkin/src/entity/boss/ender_dragon.rs",
+    "total_methods": 35,
+    "in_declaring_file": 11,
+    "elsewhere_in_workspace": 12,
+    "absent_workspace_wide": [
+      "canRide",
+      "getFightOrigin",
+      "getPhaseManager",
+      "getSubEntities",
+      "handleKillingBlow",
+      "hurt",
+      "onSyncedDataUpdated",
+      "reallyHurt",
+      "recreateFromPacket",
+      "sanitizeScale",
+      "setDragonFight",
+      "tickDeath"
+    ],
+    "note": "round12 broader pool: leads 1-12 of 12 for EnderDragon"
+  }
+]

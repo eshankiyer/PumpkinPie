@@ -1,0 +1,24 @@
+diff --git a/pumpkin/src/command/commands/locate.rs b/pumpkin/src/command/commands/locate.rs
+index 6bd6115..0f30231 100644
+--- a/pumpkin/src/command/commands/locate.rs
++++ b/pumpkin/src/command/commands/locate.rs
+@@ -104,13 +104,13 @@ pub const STRUCTURE_NAMES: &[(&str, StructureKeys)] = &[
+ /// Accepts a bare path (`village_plains`) or a namespaced identifier
+ /// (`minecraft:village_plains`). Any other namespace is not a vanilla structure
+ /// and must not resolve.
+-#[expect(
+-    clippy::todo,
+-    unused_variables,
+-    reason = "scaffold stub, filled by spec 20; remove this attribute when filling"
+-)]
+ pub fn structure_by_name(name: &str) -> Option<StructureKeys> {
+-    todo!("STUB: see tests::structure_by_name_*")
++    let name = name.strip_prefix("minecraft:").unwrap_or(name);
++
++    STRUCTURE_NAMES
++        .iter()
++        .find(|&(structure_name, _)| *structure_name == name)
++        .map(|(_, key)| *key)
+ }
+ 
+ /// The structure sets that can generate this structure.

@@ -1,0 +1,7 @@
+=== CLIPPY /home/eshanki/pumpkin-wt/loose-coverage-2
+crates/pumpkin/src/entity/mod.rs:1691:5: error: this function has too many lines (101/100)
+crates/pumpkin/src/item/items/crossbow.rs:39:14: error: item in documentation is missing backticks
+crates/pumpkin/src/item/items/crossbow.rs:52:22: error: hypotenuse can be computed more accurately: help: consider using: `rotated.x.hypot(rotated.z)`
+error: could not compile `pumpkin` (lib) due to 3 previous errors
+error: could not compile `pumpkin` (lib test) due to 3 previous errors
+=== TESTS

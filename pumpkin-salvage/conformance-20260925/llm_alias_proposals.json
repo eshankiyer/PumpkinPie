@@ -1,0 +1,338 @@
+{
+ "model": "qwen2.5-coder:7b",
+ "note": "LEADS ONLY -- spot-check before adding to METHOD_ALIASES.",
+ "accepted": [
+  {
+   "vanilla": "baseTick",
+   "class": "Entity",
+   "rust": "mob_tick",
+   "rust_file": "crates/pumpkin/src/entity/boss/ender_dragon.rs"
+  },
+  {
+   "vanilla": "canCollideWith",
+   "class": "Entity",
+   "rust": "is_collidable",
+   "rust_file": "crates/pumpkin/src/entity/vehicle/minecart.rs"
+  },
+  {
+   "vanilla": "canUsePortal",
+   "class": "Entity",
+   "rust": "try_use_portal",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "causeFallDamage",
+   "class": "Entity",
+   "rust": "is_immune_to_fall_damage",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "checkFallDamage",
+   "class": "Entity",
+   "rust": "handle_fall_damage",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "collidedWithFluid",
+   "class": "Entity",
+   "rust": "is_in_fluid",
+   "rust_file": "crates/pumpkin/src/entity/ai/goal/swim.rs"
+  },
+  {
+   "vanilla": "distanceTo",
+   "class": "Entity",
+   "rust": "distance",
+   "rust_file": "crates/pumpkin/src/entity/ai/pathfinder/node.rs"
+  },
+  {
+   "vanilla": "distanceToSqr",
+   "class": "Entity",
+   "rust": "distance_squared",
+   "rust_file": "crates/pumpkin/src/entity/boss/ender_dragon.rs"
+  },
+  {
+   "vanilla": "doCheckFallDamage",
+   "class": "Entity",
+   "rust": "handle_fall_damage",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "fixupDimensions",
+   "class": "Entity",
+   "rust": "refresh_dimensions",
+   "rust_file": "crates/pumpkin/src/entity/passive/salmon.rs"
+  },
+  {
+   "vanilla": "getDimensions",
+   "class": "Entity",
+   "rust": "get_entity_dimensions",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "getPercentFrozen",
+   "class": "Entity",
+   "rust": "tick_frozen",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "getTicksFrozen",
+   "class": "Entity",
+   "rust": "tick_frozen",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "hasControllingPassenger",
+   "class": "Entity",
+   "rust": "has_passenger",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "isColliding",
+   "class": "Entity",
+   "rust": "has_collisions",
+   "rust_file": "crates/pumpkin/src/entity/ai/pathfinder/walk_node_evaluator.rs"
+  },
+  {
+   "vanilla": "isInWaterOrRain",
+   "class": "Entity",
+   "rust": "is_in_water",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "isNoGravity",
+   "class": "Entity",
+   "rust": "has_no_gravity",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "isOnPortalCooldown",
+   "class": "Entity",
+   "rust": "is_on_cooldown",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "isUnderWater",
+   "class": "Entity",
+   "rust": "is_eye_in_water",
+   "rust_file": "crates/pumpkin/src/entity/breath.rs"
+  },
+  {
+   "vanilla": "lerpHeadTo",
+   "class": "Entity",
+   "rust": "send_head_rot",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "lerpMotion",
+   "class": "Entity",
+   "rust": "progress_motion",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "lerpPositionAndRotationStep",
+   "class": "Entity",
+   "rust": "lerp_rotation",
+   "rust_file": "crates/pumpkin/src/entity/ai/goal/dolphin_jump.rs"
+  },
+  {
+   "vanilla": "move",
+   "class": "Entity",
+   "rust": "move_to",
+   "rust_file": "crates/pumpkin/src/entity/ai/goal/spear_use.rs"
+  },
+  {
+   "vanilla": "oldPosition",
+   "class": "Entity",
+   "rust": "position",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "setGlowingTag",
+   "class": "Entity",
+   "rust": "set_living_flag",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "setLevelCallback",
+   "class": "Entity",
+   "rust": "set_level",
+   "rust_file": "crates/pumpkin/src/entity/hunger.rs"
+  },
+  {
+   "vanilla": "setNoGravity",
+   "class": "Entity",
+   "rust": "set_has_no_gravity",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "setOldRot",
+   "class": "Entity",
+   "rust": "send_head_rot",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "setPosRaw",
+   "class": "Entity",
+   "rust": "set_pos",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "setRemoved",
+   "class": "Entity",
+   "rust": "remove",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "setRot",
+   "class": "Entity",
+   "rust": "set_rotation",
+   "rust_file": "crates/pumpkin/src/entity/decoration/item_frame.rs"
+  },
+  {
+   "vanilla": "setShiftKeyDown",
+   "class": "Entity",
+   "rust": "set_bit_field",
+   "rust_file": "crates/pumpkin/src/entity/decoration/armor_stand.rs"
+  },
+  {
+   "vanilla": "setTicksFrozen",
+   "class": "Entity",
+   "rust": "tick_frozen",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "setYRot",
+   "class": "Entity",
+   "rust": "set_rotation",
+   "rust_file": "crates/pumpkin/src/entity/decoration/item_frame.rs"
+  },
+  {
+   "vanilla": "snapTo",
+   "class": "Entity",
+   "rust": "snap_to_surface",
+   "rust_file": "crates/pumpkin/src/entity/ai/goal/breeze_jump.rs"
+  },
+  {
+   "vanilla": "teleportRelative",
+   "class": "Entity",
+   "rust": "teleport_to",
+   "rust_file": "crates/pumpkin/src/entity/mob/enderman.rs"
+  },
+  {
+   "vanilla": "teleportSetPosition",
+   "class": "Entity",
+   "rust": "teleport_to",
+   "rust_file": "crates/pumpkin/src/entity/mob/enderman.rs"
+  },
+  {
+   "vanilla": "updateSwimming",
+   "class": "Entity",
+   "rust": "set_swimming",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "applyInput",
+   "class": "LivingEntity",
+   "rust": "apply_inertia",
+   "rust_file": "crates/pumpkin/src/entity/projectile/arrow.rs"
+  },
+  {
+   "vanilla": "baseTick",
+   "class": "LivingEntity",
+   "rust": "mob_tick",
+   "rust_file": "crates/pumpkin/src/entity/boss/ender_dragon.rs"
+  },
+  {
+   "vanilla": "blockUsingItem",
+   "class": "LivingEntity",
+   "rust": "blocked_by_item",
+   "rust_file": "crates/pumpkin/src/entity/mob/ravager.rs"
+  },
+  {
+   "vanilla": "canAttack",
+   "class": "LivingEntity",
+   "rust": "can_attack",
+   "rust_file": "crates/pumpkin/src/entity/passive/iron_golem.rs"
+  },
+  {
+   "vanilla": "causeExtraKnockback",
+   "class": "LivingEntity",
+   "rust": "apply_knockback",
+   "rust_file": "crates/pumpkin/src/entity/mod.rs"
+  },
+  {
+   "vanilla": "causeFallDamage",
+   "class": "LivingEntity",
+   "rust": "handle_fall_damage",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "checkFallDamage",
+   "class": "LivingEntity",
+   "rust": "handle_fall_damage",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "dealDefaultKnockback",
+   "class": "LivingEntity",
+   "rust": "handle_knockback",
+   "rust_file": "crates/pumpkin/src/entity/combat.rs"
+  },
+  {
+   "vanilla": "doHurtTarget",
+   "class": "LivingEntity",
+   "rust": "set_target",
+   "rust_file": "crates/pumpkin/src/entity/mob/mod.rs"
+  },
+  {
+   "vanilla": "dropExperience",
+   "class": "LivingEntity",
+   "rust": "award_experience",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "equipmentHasChanged",
+   "class": "LivingEntity",
+   "rust": "enqueue_equipment_change",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "forceAddEffect",
+   "class": "LivingEntity",
+   "rust": "add_effect",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "getAbsorptionAmount",
+   "class": "LivingEntity",
+   "rust": "set_absorption",
+   "rust_file": "crates/pumpkin/src/entity/living.rs"
+  },
+  {
+   "vanilla": "getDefaultDimensions",
+   "class": "LivingEntity",
+   "rust": "scaled_dimensions",
+   "rust_file": "crates/pumpkin/src/entity/decoration/interaction.rs"
+  },
+  {
+   "vanilla": "getDimensions",
+   "class": "LivingEntity",
+   "rust": "get_current_dimensions",
+   "rust_file": "crates/pumpkin/src/entity/decoration/painting.rs"
+  },
+  {
+   "vanilla": "getItemBySlot",
+   "class": "LivingEntity",
+   "rust": "damage_item_in_slot",
+   "rust_file": "crates/pumpkin/src/entity/player.rs"
+  },
+  {
+   "vanilla": "getVisibilityPercent",
+   "class": "LivingEntity",
+   "rust": "evaluate_visibility",
+   "rust_file": "crates/pumpkin/src/entity/player/advancement/visibility_evaluator.rs"
+  }
+ ],
+ "rejected_hallucinations": 36,
+ "declined": 309
+}

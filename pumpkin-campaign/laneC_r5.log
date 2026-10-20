@@ -1,0 +1,93 @@
+=== laneC chunk 1 starting 2026-08-29T18:16:44-04:00
+[0m
+> build · nemotron-3-ultra-free
+[0m
+[0m→ [0mRead WORKLIST.json
+[0m→ [0mRead /home/eshanki/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/item/CrossbowItem.java
+[0m→ [0mRead crates/pumpkin/src/item/items/crossbow.rs
+[0m✱ [0mGrep "trait ItemBehaviour"[90m in . · 1 match[0m
+[0m✱ [0mGrep "get_use_animation|use_on_release"[90m in crates/pumpkin/src/item · 0 matches[0m
+[0m→ [0mRead crates/pumpkin/src/item/mod.rs
+[0m→ [0mRead /home/eshanki/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/level/block/entity/JukeboxBlockEntity.java
+[0m→ [0mRead crates/pumpkin/src/block/entities/jukebox.rs
+[0m✱ [0mGrep "trait Inventory"[90m in crates/pumpkin-world/src · 1 match[0m
+[0m→ [0mRead /home/eshanki/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/level/block/LecternBlock.java
+[0m→ [0mRead crates/pumpkin/src/block/blocks/lectern.rs
+[0m→ [0mRead /home/eshanki/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/level/block/entity/LecternBlockEntity.java
+[0m→ [0mRead crates/pumpkin/src/block/entities/lectern.rs
+[0m→ [0mRead /home/eshanki/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/level/block/entity/SignBlockEntity.java
+[0m→ [0mRead crates/pumpkin/src/block/entities/sign.rs
+[0m→ [0mRead /home/eshanki/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/inventory/StonecutterMenu.java
+[0m→ [0mRead crates/pumpkin-inventory/src/stonecutter_screen_handler.rs
+[0m✱ [0mGrep "get_use_duration|normal_use"[90m in crates/pumpkin/src/item · 45 matches[0m
+[0m→ [0mRead crates/pumpkin/src/item/items/bow.rs
+[0m✱ [0mGrep "set_active_hand"[90m in crates/pumpkin/src · 17 matches[0m
+[0m→ [0mRead crates/pumpkin/src/entity/living.rs[90m [offset=810, limit=50][0m
+[0m✱ [0mGrep "EntityEvent|entity_event|use_animation"[90m in crates/pumpkin/src · 100 matches[0m
+[0m✱ [0mGrep "broadcast_entity_event|broadcastEntityEvent"[90m in crates/pumpkin/src · 2 matches[0m
+[0m✱ [0mGrep "fn broadcast_entity_event"[90m in crates/pumpkin/src · 0 matches[0m
+[0m✱ [0mGrep "USING_ITEM_FLAG|item_in_use"[90m in crates/pumpkin/src · 20 matches[0m
+[0m→ [0mRead crates/pumpkin/src/net/java/play/player_action.rs[90m [offset=295, limit=50][0m
+[0m→ [0mRead crates/pumpkin/src/net/java/play/use_item.rs
+[0m✱ [0mGrep "get_max_use_time|max_use_time"[90m in crates/pumpkin-data/src · 1 match[0m
+[0m→ [0mRead crates/pumpkin-data/src/item_stack/mod.rs[90m [limit=30, offset=425][0m
+[0m✗ [0mGrep "CROSSBOW|crossbow" failed[90m in crates/pumpkin-data/src[0m
+[91m[1mError: [0mRipgrep JSON record exceeded 65536 bytes
+[0m✱ [0mGrep "BlocksAttacks"[90m in crates/pumpkin-data/src · 10 matches[0m
+[0m→ [0mRead crates/pumpkin-data/src/generated/item.rs[90m [offset=50485, limit=30][0m
+[0m→ [0mRead crates/pumpkin-data/src/generated/item.rs[90m [limit=50, offset=50430][0m
+[0m✱ [0mGrep "pub const CROSSBOW:"[90m in crates/pumpkin-data/src/generated/item.rs · 3 matches[0m
+[0m→ [0mRead crates/pumpkin-data/src/generated/item.rs[90m [offset=14780, limit=50][0m
+[0m
+[0m← [0mEdit crates/pumpkin/src/item/items/crossbow.rs
+Index: /home/eshanki/pumpkin-wt/loose-coverage-5/crates/pumpkin/src/item/items/crossbow.rs
+===================================================================
+--- /home/eshanki/pumpkin-wt/loose-coverage-5/crates/pumpkin/src/item/items/crossbow.rs
++++ /home/eshanki/pumpkin-wt/loose-coverage-5/crates/pumpkin/src/item/items/crossbow.rs
+@@ -103,27 +103,28 @@
+ ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+     Box::pin(async move {
+         let stack = player.inventory().held_item().await;
+ 
+-        // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:222) already loaded the
+-        // crossbow once the charge completed while the button was still held, so a
+-        // release afterwards must not draw (and consume) ammo a second time. This
+-        // mirrors `releaseUsing`'s gate `power >= 1.0F && isCharged(itemStack)`
+-        // (CrossbowItem.java:86-89), which only succeeds for an already-charged bow.
+-        if stack
+-            .get_data_component::<ChargedProjectilesImpl>()
+-            .is_some_and(|charged| !charged.projectiles.is_empty())
+-        {
+-            player.living_entity.clear_active_hand().await;
+-            return;
+-        }
+-
+         let use_ticks = player.living_entity.item_use_time.load(Ordering::Relaxed);
+         let use_ticks = 72000 - use_ticks;
++        let charge_duration = charge_duration_ticks(&stack);
+ 
+-        if use_ticks >= charge_duration_ticks(&stack) {
++        let is_charged = stack
++            .get_data_component::<ChargedProjectilesImpl>()
++            .is_some_and(|charged| !charged.projectiles.is_empty());
++
++        // Vanilla `CrossbowItem#releaseUsing` (CrossbowItem.java:86-89):
++        // `power >= 1.0F && isCharged(itemStack)` where power = use_ticks / charge_duration.
++        // Only fire if we reached full charge AND the crossbow is loaded.
++        if is_charged && use_ticks >= charge_duration {
++            Self::fire_projectiles(player).await;
++        } else if !is_charged && use_ticks >= charge_duration {
++            // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:222-236) loads at full
++            // charge if the button is still held. If the player releases exactly at or
++            // after full charge without the tick firing, load now (but do not fire).
+             Self::try_load_projectiles(player).await;
+         }
++
+         player.living_entity.clear_active_hand().await;
+     })
+ }
+ 
+
+[0m
+Now I have a good understanding of all the classes. Let me analyze each one and implement the GENUINE_GAPs. Let me start with the CrossbowItem fix for the firing bug.
+[0m✱ [0mGrep "on_state_replaced|pre_remove"[90m in crates/pumpkin/src/block · 34 matches[0m

@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Mob",
+    "vanilla_path": "net/minecraft/world/entity/Mob.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/mod.rs",
+    "total_methods": 126,
+    "in_declaring_file": 38,
+    "elsewhere_in_workspace": 18,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "leashTooFarBehaviour",
+      "onAttributeUpdated",
+      "onLeashRemoved",
+      "onPathfindingDone",
+      "onPathfindingStart",
+      "playAmbientSound",
+      "playHurtSound",
+      "populateDefaultEquipmentEnchantments",
+      "populateDefaultEquipmentSlots",
+      "registerDebugValues",
+      "removeAfterChangingDimensions",
+      "removeAllGoals",
+      "removeFreeWill",
+      "serverAiStep",
+      "setAggressive",
+      "setChanged",
+      "setDropChance",
+      "setGuaranteedDrop",
+      "setLeashData",
+      "setTheItem"
+    ],
+    "note": "leads 41-60 of 70 for Mob"
+  }
+]

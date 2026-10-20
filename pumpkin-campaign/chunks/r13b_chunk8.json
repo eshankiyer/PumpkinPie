@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "IronGolem",
+    "vanilla_path": "net/minecraft/world/entity/animal/golem/IronGolem.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/iron_golem.rs",
+    "total_methods": 30,
+    "in_declaring_file": 7,
+    "elsewhere_in_workspace": 12,
+    "absent_workspace_wide": [
+      "die",
+      "doHurtTarget",
+      "doPush",
+      "getAttackAnimationTick",
+      "getCrackiness",
+      "getOfferFlowerTick",
+      "getPersistentAngerEndTime",
+      "handleEntityEvent",
+      "offerFlower",
+      "playStepSound",
+      "setPersistentAngerEndTime"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for IronGolem"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Mob",
+    "vanilla_path": "net/minecraft/world/entity/Mob.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/mod.rs",
+    "total_methods": 126,
+    "in_declaring_file": 47,
+    "elsewhere_in_workspace": 19,
+    "absent_workspace_wide": [
+      "ate",
+      "baseTick",
+      "checkMobSpawnRules",
+      "clampHeadRotationToBody",
+      "clearHome",
+      "createBodyControl",
+      "createEquipmentSlotContainer",
+      "createMobAttributes",
+      "createNavigation",
+      "customServerAiStep",
+      "doHurtTarget",
+      "dropCustomDeathLoot",
+      "dropFromLootTable",
+      "equip",
+      "getAttackBoundingBox",
+      "getBodyArmorItem",
+      "getDropChances",
+      "getGoalSelector",
+      "getHomePosition",
+      "getHomeRadius"
+    ],
+    "note": "round12 leads 1-20 of 60 for Mob"
+  }
+]

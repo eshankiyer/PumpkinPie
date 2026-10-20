@@ -1,0 +1,30 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Display",
+    "vanilla_path": "net/minecraft/world/entity/Display.java",
+    "rust_file": "crates/pumpkin/src/entity/decoration/display.rs",
+    "total_methods": 26,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 5,
+    "absent_workspace_wide": [
+      "BlockRenderState",
+      "CachedInfo",
+      "CachedLine",
+      "ItemRenderState",
+      "RenderState",
+      "TextRenderState",
+      "affectedByCulling",
+      "cacheDisplay",
+      "calculateInterpolationProgress",
+      "getAlign",
+      "getBoundingBoxForCulling",
+      "getInterpolation",
+      "getPistonPushReaction",
+      "getTeamColor",
+      "onSyncedDataUpdated",
+      "updateRenderSubState"
+    ],
+    "note": "round12 broader pool: leads 1-16 of 16 for Display"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "LecternBlock",
+    "vanilla_path": "net/minecraft/world/level/block/LecternBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/lectern.rs",
+    "total_methods": 23,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 9,
+    "absent_workspace_wide": [
+      "affectNeighborsAfterRemoval",
+      "createBlockStateDefinition",
+      "getCollisionShape",
+      "getOcclusionShape",
+      "hasAnalogOutputSignal",
+      "newBlockEntity",
+      "resetBookState",
+      "signalPageChange",
+      "tryPlaceBook",
+      "useItemOn",
+      "useShapeForLightOcclusion",
+      "useWithoutItem"
+    ],
+    "note": "round12 broader pool: leads 1-12 of 12 for LecternBlock"
+  }
+]

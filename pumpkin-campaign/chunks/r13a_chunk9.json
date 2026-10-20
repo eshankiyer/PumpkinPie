@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "BundleItem",
+    "vanilla_path": "net/minecraft/world/item/BundleItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/bundle.rs",
+    "total_methods": 15,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "getBarColor",
+      "getBarWidth",
+      "getFullnessDisplay",
+      "getNumberOfItemsToShow",
+      "getTooltipImage",
+      "getUseAnimation",
+      "isBarVisible",
+      "onDestroyed",
+      "overrideOtherStackedOnMe",
+      "overrideStackedOnOther",
+      "use"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for BundleItem"
+  }
+]

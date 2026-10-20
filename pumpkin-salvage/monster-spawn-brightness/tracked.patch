@@ -1,0 +1,21 @@
+diff --git a/crates/pumpkin/src/entity/ai/goal/fox_sleep.rs b/crates/pumpkin/src/entity/ai/goal/fox_sleep.rs
+index 2b9670d3..5235e857 100644
+--- a/crates/pumpkin/src/entity/ai/goal/fox_sleep.rs
++++ b/crates/pumpkin/src/entity/ai/goal/fox_sleep.rs
+@@ -23,13 +23,9 @@ fn is_bright_outside(world: &World) -> bool {
+ 
+ fn is_untamed_tamable(other: &dyn EntityBase) -> bool {
+     let entity_type = other.get_entity().entity_type;
+-    let tamable_type = [
+-        &EntityType::CAT,
+-        &EntityType::WOLF,
+-        &EntityType::PARROT,
+-    ]
+-    .into_iter()
+-    .any(|tamable| entity_type == tamable);
++    let tamable_type = [&EntityType::CAT, &EntityType::WOLF, &EntityType::PARROT]
++        .into_iter()
++        .any(|tamable| entity_type == tamable);
+     tamable_type
+         && other
+             .get_mob()

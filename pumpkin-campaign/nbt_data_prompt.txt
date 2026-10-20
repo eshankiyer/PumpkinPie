@@ -1,0 +1,129 @@
+You are implementing a real missing vanilla-parity FEATURE in the Pumpkin Minecraft
+server (Rust) against the Minecraft 26.2 Mojang decompile at
+~/pumpkin-vanilla-26.2/decompiled. This is greenfield work, not gap-filling: the feature
+does not exist here in any form yet. It has been pre-researched this session; follow the
+design below rather than re-deriving it, but verify every claim against the cited source
+before relying on it.
+
+FEATURE: NBT path arguments (vanilla's NbtPathArgument) and the `/data get|merge|remove`
+command family (vanilla's DataCommands), for the `entity` and `block` targets only.
+Read these two vanilla files in full first:
+  ~/pumpkin-vanilla-26.2/decompiled/net/minecraft/commands/arguments/NbtPathArgument.java (750 lines)
+  ~/pumpkin-vanilla-26.2/decompiled/net/minecraft/server/commands/data/DataCommands.java (410 lines)
+Also read net/minecraft/nbt/NbtUtils.java (compareNbt, ~line 65) and
+net/minecraft/server/commands/data/{DataAccessor,EntityDataAccessor,BlockDataAccessor}.java.
+
+CONFIRMED THIS SESSION (do not re-derive, verify with a quick grep and move on):
+- crates/pumpkin-nbt/src/compound.rs already has NbtCompound::get_mut, ::remove, ::merge
+  (merge mirrors CompoundTag.merge, CompoundTag.java:435-444: recursive only when both
+  sides have a Compound at that key, else overwrite). Use these.
+- pumpkin_nbt::tag::NbtTag derives Clone + PartialEq; NbtCompound too.
+- Entity NBT round-trip already exists and is exactly vanilla's real load path (used at
+  spawn AND at world/region load, not a lossy subset): EntityBase::write_nbt(&self, &mut
+  NbtCompound) and EntityBase::read_nbt_non_mut(&self, &NbtCompound), both callable through
+  a shared Arc<dyn EntityBase> (interior mutability via atomics/locks) - see
+  crates/pumpkin/src/entity/mod.rs around lines 6539 and 6618, and grep
+  `read_nbt_non_mut(` for ~90 call sites across entity/*.rs proving it's the primary path.
+  Refuse setData on players (EntityBase::get_player().is_some()) exactly like vanilla's
+  ERROR_NO_PLAYERS in EntityDataAccessor.setData.
+- Block entity NBT: BlockEntity::write_nbt(&self, &mut NbtCompound) reads out (block/entities/mod.rs
+  trait, ~line 78). There is no generic mutable load; instead
+  crates/pumpkin/src/block/entities/mod.rs::block_entity_from_nbt_at(nbt: &NbtCompound,
+  position: BlockPos) -> Option<Arc<dyn BlockEntity>> (~line 727) dispatches by
+  nbt.get_string("id") to construct a fresh instance, and World::add_block_entity(&self,
+  Arc<dyn BlockEntity>) (world/mod.rs ~line 7348) registers/persists/broadcasts it,
+  overwriting whatever was at that position. For "get the current full NBT of a block
+  entity" build a compound the same way World::add_block_entity already does right before
+  it calls add_block_entity_nbt: write_nbt() output plus put_string("id", resource_location())
+  and put_int("x"/"y"/"z", ...) - grep that function for the exact field names, it is the
+  existing precedent to copy, not something to invent.
+- Two coexisting command frameworks exist in this codebase. crates/pumpkin/src/command/commands/data.rs
+  (280 lines) currently uses the OLDER one (command::args::*, command::tree::{CommandTree,
+  builder}) and only implements bare `data get <target>` (whole-NBT dump, no path, no
+  merge, no remove). The NEWER framework (command::argument_types::*, command::node::{Command
+  Executor, CommandExecutorResult}, command::context::command_context::CommandContext,
+  command::argument_builder::{argument, command, literal}, registered via
+  `some_command::register(&mut dispatcher, ...)` rather than `dispatcher.register(some_command::init_command_tree(), perm)`)
+  is what every recently-touched multi-branch command uses - read
+  crates/pumpkin/src/command/commands/attribute.rs end to end as your template for tree
+  shape, executor structs, and registration, and read crates/pumpkin/src/command/commands/clone.rs
+  too since it also has multiple targets/subcommands. MIGRATE data.rs to this newer
+  framework rather than extending the old one; update its registration call in
+  crates/pumpkin/src/command/commands/mod.rs (currently
+  `dispatcher.register(data::init_command_tree(), "minecraft:command.data")`) to match
+  attribute.rs's registration call shape.
+  Existing pieces to reuse directly:
+  crates/pumpkin/src/command/argument_types/entity.rs::EntityArgumentType (get_entity ->
+  Arc<dyn EntityBase>);
+  crates/pumpkin/src/command/argument_types/coordinates/block_pos.rs::BlockPosArgumentType::get_loaded_block_pos;
+  crates/pumpkin/src/command/argument_types/nbt.rs::NbtCompoundArgumentType (SNBT parsing
+  for the `merge <nbt>` argument, backed by
+  crates/pumpkin/src/command/snbt/mod.rs::SnbtParser::parse_for_commands, which takes a
+  shared &mut StringReader cursor - exactly what NbtPathArgument.parse needs to interleave
+  with your own path-token reader).
+  All the commands.data.* / arguments.nbtpath.* translation keys already exist generated in
+  crates/pumpkin-data/src/generated/translation.rs (grep COMMANDS_DATA_ and
+  ARGUMENTS_NBTPATH_) - do not add new ones, use translation::java::COMMANDS_DATA_* etc.
+  with the existing CommandErrorType<N>::new pattern (see attribute.rs for the pattern).
+
+DESIGN FOR THE PATH ENGINE (new file:
+crates/pumpkin/src/command/argument_types/nbt_path.rs, sibling to nbt.rs):
+- A `PathNode` enum with the same six cases as vanilla's Node subclasses: CompoundChild(String),
+  MatchObject(String, NbtCompound), MatchRootObject(NbtCompound), IndexedElement(i32),
+  MatchElement(NbtCompound), AllElements. Port each one's getTag/getOrCreateTag/
+  createPreferredParentTag/setTag/removeTag body directly from NbtPathArgument.java lines
+  155-529 - the logic (negative-index wraparound, empty-list special case in
+  AllElementsNode.setTag, MatchRootObjectNode being firstNode-only) is exact and easy to get
+  subtly wrong; do not improvise it.
+- compareNbt (NbtUtils.java ~line 65): partial match - Compound requires actual.len() >=
+  expected.len() and every expected key present in actual with a recursively matching
+  value; List (when partial=true) requires actual.len() >= expected.len() and every expected
+  element has SOME matching element in actual (not a bijection, duplicates in expected can
+  each match the same actual element); primitives use exact equality. This predicate is what
+  MatchObjectNode/MatchElementNode/MatchRootObjectNode filter with.
+- `NbtPath { original: String, nodes: Vec<PathNode> }` with a hand-written parser mirroring
+  NbtPathArgument.parse/parseNode/readObjectNode/readUnquotedName (lines 62-149) - char-by-
+  char against crate::command::string_reader::StringReader (peek/peek_with_offset/skip/
+  read/read_int/expect/cursor/set_cursor all exist, check the file for exact signatures),
+  delegating to SnbtParser::parse_for_commands for `{...}` patterns and erasing (erroring)
+  if the parsed tag isn't a Compound.
+- Read-only query op (for `/data get`, and the merge/set "from" source in vanilla, though
+  you are not wiring `modify` this run): `get<'a>(&self, tag: &'a NbtTag) -> Result<Vec<&'a
+  NbtTag>, CommandSyntaxError>`, immutable refs, no aliasing concerns.
+- Mutating ops (`get_or_create`, `set`, `remove`, `count_matching`): implement via recursive
+  functions that hold at most one &mut borrow scope at a time - fan out into a node's
+  children as Vec<&mut NbtTag> (all disjoint by construction: distinct HashMap keys or
+  distinct Vec indices via iter_mut()/get_mut()), recurse into each, sum result counts. Do
+  not use raw pointers or unsafe; this pattern needs neither.
+- ArgumentType impl: `NbtPathArgumentType; type Item = NbtPath;` client_side_parser returns
+  JavaClientArgumentType::NbtPath (already defined, grep
+  crates/pumpkin-protocol/src/java/client/play/commands.rs:211).
+- Write table-driven unit tests in the same file (#[cfg(test)] mod tests) covering: every
+  example in vanilla's own EXAMPLES array ("foo", "foo.bar", "foo[0]", "[0]", "[]",
+  "{foo=bar}"), negative list index, get_or_create creating missing parent containers,
+  MatchRootObjectNode rejected when not the first node, and a compareNbt partial-match case
+  (pattern is a compound subset of a larger compound; pattern list element matches one of
+  several actual list elements).
+
+COMMAND WIRING (in the migrated data.rs): implement exactly these, nothing more this run -
+`/data get <entity|block> [path] [scale]`, `/data merge <entity|block> <nbt>`,
+`/data remove <entity|block> <path>`. Do NOT implement `/data modify` or the `storage`
+target this run (storage needs a persisted command-storage NBT store that does not exist
+here yet - that is separate, larger, future work; note it as such in WAVE_REPORT.md, do not
+attempt it). Follow DataCommands.java's getData/mergeData/removeData/getSingleTag exactly
+for return-value and error semantics (ERROR_MERGE_UNCHANGED when nothing changed,
+ERROR_GET_NON_EXISTENT/ERROR_GET_NOT_NUMBER/ERROR_MULTIPLE_TAGS for get). Success messages
+use the entity./block. translation keys already confirmed present above.
+
+Hard rules:
+- Every change carries a comment citing the vanilla file and line numbers you read THIS
+  run.
+- Match surrounding style exactly (this codebase, not generic Rust idiom). No emojis.
+  Comments minimal and factual.
+- Do NOT run cargo build/clippy/test, they are too slow - grep for exact signatures instead
+  of guessing them.
+- Do NOT commit, do NOT touch git.
+
+End by appending to WAVE_REPORT.md: what you implemented, what you deliberately deferred
+(modify, storage), and any vanilla behavior you were unsure about with the grep you ran to
+resolve it.

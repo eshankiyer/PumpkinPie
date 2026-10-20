@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "PotionItem",
+    "vanilla_path": "net/minecraft/world/item/PotionItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getDefaultInstance",
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "RailBlock",
+    "vanilla_path": "net/minecraft/world/level/block/RailBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/rails/rail.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getShapeProperty"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SculkCatalystBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SculkCatalystBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/sculk/sculk_catalyst.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "spawnAfterBreak"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SculkSpreader",
+    "vanilla_path": "net/minecraft/world/level/block/SculkSpreader.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/sculk/sculk_spreader.rs",
+    "total_methods": 18,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 12,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createLevelSpreader",
+      "createWorldGenSpreader"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundBlockEntityTagQueryPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundBlockEntityTagQueryPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/block_entity_tag_query.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTransactionId",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundClientCommandPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundClientCommandPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/client_command.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getAction",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundEntityTagQueryPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundEntityTagQueryPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/entity_tag_query.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTransactionId",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPingRequestPacket",
+    "vanilla_path": "net/minecraft/network/protocol/ping/ServerboundPingRequestPacket.java",
+    "rust_file": "crates/pumpkin/src/net/java/play/ping_request.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTime",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPlayerCommandPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPlayerCommandPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/player_command.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getAction",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundRecipeBookChangeSettingsPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundRecipeBookChangeSettingsPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/recipe_book_change_settings.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBookType",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetCommandBlockPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetCommandBlockPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_command_block.rs",
+    "total_methods": 8,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isTrackOutput",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetCommandMinecartPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetCommandMinecartPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_command_minecart.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isTrackOutput",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SideChainPart",
+    "vanilla_path": "net/minecraft/world/level/block/state/properties/SideChainPart.java",
+    "rust_file": "crates/pumpkin-data/src/generated/block.rs",
+    "total_methods": 9,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isChainEnd",
+      "isConnectionTowards"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SlabBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SlabBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/slabs.rs",
+    "total_methods": 10,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "useShapeForLightOcclusion"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SlimeBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SlimeBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/slime.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "fallOn",
+      "stepOn"
+    ]
+  }
+]

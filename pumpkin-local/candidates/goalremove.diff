@@ -1,0 +1,33 @@
+diff --git a/pumpkin/src/entity/ai/goal/goal_selector.rs b/pumpkin/src/entity/ai/goal/goal_selector.rs
+index 39b0227..dbd54de 100644
+--- a/pumpkin/src/entity/ai/goal/goal_selector.rs
++++ b/pumpkin/src/entity/ai/goal/goal_selector.rs
+@@ -33,19 +33,23 @@ impl GoalSelector {
+             }
+         }
+ 
+-        for goal_idx in goals_to_remove {
++        // Iterate in descending order so earlier indices remain valid during removal.
++        for goal_idx in goals_to_remove.into_iter().rev() {
++            let last_idx = self.goals.len() - 1;
+             self.goals.swap_remove(goal_idx);
+ 
+-            // This is very fast because arrays are on the stack and the compiler knows the size
++            // Fix up `goals_by_control` to match `swap_remove` exactly.
++            // `swap_remove` moves the last element into `goal_idx`, so any control
++            // tracking the old last index now tracks `goal_idx`. Controls tracking
++            // `goal_idx` are invalidated because a different goal was swapped in.
+             for slot in &mut self.goals_by_control {
+                 if *slot == usize::MAX {
+                     continue;
+                 }
+-                // Update the idx
+                 if *slot == goal_idx {
+                     *slot = usize::MAX;
+-                } else if *slot > goal_idx {
+-                    *slot -= 1;
++                } else if *slot == last_idx {
++                    *slot = goal_idx;
+                 }
+             }
+         }

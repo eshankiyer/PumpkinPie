@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 44,
+    "elsewhere_in_workspace": 59,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "isVisuallySwimming",
+      "jumpFromGround",
+      "jumpInLiquid",
+      "lerpHeadRotationStep",
+      "lerpHeadTo",
+      "makePoofParticles",
+      "makeSound",
+      "makeWaypointConnectionWith",
+      "maxUpStep",
+      "onAttack",
+      "onAttributeUpdated",
+      "onBelowWorld",
+      "onChangedBlock",
+      "onClimbable",
+      "onEffectAdded",
+      "onEffectUpdated",
+      "onEffectsRemoved",
+      "onEnterCombat",
+      "onEquipItem",
+      "onEquippedItemBroken"
+    ],
+    "note": "leads 121-140 of 200 for LivingEntity"
+  }
+]

@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AbstractHorse",
+    "vanilla_path": "net/minecraft/world/entity/animal/equine/AbstractHorse.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/equine/mod.rs",
+    "total_methods": 88,
+    "in_declaring_file": 36,
+    "elsewhere_in_workspace": 26,
+    "absent_workspace_wide": [
+      "addBehaviourGoals",
+      "canMate",
+      "createBaseHorseAttributes",
+      "createInventory",
+      "equipBodyArmor",
+      "followMommy",
+      "getAmbientStandInterval",
+      "getDismountLocationForPassenger",
+      "getEatAnim",
+      "getEquipSound",
+      "getInventorySize",
+      "getMouthAnim",
+      "getPassengerAttachmentPoint",
+      "getStandAnim",
+      "handleEntityEvent",
+      "hasInventoryChanged",
+      "onClimbable",
+      "playGallopSound",
+      "playStepSound",
+      "setBred",
+      "setEating",
+      "setOffspringAttributes",
+      "setTemper",
+      "shouldPanic",
+      "tameWithName"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 26 for AbstractHorse"
+  }
+]

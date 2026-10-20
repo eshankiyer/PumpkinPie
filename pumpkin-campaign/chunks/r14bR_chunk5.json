@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "SmallDripleafBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SmallDripleafBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/small_dripleaf.rs",
+    "total_methods": 14,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getMaxVerticalOffset"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SmithingTableBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SmithingTableBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/smithing_table.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getMenuProvider",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SmokerBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SmokerBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/smoker.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick",
+      "newBlockEntity"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SmokerBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/SmokerBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/smoker.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createMenu",
+      "getBurnDuration"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SnifferEggBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SnifferEggBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/sniffer_egg.rs",
+    "total_methods": 8,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getHatchLevel"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "SnowballItem",
+    "vanilla_path": "net/minecraft/world/item/SnowballItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/snowball.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "asProjectile",
+      "use"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SoulFireBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SoulFireBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/fire/soul_fire.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "canBurn",
+      "canSurviveOnBlock"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SpawnerBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SpawnerBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/spawner.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "newBlockEntity",
+      "spawnAfterBreak"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "SplashPotionItem",
+    "vanilla_path": "net/minecraft/world/item/SplashPotionItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createPotion",
+      "use"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "StraightTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/StraightTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/straight.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "storage",
+    "vanilla_class": "TagEntry",
+    "vanilla_path": "net/minecraft/world/level/storage/loot/entries/TagEntry.java",
+    "rust_file": "crates/pumpkin-util/src/loot_table.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "expandTag",
+      "tagContents"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "ThreeLayersFeatureSize",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/featuresize/ThreeLayersFeatureSize.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/size.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSizeAtHeight",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TrapDoorBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TrapDoorBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/trapdoor.rs",
+    "total_methods": 12,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 9,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TrappedChestBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TrappedChestBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/chests.rs",
+    "total_methods": 6,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getOpenChestStat",
+      "newBlockEntity"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "TreeFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/TreeFeature.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/mod.rs",
+    "total_methods": 8,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getLowestTrunkOrRootOfTree",
+      "isVine"
+    ]
+  }
+]

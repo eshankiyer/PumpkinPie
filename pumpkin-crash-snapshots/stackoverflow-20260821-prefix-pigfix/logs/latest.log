@@ -1,0 +1,19 @@
+[INFO] Starting Pumpkin 0.1.0-dev+26.2-26.40 Java Minecraft (Protocol 776) | 1.26.40 Bedrock (Protocol 2168)
+[WARN] Pumpkin is running an unoptimized debug build. Do not use this build for performance testing; run `cargo run --release` or use a release binary.
+[WARN] Pumpkin is currently under heavy development!
+[INFO] Report issues on https://github.com/Pumpkin-MC/Pumpkin/issues
+[INFO] Join our Discord for community support: https://discord.gg/wT8XjrjKkf
+[INFO] Consider Donating to https://pumpkinmc.org/donate/
+[WARN] No level.dat in world, creating a new world with seed 1786772846643249817
+[ERROR] Failed to save level.dat: Info not found!
+[INFO] Enabled dimensions: ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]
+[INFO] Starting parallel world load...
+[INFO] Loading minecraft:overworld
+[INFO] Loading minecraft:the_nether
+[INFO] Loading minecraft:the_end
+[INFO] Initial overworld spawn selected at (0, 66, 0)
+[INFO] All worlds loaded successfully.
+[INFO] Started server; took 7620ms
+[INFO] Server is now running. Connect using port: Java Edition: 127.0.0.1:25599
+[WARN] The input is not a TTY; falling back to simple logger and ignoring `use_tty` setting
+[INFO] ParityBot joined the game

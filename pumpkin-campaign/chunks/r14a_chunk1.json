@@ -1,0 +1,89 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "Ingredient",
+    "vanilla_path": "net/minecraft/world/item/crafting/Ingredient.java",
+    "rust_file": "crates/pumpkin-plugin-api/src/recipe.rs",
+    "total_methods": 10,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "acceptsItem",
+      "display",
+      "equals",
+      "hashCode",
+      "optionalIngredientToDisplay",
+      "testOptionalIngredient"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TurtleEggBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TurtleEggBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/turtle_egg.rs",
+    "total_methods": 11,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "fallOn",
+      "isSand",
+      "onSand",
+      "playerDestroy",
+      "stepOn"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundChunksBiomesPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundChunksBiomesPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/chunks_biomes.rs",
+    "total_methods": 7,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "ChunkBiomeData",
+      "extractChunkData",
+      "forChunks",
+      "getReadBuffer",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "LightBlock",
+    "vanilla_path": "net/minecraft/world/level/block/LightBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/light.rs",
+    "total_methods": 11,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getRenderShape",
+      "getShadeBrightness",
+      "setLightOnStack",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetStructureBlockPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetStructureBlockPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_structure_block.rs",
+    "total_methods": 17,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 12,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getUpdateType",
+      "isShowAir",
+      "isShowBoundingBox",
+      "isStrict",
+      "type"
+    ]
+  }
+]

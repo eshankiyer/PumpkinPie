@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "chunk",
+    "vanilla_class": "ProtoChunk",
+    "vanilla_path": "net/minecraft/world/level/chunk/ProtoChunk.java",
+    "rust_file": "crates/pumpkin-world/src/generation/proto_chunk.rs",
+    "total_methods": 26,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 5,
+    "absent_workspace_wide": [
+      "addPackedPostProcess",
+      "getBlockEntities",
+      "getBlockEntityNbts",
+      "getBlockTicks",
+      "getFluidTicks",
+      "getHeightAccessorForGeneration",
+      "getOrCreateCarvingMask",
+      "getPersistedStatus",
+      "getTicksForSerialization",
+      "markPosForPostProcessing",
+      "packOffsetCoordinates",
+      "setBelowZeroRetrogen",
+      "setBlockEntity",
+      "setCarvingMask",
+      "setLightEngine",
+      "setPersistedStatus",
+      "setStartForStructure",
+      "unpackBlockTicks",
+      "unpackFluidTicks",
+      "unpackOffsetCoordinates"
+    ],
+    "note": "round12 broader pool: leads 1-20 of 20 for ProtoChunk"
+  }
+]

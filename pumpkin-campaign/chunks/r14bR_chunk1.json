@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundSetBorderWarningDistancePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundSetBorderWarningDistancePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/set_border_warning_distance.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getWarningBlocks",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundSetHealthPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundSetHealthPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/bedrock/client/set_health.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getFood",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundSoundPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundSoundPacket.java",
+    "rust_file": "crates/pumpkin-data/src/generated/sound.rs",
+    "total_methods": 10,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 8,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getVolume",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundUpdateTagsPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundUpdateTagsPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/config/update_tags.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTags",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "CompassItem",
+    "vanilla_path": "net/minecraft/world/item/CompassItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/compass.rs",
+    "total_methods": 4,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isFoil",
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "ConcretePowderBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ConcretePowderBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/falling.rs",
+    "total_methods": 5,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getDustColor",
+      "onLand"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "ConduitBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ConduitBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/conduit.rs",
+    "total_methods": 7,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "newBlockEntity"
+    ]
+  },
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "CrafterSlot",
+    "vanilla_path": "net/minecraft/world/inventory/CrafterSlot.java",
+    "rust_file": "crates/pumpkin-inventory/src/crafter_screen_handler.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mayPlace",
+      "setChanged"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CraftingTableBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CraftingTableBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/crafting_table.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getMenuProvider",
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "DarkOakTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/DarkOakTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/dark_oak.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "DoubleBlockHalf",
+    "vanilla_path": "net/minecraft/world/level/block/state/properties/DoubleBlockHalf.java",
+    "rust_file": "crates/pumpkin-data/src/generated/block.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getDirectionToOther",
+      "getOtherHalf"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "DragonFireball",
+    "vanilla_path": "net/minecraft/world/entity/projectile/hurtingprojectile/DragonFireball.java",
+    "rust_file": "crates/pumpkin/src/entity/projectile/dragon_fireball.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTrailParticle",
+      "shouldBurn"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "DyeColor",
+    "vanilla_path": "net/minecraft/world/item/DyeColor.java",
+    "rust_file": "crates/pumpkin-data/src/generated/dye_color.rs",
+    "total_methods": 11,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getMapColor",
+      "getTerracottaColor"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "DyeItem",
+    "vanilla_path": "net/minecraft/world/item/DyeItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/dye.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "interactLivingEntity",
+      "tryApplyToSign"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "EggItem",
+    "vanilla_path": "net/minecraft/world/item/EggItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/egg.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "asProjectile",
+      "use"
+    ]
+  }
+]

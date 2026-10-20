@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "SignBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/SignBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/sign.rs",
+    "total_methods": 22,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 7,
+    "absent_workspace_wide": [
+      "canExecuteClickCommands",
+      "createDefaultSignText",
+      "executeClickCommandsIfPresent",
+      "getMaxTextLineWidth",
+      "getSignInteractionFailedSoundEvent",
+      "getTextLineHeight",
+      "getUpdatePacket",
+      "getUpdateTag",
+      "playerIsTooFarAwayToEdit",
+      "setAllowedPlayerEditor",
+      "updateSignText"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for SignBlockEntity"
+  }
+]

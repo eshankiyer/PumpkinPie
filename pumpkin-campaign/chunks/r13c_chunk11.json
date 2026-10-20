@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "JukeboxBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/JukeboxBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/jukebox.rs",
+    "total_methods": 18,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "getContainerBlockEntity",
+      "getSongPlayer",
+      "getTheItem",
+      "onSongChanged",
+      "preRemoveSideEffects",
+      "setRemoved",
+      "setSongItemWithoutPlaying",
+      "setTheItem",
+      "splitTheItem",
+      "tryForcePlaySong"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for JukeboxBlockEntity"
+  }
+]

@@ -1,0 +1,12 @@
+error: unused variable: `name`
+error: unused variable: `key`
+error: unused variable: `a`
+error: unused variable: `b`
+error: constant `MAX_SEARCH_RADIUS` is never used
+error: function `sets_containing` is never used
+error: function `horizontal_distance` is never used
+error: redundant clone
+error: implicitly cloning a `String` by calling `to_string` on its dereferenced type
+error: could not compile `pumpkin` (lib test) due to 7 previous errors
+error: could not compile `pumpkin` (lib) due to 9 previous errors
+EXIT=0

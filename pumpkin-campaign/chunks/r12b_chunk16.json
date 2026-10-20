@@ -1,0 +1,31 @@
+[
+  {
+    "subsystem": "border",
+    "vanilla_class": "WorldBorder",
+    "vanilla_path": "net/minecraft/world/level/border/WorldBorder.java",
+    "rust_file": "crates/pumpkin/src/world/border.rs",
+    "total_methods": 40,
+    "in_declaring_file": 15,
+    "elsewhere_in_workspace": 8,
+    "absent_workspace_wide": [
+      "applyInitialSettings",
+      "clampToBounds",
+      "clampVec3ToBound",
+      "getCollisionShape",
+      "getDamagePerBlock",
+      "getLerpTarget",
+      "getListeners",
+      "getPreviousSize",
+      "getSafeZone",
+      "getWarningBlocks",
+      "getWarningTime",
+      "lerpSizeBetween",
+      "onAbsoluteMaxSizeChange",
+      "onCenterChange",
+      "removeListener",
+      "setWarningBlocks",
+      "setWarningTime"
+    ],
+    "note": "round12 broader pool: leads 1-17 of 17 for WorldBorder"
+  }
+]

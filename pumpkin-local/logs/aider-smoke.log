@@ -1,0 +1,23 @@
+Warning: Input is not a terminal (fd=0).
+────────────────────────────────────────────────────────────────────────────────
+You can skip this check with --no-gitignore
+Added .aider* to .gitignore
+Warning for openai/qwen3.6-27b: Unknown context window size and costs, using 
+sane defaults.
+You can skip this check with --no-show-model-warnings
+
+https://aider.chat/docs/llms/warnings.html
+
+Opening in existing browser session.
+Aider v0.86.2
+Model: openai/qwen3.6-27b with whole edit format
+Git repo: ../../Pumpkin/.git/worktrees/diagvalid with 3,577 files
+Warning: For large repos, consider using --subtree-only and .aiderignore
+See: https://aider.chat/docs/faq.html#can-i-use-aider-in-a-large-mono-repo
+Repo-map: disabled
+Added pumpkin/src/block/blocks/plant/crop/nether_wart.rs to the chat.
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+Opening in existing browser session.

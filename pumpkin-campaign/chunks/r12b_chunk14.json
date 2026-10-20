@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "MerchantOffer",
+    "vanilla_path": "net/minecraft/world/item/trading/MerchantOffer.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/merchant_offers.rs",
+    "total_methods": 27,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "addToSpecialPriceDiff",
+      "assemble",
+      "createFromStream",
+      "getBaseCostA",
+      "getCostA",
+      "getCostB",
+      "getDemand",
+      "getItemCostA",
+      "getItemCostB",
+      "getMaxUses",
+      "getPriceMultiplier",
+      "getSpecialPriceDiff",
+      "getUses",
+      "getXp",
+      "increaseUses",
+      "resetSpecialPriceDiff",
+      "satisfiedBy",
+      "setSpecialPriceDiff",
+      "shouldRewardExp",
+      "take"
+    ],
+    "note": "round12 broader pool: leads 1-20 of 20 for MerchantOffer"
+  }
+]

@@ -1,0 +1,7 @@
+crates/pumpkin/src/entity/living.rs:4520:13: error: all if blocks contain the same code at the start
+crates/pumpkin/src/entity/player.rs:7221:37: error: temporary with significant `Drop` in `if let` scrutinee will live until the end of the `if let` expression
+crates/pumpkin/src/entity/mod.rs:1274:1: error: more than 3 bools in function parameters
+crates/pumpkin/src/entity/mod.rs:1666:5: error: this function has too many lines (106/100)
+crates/pumpkin/src/entity/mod.rs:3876:5: error: unused `async` for function with no await statements
+crates/pumpkin/src/entity/player.rs:4485:14: error: this lint expectation is unfulfilled
+FIX DONE /home/eshanki/pumpkin-wt/loose-coverage-4

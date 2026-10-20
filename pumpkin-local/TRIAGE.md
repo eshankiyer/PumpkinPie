@@ -1,0 +1,11 @@
+- 2026-07-28 09:16  12-piston-pushed-state  **BLINDSPOT**  The spec requires modifying three separate functions (`write_nbt`, `chunk_data_nbt`, `from_nbt`), but FUNC mode is restricted to returning only one function, making the multi-function fix structurally unwinnable.
+- 2026-07-28 09:53  14-mushroom-light-gate  **BLINDSPOT**  The `BlockAccessor` trait lacks a light lookup method, meaning implementing the light check requires widening the function signature or accessing a different provider, which FUNC mode cannot do.
+- 2026-07-28 10:01  02-growth-rates  **ESCALATE**  The model repeatedly returns the unmodified function across three iterations with identical feedback, indicating it is stuck and not learning from the failure signal.
+- 2026-07-28 10:32  15-tripwire-avoid-traps  **ESCALATE**  The model repeatedly hallucinates module and type names (`EntityType`, `pumpkin`, `pumpkin_api`) across iterations without converging, despite clear compiler feedback that the types/modules do not exist or are inaccessible.
+- 2026-07-29 19:11  16-tripwire-shears-durability  **BLINDSPOT**  The same missing item-durability helper blocks both iterations, and FUNC mode cannot return that helper.
+- 2026-07-29 19:13  02-growth-rates  **ESCALATE**  ASSERT_ABSENT for random_range(0..5) repeated across iterations, then the shown function no longer contained the target text.
+- 2026-07-29 19:15  13-aec-nbt  **ESCALATE**  iter 1 repeated invented NBT types and async misuse, then iter 2 diff context not found.
+- 2026-07-29 19:16  11-lightning-raining-at  **BADSPEC**  iter 1 E0599 and iter 2 CANNOT both show is_raining_at_unchecked is not in the visible World API, contradicting the spec premise.
+- 2026-07-29 19:17  21-locate-sets-containing  **BLINDSPOT**  iter 1 and iter 2 both failed with CANNOT because StructureSet::ALL, StructureSet::structures, and WeightedEntry::structure are not visible in the provided API listing
+- 2026-07-29 19:17  15-tripwire-avoid-traps  **BLINDSPOT**  E0407 repeats across iterations because FUNC mode cannot add a trait member to `BlockBehaviour`.
+- 2026-07-29 19:26  25-piston-from-nbt  **ESCALATE**  The same `NbtCompound` `iter` and missing `from_props` errors repeated across iterations 1 through 4.

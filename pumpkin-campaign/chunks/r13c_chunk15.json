@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "Slot",
+    "vanilla_path": "net/minecraft/world/inventory/Slot.java",
+    "rust_file": "crates/pumpkin-inventory/src/slot.rs",
+    "total_methods": 22,
+    "in_declaring_file": 7,
+    "elsewhere_in_workspace": 6,
+    "absent_workspace_wide": [
+      "getContainerSlot",
+      "hasItem",
+      "mayPlace",
+      "onQuickCraft",
+      "safeClone",
+      "safeInsert",
+      "setByPlayer",
+      "setChanged",
+      "tryRemove"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for Slot"
+  }
+]

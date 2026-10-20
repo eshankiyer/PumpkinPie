@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 97,
+    "elsewhere_in_workspace": 76,
+    "absent_workspace_wide": [
+      "clearFire",
+      "clearMovementThisTick",
+      "collectAllColliders",
+      "collideBoundingBox",
+      "collidedWithFluid",
+      "computeSpeed",
+      "considersEntityAsAlly",
+      "copyPosition",
+      "countPlayerPassengers",
+      "createCommandSourceStackForNameResolution",
+      "createHoverEvent",
+      "damageSources",
+      "deflection",
+      "discard",
+      "dismountTo",
+      "dismountsUnderwater",
+      "displayFireAnimation",
+      "distanceTo",
+      "emitsAnything",
+      "emitsEvents"
+    ],
+    "note": "round12 leads 21-40 of 248 for Entity"
+  }
+]

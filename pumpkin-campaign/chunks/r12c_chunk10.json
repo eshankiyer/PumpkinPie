@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Inventory",
+    "vanilla_path": "net/minecraft/world/entity/player/Inventory.java",
+    "rust_file": "crates/pumpkin-world/src/inventory/inventory.rs",
+    "total_methods": 38,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 11,
+    "absent_workspace_wide": [
+      "addAndPickItem",
+      "clearContent",
+      "clearOrCountMatchingItems",
+      "createInventoryUpdatePacket",
+      "dropAll",
+      "fillStackedContents",
+      "findSlotMatchingCraftingIngredient",
+      "findSlotMatchingItem",
+      "getContainerSize",
+      "getFreeSlot",
+      "getNonEquipmentItems",
+      "getSelectedItem",
+      "getSelectionSize",
+      "getSlotWithRemainingSpace",
+      "getSuitableHotbarSlot",
+      "getTimesChanged",
+      "isHotbarSlot",
+      "pickSlot",
+      "placeItemBackInInventory",
+      "removeFromSelected",
+      "removeItem",
+      "removeItemNoUpdate",
+      "replaceWith",
+      "setChanged",
+      "setSelectedItem"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 26 for Inventory"
+  }
+]

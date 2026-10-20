@@ -1,0 +1,16 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlockBehaviour",
+    "vanilla_path": "net/minecraft/world/level/block/state/BlockBehaviour.java",
+    "rust_file": "crates/pumpkin/src/block/mod.rs",
+    "total_methods": 124,
+    "in_declaring_file": 13,
+    "elsewhere_in_workspace": 28,
+    "absent_workspace_wide": [
+      "useShapeForLightOcclusion",
+      "useWithoutItem"
+    ],
+    "note": "round12 leads 81-82 of 82 for BlockBehaviour"
+  }
+]

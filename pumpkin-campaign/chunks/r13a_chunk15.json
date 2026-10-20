@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "FoliagePlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/foliageplacers/FoliagePlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/foliage/mod.rs",
+    "total_methods": 10,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "absent_workspace_wide": [
+      "createFoliage",
+      "doubleTrunk",
+      "foliagePlacerParts",
+      "foliageRadius",
+      "placeLeavesRow",
+      "placeLeavesRowWithHangingLeavesBelow",
+      "radiusOffset",
+      "shouldSkipLocationSigned",
+      "tryPlaceLeaf"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for FoliagePlacer"
+  }
+]

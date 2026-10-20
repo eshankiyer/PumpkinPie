@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundKeepAlivePacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ServerboundKeepAlivePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/keep_alive.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundLockDifficultyPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundLockDifficultyPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/lock_difficulty.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundLoginAcknowledgedPacket",
+    "vanilla_path": "net/minecraft/network/protocol/login/ServerboundLoginAcknowledgedPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/login/login_response.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundMoveVehiclePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundMoveVehiclePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/move_vehicle.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPaddleBoatPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPaddleBoatPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/paddle_boat.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPickItemFromBlockPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPickItemFromBlockPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/pick_item.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPickItemFromEntityPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPickItemFromEntityPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/pick_item.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPlaceRecipePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPlaceRecipePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/place_recipe.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPlayerAbilitiesPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPlayerAbilitiesPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/player_abilities.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPlayerInputPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPlayerInputPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/player_input.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPlayerLoadedPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPlayerLoadedPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/player_loaded.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundRecipeBookSeenRecipePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundRecipeBookSeenRecipePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/recipe_book_seen_recipe.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundRenameItemPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundRenameItemPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/rename_item.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundResourcePackPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ServerboundResourcePackPacket.java",
+    "rust_file": "crates/pumpkin/src/net/java/config/resource_pack.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSelectTradePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSelectTradePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/select_trade.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  }
+]

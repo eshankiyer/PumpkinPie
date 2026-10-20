@@ -1,0 +1,4 @@
+| Class | NOT_A_GAP (existing file) OR methods IMPLEMENTED | vanilla file:lines read | new call sites wired |
+|---|---|---|---|
+| EyeblossomBlock | NOT_A_GAP (`crates/pumpkin/src/block/blocks/plant/flower.rs`; potted behavior in `crates/pumpkin/src/block/blocks/flower_pots.rs`) | `EyeblossomBlock.java:28-177`; `FlowerBlock.java:19-57`; `Blocks.java:5669-5698` | None; existing `FlowerBlock` and `FlowerPotBlock` registrations/call sites cover it |
+| TagValueOutput | NOT_A_GAP (`crates/pumpkin-nbt/src/compound.rs`; `crates/pumpkin-nbt/src/nbt_ops.rs`; existing NBT writers in `crates/pumpkin/src/entity/mod.rs` and `crates/pumpkin/src/block/entities/mod.rs`) | `TagValueOutput.java:16-244`; `ValueOutput.java:7-56`; `Entity.java:2045-2129`; `NbtPredicate.java:42-54` | None; existing `NbtCompound`/`NbtOps` serialization call sites cover it |

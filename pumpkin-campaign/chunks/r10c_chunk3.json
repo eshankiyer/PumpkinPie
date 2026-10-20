@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Player",
+    "vanilla_path": "net/minecraft/world/entity/player/Player.java",
+    "rust_file": "crates/pumpkin/src/entity/player.rs",
+    "total_methods": 201,
+    "in_declaring_file": 30,
+    "elsewhere_in_workspace": 31,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "openDialog",
+      "openHorseInventory",
+      "openItemGui",
+      "openJigsawBlock",
+      "openMenu",
+      "openMinecartCommandBlock",
+      "openNautilusInventory",
+      "openStructureBlock",
+      "openTestBlock",
+      "openTestInstanceBlock",
+      "openTextEdit",
+      "permissions",
+      "playStepSound",
+      "preventsBlockDrops",
+      "removeVehicle",
+      "resetAttackStrengthTicker",
+      "resetOnlyAttackStrengthTicker",
+      "resetStat",
+      "rideTick",
+      "sendMerchantOffers"
+    ],
+    "note": "leads 101-120 of 140 for Player"
+  }
+]

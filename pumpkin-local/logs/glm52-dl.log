@@ -1,0 +1,20 @@
+Fetching 149 files:   0%|          | 0/149 [00:00<?, ?it/s]Downloading 'out-00001.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/1_wp6fVIubZG1052-Zqs4-PNRbk=.aa1f9861966edbdb5fb405f1ef0ae627b7dbb69a2d3eb67ac75c3759c0c92df0.incomplete'
+Downloading 'out-00000.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/BXaEwIiYyWsORDfVXpF5mrD0JgA=.aa0429aff0d02342ee6a964f0fe2a5f318a207dcd2b66319c5416418d1ff322a.incomplete'
+Downloading 'out-00002.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/NHvUW_OHrRRmraDhG2r0WAISCfo=.3ba2fa704185cebd5f16e866bd9d6c2753f8938fe122662ace7e923c57bb7fd5.incomplete'
+Downloading 'generation_config.json' to '/home/eshanki/glm52_i4/.cache/huggingface/download/3EVKVggOldJcKSsGjSdoUCN1AyQ=.216bbb092d0df0dda1dc4cedd789b92286c4c001.incomplete'
+Downloading '.coli_usage' to '/home/eshanki/glm52_i4/.cache/huggingface/download/gX6VeGE8CyiSO3KjdvrOZupWTd4=.d8dfb4f3ccac576ede5b36a9eb2319d0f8620d9f.incomplete'
+Still waiting to acquire lock on /home/eshanki/glm52_i4/.cache/huggingface/.gitignore.lock (elapsed: 0.1 seconds)
+Download complete. Moving file to /home/eshanki/glm52_i4/generation_config.json
+Download complete. Moving file to /home/eshanki/glm52_i4/.coli_usage
+Fetching 149 files:   1%|          | 1/149 [00:00<00:21,  6.97it/s]Downloading '.gitattributes' to '/home/eshanki/glm52_i4/.cache/huggingface/download/wPaCkH-WbT7GsmxMKKrNZTV4nSM=.52373fe24473b1aa44333d318f578ae6bf04b49b.incomplete'
+Downloading 'out-00003.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/xHIcIeWUhyHBp9zBHRr8eUhX4LQ=.cbf06d804769c053121c35f0b59c375440971ea8721d28601a9c8a0dad220bf7.incomplete'
+Downloading 'out-00004.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/vc4MjksPQy_d2jbcuDNjzfQdsEk=.1782c8650ab1b7225efb781f534372bf389cb11102ee4147b525bbe3f9113b2b.incomplete'
+Download complete. Moving file to /home/eshanki/glm52_i4/.gitattributes
+Downloading 'config.json' to '/home/eshanki/glm52_i4/.cache/huggingface/download/8_PA_wEVGiVa2goH2H4KQOQpvVY=.4e1f0168afd127189fb1c4ddb1d4476a4fca96ac.incomplete'
+Downloading 'out-00005.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/Ifw4Ko9h-EEXPErjt3HnHj0XSFI=.7279e91955483aa9d605f3c0bf3988f6130234be5cd966adb253ed6669f2347e.incomplete'
+Downloading 'README.md' to '/home/eshanki/glm52_i4/.cache/huggingface/download/Xn7B-BWUGOee2Y6hCZtEhtFu4BE=.77311a8495cbd5984b60d48dd84d7070fb573660.incomplete'
+Download complete. Moving file to /home/eshanki/glm52_i4/config.json
+Download complete. Moving file to /home/eshanki/glm52_i4/README.md
+Fetching 149 files:   2%|▏         | 3/149 [00:00<00:11, 13.15it/s]Downloading 'out-00006.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/-rEJPv-8GIx05W69M2n14enjvg4=.e71ae78ece540a964a2d30ba12f42b48700780743a76c2deeb8a7a164ee40d91.incomplete'
+Downloading 'out-00007.safetensors' to '/home/eshanki/glm52_i4/.cache/huggingface/download/SHp3xmdLlAxdc5VNZEGNlEjD8xY=.42ea0d8b82002e9442af0316815fd2292d3b7dbde45af6aae9367eb59d66c40e.incomplete'
+Fetching 149 files:   2%|▏         | 3/149 [00:20<00:11, 13.15it/s]

@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "BlockItem",
+    "vanilla_path": "net/minecraft/world/item/BlockItem.java",
+    "rust_file": "crates/pumpkin-data/src/blocks.rs",
+    "total_methods": 13,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 4,
+    "absent_workspace_wide": [
+      "canPlace",
+      "getPlaceSound",
+      "mustSurvive",
+      "onDestroyed",
+      "registerBlocks",
+      "setBlockEntityData",
+      "shouldPrintOpWarning",
+      "updateCustomBlockEntityTag",
+      "useOn"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for BlockItem"
+  }
+]

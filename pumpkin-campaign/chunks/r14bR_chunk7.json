@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AngerLevel",
+    "vanilla_path": "net/minecraft/world/entity/monster/warden/AngerLevel.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/warden_anger.rs",
+    "total_methods": 5,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getListeningSound"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "ArmorStandItem",
+    "vanilla_path": "net/minecraft/world/item/ArmorStandItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/armor_stand.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "AttachedStemBlock",
+    "vanilla_path": "net/minecraft/world/level/block/AttachedStemBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/gourds/attached_stem.rs",
+    "total_methods": 8,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Attributes",
+    "vanilla_path": "net/minecraft/world/entity/ai/attributes/Attributes.java",
+    "rust_file": "crates/pumpkin-data/src/generated/attributes.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "bootstrap"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "AxeItem",
+    "vanilla_path": "net/minecraft/world/item/AxeItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/axe.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BannerBlock",
+    "vanilla_path": "net/minecraft/world/level/block/BannerBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/banners.rs",
+    "total_methods": 9,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BellBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/BellBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/bell.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "clientTick"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BigDripleafStemBlock",
+    "vanilla_path": "net/minecraft/world/level/block/BigDripleafStemBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/big_dripleaf_stem.rs",
+    "total_methods": 12,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlockPredicate",
+    "vanilla_path": "net/minecraft/world/level/block/state/predicate/BlockPredicate.java",
+    "rust_file": "crates/pumpkin-world/src/generation/block_predicate.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "forBlock"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlockState",
+    "vanilla_path": "net/minecraft/world/level/block/state/BlockState.java",
+    "rust_file": "crates/pumpkin-data/src/block_state.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "asState"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "BoatItem",
+    "vanilla_path": "net/minecraft/world/item/BoatItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/boat.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "use"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "BossBarCommands",
+    "vanilla_path": "net/minecraft/server/commands/BossBarCommands.java",
+    "rust_file": "crates/pumpkin/src/command/commands/bossbar.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBossBar"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "BreakDoorGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/BreakDoorGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/break_door.rs",
+    "total_methods": 6,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getDoorBreakTime"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CarrotBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CarrotBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/carrot.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBaseSeedId"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CartographyTableBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CartographyTableBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/cartography_table.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useWithoutItem"
+    ]
+  }
+]

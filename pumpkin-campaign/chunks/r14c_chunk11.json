@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetBeaconPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetBeaconPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_beacon.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetGameRulePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetGameRulePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_game_rule.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetJigsawBlockPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetJigsawBlockPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_jigsaw_block.rs",
+    "total_methods": 10,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 9,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSetTestBlockPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSetTestBlockPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_test_block.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundSpectatorActionPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundSpectatorActionPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/spectator_action.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundStatusRequestPacket",
+    "vanilla_path": "net/minecraft/network/protocol/status/ServerboundStatusRequestPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/query.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundTeleportToEntityPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundTeleportToEntityPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/teleport_to_entity.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundTestInstanceBlockActionPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundTestInstanceBlockActionPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/test_instance_block_action.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "ShovelItem",
+    "vanilla_path": "net/minecraft/world/item/ShovelItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/shovel.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useOn"
+    ]
+  },
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "ShulkerBoxSlot",
+    "vanilla_path": "net/minecraft/world/inventory/ShulkerBoxSlot.java",
+    "rust_file": "crates/pumpkin-inventory/src/shulker_box_screen_handler.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mayPlace"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "SignItem",
+    "vanilla_path": "net/minecraft/world/item/SignItem.java",
+    "rust_file": "crates/pumpkin/src/command/snbt/markers.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "updateCustomBlockEntityTag"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "SimpleStateProvider",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/stateproviders/SimpleStateProvider.java",
+    "rust_file": "crates/pumpkin-world/src/generation/block_state_provider.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SkullBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SkullBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/skull_block.rs",
+    "total_methods": 7,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "SlotRanges",
+    "vanilla_path": "net/minecraft/world/inventory/SlotRanges.java",
+    "rust_file": "crates/pumpkin-data/src/generated/slot_ranges.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "singleSlotNames"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "SmallFireball",
+    "vanilla_path": "net/minecraft/world/entity/projectile/hurtingprojectile/SmallFireball.java",
+    "rust_file": "crates/pumpkin/src/entity/projectile/small_fireball.rs",
+    "total_methods": 3,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "onHitBlock"
+    ]
+  }
+]

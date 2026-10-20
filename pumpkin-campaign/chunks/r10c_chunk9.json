@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 67,
+    "elsewhere_in_workspace": 73,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "setOldRot",
+      "setOnGround",
+      "setOnGroundWithMovement",
+      "setRemainingFireTicks",
+      "setRemoved",
+      "setRequiresPrecisePosition",
+      "setRot",
+      "setSharedFlag",
+      "setSharedFlagOnFire",
+      "setShiftKeyDown",
+      "setTicksFrozen",
+      "setUUID",
+      "setViewScale",
+      "setXRot",
+      "setYBodyRot",
+      "setYHeadRot",
+      "setYRot",
+      "shouldRender",
+      "shouldShowName",
+      "showVehicleHealth"
+    ],
+    "note": "leads 241-260 of 281 for Entity"
+  }
+]

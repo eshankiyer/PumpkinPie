@@ -1,0 +1,24 @@
+diff --git a/pumpkin/src/entity/passive/villager/mod.rs b/pumpkin/src/entity/passive/villager/mod.rs
+index d87a92b..93d5aff 100644
+--- a/pumpkin/src/entity/passive/villager/mod.rs
++++ b/pumpkin/src/entity/passive/villager/mod.rs
+@@ -29,7 +29,7 @@ use crate::entity::player::Player;
+ use crate::entity::{
+     Entity, EntityBase, NBTStorage,
+     ai::goal::{
+-        avoid_entity::AvoidEntityGoal, look_around::RandomLookAroundGoal,
++        avoid_entity::AvoidEntityGoal, breed::BreedGoal, look_around::RandomLookAroundGoal,
+         look_at_entity::LookAtEntityGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+     },
+     mob::{Mob, MobEntity},
+@@ -141,6 +141,10 @@ impl VillagerEntity {
+                 Box::new(AvoidEntityGoal::new(&EntityType::VEX, 12.0, 0.5, 0.5)),
+             );
+ 
++            // Villager breeding
++            goal_selector.add_goal(1.5, Box::new(BreedGoal::new(0.5)));
++
++
+             // Basic movement and looking (Vanilla uses 0.5 speed)
+             goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(0.5)));
+             goal_selector.add_goal(

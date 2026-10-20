@@ -1,0 +1,9 @@
+ M crates/pumpkin-inventory/src/generic_container_screen_handler.rs
+ M crates/pumpkin-inventory/src/screen_handler.rs
+ M crates/pumpkin/src/block/entities/furnace_like_block_entity.rs
+ M crates/pumpkin/src/entity/mod.rs
+ M crates/pumpkin/src/entity/player.rs
+ M crates/pumpkin/src/entity/vehicle/minecart/container.rs
+ M crates/pumpkin/src/world/loot.rs
+?? WAVE_REPORT.md
+?? WORKLIST.json

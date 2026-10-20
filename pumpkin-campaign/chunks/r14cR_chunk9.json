@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "SnowGolem",
+    "vanilla_path": "net/minecraft/world/entity/animal/golem/SnowGolem.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/snow_golem.rs",
+    "total_methods": 14,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 10,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "performRangedAttack"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SpongeBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SpongeBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/sponge.rs",
+    "total_methods": 4,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "tryAbsorbWater"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SporeBlossomBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SporeBlossomBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/spore_blossom.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "StemBlock",
+    "vanilla_path": "net/minecraft/world/level/block/StemBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/gourds/stem.rs",
+    "total_methods": 9,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "StructureSet",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/StructureSet.java",
+    "rust_file": "crates/pumpkin-data/src/generated/structures.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "StructureSelectionEntry"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "SugarCaneBlock",
+    "vanilla_path": "net/minecraft/world/level/block/SugarCaneBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/sugar_cane.rs",
+    "total_methods": 7,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "SuggestionProviders",
+    "vanilla_path": "net/minecraft/commands/synchronization/SuggestionProviders.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/commands.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getProvider"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "SummonCommand",
+    "vanilla_path": "net/minecraft/server/commands/SummonCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/summon.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createEntity"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TargetBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TargetBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/target_block.rs",
+    "total_methods": 7,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TestBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/TestBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/test_block.rs",
+    "total_methods": 13,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 12,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getUpdateTag"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TestBlockMode",
+    "vanilla_path": "net/minecraft/world/level/block/state/properties/TestBlockMode.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/set_test_block.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getDetailedMessage"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TestInstanceBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TestInstanceBlock.java",
+    "rust_file": "crates/pumpkin/src/block/entities/test_instance_block.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useWithoutItem"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "Tilt",
+    "vanilla_path": "net/minecraft/world/level/block/state/properties/Tilt.java",
+    "rust_file": "crates/pumpkin-data/src/generated/block.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "causesVibration"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "TorchBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TorchBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/torches.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "TraderLlama",
+    "vanilla_path": "net/minecraft/world/entity/animal/equine/TraderLlama.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/trader_llama.rs",
+    "total_methods": 9,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isTraderLlama"
+    ]
+  }
+]

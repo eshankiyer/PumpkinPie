@@ -1,0 +1,29 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AreaEffectCloud",
+    "vanilla_path": "net/minecraft/world/entity/AreaEffectCloud.java",
+    "rust_file": "crates/pumpkin/src/entity/area_effect_cloud.rs",
+    "total_methods": 31,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 10,
+    "absent_workspace_wide": [
+      "applyImplicitComponent",
+      "getDurationOnUse",
+      "getParticle",
+      "getPistonPushReaction",
+      "getRadiusOnUse",
+      "getRadiusPerTick",
+      "getWaitTime",
+      "isWaiting",
+      "onSyncedDataUpdated",
+      "setDuration",
+      "setDurationOnUse",
+      "setRadiusOnUse",
+      "setRadiusPerTick",
+      "setWaitTime",
+      "setWaiting"
+    ],
+    "note": "round12 broader pool: leads 1-15 of 15 for AreaEffectCloud"
+  }
+]

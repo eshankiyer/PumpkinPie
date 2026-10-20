@@ -1,0 +1,27 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "RecipeManager",
+    "vanilla_path": "net/minecraft/world/item/crafting/RecipeManager.java",
+    "rust_file": "crates/pumpkin/src/server/recipe.rs",
+    "total_methods": 16,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "absent_workspace_wide": [
+      "ServerDisplayInfo",
+      "asPropertySet",
+      "byKey",
+      "createCheck",
+      "finalizeRecipeLoading",
+      "fromJson",
+      "getRecipeFor",
+      "getRecipes",
+      "getSynchronizedItemProperties",
+      "getSynchronizedStonecutterRecipes",
+      "listDisplaysForRecipe",
+      "propertySet",
+      "stonecutterRecipes"
+    ],
+    "note": "round12 broader pool: leads 1-13 of 13 for RecipeManager"
+  }
+]

@@ -1,0 +1,288 @@
+{
+ "milestone": "26.2",
+ "seed": 262,
+ "per_subsystem": 6,
+ "sample_size": 28,
+ "units": [
+  {
+   "milestone": "26.2",
+   "subsystem": "block",
+   "vanilla_class": "FallingBlock",
+   "vanilla_path": "net/minecraft/world/level/block/FallingBlock.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "FallingBlock",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "block",
+   "vanilla_class": "CrafterBlockEntity",
+   "vanilla_path": "net/minecraft/world/level/block/entity/CrafterBlockEntity.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "CrafterBlockEntity",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "block",
+   "vanilla_class": "TwistingVinesBlock",
+   "vanilla_path": "net/minecraft/world/level/block/TwistingVinesBlock.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "TwistingVinesBlock",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "block",
+   "vanilla_class": "LightningRodBlock",
+   "vanilla_path": "net/minecraft/world/level/block/LightningRodBlock.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "LightningRodBlock",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "block",
+   "vanilla_class": "Blocks",
+   "vanilla_path": "net/minecraft/world/level/block/Blocks.java",
+   "pumpkin_ref": "pumpkin/src/block/blocks/mod.rs",
+   "pumpkin_matched_name": "Blocks",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "block",
+   "vanilla_class": "WitherRoseBlock",
+   "vanilla_path": "net/minecraft/world/level/block/WitherRoseBlock.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "WitherRoseBlock",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "border",
+   "vanilla_class": "WorldBorder",
+   "vanilla_path": "net/minecraft/world/level/border/WorldBorder.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "Worldborder",
+   "coverage_match_kind": "struct_match_ci",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "entity",
+   "vanilla_class": "GlowSquid",
+   "vanilla_path": "net/minecraft/world/entity/animal/squid/GlowSquid.java",
+   "pumpkin_ref": "pumpkin/src/entity/passive/glow_squid.rs",
+   "pumpkin_matched_name": "GlowSquid",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "entity",
+   "vanilla_class": "ElderGuardian",
+   "vanilla_path": "net/minecraft/world/entity/monster/ElderGuardian.java",
+   "pumpkin_ref": "pumpkin/src/entity/mob/elder_guardian.rs",
+   "pumpkin_matched_name": "ElderGuardian",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "entity",
+   "vanilla_class": "Shulker",
+   "vanilla_path": "net/minecraft/world/entity/monster/Shulker.java",
+   "pumpkin_ref": "pumpkin/src/entity/mob/shulker.rs",
+   "pumpkin_matched_name": "Shulker",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "entity",
+   "vanilla_class": "RandomLookAroundGoal",
+   "vanilla_path": "net/minecraft/world/entity/ai/goal/RandomLookAroundGoal.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "RandomLookAroundGoal",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "entity",
+   "vanilla_class": "Ghast",
+   "vanilla_path": "net/minecraft/world/entity/monster/Ghast.java",
+   "pumpkin_ref": "pumpkin/src/entity/mob/ghast.rs",
+   "pumpkin_matched_name": "Ghast",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "entity",
+   "vanilla_class": "Arrow",
+   "vanilla_path": "net/minecraft/world/entity/projectile/arrow/Arrow.java",
+   "pumpkin_ref": "pumpkin/src/entity/projectile/arrow.rs",
+   "pumpkin_matched_name": "Arrow",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "food",
+   "vanilla_class": "FoodData",
+   "vanilla_path": "net/minecraft/world/food/FoodData.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "HungerManager",
+   "coverage_match_kind": "known_alias",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "food",
+   "vanilla_class": "FoodConstants",
+   "vanilla_path": "net/minecraft/world/food/FoodConstants.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "HungerManager",
+   "coverage_match_kind": "known_alias",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "gameevent",
+   "vanilla_class": "GameEvent",
+   "vanilla_path": "net/minecraft/world/level/gameevent/GameEvent.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "GameEvent",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "inventory",
+   "vanilla_class": "ResultSlot",
+   "vanilla_path": "net/minecraft/world/inventory/ResultSlot.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "ResultSlot",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "inventory",
+   "vanilla_class": "SlotRanges",
+   "vanilla_path": "net/minecraft/world/inventory/SlotRanges.java",
+   "pumpkin_ref": "pumpkin-data/src/generated/slot_ranges.rs",
+   "pumpkin_matched_name": "SlotRanges",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "inventory",
+   "vanilla_class": "Slot",
+   "vanilla_path": "net/minecraft/world/inventory/Slot.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "Slot",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "inventory",
+   "vanilla_class": "ArmorSlot",
+   "vanilla_path": "net/minecraft/world/inventory/ArmorSlot.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "ArmorSlot",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "item",
+   "vanilla_class": "Ignite",
+   "vanilla_path": "net/minecraft/world/item/enchantment/effects/Ignite.java",
+   "pumpkin_ref": "pumpkin/src/item/items/ignite/mod.rs",
+   "pumpkin_matched_name": "Ignite",
+   "coverage_match_kind": "filename_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "item",
+   "vanilla_class": "HoneycombItem",
+   "vanilla_path": "net/minecraft/world/item/HoneycombItem.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "HoneyCombItem",
+   "coverage_match_kind": "struct_match_ci",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "item",
+   "vanilla_class": "BowItem",
+   "vanilla_path": "net/minecraft/world/item/BowItem.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "BowItem",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "item",
+   "vanilla_class": "SplashPotionItem",
+   "vanilla_path": "net/minecraft/world/item/SplashPotionItem.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "SplashPotionItem",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "item",
+   "vanilla_class": "DyeItem",
+   "vanilla_path": "net/minecraft/world/item/DyeItem.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "DyeItem",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "item",
+   "vanilla_class": "FireChargeItem",
+   "vanilla_path": "net/minecraft/world/item/FireChargeItem.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "FireChargeItem",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "material",
+   "vanilla_class": "Fluid",
+   "vanilla_path": "net/minecraft/world/level/material/Fluid.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "Fluid",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  },
+  {
+   "milestone": "26.2",
+   "subsystem": "material",
+   "vanilla_class": "FluidState",
+   "vanilla_path": "net/minecraft/world/level/material/FluidState.java",
+   "pumpkin_ref": null,
+   "pumpkin_matched_name": "FluidState",
+   "coverage_match_kind": "struct_match",
+   "verdict": "unchecked"
+  }
+ ]
+}

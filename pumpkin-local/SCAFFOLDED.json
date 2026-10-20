@@ -1,0 +1,16 @@
+{
+  "runs": [
+    {
+      "date": "2026-07-27",
+      "row": "M5",
+      "accepted": false,
+      "note": "rejected:\n    the design pass wrote no spec files"
+    },
+    {
+      "date": "2026-07-27",
+      "row": "M5",
+      "accepted": false,
+      "note": "design pass failed rc=1: Error: Reached max turns (80)"
+    }
+  ]
+}

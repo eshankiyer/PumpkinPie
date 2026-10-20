@@ -1,0 +1,37 @@
+[
+  {
+    "subsystem": "chunk",
+    "vanilla_class": "LevelChunk",
+    "vanilla_path": "net/minecraft/world/level/chunk/LevelChunk.java",
+    "rust_file": "crates/pumpkin-protocol/src/bedrock/client/level_chunk.rs",
+    "total_methods": 34,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 11,
+    "absent_workspace_wide": [
+      "addAndRegisterBlockEntity",
+      "clearAllBlockEntities",
+      "getBlockEntities",
+      "getBlockTicks",
+      "getFluidTicks",
+      "getFullStatus",
+      "getListenerRegistry",
+      "getPersistedStatus",
+      "getTicksForSerialization",
+      "markUnsaved",
+      "postProcessGeneration",
+      "registerAllBlockEntitiesAfterLevelLoad",
+      "registerDebugValues",
+      "registerTickContainerInLevel",
+      "replaceBiomes",
+      "replaceWithPacketData",
+      "runPostLoad",
+      "setBlockEntity",
+      "setFullStatus",
+      "setLoaded",
+      "setUnsavedListener",
+      "unpackTicks",
+      "unregisterTickContainerFromLevel"
+    ],
+    "note": "round12 broader pool: leads 1-23 of 23 for LevelChunk"
+  }
+]

@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "CarvedPumpkinBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CarvedPumpkinBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/carved_pumpkin.rs",
+    "total_methods": 8,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "clearPatternBlocks",
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "CarvingContext",
+    "vanilla_path": "net/minecraft/world/level/levelgen/carver/CarvingContext.java",
+    "rust_file": "crates/pumpkin-world/src/generation/carver/mod.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "randomState",
+      "registryAccess"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "CatLieOnBedGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/CatLieOnBedGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/cat_lie_on_bed.rs",
+    "total_methods": 6,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isValidTarget",
+      "nextStartTick"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CauldronBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CauldronBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/cauldron.rs",
+    "total_methods": 6,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "canReceiveStalactiteDrip",
+      "receiveStalactiteDrip"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "CherryTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/CherryTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/cherry.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundCommandSuggestionsPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundCommandSuggestionsPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/command_suggestions.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "toSuggestions",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundGameEventPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundGameEventPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/game_event.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getParam",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundLightUpdatePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundLightUpdatePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/light_update.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getLightData",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundMapItemDataPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundMapItemDataPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/map_item_data.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "applyToMap",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundOpenBookPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundOpenBookPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/open_book.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getHand",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundOpenSignEditorPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundOpenSignEditorPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/open_sign_editor.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isFrontText",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundPlayerChatPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundPlayerChatPacket.java",
+    "rust_file": "crates/pumpkin/src/plugin/api/events/player/player_chat.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isSkippable",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundPlayerLookAtPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundPlayerLookAtPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/player_look_at.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getFromAnchor",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundRecipeBookAddPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundRecipeBookAddPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/recipe_book_add.rs",
+    "total_methods": 5,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "notification",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundRemoveEntitiesPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundRemoveEntitiesPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/remove_entities.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getEntityIds",
+      "type"
+    ]
+  }
+]

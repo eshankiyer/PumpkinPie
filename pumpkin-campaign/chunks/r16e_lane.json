@@ -1,0 +1,56 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "PistonMovingBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java",
+    "method_count": 19,
+    "methods": [
+      "finalTick",
+      "getCollisionShape",
+      "getDirection",
+      "getLastTicked",
+      "getMovedState",
+      "getMovementDirection",
+      "getProgress",
+      "getPushDirection",
+      "getUpdateTag",
+      "getXOff",
+      "getYOff",
+      "getZOff",
+      "isExtending",
+      "isSourcePiston",
+      "loadAdditional",
+      "preRemoveSideEffects",
+      "saveAdditional",
+      "setLevel",
+      "tick"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "CamelHusk",
+    "vanilla_path": "net/minecraft/world/entity/animal/camel/CamelHusk.java",
+    "method_count": 19,
+    "methods": [
+      "canBeABaby",
+      "canBeLeashed",
+      "canFallInLove",
+      "canMate",
+      "chargeSpeedModifier",
+      "getAmbientSound",
+      "getDashReadySound",
+      "getDashingSound",
+      "getDeathSound",
+      "getEatingSound",
+      "getHurtSound",
+      "getSaddleSound",
+      "getSitDownSound",
+      "getStandUpSound",
+      "interact",
+      "isFood",
+      "isMobControlled",
+      "playStepSound",
+      "removeWhenFarAway"
+    ]
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Animal",
+    "vanilla_path": "net/minecraft/world/entity/animal/Animal.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/animal.rs",
+    "total_methods": 25,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 10,
+    "absent_workspace_wide": [
+      "actuallyHurt",
+      "canMate",
+      "checkAnimalSpawnRules",
+      "createAnimalAttributes",
+      "customServerAiStep",
+      "finalizeSpawnChildFromBreeding",
+      "getDismountLocationForPassenger",
+      "getInLoveTime",
+      "handleEntityEvent",
+      "isBrightEnoughToSpawn",
+      "setInLove",
+      "setInLoveTime",
+      "spawnChildFromBreeding"
+    ],
+    "note": "round12 broader pool: leads 1-13 of 13 for Animal"
+  }
+]

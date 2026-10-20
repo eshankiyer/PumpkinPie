@@ -1,0 +1,132 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "TrialSpawnerBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TrialSpawnerBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/trial_spawner.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "TriggerCommand",
+    "vanilla_path": "net/minecraft/server/commands/TriggerCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/trigger.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "suggestObjectives"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "TrimPattern",
+    "vanilla_path": "net/minecraft/world/item/equipment/trim/TrimPattern.java",
+    "rust_file": "crates/pumpkin-data/src/trim.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "copyWithStyle"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "VersionCommand",
+    "vanilla_path": "net/minecraft/server/commands/VersionCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/pumpkin.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "dumpVersion"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "VillagerProfession",
+    "vanilla_path": "net/minecraft/world/entity/npc/villager/VillagerProfession.java",
+    "rust_file": "crates/pumpkin-data/src/generated/villager.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "bootstrap"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "WalkTarget",
+    "vanilla_path": "net/minecraft/world/entity/ai/memory/WalkTarget.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/memory.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getCloseEnoughDist"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "WallSkullBlock",
+    "vanilla_path": "net/minecraft/world/level/block/WallSkullBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/skull_block.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "WetSpongeBlock",
+    "vanilla_path": "net/minecraft/world/level/block/WetSpongeBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/sponge.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "WritableBookItem",
+    "vanilla_path": "net/minecraft/world/item/WritableBookItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/writable_book.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "use"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "ZombieHorse",
+    "vanilla_path": "net/minecraft/world/entity/animal/equine/ZombieHorse.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/zombie_horse.rs",
+    "total_methods": 21,
+    "in_declaring_file": 11,
+    "elsewhere_in_workspace": 9,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "addBehaviourGoals"
+    ]
+  }
+]

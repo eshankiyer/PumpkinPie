@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 67,
+    "elsewhere_in_workspace": 73,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "getQuadLeashHolderOffsets",
+      "getRandomX",
+      "getRandomY",
+      "getRandomZ",
+      "getRelativePortalPosition",
+      "getRemainingFireTicks",
+      "getRequiresPrecisePosition",
+      "getRootVehicle",
+      "getRopeHoldPosition",
+      "getScoreboardName",
+      "getSelfAndPassengers",
+      "getSharedFlag",
+      "getStringUUID",
+      "getSwimHighSpeedSplashSound",
+      "getSwimSplashSound",
+      "getTeamColor",
+      "getTicksFrozen",
+      "getTicksRequiredToFreeze",
+      "getTypeName",
+      "getUpVector"
+    ],
+    "note": "leads 101-120 of 281 for Entity"
+  }
+]

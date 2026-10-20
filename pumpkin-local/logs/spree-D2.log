@@ -1,0 +1,417 @@
+This is mini-swe-agent version 2.4.6.
+Check the v2 migration guide at https://klieret.short.gy/mini-v2-migration
+Loading global config from '/home/eshanki/.config/mini-swe-agent/.env'
+Warning: Input is not a terminal (fd=0).
+Building agent config from specs: 
+['/home/eshanki/.local/share/uv/tools/mini-swe-agent/lib/python3.12/site-package
+s/minisweagent/config/mini.yaml']
+
+System:
+You are a helpful assistant that can interact with a computer.
+
+User:
+Please solve this issue: You are fixing a Minecraft-parity bug in the Pumpkin 
+server (Rust, target MC 26.2). Work only inside this repo.
+
+Bug D2: Instant potions apply twice
+Files: `pumpkin/src/item/potion.rs`
+What is wrong: It calls `heal`/`damage` directly and then calls `add_effect` 
+with the same instant type, which heals or damages again inside `living.rs` on a
+different, unscaled formula.
+Verified vanilla behaviour: 
+The change to make: Pick one path. The `add_effect` path is the one that knows 
+about amplifier.
+Be careful: Check splash and lingering sources too, they may scale differently.
+
+Make the smallest change that fixes exactly this. Do not touch unrelated code. 
+When done, run `cargo build -p pumpkin` and make sure it compiles, then stop. Do
+not commit.
+
+--- RULEBOOK (lessons paid for by past failures; every rule here is mandatory) 
+---
+# Rulebook
+
+Rules distilled from repeated gate failures. Each was paid for by the same 
+mistake landing at least twice. night_run.py injects this whole file into every 
+local and sonnet prompt, so the loop learns once and never relearns.
+
+Do not delete a rule to make a diff pass; that is fixing the code to dodge the 
+process. Rules are keyed by an HTML comment so they are appended once.
+
+<!-- rule:check:cargo_check_error -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 5x. example: `check: cargo_check_error`
+
+<!-- rule:static:escape_artifact:u00xx:'u0026' -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 4x. example: `static: escape_artifact:u00xx:'u0026'`
+
+<!-- rule:structure:orphan_code:<file>:curly_unbalanced_by_-<n> -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 3x. example: `structure: 
+orphan_code:pumpkin/src/item/potion.rs:curly_unbalanced_by_-2`
+
+<!-- rule:apply:git_apply_check_failed -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 3x. example: `apply: git_apply_check_failed`
+
+<!-- rule:clippy:clippy_warning -->
+- Avoid the failure captured below; a candidate that reproduces it will be 
+rejected by the gate, so pre-empt it.
+  - seen 2x. example: `clippy: clippy_warning`
+
+--- REFERENCE (clean-room, Apache-2.0 only; describes behaviour to reimplement, 
+never to copy) ---
+REFERENCE  (SECONDARY - oracle + wiki remain authoritative for 26.2)
+  Reference, do not copy: take the algorithm and control flow, write the
+  Rust yourself. Pumpkin is MIT; verbatim Apache-2.0 would need an
+  attribution/NOTICE trail this project does not carry. Cuberite is
+  ~1.12 and Minestom omits most gameplay, so confirm every specific
+  (numbers, timings, block ids) against the differential oracle.
+  keywords: d2 instant potions apply twice `pumpkin/src/item/potion.rs`
+
+  == Minestom (Apache-2.0 Java; recent protocol, minimal vanilla gameplay) ==
+     ! /home/eshanki/pumpkin-local/refs/Minestom/src missing; clone the 
+reference first
+
+  == Cuberite (Apache-2.0 C++; ~1.12-era behaviour, NOT 26.2) ==
+     ! /home/eshanki/pumpkin-local/refs/Cuberite/src missing; clone the 
+reference first
+
+  No usable reference. Rely on the oracle and the wiki.
+
+You can execute bash commands and edit files to implement the necessary changes.
+
+## Recommended Workflow
+
+This workflow should be done step-by-step so that you can iterate on your 
+changes and any possible problems.
+
+1. Analyze the codebase by finding and reading relevant files
+2. Create a script to reproduce the issue
+3. Edit the source code to resolve the issue
+4. Verify your fix works by running your script again
+5. Test edge cases to ensure your fix is robust
+6. Submit your changes and finish your work by issuing the following command: 
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+   Do not combine it with any other command. <important>After this command, you 
+cannot continue working on this task.</important>
+
+## Command Execution Rules
+
+You are operating in an environment where
+
+1. You issue at least one command
+2. The system executes the command(s) in a subshell
+3. You see the result(s)
+4. You write your next command(s)
+
+Each response should include:
+
+1. **Reasoning text** where you explain your analysis and plan
+2. At least one tool call with your command
+
+**CRITICAL REQUIREMENTS:**
+
+- Your response SHOULD include reasoning text explaining what you're doing
+- Your response MUST include AT LEAST ONE bash tool call
+- Directory or environment variable changes are not persistent. Every action is 
+executed in a new subshell.
+- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd 
+/path/to/working/dir && ...` or write/load environment variables from files
+- Submit your changes and finish your work by issuing the following command: 
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
+  Do not combine it with any other command. <important>After this command, you 
+cannot continue working on this task.</important>
+
+Example of a CORRECT response:
+<example_response>
+I need to understand the structure of the repository first. Let me check what 
+files are in the current directory to get a better understanding of the 
+codebase.
+
+[Makes bash tool call with {"command": "ls -la"} as arguments]
+</example_response>
+
+<system_information>
+Linux 7.1.5-1-cachyos #1 SMP PREEMPT_DYNAMIC Mon, 27 Jul 2026 14:05:40 +0000 
+x86_64
+</system_information>
+
+## Useful command examples
+
+### Create a new file:
+
+```bash
+cat <<'EOF' > newfile.py
+import numpy as np
+hello = "world"
+print(hello)
+EOF
+```
+
+### Edit files with sed:```bash
+# Replace all occurrences
+sed -i 's/old_string/new_string/g' filename.py
+
+# Replace only first occurrence
+sed -i 's/old_string/new_string/' filename.py
+
+# Replace first occurrence on line 1
+sed -i '1s/old_string/new_string/' filename.py
+
+# Replace all occurrences in lines 1-10
+sed -i '1,10s/old_string/new_string/g' filename.py
+```
+
+### View file content:
+
+```bash
+# View specific lines with numbers
+nl -ba filename.py | sed -n '10,20p'
+```
+
+### Any other command you want to run
+
+```bash
+anything
+```
+────────────────────────────────────────────────────────────────────────────────
+Retrying <unknown> in 4 seconds as it raised Timeout: litellm.Timeout: APITimeoutError - Request timed out. Error_str: Request timed out..
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
+
+mini-swe-agent (step 1, $0.00):
+I'll start by examining the relevant file to understand the current 
+implementation of instant potions.
+
+
+
+```
+cat pumpkin/src/item/potion.rs
+```
+
+Tool:
+<returncode>
+0
+<output>
+use crate::entity::EntityBase;
+use crate::entity::living::LivingEntity;
+use pumpkin_data::effect::StatusEffect;
+use pumpkin_data::item_stack::ItemStack;
+
+/// Utilities for reading potion contents from an `ItemStack` and applying 
+effects.
+pub struct PotionContents;
+
+/// Source context for applying potion effects (affects scaling rules).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PotionApplicationSource {
+    /// Normal application (drinking / splash)
+    Normal,
+    /// `AreaEffectCloud` application (shorter durations and weaker instant 
+potency)
+    AreaEffectCloud,
+}
+
+impl PotionContents {
+    /// Read effects from an `ItemStack`'s `PotionContents` data component.
+    #[must_use]
+    pub fn read_potion_effects(
+        stack: &ItemStack,
+    ) -> Vec<(&'static StatusEffect, i32, u8, bool, bool, bool)> {
+        // Prefer generated potion id if present, otherwise use custom_effects
+        if let Some(pc) =
+            stack.get_data_component::<pumpkin_data::data_component_impl::Potion
+ContentsImpl>()
+        {
+            // Custom effects present
+            let mut out = Vec::new();
+            if let Some(potion_id) = pc.potion_id {
+                // Map potion id to generated Potion if possible
+                macro_rules! try_push_potion {
+                    ($p:expr) => {
+                        if $p.id as i32 == potion_id {
+                            for e in $p.effects {
+                                out.push((
+                                    e.effect_type,
+                                    e.duration,
+                                    e.amplifier,
+                                    e.ambient,
+                                    e.show_particles,
+                                    e.show_icon,
+                                ));
+                            }
+                        }
+                    };
+                }
+                try_push_potion!(pumpkin_data::potion::Potion::AWKWARD);
+                try_push_potion!(pumpkin_data::potion::Potion::FIRE_RESISTANCE);
+                try_push_potion!(pumpkin_data::potion::Potion::HARMING);
+                try_push_potion!(pumpkin_data::potion::Potion::HEALING);
+                try_push_potion!(pumpkin_data::potion::Potion::INFESTED);
+                try_push_potion!(pumpkin_data::potion::Potion::INVISIBILITY);
+                try_push_potion!(pumpkin_data::potion::Potion::LEAPING);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_FIRE_RESISTA
+NCE);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_INVISIBILITY
+);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_LEAPING);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_NIGHT_VISION
+);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_POISON);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_REGENERATION
+);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_SLOW_FALLING
+);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_SLOWNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_STRENGTH);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_SWIFTNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_TURTLE_MASTE
+R);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_WATER_BREATH
+ING);
+                try_push_potion!(pumpkin_data::potion::Potion::LONG_WEAKNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::LUCK);
+                try_push_potion!(pumpkin_data::potion::Potion::MUNDANE);
+                try_push_potion!(pumpkin_data::potion::Potion::NIGHT_VISION);
+                try_push_potion!(pumpkin_data::potion::Potion::OOZING);
+                try_push_potion!(pumpkin_data::potion::Potion::POISON);
+                try_push_potion!(pumpkin_data::potion::Potion::REGENERATION);
+                try_push_potion!(pumpkin_data::potion::Potion::SLOW_FALLING);
+                try_push_potion!(pumpkin_data::potion::Potion::SLOWNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::STRENGTH);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_HARMING);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_HEALING);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_LEAPING);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_POISON);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_REGENERATI
+ON);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_SLOWNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_STRENGTH);
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_SWIFTNESS)
+;
+                try_push_potion!(pumpkin_data::potion::Potion::STRONG_TURTLE_MAS
+TER);
+                try_push_potion!(pumpkin_data::potion::Potion::SWIFTNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::THICK);
+                try_push_potion!(pumpkin_data::potion::Potion::TURTLE_MASTER);
+                try_push_potion!(pumpkin_data::potion::Potion::WATER);
+                try_push_potion!(pumpkin_data::potion::Potion::WATER_BREATHING);
+                try_push_potion!(pumpkin_data::potion::Potion::WEAKNESS);
+                try_push_potion!(pumpkin_data::potion::Potion::WEAVING);
+                try_push_potion!(pumpkin_data::potion::Potion::WIND_CHARGED);
+            }
+
+            // Custom effects appended
+            for ce in &pc.custom_effects {
+                if let Some(se) = 
+StatusEffect::from_minecraft_name(&ce.effect_id) {
+                    out.push((
+                        se,
+                        ce.duration,
+                        ce.amplifier as u8,
+                        ce.ambient,
+                        ce.show_particles,
+                        ce.show_icon,
+                    ));
+                }
+            }
+
+            return out;
+        }
+
+        Vec::new()
+    }
+
+    /// Apply instant or duration effects to a target living entity.
+    pub async fn apply_effects_to(
+        target: &LivingEntity,
+        effects: Vec<(&'static StatusEffect, i32, u8, bool, bool, bool)>,
+        scale: f32,
+        source: PotionApplicationSource,
+    ) {
+        for (effect_type, duration, amplifier, ambient, show_particles, 
+show_icon) in effects {
+            // Instant effects should apply immediately
+            let is_instant = effect_type.id
+                == pumpkin_data::effect::StatusEffect::INSTANT_HEALTH.id
+                || effect_type.id == 
+pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id;
+
+            if is_instant {
+                // Instant potency scaling
+                let instant_scale = if source == 
+PotionApplicationSource::AreaEffectCloud {
+                    scale * 0.5
+                } else {
+                    scale
+                };
+
+                // Apply instant effects logic directly as they don't tick
+                if effect_type.id == 
+pumpkin_data::effect::StatusEffect::INSTANT_HEALTH.id {
+                    let amount = (4 * ((amplifier as i32) + 1)) as f32 * 
+instant_scale;
+                    target.heal(amount);
+                } else if effect_type.id == 
+pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id {
+                    let amount = (6 * ((amplifier as i32) + 1)) as f32 * 
+instant_scale;
+
+                    target
+                        .damage(
+                            target.get_entity(),
+                            amount,
+                            pumpkin_data::damage::DamageType::MAGIC,
+                        )
+                        .await;
+                }
+
+                // For instant effects, still add a short visual effect entry as
+before
+                let eff = pumpkin_data::potion::Effect {
+                    effect_type,
+                    duration: 1,
+                    amplifier,
+                    ambient,
+                    show_particles,
+                    show_icon,
+                    blend: false,
+                };
+                target.add_effect(eff).await;
+            } else {
+                // Duration scaling
+                let duration_scale = if source == 
+PotionApplicationSource::AreaEffectCloud {
+                    scale * 0.25
+                } else {
+                    scale
+                };
+
+                let dur = ((duration as f32) * duration_scale).max(1.0) as i32;
+                let eff = pumpkin_data::potion::Effect {
+                    effect_type,
+                    duration: dur,
+                    amplifier,
+                    ambient,
+                    show_particles,
+                    show_icon,
+                    blend: false,
+                };
+                target.add_effect(eff).await;
+            }
+        }
+    }
+}
+
+────────────────────────────────────────────────────────────────────────────────

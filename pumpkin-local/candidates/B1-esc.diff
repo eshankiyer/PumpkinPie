@@ -1,0 +1,228 @@
+diff --git a/pumpkin-data/src/blocks.rs b/pumpkin-data/src/blocks.rs
+index c52c653..30fdddf 100644
+--- a/pumpkin-data/src/blocks.rs
++++ b/pumpkin-data/src/blocks.rs
+@@ -194,6 +194,53 @@ impl Block {
+     ) -> &'static BlockState {
+         BlockState::from_id(id)
+     }
++
++    /// Parses a block state argument such as `minecraft:wheat[age=0]`, resolving any
++    /// supplied properties against the block's definition. Returns `None` if the block
++    /// name is unknown, a property name/value is not valid for the block, or the block
++    /// does not have properties at all but some were supplied.
++    #[must_use]
++    pub fn from_state_str(input: &str) -> Option<&'static BlockState> {
++        let (name, props) = match input.find('[') {
++            Some(idx) if input.ends_with(']') => (&input[..idx], &input[idx + 1..input.len() - 1]),
++            _ => (input, ""),
++        };
++
++        let block = Self::from_name(name)?;
++
++        let props = props.trim();
++        if props.is_empty() {
++            return Some(block.default_state);
++        }
++
++        let valid_keys: Vec<&str> = block
++            .properties(block.default_state.id)
++            .map(|properties| properties.to_props().into_iter().map(|(key, _)| key).collect())
++            .unwrap_or_default();
++
++        let mut pairs = Vec::new();
++        for part in props.split(',') {
++            let mut kv = part.splitn(2, '=');
++            let key = kv.next().unwrap_or("").trim();
++            let value = kv.next().unwrap_or("").trim();
++
++            if !valid_keys.contains(&key) {
++                return None;
++            }
++
++            // Some property values only fail once resolved against the block's generated
++            // enum types; validate each key in isolation before committing to the batch
++            // below so a bad value is reported here instead of panicking downstream.
++            if std::panic::catch_unwind(|| block.from_properties(&[(key, value)])).is_err() {
++                return None;
++            }
++
++            pairs.push((key, value));
++        }
++
++        let state_id = block.from_properties(&pairs).to_state_id(block);
++        Some(BlockState::from_id(state_id))
++    }
+ }
+ 
+ impl BlockId {
+diff --git a/pumpkin/src/command/args/block.rs b/pumpkin/src/command/args/block.rs
+index efbd7a1..ee6beda 100644
+--- a/pumpkin/src/command/args/block.rs
++++ b/pumpkin/src/command/args/block.rs
+@@ -1,5 +1,5 @@
+ use pumpkin_data::tag::{RegistryKey, get_tag_ids};
+-use pumpkin_data::{Block, BlockId, translation};
++use pumpkin_data::{Block, BlockId, BlockState, translation};
+ use pumpkin_protocol::java::client::play::{ArgumentType, SuggestionProviders};
+ use pumpkin_util::text::TextComponent;
+ 
+@@ -48,11 +48,11 @@ impl DefaultNameArgConsumer for BlockArgumentConsumer {
+ }
+ 
+ impl<'a> FindArg<'a> for BlockArgumentConsumer {
+-    type Data = &'static Block;
++    type Data = &'static BlockState;
+ 
+     fn find_arg(args: &'a super::ConsumedArgs, name: &str) -> Result<Self::Data, CommandError> {
+         match args.get(name) {
+-            Some(Arg::Block(name)) => Block::from_name(name).map_or_else(
++            Some(Arg::Block(name)) => Block::from_state_str(name).map_or_else(
+                 || {
+                     if name.starts_with("minecraft:") {
+                         Err(CommandError::CommandFailed(TextComponent::translate_cross(
+diff --git a/pumpkin/src/command/argument_types/block.rs b/pumpkin/src/command/argument_types/block.rs
+index 5588321..e65d958 100644
+--- a/pumpkin/src/command/argument_types/block.rs
++++ b/pumpkin/src/command/argument_types/block.rs
+@@ -8,7 +8,7 @@ use crate::command::{
+     string_reader::StringReader,
+     suggestion::suggestions::{Suggestions, SuggestionsBuilder},
+ };
+-use pumpkin_data::{Block, translation};
++use pumpkin_data::{Block, BlockState, translation};
+ use pumpkin_util::text::TextComponent;
+ 
+ pub const INVALID_BLOCK_ERROR_TYPE: CommandErrorType<1> = CommandErrorType::new(
+@@ -20,7 +20,7 @@ pub const INVALID_BLOCK_ERROR_TYPE: CommandErrorType<1> = CommandErrorType::new(
+ pub struct BlockArgumentType;
+ 
+ impl ArgumentType for BlockArgumentType {
+-    type Item = &'static Block;
++    type Item = &'static BlockState;
+ 
+     fn parse(&self, reader: &mut StringReader) -> Result<Self::Item, CommandSyntaxError> {
+         let start = reader.cursor();
+@@ -31,6 +31,15 @@ impl ArgumentType for BlockArgumentType {
+                 break;
+             }
+         }
++        if reader.peek() == Some('[') {
++            reader.skip();
++            while let Some(c) = reader.peek() {
++                reader.skip();
++                if c == ']' {
++                    break;
++                }
++            }
++        }
+         let block_name = &reader.string()[start..reader.cursor()];
+         let normalized = if block_name.contains(':') {
+             block_name.to_string()
+@@ -38,7 +47,7 @@ impl ArgumentType for BlockArgumentType {
+             format!("minecraft:{block_name}")
+         };
+ 
+-        Block::from_name(&normalized)
++        Block::from_state_str(&normalized)
+             .ok_or_else(|| INVALID_BLOCK_ERROR_TYPE.create(reader, TextComponent::text(normalized)))
+     }
+ 
+@@ -56,7 +65,10 @@ impl ArgumentType for BlockArgumentType {
+ }
+ 
+ impl BlockArgumentType {
+-    pub fn get(context: &CommandContext, name: &str) -> Result<&'static Block, CommandSyntaxError> {
+-        context.get_argument::<&'static Block>(name).copied()
++    pub fn get(
++        context: &CommandContext,
++        name: &str,
++    ) -> Result<&'static BlockState, CommandSyntaxError> {
++        context.get_argument::<&'static BlockState>(name).copied()
+     }
+ }
+diff --git a/pumpkin/src/command/commands/clone.rs b/pumpkin/src/command/commands/clone.rs
+index a6857ad..96c19fa 100644
+--- a/pumpkin/src/command/commands/clone.rs
++++ b/pumpkin/src/command/commands/clone.rs
+@@ -5,7 +5,7 @@ use crate::command::context::command_context::CommandContext;
+ use crate::command::errors::error_types::CommandErrorType;
+ use crate::command::node::dispatcher::CommandDispatcher;
+ use crate::command::node::{CommandExecutor, CommandExecutorResult};
+-use pumpkin_data::{Block, BlockStateId, translation};
++use pumpkin_data::{BlockStateId, translation};
+ use pumpkin_nbt::compound::NbtCompound;
+ use pumpkin_util::PermissionLvl;
+ use pumpkin_util::math::position::BlockPos;
+@@ -173,10 +173,7 @@ impl CommandExecutor for CloneExecutor {
+                         let should_clone = match self.mask_mode {
+                             MaskMode::Replace => true,
+                             MaskMode::Masked => !pumpkin_data::block_properties::is_air(state_id),
+-                            MaskMode::Filtered => {
+-                                let block = Block::from_state_id(state_id);
+-                                block.id == filter_block.unwrap().id
+-                            }
++                            MaskMode::Filtered => state_id == filter_block.unwrap().id,
+                         };
+ 
+                         if should_clone {
+diff --git a/pumpkin/src/command/commands/execute.rs b/pumpkin/src/command/commands/execute.rs
+index c4bd3cd..0af0cd2 100644
+--- a/pumpkin/src/command/commands/execute.rs
++++ b/pumpkin/src/command/commands/execute.rs
+@@ -278,11 +278,11 @@ fn execute_if_block_modifier<'a>(
+ ) -> crate::command::node::RedirectModifierResult<'a> {
+     Box::pin(async move {
+         let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
+-        let expected_block = BlockArgumentType::get(context, "block")?;
++        let expected_state = BlockArgumentType::get(context, "block")?;
+ 
+         if let Some(ref world) = context.source.world {
+-            let block = world.get_block(&pos);
+-            if block == expected_block {
++            let state = world.get_block_state(&pos);
++            if state == expected_state {
+                 return Ok(vec![context.source.clone()]);
+             }
+         }
+@@ -295,11 +295,11 @@ fn execute_unless_block_modifier<'a>(
+ ) -> crate::command::node::RedirectModifierResult<'a> {
+     Box::pin(async move {
+         let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
+-        let expected_block = BlockArgumentType::get(context, "block")?;
++        let expected_state = BlockArgumentType::get(context, "block")?;
+ 
+         if let Some(ref world) = context.source.world {
+-            let block = world.get_block(&pos);
+-            if block != expected_block {
++            let state = world.get_block_state(&pos);
++            if state != expected_state {
+                 return Ok(vec![context.source.clone()]);
+             }
+         } else {
+diff --git a/pumpkin/src/command/commands/fill.rs b/pumpkin/src/command/commands/fill.rs
+index 665216d..64bcf22 100644
+--- a/pumpkin/src/command/commands/fill.rs
++++ b/pumpkin/src/command/commands/fill.rs
+@@ -264,7 +264,7 @@ impl CommandExecutor for Executor {
+     ) -> CommandResult<'a> {
+         Box::pin(async move {
+             let block = BlockArgumentConsumer::find_arg(args, ARG_BLOCK)?;
+-            let block_state_id = block.default_state.id;
++            let block_state_id = block.id;
+             let from = BlockPosArgumentConsumer::find_arg(args, ARG_FROM)?;
+             let to = BlockPosArgumentConsumer::find_arg(args, ARG_TO)?;
+             let mode = self.0;
+diff --git a/pumpkin/src/command/commands/setblock.rs b/pumpkin/src/command/commands/setblock.rs
+index 79d457e..7b42c62 100644
+--- a/pumpkin/src/command/commands/setblock.rs
++++ b/pumpkin/src/command/commands/setblock.rs
+@@ -41,7 +41,7 @@ impl CommandExecutor for Executor {
+     ) -> CommandResult<'a> {
+         Box::pin(async move {
+             let block = BlockArgumentConsumer::find_arg(args, ARG_BLOCK)?;
+-            let block_state_id = block.default_state.id;
++            let block_state_id = block.id;
+             let mode = self.0;
+             let world = sender
+                 .world_or_first(server)

@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "MyceliumBlock",
+    "vanilla_path": "net/minecraft/world/level/block/MyceliumBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/mycelium.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "NameTagItem",
+    "vanilla_path": "net/minecraft/world/item/NameTagItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/name_tag.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "interactLivingEntity"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "NearestAttackableTargetGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/active_target.rs",
+    "total_methods": 5,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTargetSearchArea"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "NearestAttackableWitchTargetGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/target/NearestAttackableWitchTargetGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/nearest_attackable_witch_target.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setCanAttack"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "NearestHealableRaiderTargetGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/target/NearestHealableRaiderTargetGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/nearest_healable_raider_target.rs",
+    "total_methods": 4,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "decrementCooldown"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "NearestVisibleLivingEntities",
+    "vanilla_path": "net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/memory.rs",
+    "total_methods": 6,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "nearbyEntities"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "NetherWartBlock",
+    "vanilla_path": "net/minecraft/world/level/block/NetherWartBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/nether_wart.rs",
+    "total_methods": 7,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "NoiseRouter",
+    "vanilla_path": "net/minecraft/world/level/levelgen/NoiseRouter.java",
+    "rust_file": "crates/pumpkin-data/src/generated/noise_router.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mapAll"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "OneShot",
+    "vanilla_path": "net/minecraft/world/entity/ai/behavior/OneShot.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/behavior/mod.rs",
+    "total_methods": 5,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "debugString"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "PotatoBlock",
+    "vanilla_path": "net/minecraft/world/level/block/PotatoBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/potatoes.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBaseSeedId"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "Potions",
+    "vanilla_path": "net/minecraft/world/item/alchemy/Potions.java",
+    "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "bootstrap"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "ProcessorRule",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/templatesystem/ProcessorRule.java",
+    "rust_file": "crates/pumpkin-world/src/generation/structure/template/processor.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getOutputState"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "PumpkinBlock",
+    "vanilla_path": "net/minecraft/world/level/block/PumpkinBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/pumpkin.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useItemOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "RailShape",
+    "vanilla_path": "net/minecraft/world/level/block/state/properties/RailShape.java",
+    "rust_file": "crates/pumpkin-data/src/generated/block.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isSlope"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "RandomPos",
+    "vanilla_path": "net/minecraft/world/entity/ai/util/RandomPos.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/random_pos.rs",
+    "total_methods": 4,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "moveUpToAboveSolid"
+    ]
+  }
+]

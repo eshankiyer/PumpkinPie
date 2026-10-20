@@ -1,0 +1,32 @@
+[
+  {
+    "subsystem": "server_level",
+    "vanilla_class": "ChunkHolder",
+    "vanilla_path": "net/minecraft/server/level/ChunkHolder.java",
+    "rust_file": "crates/pumpkin-world/src/chunk_system/chunk_holder.rs",
+    "total_methods": 18,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "absent_workspace_wide": [
+      "addSaveDependency",
+      "addSendDependency",
+      "blockChanged",
+      "broadcastChanges",
+      "getEntityTickingChunkFuture",
+      "getFullChunkFuture",
+      "getQueueLevel",
+      "getSaveSyncFuture",
+      "getSendSyncFuture",
+      "getTicketLevel",
+      "getTickingChunkFuture",
+      "hasChangesToBroadcast",
+      "isReadyForSaving",
+      "refreshAccessibility",
+      "sectionLightChanged",
+      "setTicketLevel",
+      "updateFutures",
+      "wasAccessibleSinceLastSave"
+    ],
+    "note": "round12 broader pool: leads 1-18 of 18 for ChunkHolder"
+  }
+]

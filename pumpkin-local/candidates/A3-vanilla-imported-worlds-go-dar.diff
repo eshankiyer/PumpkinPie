@@ -1,0 +1,10 @@
+diff --git a/pumpkin-world/src/chunk/format/mod.rs b/pumpkin-world/src/chunk/format/mod.rs
+index 2a82376..141cc0f 100644
+--- a/pumpkin-world/src/chunk/format/mod.rs
++++ b/pumpkin-world/src/chunk/format/mod.rs
+@@ -747,3 +747,5 @@ struct EntityNbt {
+     position: [i32; 2],
+     entities: Vec<NbtCompound>,
+ }
++#[cfg(test)]
++mod tests;

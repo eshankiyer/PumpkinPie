@@ -1,0 +1,32 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "Item",
+    "vanilla_path": "net/minecraft/world/item/Item.java",
+    "rust_file": "crates/pumpkin-data/src/generated/item.rs",
+    "total_methods": 83,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 12,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isBarVisible",
+      "isCorrectToolForDrops",
+      "isFoil",
+      "isPeaceful",
+      "jukeboxPlayable",
+      "mapData",
+      "mineBlock",
+      "nautilusArmor",
+      "onCraftedBy",
+      "onCraftedPostProcess",
+      "onDestroyed",
+      "overrideDescription",
+      "overrideOtherStackedOnMe",
+      "overrideStackedOnOther",
+      "pickaxe",
+      "postHurtEnemy",
+      "rarity",
+      "registries"
+    ]
+  }
+]

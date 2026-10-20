@@ -1,0 +1,22 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "AgeableMob",
+    "vanilla_path": "net/minecraft/world/entity/AgeableMob.java",
+    "rust_file": "crates/pumpkin/src/entity/ageable.rs",
+    "total_methods": 27,
+    "in_declaring_file": 12,
+    "elsewhere_in_workspace": 7,
+    "absent_workspace_wide": [
+      "getBabySpawnChance",
+      "getForcedAge",
+      "getForcedAgeTimer",
+      "getGroupSize",
+      "increaseGroupSizeByOne",
+      "isShouldSpawnBaby",
+      "makeAgeLockedParticle",
+      "onSyncedDataUpdated"
+    ],
+    "note": "round13 broader pool: leads 1-8 of 8 for AgeableMob"
+  }
+]

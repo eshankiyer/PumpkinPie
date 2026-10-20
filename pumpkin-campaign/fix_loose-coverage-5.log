@@ -1,0 +1,6 @@
+crates/pumpkin/src/block/mod.rs:4:38: error: unused import: `BlockProperties`
+crates/pumpkin/src/entity/living.rs:1882:9: error: `if _ { .. } else { .. }` is an expression
+crates/pumpkin/src/entity/player.rs:933:5: error: this function has too many lines (122/100)
+crates/pumpkin/src/entity/projectile/arrow.rs:805:28: error: this comparison involving the minimum or maximum element for this type contains a case that is always true or always false
+crates/pumpkin/src/entity/mod.rs:1698:5: error: this function has too many lines (101/100)
+FIX DONE /home/eshanki/pumpkin-wt/loose-coverage-5

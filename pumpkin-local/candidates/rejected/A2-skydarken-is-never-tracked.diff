@@ -1,0 +1,1145 @@
+diff --git a/pumpkin/src/world/mod.rs b/pumpkin/src/world/mod.rs
+index 5ff4e26..ce6833e 100644
+--- a/pumpkin/src/world/mod.rs
++++ b/pumpkin/src/world/mod.rs
+@@ -228,6 +228,8 @@ pub struct World {
+     /// Block entities indexed by chunk, so ticking only visits the currently
+     /// active chunks instead of scanning every loaded block entity each tick.
+     pub block_entities: DashMap<Vector2<i32>, FxHashMap<BlockPos, Arc<dyn BlockEntity>>>,
++    /// Ambient sky darkness derived from time of day; clamped to [0..15].
++    pub sky_darken: Mutex<f32>,
+ }
+ 
+ impl PartialEq for World {
+@@ -1156,12 +1158,26 @@ impl World {
+ 
+         let mut weather = self.weather.lock().await;
+         weather.tick_weather(self);
++        {
++            let time_of_day = self.level_time.lock().await.time_of_day;
++            let sun_angle_fraction = (time_of_day as f32 / 24000.0) - 0.25;
++            let sun_angle_radians = sun_angle_fraction * (std::f32::consts::PI * 2.0);
++            let ambient_darkness = if sun_angle_radians.cos() < 0.0 {
++                sun_angle_radians.cos().abs() * 11.0
++            } else {
++                0.0
++            };
++            *self.sky_darken.lock().await = ambient_darkness.clamp(0.0, 15.0);
++        }
+ 
+         if self.should_skip_night() && is_night {
+             let mut level_time = self.level_time.lock().await;
+             let time = time_of_day + 24000;
+             level_time.set_time(time - time % 24000);
+             level_time.send_time(self).await;
++    }
++    pub async fn get_sky_darken(u0026self) -> f32 {
++        *self.sky_darken.lock().await
+             drop(level_time);
+ 
+             for player in self.players.load().iter() {
+@@ -1174,6 +1190,9 @@ impl World {
+         } else if world_age % 20 == 0 {
+             let level_time = self.level_time.lock().await;
+             level_time.send_time(self).await;
++    }
++    pub async fn get_sky_darken(u0026self) -> f32 {
++        *self.sky_darken.lock().await
+         }
+     }
+ 
+@@ -1704,6 +1723,9 @@ impl World {
+         level_time.set_time(time);
+         level_time.send_time(self).await;
+     }
++    pub async fn get_sky_darken(&self) -> f32 {
++        *self.sky_darken.lock().await
++    }
+ 
+     pub async fn is_raining(&self) -> bool {
+         self.weather.lock().await.raining
+@@ -4441,1083 +4463,5 @@ impl World {
+     }
+ 
+     pub fn get_max_local_raw_brightness(&self, pos: &BlockPos) -> u8 {
+-        // TODO: pass the sky darken value here once it is tracked.
+-        self.get_raw_brightness(pos, 0)
+-    }
+-
+-    pub fn get_block_light_level(&self, position: &BlockPos) -> Option<u8> {
+-        self.level
+-            .light_engine
+-            .get_block_light_level(&self.level, position)
+-    }
+-
+-    pub fn get_sky_light_level(&self, position: &BlockPos) -> u8 {
+-        self.level
+-            .light_engine
+-            .get_sky_light_level(&self.level, position)
+-    }
+-
+-    /// Whether `position` has an unobstructed view of the sky.
+-    ///
+-    /// Mirrors vanilla `BlockAndTintGetter#canSeeSky`, which checks the raw
+-    /// (not day/night darkened) sky light against the maximum light level.
+-    #[must_use]
+-    pub fn can_see_sky(&self, position: &BlockPos) -> bool {
+-        // Out of range lookups report full sky light, so reject them here
+-        // rather than letting a position below or above the world claim to
+-        // see the sky.
+-        if position.0.y < self.dimension.min_y
+-            || position.0.y >= self.dimension.min_y + self.dimension.height
+-        {
+-            return false;
+-        }
+-        self.get_sky_light_level(position) >= MAX_LIGHT_LEVEL
+-    }
+-
+-    pub fn set_block_light_level(&self, position: &BlockPos, light_level: u8) {
+-        let _ = self
+-            .level
+-            .light_engine
+-            .set_block_light_level(&self.level, position, light_level);
+-    }
+-
+-    pub fn set_sky_light_level(&self, position: &BlockPos, light_level: u8) {
+-        let _ = self
+-            .level
+-            .light_engine
+-            .set_sky_light_level(&self.level, position, light_level);
+-    }
+-
+-    pub fn get_biome(&self, position: &BlockPos) -> &'static Biome {
+-        let chunk_pos = position.chunk_position();
+-        if let Some(chunk) = self.level.loaded_chunks.get(&chunk_pos) {
+-            let id = chunk
+-                .section
+-                .get_rough_biome_absolute_y(
+-                    (position.0.x & 15) as usize,
+-                    position.0.y,
+-                    (position.0.z & 15) as usize,
+-                )
+-                .unwrap_or(0);
+-            Biome::from_id(id).unwrap_or(&Biome::PLAINS)
+-        } else {
+-            &Biome::PLAINS
+-        }
+-    }
+-
+-    pub fn schedule_block_tick(
+-        &self,
+-        block: &Block,
+-        block_pos: BlockPos,
+-        delay: u8,
+-        priority: TickPriority,
+-    ) {
+-        self.level
+-            .schedule_block_tick(block, block_pos, delay, priority);
+-    }
+-
+-    pub fn schedule_fluid_tick(
+-        &self,
+-        fluid: &Fluid,
+-        block_pos: BlockPos,
+-        delay: u8,
+-        priority: TickPriority,
+-    ) {
+-        self.level
+-            .schedule_fluid_tick(fluid, block_pos, delay, priority);
+-    }
+-
+-    pub fn is_block_tick_scheduled(&self, block_pos: &BlockPos, block: &Block) -> bool {
+-        self.level.is_block_tick_scheduled(block_pos, block)
+-    }
+-
+-    pub fn is_fluid_tick_scheduled(&self, block_pos: &BlockPos, fluid: &Fluid) -> bool {
+-        self.level.is_fluid_tick_scheduled(block_pos, fluid)
+-    }
+-
+-    // Return new state
+-    #[allow(clippy::too_many_lines)]
+-    pub async fn break_block(
+-        self: &Arc<Self>,
+-        position: &BlockPos,
+-        cause: Option<Arc<Player>>,
+-        flags: BlockFlags,
+-    ) -> Option<BlockStateId> {
+-        let (broken_block, broken_block_state) = self.get_block_and_state_id(position);
+-        if is_air(broken_block_state) {
+-            return None;
+-        }
+-        let event = BlockBreakEvent::new(
+-            cause.clone(),
+-            broken_block,
+-            *position,
+-            0,
+-            !flags.contains(BlockFlags::SKIP_DROPS),
+-        );
+-
+-        let event = self
+-            .server
+-            .upgrade()
+-            .unwrap()
+-            .plugin_manager
+-            .fire::<BlockBreakEvent>(event)
+-            .await;
+-
+-        if !event.cancelled {
+-            let mut flags = flags;
+-            if event.drop {
+-                flags.remove(BlockFlags::SKIP_DROPS);
+-            } else {
+-                flags.insert(BlockFlags::SKIP_DROPS);
+-            }
+-            let new_state_id = if broken_block
+-                .properties(broken_block_state)
+-                .and_then(|properties| {
+-                    properties
+-                        .to_props()
+-                        .into_iter()
+-                        .find(|p| p.0 == "waterlogged")
+-                        .map(|(_, value)| value == "true")
+-                })
+-                .unwrap_or(false)
+-            {
+-                let mut water_props = FlowingFluidProperties::default(&Fluid::FLOWING_WATER);
+-                water_props.level = pumpkin_data::fluid::Level::L8;
+-                water_props.falling = Falling::False;
+-                water_props.to_state_id(&Fluid::FLOWING_WATER)
+-            } else {
+-                BlockStateId::AIR
+-            };
+-
+-            let broken_state_id = self.set_block_state(position, new_state_id, flags).await;
+-
+-            // Close container screens for any players viewing this block
+-            self.close_container_screens_at(position).await;
+-
+-            let luck = cause.as_ref().map_or(0.0, |player| {
+-                player.living_entity.get_attribute_value(&Attributes::LUCK) as f32
+-            });
+-
+-            if Block::from_state_id(broken_state_id) != &Block::FIRE {
+-                let particles_packet = CWorldEvent::new(
+-                    WorldEvent::ParticlesDestroyBlock as i32,
+-                    *position,
+-                    broken_state_id.as_u16().into(),
+-                    false,
+-                );
+-                let chunk_pos = position.chunk_position();
+-                match &cause {
+-                    Some(player) => {
+-                        self.broadcast_to_chunk_except(
+-                            chunk_pos,
+-                            &[player.get_entity().entity_uuid],
+-                            &particles_packet,
+-                        );
+-                    }
+-                    None => self.broadcast_to_chunk(chunk_pos, &particles_packet),
+-                }
+-            }
+-            if !flags.contains(BlockFlags::SKIP_DROPS) {
+-                let tool = if let Some(player) = &cause {
+-                    let hand_stack = player
+-                        .inventory
+-                        .get_stack_in_hand(pumpkin_util::Hand::Right)
+-                        .await;
+-                    let stack_guard = hand_stack.lock().await;
+-                    (stack_guard.item_count > 0).then(|| stack_guard.clone())
+-                } else {
+-                    None
+-                };
+-
+-                let is_raining = self.is_raining().await;
+-                let is_thundering = self.is_thundering().await;
+-
+-                let params = LootContextParameters {
+-                    block_state: Some(BlockState::from_id(broken_state_id)),
+-                    luck,
+-                    position: Some(pumpkin_util::math::vector3::Vector3::new(
+-                        position.0.x as f64,
+-                        position.0.y as f64,
+-                        position.0.z as f64,
+-                    )),
+-                    world_time: self.level_info.load().day_time as u64,
+-                    tool,
+-                    is_raining: Some(is_raining),
+-                    is_thundering: Some(is_thundering),
+-                    ..Default::default()
+-                };
+-                block::drop_loot(self, broken_block, position, true, params).await;
+-            }
+-            return Some(new_state_id);
+-        }
+-        None
+-    }
+-
+-    /// Close container screens for all players who have a container open at the given block position.
+-    pub async fn close_container_screens_at(&self, position: &BlockPos) {
+-        let players = self.players.load();
+-        for player in players.iter() {
+-            if player.open_container_pos.load() == Some(*position) {
+-                player.close_handled_screen().await;
+-            }
+-        }
+-    }
+-
+-    pub async fn drop_stack(self: &Arc<Self>, pos: &BlockPos, stack: ItemStack) {
+-        let height = EntityType::ITEM.dimension[1] / 2.0;
+-        let spawn_pos = {
+-            let mut r = rand::rng();
+-            Vector3::new(
+-                f64::from(pos.0.x) + 0.5 + r.random_range(-0.25..0.25),
+-                f64::from(pos.0.y) + 0.5 + r.random_range(-0.25..0.25) - f64::from(height),
+-                f64::from(pos.0.z) + 0.5 + r.random_range(-0.25..0.25),
+-            )
+-        };
+-
+-        let entity = Entity::new(self.clone(), spawn_pos, &EntityType::ITEM);
+-        let item_entity = Arc::new(ItemEntity::new(entity, stack));
+-        self.spawn_entity(item_entity).await;
+-    }
+-
+-    /* ItemScatterer.java */
+-    pub async fn scatter_inventory(
+-        self: &Arc<Self>,
+-        position: &BlockPos,
+-        inventory: &Arc<dyn Inventory>,
+-    ) {
+-        for i in 0..inventory.size() {
+-            self.scatter_stack(
+-                f64::from(position.0.x),
+-                f64::from(position.0.y),
+-                f64::from(position.0.z),
+-                inventory.remove_stack(i).await,
+-            )
+-            .await;
+-        }
+-    }
+-    pub async fn scatter_stack(self: &Arc<Self>, x: f64, y: f64, z: f64, mut stack: ItemStack) {
+-        const TRIANGULAR_DEVIATION: f64 = 0.114_850_001_711_398_36;
+-
+-        const XZ_MODE: f64 = 0.0;
+-        const Y_MODE: f64 = 0.2;
+-
+-        let width = f64::from(EntityType::ITEM.dimension[0]);
+-        let half_width = width / 2.0;
+-        let spawn_area = 1.0 - width;
+-
+-        let mut rng = Xoroshiro::from_seed(get_seed());
+-
+-        // TODO: Use world random here: world.random.nextDouble()
+-        let x = rng.next_f64().mul_add(spawn_area, x.floor()) + half_width;
+-        let y = rng.next_f64().mul_add(spawn_area, y.floor());
+-        let z = rng.next_f64().mul_add(spawn_area, z.floor()) + half_width;
+-
+-        while !stack.is_empty() {
+-            let item = stack.split((rng.next_bounded_i32(21) + 10) as u8);
+-            let velocity = Vector3::new(
+-                rng.next_triangular(XZ_MODE, TRIANGULAR_DEVIATION),
+-                rng.next_triangular(Y_MODE, TRIANGULAR_DEVIATION),
+-                rng.next_triangular(XZ_MODE, TRIANGULAR_DEVIATION),
+-            );
+-
+-            let entity = Entity::new(self.clone(), Vector3::new(x, y, z), &EntityType::ITEM);
+-            let entity = Arc::new(ItemEntity::new_with_velocity(entity, item, velocity, 10));
+-            self.spawn_entity(entity).await;
+-        }
+-    }
+-    /* End ItemScatterer.java */
+-
+-    pub fn sync_world_event(&self, world_event: WorldEvent, position: BlockPos, data: i32) {
+-        let chunk_pos = position.chunk_position();
+-        self.broadcast_to_chunk(
+-            chunk_pos,
+-            &CWorldEvent::new(world_event as i32, position, data, false),
+-        );
+-    }
+-    #[must_use]
+-    pub fn is_valid(dest: BlockPos) -> bool {
+-        Self::is_valid_horizontally(dest) && Self::is_valid_vertically(dest.0.y)
+-    }
+-    #[must_use]
+-    pub fn is_valid_horizontally(dest: BlockPos) -> bool {
+-        // Note: 30_000_000 is not valid, but -30_000_000 is.
+-        (-30_000_000..30_000_000).contains(&dest.0.x)
+-            && (-30_000_000..30_000_000).contains(&dest.0.z)
+-    }
+-    #[must_use]
+-    pub fn is_valid_vertically(y: i32) -> bool {
+-        // Note: 20_000_000 is not valid, but -20_000_000 is.
+-        (-20_000_000..20_000_000).contains(&y)
+-    }
+-    #[must_use]
+-    pub fn is_in_build_limit(&self, dest: BlockPos) -> bool {
+-        self.is_in_height_limit(dest.0.y) && Self::is_valid_horizontally(dest)
+-    }
+-    #[must_use]
+-    pub fn is_in_height_limit(&self, y: i32) -> bool {
+-        (self.get_bottom_y()..=self.get_top_y()).contains(&y)
+-    }
+-    pub const fn get_bottom_y(&self) -> i32 {
+-        self.dimension.min_y
+-    }
+-    pub const fn get_top_y(&self) -> i32 {
+-        self.dimension.min_y + self.dimension.height - 1
+-    }
+-    /// Gets a `Block` from the block registry. Returns `Block::AIR` if the block was not found.
+-    pub fn get_block(&self, position: &BlockPos) -> &'static Block {
+-        self.get_block_state_id_if_loaded(position)
+-            .map_or(&Block::AIR, Block::from_state_id)
+-    }
+-
+-    #[must_use]
+-    pub fn get_block_state_id_if_loaded(&self, position: &BlockPos) -> Option<BlockStateId> {
+-        if !self.is_in_build_limit(*position) {
+-            return None;
+-        }
+-
+-        let (chunk_coordinate, relative) = position.chunk_and_chunk_relative_position();
+-        self.level.read_chunk_sync(&chunk_coordinate, |chunk| {
+-            chunk
+-                .section
+-                .get_block_absolute_y(relative.x as usize, relative.y, relative.z as usize)
+-        })?
+-    }
+-
+-    #[must_use]
+-    pub fn get_block_state_if_loaded(&self, position: &BlockPos) -> Option<&'static BlockState> {
+-        self.get_block_state_id_if_loaded(position)
+-            .map(BlockState::from_id)
++        self.get_raw_brightness(pos, self.get_sky_darken().await as u8)
+     }
+-
+-    #[must_use]
+-    pub fn is_loaded(&self, position: &BlockPos) -> bool {
+-        self.get_block_state_id_if_loaded(position).is_some()
+-    }
+-
+-    pub fn get_fluid(&self, position: &BlockPos) -> &'static pumpkin_data::fluid::Fluid {
+-        let id = self.get_block_state_id(position);
+-        let fluid = Fluid::from_state_id(id).ok_or(&Fluid::EMPTY);
+-        if let Ok(fluid) = fluid {
+-            return fluid.to_flowing();
+-        }
+-        let block = Block::from_state_id(id);
+-        block
+-            .properties(id)
+-            .and_then(|props| {
+-                props
+-                    .to_props()
+-                    .into_iter()
+-                    .find(|p| p.0 == "waterlogged")
+-                    .map(|(_, value)| {
+-                        if value == "true" {
+-                            &Fluid::FLOWING_WATER
+-                        } else {
+-                            &Fluid::EMPTY
+-                        }
+-                    })
+-            })
+-            .unwrap_or(&Fluid::EMPTY)
+-    }
+-
+-    pub fn get_block_and_fluid(
+-        &self,
+-        position: &BlockPos,
+-    ) -> (
+-        &'static pumpkin_data::Block,
+-        &'static pumpkin_data::fluid::Fluid,
+-    ) {
+-        let id = self.get_block_state_id(position);
+-        let block = Block::from_state_id(id);
+-
+-        let fluid = Fluid::from_state_id(id)
+-            .map(Fluid::to_flowing)
+-            .ok_or(&Fluid::EMPTY)
+-            .unwrap_or_else(|_| {
+-                block
+-                    .properties(id)
+-                    .and_then(|props| {
+-                        props
+-                            .to_props()
+-                            .into_iter()
+-                            .find(|p| p.0 == "waterlogged")
+-                            .map(|(_, value)| {
+-                                if value == "true" {
+-                                    &Fluid::FLOWING_WATER
+-                                } else {
+-                                    &Fluid::EMPTY
+-                                }
+-                            })
+-                    })
+-                    .unwrap_or(&Fluid::EMPTY)
+-            });
+-        (block, fluid)
+-    }
+-
+-    pub fn get_fluid_and_fluid_state(
+-        &self,
+-        position: &BlockPos,
+-    ) -> (&'static Fluid, &'static FluidState) {
+-        let id = self.get_block_state_id(position);
+-
+-        let Some(raw_fluid) = Fluid::from_state_id(id) else {
+-            let block = Block::from_state_id(id);
+-            if let Some(properties) = block.properties(id) {
+-                for (name, value) in properties.to_props() {
+-                    if name == "waterlogged" {
+-                        if value == "true" {
+-                            let state = &Fluid::FLOWING_WATER.states[0];
+-                            return (&Fluid::FLOWING_WATER, state);
+-                        }
+-
+-                        break;
+-                    }
+-                }
+-            }
+-
+-            let state = &Fluid::EMPTY.states[0];
+-            return (&Fluid::EMPTY, state);
+-        };
+-
+-        let fluid = raw_fluid.to_flowing();
+-        let state = &fluid.states[0];
+-
+-        (fluid, state)
+-    }
+-
+-    pub fn get_block_state_id(&self, position: &BlockPos) -> BlockStateId {
+-        self.get_block_state_id_if_loaded(position)
+-            .unwrap_or(Block::AIR.default_state.id)
+-    }
+-
+-    /// Gets the `BlockState` from the block registry. Returns Air if the block state was not found.
+-    pub fn get_block_state(&self, position: &BlockPos) -> &'static BlockState {
+-        let id = self.get_block_state_id(position);
+-        BlockState::from_id(id)
+-    }
+-
+-    /// Gets the Block + Block state from the Block Registry, Returns Air if the Block state has not been found
+-    pub fn get_block_and_state(
+-        &self,
+-        position: &BlockPos,
+-    ) -> (&'static Block, &'static BlockState) {
+-        let id = self.get_block_state_id(position);
+-        BlockState::from_id_with_block(id)
+-    }
+-
+-    /// Gets the Block + state id from the Block Registry, Returns Air if the Block state has not been found
+-    pub fn get_block_and_state_id(&self, position: &BlockPos) -> (&'static Block, BlockStateId) {
+-        let id = self.get_block_state_id(position);
+-        (Block::from_state_id(id), id)
+-    }
+-
+-    /// Updates neighboring blocks of a block
+-    pub async fn update_neighbors(
+-        self: &Arc<Self>,
+-        block_pos: &BlockPos,
+-        except: Option<BlockDirection>,
+-    ) {
+-        let source_block = self.get_block(block_pos);
+-        for direction in BlockDirection::update_order() {
+-            if except.is_some_and(|d| d == direction) {
+-                continue;
+-            }
+-
+-            let neighbor_pos = block_pos.offset(direction.to_offset());
+-            let (neighbor_block, neighbor_fluid) = self.get_block_and_fluid(&neighbor_pos);
+-
+-            if let Some(neighbor_pumpkin_block) =
+-                self.block_registry.get_pumpkin_block(neighbor_block.id)
+-            {
+-                neighbor_pumpkin_block
+-                    .on_neighbor_update(OnNeighborUpdateArgs {
+-                        world: self,
+-                        block: neighbor_block,
+-                        position: &neighbor_pos,
+-                        source_block,
+-                        notify: false,
+-                    })
+-                    .await;
+-            }
+-
+-            if let Some(neighbor_pumpkin_fluid) =
+-                self.block_registry.get_pumpkin_fluid(neighbor_fluid.id)
+-            {
+-                neighbor_pumpkin_fluid
+-                    .on_neighbor_update(self, neighbor_fluid, &neighbor_pos, false)
+-                    .await;
+-            }
+-        }
+-    }
+-
+-    pub async fn update_neighbor(
+-        self: &Arc<Self>,
+-        neighbor_block_pos: &BlockPos,
+-        source_block: &Block,
+-    ) {
+-        let neighbor_block = self.get_block(neighbor_block_pos);
+-
+-        if let Some(neighbor_pumpkin_block) =
+-            self.block_registry.get_pumpkin_block(neighbor_block.id)
+-        {
+-            neighbor_pumpkin_block
+-                .on_neighbor_update(OnNeighborUpdateArgs {
+-                    world: self,
+-                    block: neighbor_block,
+-                    position: neighbor_block_pos,
+-                    source_block,
+-                    notify: false,
+-                })
+-                .await;
+-        }
+-    }
+-
+-    pub async fn update_from_neighbor_shapes(
+-        self: &Arc<Self>,
+-        state_id: BlockStateId,
+-        pos: &BlockPos,
+-    ) -> BlockStateId {
+-        let mut current_state_id = state_id;
+-        let block = Block::from_state_id(state_id);
+-        for direction in BlockDirection::all() {
+-            let neighbor_pos = pos.offset(direction.to_offset());
+-            let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
+-            current_state_id = self
+-                .block_registry
+-                .get_state_for_neighbor_update(
+-                    self,
+-                    block,
+-                    current_state_id,
+-                    pos,
+-                    direction,
+-                    &neighbor_pos,
+-                    neighbor_state_id,
+-                )
+-                .await;
+-        }
+-        current_state_id
+-    }
+-
+-    pub async fn replace_with_state_for_neighbor_update(
+-        self: &Arc<Self>,
+-        block_pos: &BlockPos,
+-        direction: BlockDirection,
+-        flags: BlockFlags,
+-    ) {
+-        let (block, block_state_id) = self.get_block_and_state_id(block_pos);
+-
+-        if flags.contains(BlockFlags::SKIP_REDSTONE_WIRE_STATE_REPLACEMENT)
+-            && *block == Block::REDSTONE_WIRE
+-        {
+-            return;
+-        }
+-
+-        let neighbor_pos = block_pos.offset(direction.to_offset());
+-        let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
+-
+-        let new_state_id = self
+-            .block_registry
+-            .get_state_for_neighbor_update(
+-                self,
+-                block,
+-                block_state_id,
+-                block_pos,
+-                direction,
+-                &neighbor_pos,
+-                neighbor_state_id,
+-            )
+-            .await;
+-
+-        if new_state_id != block_state_id {
+-            if is_air(new_state_id) {
+-                self.break_block(block_pos, None, flags).await;
+-            } else {
+-                self.set_block_state(block_pos, new_state_id, flags).await;
+-            }
+-        }
+-    }
+-
+-    /// Returns whether monsters can be spawned in the world
+-    pub fn should_spawn_monsters(&self) -> bool {
+-        let level_data = self.level_info.load();
+-        level_data.game_rules.spawn_mobs
+-            && level_data.game_rules.spawn_monsters
+-            && level_data.difficulty != Difficulty::Peaceful
+-    }
+-
+-    pub fn get_block_entity(&self, block_pos: &BlockPos) -> Option<Arc<dyn BlockEntity>> {
+-        let chunk_pos = block_pos.chunk_position();
+-        if let Some(chunk_block_entities) = self.block_entities.get(&chunk_pos)
+-            && let Some(entity) = chunk_block_entities.get(block_pos)
+-        {
+-            return Some(entity.clone());
+-        }
+-
+-        let nbt = self
+-            .level
+-            .read_chunk_sync(&chunk_pos, |chunk| {
+-                chunk
+-                    .pending_block_entities
+-                    .lock()
+-                    .unwrap()
+-                    .remove(block_pos)
+-            })
+-            .flatten()?;
+-        let entity = block_entity_from_nbt(&nbt)?;
+-        self.block_entities
+-            .entry(chunk_pos)
+-            .or_default()
+-            .insert(*block_pos, entity.clone());
+-        Some(entity)
+-    }
+-
+-    pub fn add_block_entity(&self, block_entity: Arc<dyn BlockEntity>) {
+-        let block_pos = block_entity.get_position();
+-        let chunk_pos = block_pos.chunk_position();
+-        let block_entity_nbt = block_entity.chunk_data_nbt();
+-
+-        if let Some(nbt) = &block_entity_nbt {
+-            let mut bytes = Vec::new();
+-            to_bytes_unnamed(nbt, &mut bytes).unwrap();
+-            self.broadcast_to_chunk(
+-                chunk_pos,
+-                &CBlockEntityData::new(
+-                    block_entity.get_position(),
+-                    VarInt(block_entity.get_id() as i32),
+-                    bytes.into_boxed_slice(),
+-                ),
+-            );
+-        }
+-
+-        self.block_entities
+-            .entry(chunk_pos)
+-            .or_default()
+-            .insert(block_pos, block_entity);
+-        self.level.read_chunk_sync(&chunk_pos, |chunk| {
+-            chunk.mark_dirty(true);
+-        });
+-    }
+-
+-    pub fn add_block_entity_nbt(&self, block_pos: BlockPos, nbt: &NbtCompound) {
+-        self.level
+-            .read_chunk_sync(&block_pos.chunk_position(), |chunk| {
+-                chunk
+-                    .pending_block_entities
+-                    .lock()
+-                    .unwrap()
+-                    .insert(block_pos, nbt.clone());
+-                chunk.mark_dirty(true);
+-            });
+-    }
+-
+-    pub fn remove_block_entity(&self, block_pos: &BlockPos) {
+-        let chunk_pos = block_pos.chunk_position();
+-        let removed =
+-            self.block_entities
+-                .get_mut(&chunk_pos)
+-                .is_some_and(|mut chunk_block_entities| {
+-                    chunk_block_entities.remove(block_pos).is_some()
+-                });
+-        if removed {
+-            // Drop the chunk's map once its last block entity is gone.
+-            self.block_entities
+-                .remove_if(&chunk_pos, |_, entities| entities.is_empty());
+-            self.level.read_chunk_sync(&chunk_pos, |chunk| {
+-                chunk.mark_dirty(true);
+-            });
+-        }
+-    }
+-
+-    pub fn update_block_entity(&self, block_entity: &Arc<dyn BlockEntity>) {
+-        let block_pos = block_entity.get_position();
+-        let chunk_pos = block_pos.chunk_position();
+-        let block_entity_nbt = block_entity.chunk_data_nbt();
+-
+-        if let Some(nbt) = &block_entity_nbt {
+-            let mut bytes = Vec::new();
+-            to_bytes_unnamed(nbt, &mut bytes).unwrap();
+-            self.broadcast_to_chunk(
+-                chunk_pos,
+-                &CBlockEntityData::new(
+-                    block_entity.get_position(),
+-                    VarInt(block_entity.get_id() as i32),
+-                    bytes.into_boxed_slice(),
+-                ),
+-            );
+-        }
+-        self.level.read_chunk_sync(&chunk_pos, |chunk| {
+-            chunk.mark_dirty(true);
+-        });
+-    }
+-
+-    fn intersects_aabb_with_direction(
+-        from: Vector3<f64>,
+-        to: Vector3<f64>,
+-        min: Vector3<f64>,
+-        max: Vector3<f64>,
+-    ) -> Option<BlockDirection> {
+-        let dir = to.sub(&from);
+-        let mut tmin: f64 = 0.0;
+-        let mut tmax: f64 = 1.0;
+-
+-        let mut hit_axis = None;
+-        let mut hit_is_min = false;
+-
+-        macro_rules! check_axis {
+-            ($axis:ident, $dir_axis:ident, $min_axis:ident, $max_axis:ident, $direction_min:expr, $direction_max:expr) => {{
+-                if dir.$dir_axis.abs() < 1e-8 {
+-                    if from.$dir_axis < min.$min_axis || from.$dir_axis > max.$max_axis {
+-                        return None;
+-                    }
+-                } else {
+-                    let inv_d = 1.0 / dir.$dir_axis;
+-                    let t_near = (min.$min_axis - from.$dir_axis) * inv_d;
+-                    let t_far = (max.$max_axis - from.$dir_axis) * inv_d;
+-
+-                    // Determine entry and exit points based on ray direction
+-                    let (t_entry, t_exit, is_min_face) = if inv_d >= 0.0 {
+-                        (t_near, t_far, true)
+-                    } else {
+-                        (t_far, t_near, false)
+-                    };
+-
+-                    if t_entry > tmin {
+-                        tmin = t_entry;
+-                        hit_axis = Some(stringify!($axis));
+-                        hit_is_min = is_min_face;
+-                    }
+-                    tmax = tmax.min(t_exit);
+-                    if tmax < tmin {
+-                        return None;
+-                    }
+-                }
+-            }};
+-        }
+-
+-        check_axis!(x, x, x, x, BlockDirection::West, BlockDirection::East);
+-        check_axis!(y, y, y, y, BlockDirection::Down, BlockDirection::Up);
+-        check_axis!(z, z, z, z, BlockDirection::North, BlockDirection::South);
+-
+-        match (hit_axis, hit_is_min) {
+-            (Some("x"), true) => Some(BlockDirection::West),
+-            (Some("x"), false) => Some(BlockDirection::East),
+-            (Some("y"), true) => Some(BlockDirection::Down),
+-            (Some("y"), false) => Some(BlockDirection::Up),
+-            (Some("z"), true) => Some(BlockDirection::North),
+-            (Some("z"), false) => Some(BlockDirection::South),
+-            _ => None,
+-        }
+-    }
+-
+-    fn ray_outline_check(
+-        &self,
+-        block_pos: &BlockPos,
+-        from: Vector3<f64>,
+-        to: Vector3<f64>,
+-    ) -> (bool, Option<BlockDirection>) {
+-        let state = self.get_block_state(block_pos);
+-
+-        if state.outline_shapes.is_empty() {
+-            return (true, None);
+-        }
+-
+-        let bounding_boxes = state.get_block_outline_shapes();
+-
+-        for shape in bounding_boxes {
+-            let world_min = shape.min.add(&block_pos.0.to_f64());
+-            let world_max = shape.max.add(&block_pos.0.to_f64());
+-
+-            let direction = Self::intersects_aabb_with_direction(from, to, world_min, world_max);
+-            if direction.is_some() {
+-                return (true, direction);
+-            }
+-        }
+-
+-        (false, None)
+-    }
+-
+-    pub async fn raycast(
+-        self: &Arc<Self>,
+-        start_pos: Vector3<f64>,
+-        end_pos: Vector3<f64>,
+-        hit_check: impl AsyncFn(&BlockPos, &Arc<Self>) -> bool,
+-    ) -> Option<(BlockPos, BlockDirection)> {
+-        if start_pos == end_pos {
+-            return None;
+-        }
+-
+-        let adjust = -1.0e-7f64;
+-        let to = end_pos.lerp(&start_pos, adjust);
+-        let from = start_pos.lerp(&end_pos, adjust);
+-
+-        let mut block = BlockPos::floored(from.x, from.y, from.z);
+-
+-        let (collision, direction) = self.ray_outline_check(&block, from, to);
+-        if let Some(dir) = direction
+-            && collision
+-        {
+-            return Some((block, dir));
+-        }
+-
+-        let difference = to.sub(&from);
+-
+-        let step = difference.sign();
+-
+-        let delta = Vector3::new(
+-            if step.x == 0 {
+-                f64::MAX
+-            } else {
+-                (f64::from(step.x)) / difference.x
+-            },
+-            if step.y == 0 {
+-                f64::MAX
+-            } else {
+-                (f64::from(step.y)) / difference.y
+-            },
+-            if step.z == 0 {
+-                f64::MAX
+-            } else {
+-                (f64::from(step.z)) / difference.z
+-            },
+-        );
+-
+-        let mut next = Vector3::new(
+-            delta.x
+-                * (if step.x > 0 {
+-                    1.0 - (from.x - from.x.floor())
+-                } else {
+-                    from.x - from.x.floor()
+-                }),
+-            delta.y
+-                * (if step.y > 0 {
+-                    1.0 - (from.y - from.y.floor())
+-                } else {
+-                    from.y - from.y.floor()
+-                }),
+-            delta.z
+-                * (if step.z > 0 {
+-                    1.0 - (from.z - from.z.floor())
+-                } else {
+-                    from.z - from.z.floor()
+-                }),
+-        );
+-
+-        while next.x <= 1.0 || next.y <= 1.0 || next.z <= 1.0 {
+-            let block_direction = match (next.x, next.y, next.z) {
+-                (x, y, z) if x < y && x < z => {
+-                    block.0.x += step.x;
+-                    next.x += delta.x;
+-                    if step.x > 0 {
+-                        BlockDirection::West
+-                    } else {
+-                        BlockDirection::East
+-                    }
+-                }
+-                (_, y, z) if y < z => {
+-                    block.0.y += step.y;
+-                    next.y += delta.y;
+-                    if step.y > 0 {
+-                        BlockDirection::Down
+-                    } else {
+-                        BlockDirection::Up
+-                    }
+-                }
+-                _ => {
+-                    block.0.z += step.z;
+-                    next.z += delta.z;
+-                    if step.z > 0 {
+-                        BlockDirection::North
+-                    } else {
+-                        BlockDirection::South
+-                    }
+-                }
+-            };
+-
+-            if hit_check(&block, self).await {
+-                let (collision, direction) = self.ray_outline_check(&block, from, to);
+-                if collision {
+-                    if let Some(dir) = direction {
+-                        return Some((block, dir));
+-                    }
+-                    return Some((block, block_direction));
+-                }
+-            }
+-        }
+-
+-        None
+-    }
+-
+-    /// Broadcasts a packet to all players who currently have the target chunk loaded.
+-    /// This uses highly optimized Chebyshev distance math (Chunk Grid) instead of floating point distance checks.
+-    pub fn broadcast_to_chunk<P: ClientPacket>(&self, chunk_pos: Vector2<i32>, packet: &P) {
+-        let players = self.players.load();
+-
+-        let recipients = players.iter().filter(|p| {
+-            let center = p.get_entity().chunk_pos.load();
+-            let view_distance = get_view_distance(p).get() as i32;
+-
+-            // Chebyshev distance (Minecraft's chunk loading shape)
+-            is_within_view_distance(chunk_pos, center, view_distance)
+-        });
+-
+-        let recipients_by_version = Self::collect_java_recipients_by_version(recipients);
+-        Self::broadcast_java_grouped(packet, recipients_by_version);
+-    }
+-
+-    pub fn broadcast_to_chunk_editioned_sync<J: ClientPacket, B: BClientPacket>(
+-        &self,
+-        chunk_pos: Vector2<i32>,
+-        je_packet: &J,
+-        be_packet: &B,
+-    ) {
+-        let players = self.players.load();
+-        let mut java_recipients = Vec::new();
+-
+-        let recipients = players.iter().filter(|p| {
+-            let center = p.get_entity().chunk_pos.load();
+-            let view_distance = get_view_distance(p).get() as i32;
+-            is_within_view_distance(chunk_pos, center, view_distance)
+-        });
+-
+-        for p in recipients {
+-            match p.client.as_ref() {
+-                ClientPlatform::Java(_) => java_recipients.push(p),
+-                ClientPlatform::Bedrock(be_client) => be_client.try_enqueue_packet(be_packet),
+-            }
+-        }
+-
+-        let recipients_by_version =
+-            Self::collect_java_recipients_by_version(java_recipients.into_iter());
+-        Self::broadcast_java_grouped(je_packet, recipients_by_version);
+-    }
+-
+-    /// Broadcasts a packet to chunk watchers, excluding specific players.
+-    pub fn broadcast_to_chunk_except<P: ClientPacket>(
+-        &self,
+-        chunk_pos: Vector2<i32>,
+-        except: &[uuid::Uuid],
+-        packet: &P,
+-    ) {
+-        let players = self.players.load();
+-
+-        let recipients = players.iter().filter(|p| {
+-            if except.contains(&p.get_entity().entity_uuid) {
+-                return false;
+-            }
+-            let center = p.get_entity().chunk_pos.load();
+-            let view_distance = get_view_distance(p).get() as i32;
+-
+-            is_within_view_distance(chunk_pos, center, view_distance)
+-        });
+-
+-        let recipients_by_version = Self::collect_java_recipients_by_version(recipients);
+-        Self::broadcast_java_grouped(packet, recipients_by_version);
+-    }
+-
+-    pub async fn broadcast_to_chunk_except_editioned<J: ClientPacket, B: BClientPacket>(
+-        &self,
+-        chunk_pos: Vector2<i32>,
+-        except: &[uuid::Uuid],
+-        je_packet: &J,
+-        be_packet: &B,
+-    ) {
+-        let players = self.players.load();
+-        let recipients = players.iter().filter(|p| {
+-            if except.contains(&p.get_entity().entity_uuid) {
+-                return false;
+-            }
+-            let center = p.get_entity().chunk_pos.load();
+-            let view_distance = get_view_distance(p).get() as i32;
+-
+-            is_within_view_distance(chunk_pos, center, view_distance)
+-        });
+-
+-        let mut java_recipients = Vec::new();
+-        let mut bedrock_recipients = Vec::new();
+-
+-        for p in recipients {
+-            match p.client.as_ref() {
+-                ClientPlatform::Java(_) => java_recipients.push(p),
+-                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client.clone()),
+-            }
+-        }
+-
+-        let je_recipients_by_version =
+-            Self::collect_java_recipients_by_version(java_recipients.into_iter());
+-        Self::broadcast_java_grouped(je_packet, je_recipients_by_version);
+-
+-        for recipient in bedrock_recipients {
+-            recipient.enqueue_packet(be_packet).await;
+-        }
+-    }
+-}
+-
+-impl BlockAccessor for World {
+-    fn get_block(&self, position: &BlockPos) -> &'static Block {
+-        self.get_block_state_id_if_loaded(position)
+-            .map_or(&Block::AIR, Block::from_state_id)
+-    }
+-    fn get_block_state(&self, position: &BlockPos) -> &'static BlockState {
+-        self.get_block_state_id_if_loaded(position)
+-            .map_or(Block::AIR.default_state, BlockState::from_id)
+-    }
+-
+-    fn get_block_state_id(&self, position: &BlockPos) -> BlockStateId {
+-        self.get_block_state_id_if_loaded(position)
+-            .unwrap_or(Block::AIR.default_state.id)
+-    }
+-
+-    fn get_block_and_state(&self, position: &BlockPos) -> (&'static Block, &'static BlockState) {
+-        let id = self
+-            .get_block_state_id_if_loaded(position)
+-            .unwrap_or(Block::AIR.default_state.id);
+-        BlockState::from_id_with_block(id)
+-    }
+-}
+-
+-pub struct WorldPortal(pub Arc<World>);
+-
+-// Pure Beauty :cap:
+-impl WorldPortalExt for WorldPortal {
+-    fn can_place_at(
+-        &self,
+-        block: &pumpkin_data::Block,
+-        state: &BlockState,
+-        block_accessor: &dyn BlockAccessor,
+-        block_pos: &BlockPos,
+-    ) -> bool {
+-        self.0.block_registry.can_place_at(
+-            None,
+-            None,
+-            block_accessor,
+-            None,
+-            block,
+-            state,
+-            block_pos,
+-            None,
+-            None,
+-        )
+-    }
+-
+-    fn mirror(&self, block: &Block, state_id: BlockStateId, mirror: Mirror) -> &'static BlockState {
+-        self.0.block_registry.mirror(block, state_id, mirror)
+-    }
+-
+-    fn rotate(
+-        &self,
+-        block: &Block,
+-        state_id: BlockStateId,
+-        rotation: Rotation,
+-    ) -> &'static BlockState {
+-        self.0.block_registry.rotate(block, state_id, rotation)
+-    }
+-
+-    fn spawn_mobs_for_chunk_generation(
+-        &self,
+-        cache: &mut dyn GenerationCache,
+-        biome: &'static Biome,
+-        chunk_x: i32,
+-        chunk_z: i32,
+-    ) {
+-        natural_spawner::spawn_mobs_for_chunk_generation(&self.0, cache, biome, chunk_x, chunk_z);
+-    }
+-}

@@ -1,0 +1,32 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "TripWireHookBlock",
+    "vanilla_path": "net/minecraft/world/level/block/TripWireHookBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/tripwire_hook.rs",
+    "total_methods": 14,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "affectNeighborsAfterRemoval",
+      "calculateState",
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "WindChargeItem",
+    "vanilla_path": "net/minecraft/world/item/WindChargeItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/wind_charge.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "asProjectile",
+      "createDispenseConfig",
+      "use"
+    ]
+  }
+]

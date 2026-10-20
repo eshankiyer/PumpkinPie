@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Mob",
+    "vanilla_path": "net/minecraft/world/entity/Mob.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/mod.rs",
+    "total_methods": 126,
+    "in_declaring_file": 38,
+    "elsewhere_in_workspace": 18,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setXxa",
+      "setYya",
+      "setZza",
+      "shearItem",
+      "shouldPassengersInheritMalus",
+      "spawnAnim",
+      "startRiding",
+      "stillValid",
+      "tickHeadTurn",
+      "usePlayerItem"
+    ],
+    "note": "leads 61-70 of 70 for Mob"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "BarrelBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/BarrelBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/barrel.rs",
+    "total_methods": 15,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 3,
+    "absent_workspace_wide": [
+      "createMenu",
+      "getContainerSize",
+      "getEntitiesWithContainerOpen",
+      "isOwnContainer",
+      "openerCountChanged",
+      "setItems",
+      "startOpen",
+      "stopOpen"
+    ],
+    "note": "round13 broader pool: leads 1-8 of 8 for BarrelBlockEntity"
+  }
+]

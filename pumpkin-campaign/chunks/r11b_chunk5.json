@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Mob",
+    "vanilla_path": "net/minecraft/world/entity/Mob.java",
+    "rust_file": "crates/pumpkin/src/entity/mob/mod.rs",
+    "total_methods": 126,
+    "in_declaring_file": 41,
+    "elsewhere_in_workspace": 19,
+    "absent_workspace_wide": [
+      "getHomePosition",
+      "getHomeRadius",
+      "getJumpControl",
+      "getLookControl",
+      "getLootTable",
+      "getLootTableSeed",
+      "getMainArm",
+      "getMaxFallDistance",
+      "getMaxSpawnClusterSize",
+      "getMoveControl",
+      "getNavigation",
+      "getSensing",
+      "getTheItem",
+      "handleEntityEvent",
+      "hasHome",
+      "isAggressive",
+      "isWithinMeleeAttackRange",
+      "jumpInLiquid",
+      "leashTooFarBehaviour",
+      "onAttributeUpdated"
+    ],
+    "note": "round11 leads 21-40 of 66 for Mob"
+  }
+]

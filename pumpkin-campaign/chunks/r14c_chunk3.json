@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "server_level",
+    "vanilla_class": "ColumnPos",
+    "vanilla_path": "net/minecraft/server/level/ColumnPos.java",
+    "rust_file": "crates/pumpkin-util/src/math/position.rs",
+    "total_methods": 7,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "hashCode"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "ConfiguredFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/ConfiguredFeature.java",
+    "rust_file": "crates/pumpkin-data/src/generated/configured_feature.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSubFeatures"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CopperBulbBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CopperBulbBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/redstone/copper_bulb.rs",
+    "total_methods": 7,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CopperGolemStatueBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/CopperGolemStatueBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/copper_golem_statue.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getUpdatePacket"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "CoralClawFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/CoralClawFeature.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/coral/coral_claw.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeFeature"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "CoralFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/CoralFeature.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/coral/mod.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeCoralBlock"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "CoralMushroomFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/CoralMushroomFeature.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/coral/coral_mushroom.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeFeature"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "CoralTreeFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/CoralTreeFeature.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/coral/coral_tree.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeFeature"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "DataCommands",
+    "vanilla_path": "net/minecraft/server/commands/data/DataCommands.java",
+    "rust_file": "crates/pumpkin/src/command/commands/data.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSingleTag"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "DensityFunction",
+    "vanilla_path": "net/minecraft/world/level/levelgen/DensityFunction.java",
+    "rust_file": "crates/pumpkin-world/src/generation/noise/router/density_function/mod.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "visitNoise"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "DimensionPadding",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/pools/DimensionPadding.java",
+    "rust_file": "crates/pumpkin-world/src/generation/structure/structures/jigsaw_placement.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "hasEqualTopAndBottom"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "DirtPathBlock",
+    "vanilla_path": "net/minecraft/world/level/block/DirtPathBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/dirt_path.rs",
+    "total_methods": 8,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "useShapeForLightOcclusion"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "DoNothing",
+    "vanilla_path": "net/minecraft/world/entity/ai/behavior/DoNothing.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/behavior/do_nothing.rs",
+    "total_methods": 6,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "debugString"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "DryVegetationBlock",
+    "vanilla_path": "net/minecraft/world/level/block/DryVegetationBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/dry_vegetation.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "EatBlockGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/EatBlockGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/eat_grass.rs",
+    "total_methods": 6,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getEatAnimationTick"
+    ]
+  }
+]

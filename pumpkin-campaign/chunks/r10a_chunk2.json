@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 44,
+    "elsewhere_in_workspace": 59,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "Fallsounds",
+      "activeLocationDependentEnchantments",
+      "actuallyHurt",
+      "animateHurt",
+      "applyInput",
+      "applyItemBlocking",
+      "areAllEffectsAmbient",
+      "attackable",
+      "baseTick",
+      "blockUsingItem",
+      "calculateEntityAnimation",
+      "canBeSeenAsEnemy",
+      "canStandOnFluid",
+      "causeExtraKnockback",
+      "checkAutoSpinAttack",
+      "checkFallDamage",
+      "clearSleepingPos",
+      "completeUsingItem",
+      "createDamageSource",
+      "createEquipment"
+    ],
+    "note": "leads 1-20 of 200 for LivingEntity"
+  }
+]

@@ -1,0 +1,77 @@
+commit fe8f54463e7378046a43d720ede2afda0c42cc0c
+Author: Eshan I. <79593316+eshankiyer@users.noreply.github.com>
+Date:   Sat Aug 1 19:11:49 2026 -0400
+
+    fix(item): consume wind charges
+
+diff --git a/pumpkin/src/entity/projectile/wind_charge.rs b/pumpkin/src/entity/projectile/wind_charge.rs
+index b2d0f82d..24b80dc9 100644
+--- a/pumpkin/src/entity/projectile/wind_charge.rs
++++ b/pumpkin/src/entity/projectile/wind_charge.rs
+@@ -9,8 +9,10 @@ use std::{
+ 
+ use crate::{
+     entity::{
+-        Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity,
+-        projectile::ThrownItemEntity, projectile_deflection::ProjectileDeflectionType,
++        Entity, EntityBase, EntityBaseFuture, NBTStorage,
++        living::LivingEntity,
++        projectile::{ProjectileHit, ThrownItemEntity},
++        projectile_deflection::ProjectileDeflectionType,
+     },
+     server::Server,
+ };
+@@ -130,4 +132,15 @@ impl EntityBase for WindChargeEntity {
+     fn cast_any(&self) -> &dyn std::any::Any {
+         self
+     }
++
++    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
++        Box::pin(async move {
++            if let ProjectileHit::Entity { entity, .. } = &hit {
++                entity
++                    .damage(self, 1.0, pumpkin_data::damage::DamageType::WIND_CHARGE)
++                    .await;
++            }
++            self.create_explosion(hit.hit_pos()).await;
++        })
++    }
+ }
+diff --git a/pumpkin/src/item/items/wind_charge.rs b/pumpkin/src/item/items/wind_charge.rs
+index 5c9f967d..45d739c3 100644
+--- a/pumpkin/src/item/items/wind_charge.rs
++++ b/pumpkin/src/item/items/wind_charge.rs
+@@ -51,6 +51,13 @@ impl ItemBehaviour for WindChargeItem {
+             world
+                 .spawn_entity(Arc::new(WindChargeEntity::new_normal(wind_charge)))
+                 .await;
++
++            if player.gamemode.load() != pumpkin_util::GameMode::Creative {
++                let inventory = player.inventory();
++                let held_item = inventory.held_item();
++                let mut held_item = held_item.lock().await;
++                held_item.decrement(1);
++            }
+         })
+     }
+ 
+=== plus uncommitted ===
+diff --git a/pumpkin-data/src/blocks.rs b/pumpkin-data/src/blocks.rs
+index 30fdddf5..717b2994 100644
+--- a/pumpkin-data/src/blocks.rs
++++ b/pumpkin-data/src/blocks.rs
+@@ -215,7 +215,13 @@ impl Block {
+ 
+         let valid_keys: Vec<&str> = block
+             .properties(block.default_state.id)
+-            .map(|properties| properties.to_props().into_iter().map(|(key, _)| key).collect())
++            .map(|properties| {
++                properties
++                    .to_props()
++                    .into_iter()
++                    .map(|(key, _)| key)
++                    .collect()
++            })
+             .unwrap_or_default();
+ 
+         let mut pairs = Vec::new();

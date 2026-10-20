@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "TrialSpawner",
+    "vanilla_path": "net/minecraft/world/level/block/entity/trialspawner/TrialSpawner.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/trial_spawner.rs",
+    "total_methods": 32,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 11,
+    "absent_workspace_wide": [
+      "FullConfig",
+      "addBecomeOminousParticles",
+      "addDetectPlayerParticles",
+      "addEjectItemParticles",
+      "addSpawnParticles",
+      "applyOminous",
+      "getEntitySelector",
+      "getPlayerDetector",
+      "getRequiredPlayerRange",
+      "getStateData",
+      "getTargetCooldownLength",
+      "isOminous",
+      "markUpdated",
+      "normalConfig",
+      "ominousConfig",
+      "overrideEntity",
+      "overrideEntityToSpawn",
+      "overridePeacefulAndMobSpawnRule",
+      "removeOminous",
+      "setPlayerDetector",
+      "tickClient"
+    ],
+    "note": "round12 broader pool: leads 1-21 of 21 for TrialSpawner"
+  }
+]

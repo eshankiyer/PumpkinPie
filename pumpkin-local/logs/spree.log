@@ -1,0 +1,26 @@
+eligible: 12   skipped: 63
+  skip A4: STATE is 'absent', not confirmed
+  skip B3: STATE is 'suspected', not confirmed
+  skip C1: STATE is '', not confirmed
+  skip C2: STATE is '', not confirmed
+  skip C3: STATE is 'suspected', not confirmed
+  skip C4: STATE is 'suspected', not confirmed
+  skip C5: STATE is 'suspected', not confirmed
+  skip D4: STATE is 'absent', not confirmed
+  skip D5: STATE is 'absent', not confirmed
+  skip D6: missing WHERE or DO
+  skip D7: STATE is 'suspected', not confirmed
+  skip E3: STATE is 'absent', not confirmed
+
+=== A1-get-sky-light-level-returns-15 ===
+  mini timed out after 2400s
+  no edit produced (2400s)
+
+=== A2-skydarken-is-never-tracked ===
+  mini timed out after 2400s
+  no edit produced (2400s)
+
+=== A3-vanilla-imported-worlds-go-dar ===
+  CANDIDATE banked, clippy clean (2072s)
+
+=== B1-block-states-rejected-in-setbl ===

@@ -1,0 +1,23 @@
+pumpkin.toml changed because values were missing. The missing values were filled with default values.
+[2m2026-08-21 18:03:16[0m [32m INFO[0m main ThreadId(01) [2mpumpkin[0m[2m:[0m Starting Pumpkin 0.1.0-dev+26.2-26.40 Java Minecraft (Protocol 776) | 1.26.40 Bedrock (Protocol 2168)
+[2m2026-08-21 18:03:16[0m [33m WARN[0m main ThreadId(01) [2mpumpkin[0m[2m:[0m Pumpkin is running an unoptimized debug build. Do not use this build for performance testing; run `cargo run --release` or use a release binary.
+[2m2026-08-21 18:03:16[0m [33m WARN[0m main ThreadId(01) [2mpumpkin[0m[2m:[0m Pumpkin is currently under heavy development!
+[2m2026-08-21 18:03:16[0m [32m INFO[0m main ThreadId(01) [2mpumpkin[0m[2m:[0m Report issues on https://github.com/Pumpkin-MC/Pumpkin/issues
+[2m2026-08-21 18:03:16[0m [32m INFO[0m main ThreadId(01) [2mpumpkin[0m[2m:[0m Join our Discord for community support: https://discord.gg/wT8XjrjKkf
+[2m2026-08-21 18:03:16[0m [32m INFO[0m main ThreadId(01) [2mpumpkin[0m[2m:[0m Consider Donating to https://pumpkinmc.org/donate/
+[2m2026-08-21 18:03:16[0m [33m WARN[0m main ThreadId(01) [2mpumpkin::server[0m[2m:[0m No level.dat in world, creating a new world with seed 1786772846643249817
+[2m2026-08-21 18:03:16[0m [31mERROR[0m main ThreadId(01) [2mpumpkin::server[0m[2m:[0m Failed to save level.dat: Info not found!
+[2m2026-08-21 18:03:16[0m [32m INFO[0m main ThreadId(01) [2mpumpkin::server[0m[2m:[0m Enabled dimensions: ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]
+[2m2026-08-21 18:03:16[0m [32m INFO[0m main ThreadId(01) [2mpumpkin::server[0m[2m:[0m Starting parallel world load...
+[2m2026-08-21 18:03:16[0m [32m INFO[0m tokio-rt-worker ThreadId(41) [2mpumpkin::server[0m[2m:[0m Loading minecraft:overworld
+[2m2026-08-21 18:03:16[0m [32m INFO[0m tokio-rt-worker ThreadId(42) [2mpumpkin::server[0m[2m:[0m Loading minecraft:the_nether
+[2m2026-08-21 18:03:16[0m [32m INFO[0m tokio-rt-worker ThreadId(43) [2mpumpkin::server[0m[2m:[0m Loading minecraft:the_end
+[2m2026-08-21 18:03:23[0m [32m INFO[0m            main ThreadId(01) [2mpumpkin::server[0m[2m:[0m Initial overworld spawn selected at (0, 66, 0)
+[2m2026-08-21 18:03:23[0m [32m INFO[0m            main ThreadId(01) [2mpumpkin::server[0m[2m:[0m All worlds loaded successfully.
+[2m2026-08-21 18:03:23[0m [32m INFO[0m            main ThreadId(01) [2mpumpkin[0m[2m:[0m Started server; took 7620ms
+[2m2026-08-21 18:03:23[0m [32m INFO[0m            main ThreadId(01) [2mpumpkin[0m[2m:[0m Server is now running. Connect using port: Java Edition: 127.0.0.1:25599
+[2m2026-08-21 18:03:23[0m [33m WARN[0m            main ThreadId(01) [2mpumpkin[0m[2m:[0m The input is not a TTY; falling back to simple logger and ignoring `use_tty` setting
+[2m2026-08-21 18:03:33[0m [32m INFO[0m tokio-rt-worker ThreadId(16) [2mpumpkin::world[0m[2m:[0m ParityBot joined the game
+
+thread 'tokio-rt-worker' (1434964) has overflowed its stack
+fatal runtime error: stack overflow, aborting

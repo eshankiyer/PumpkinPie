@@ -1,0 +1,52 @@
+diff --git a/pumpkin/src/command/commands/forceload.rs b/pumpkin/src/command/commands/forceload.rs
+index c3e1457..7d2415e 100644
+--- a/pumpkin/src/command/commands/forceload.rs
++++ b/pumpkin/src/command/commands/forceload.rs
+@@ -75,11 +75,15 @@ impl CommandExecutor for ForceloadAddExecutor {
+ 
+             {
+                 let mut forced = world.forced_chunks.lock().unwrap();
++                let mut chunk_loading = world.level.chunk_loading.lock().unwrap();
+                 for x in min_x..=max_x {
+                     for z in min_z..=max_z {
+-                        forced.insert(Vector2::new(x, z));
++                        if forced.insert(Vector2::new(x, z)) {
++                            chunk_loading.add_force_ticket(Vector2::new(x, z));
++                        }
+                     }
+                 }
++                chunk_loading.send_change();
+             }
+ 
+             world.update_active_chunks();
+@@ -159,11 +163,15 @@ impl CommandExecutor for ForceloadRemoveExecutor {
+ 
+             {
+                 let mut forced = world.forced_chunks.lock().unwrap();
++                let mut chunk_loading = world.level.chunk_loading.lock().unwrap();
+                 for x in min_x..=max_x {
+                     for z in min_z..=max_z {
+-                        forced.remove(&Vector2::new(x, z));
++                        if forced.remove(&Vector2::new(x, z)) {
++                            chunk_loading.remove_force_ticket(Vector2::new(x, z));
++                        }
+                     }
+                 }
++                chunk_loading.send_change();
+             }
+ 
+             world.update_active_chunks();
+@@ -213,8 +221,12 @@ impl CommandExecutor for ForceloadRemoveAllExecutor {
+ 
+             let removed_count = {
+                 let mut forced = world.forced_chunks.lock().unwrap();
++                let mut chunk_loading = world.level.chunk_loading.lock().unwrap();
+                 let count = forced.len();
+-                forced.clear();
++                for pos in forced.drain() {
++                    chunk_loading.remove_force_ticket(pos);
++                }
++                chunk_loading.send_change();
+                 count
+             };
+ 

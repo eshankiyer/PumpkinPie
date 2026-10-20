@@ -1,0 +1,8 @@
+ M crates/pumpkin/src/entity/ai/goal/camel_sit.rs
+ M crates/pumpkin/src/entity/living.rs
+ M crates/pumpkin/src/entity/mob/mod.rs
+ M crates/pumpkin/src/entity/passive/camel.rs
+ M crates/pumpkin/src/entity/passive/equine/mod.rs
+ M crates/pumpkin/src/entity/type.rs
+?? WAVE_REPORT.md
+?? WORKLIST.json

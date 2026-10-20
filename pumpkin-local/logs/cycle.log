@@ -1,0 +1,94 @@
+===== parity cycle 2026-07-30 02:00 =====
+[cycle] oracle discovery (background)
+[cycle] fix spree (foreground)
+CANDIDATE      D2  961s
+NOEDIT         D3  614s
+NOEDIT         E1  3143s
+NOEDIT         E2  312s
+NOEDIT         F1  2831s
+CANDIDATE      F2  1494s
+
+5/12 banked. Diffs in /home/eshanki/pumpkin-local/candidates/
+[cycle] discovery result:
+command: 22 difference(s)
+
+22 diffs found, 0 new filed to /home/eshanki/pumpkin-local/DISCOVERED.md
+[cycle] behavioural oracle (bot + probes)
+===== parity cycle 2026-07-31 06:52 =====
+[cycle] starting llama-server
+[serve] VRAM 13/8151 MiB used, 8138 MiB free
+[serve] starting: ctx=16384 ncmoe=0 port=11434 reasoning=on/-1
+[serve] ready after 12s
+6503 MiB
+[cycle] oracle discovery (background)
+[cycle] fix spree (foreground)
+===== parity cycle 2026-08-01 07:14 =====
+[cycle] starting llama-server
+[serve] VRAM 13/8151 MiB used, 8138 MiB free
+[serve] starting: ctx=16384 ncmoe=0 port=11434 reasoning=on/-1
+[serve] ready after 11s
+6503 MiB
+[cycle] oracle discovery (background)
+[cycle] fix spree (foreground)
+NOEDIT         D2  3118s
+NOEDIT         D3  265s
+NOEDIT         E1  264s
+NOEDIT         E2  264s
+NOEDIT         F1  264s
+NOEDIT         F2  264s
+
+0/12 banked. Diffs in /home/eshanki/pumpkin-local/candidates/
+[cycle] discovery result:
+command: 22 difference(s)
+
+22 diffs found, 0 new filed to /home/eshanki/pumpkin-local/DISCOVERED.md
+[cycle] behavioural oracle skipped (set COVER_BEHAVIOUR=1 to enable)
+[cycle] triage discoveries
+FIX             0
+FEATURE         22
+NOISE-COSMETIC  0
+NOISE-CONFIG    0
+
+parked 22 feature(s) -> /home/eshanki/pumpkin-local/DISCOVERED-FEATURES.md
+
+nothing to promote: no FIX-class discoveries this pass.
+===== cycle done 2026-08-01 11:26: 46 candidate diffs on disk, 32 open discoveries =====
+===== parity cycle 2026-08-02 02:00 =====
+[cycle] starting llama-server
+[serve] VRAM 13/8151 MiB used, 8138 MiB free
+[serve] starting: ctx=16384 ncmoe=0 port=11434 reasoning=on/-1
+[serve] ready after 10s
+6503 MiB
+[cycle] oracle discovery (background)
+[cycle] fix spree (foreground)
+REJECT:check   D2  3600s
+NOEDIT         D3  11505s
+NOEDIT         E1  856s
+NOEDIT         E2  544s
+NOEDIT         F1  1378s
+CANDIDATE      F2  1100s
+
+1/12 banked. Diffs in /home/eshanki/pumpkin-local/candidates/
+[cycle] discovery result:
+command: 22 difference(s)
+
+22 diffs found, 0 new filed to /home/eshanki/pumpkin-local/DISCOVERED.md
+[cycle] behavioural oracle skipped (set COVER_BEHAVIOUR=1 to enable)
+[cycle] triage discoveries
+FIX             0
+FEATURE         22
+NOISE-COSMETIC  0
+NOISE-CONFIG    0
+
+parked 22 feature(s) -> /home/eshanki/pumpkin-local/DISCOVERED-FEATURES.md
+
+nothing to promote: no FIX-class discoveries this pass.
+===== cycle done 2026-08-02 10:33: 45 candidate diffs on disk, 32 open discoveries =====
+===== parity cycle 2026-08-03 02:00 =====
+[cycle] starting llama-server
+[serve] VRAM 13/8151 MiB used, 8138 MiB free
+[serve] starting: ctx=16384 ncmoe=0 port=11434 reasoning=on/-1
+[serve] ready after 20s
+6503 MiB
+[cycle] oracle discovery (background)
+[cycle] fix spree (foreground)

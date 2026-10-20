@@ -1,0 +1,7 @@
+{
+  "pass": false,
+  "item": "locate",
+  "stage_failed": "apply",
+  "reason": "git_apply_check_failed",
+  "log_tail": "error: pumpkin/src/command/commands/locate.rs: No such file or directory\n"
+}

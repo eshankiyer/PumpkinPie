@@ -1,0 +1,27 @@
+[
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "LoomMenu",
+    "vanilla_path": "net/minecraft/world/inventory/LoomMenu.java",
+    "rust_file": "crates/pumpkin-inventory/src/loom_screen_handler.rs",
+    "total_methods": 15,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "getBannerSlot",
+      "getDyeSlot",
+      "getPatternSlot",
+      "getResultSlot",
+      "getSelectablePatterns",
+      "getSelectedBannerPatternIndex",
+      "mayPlace",
+      "quickMoveStack",
+      "registerUpdateListener",
+      "removed",
+      "setChanged",
+      "slotsChanged",
+      "stillValid"
+    ],
+    "note": "round12 broader pool: leads 1-13 of 13 for LoomMenu"
+  }
+]

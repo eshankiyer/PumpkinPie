@@ -1,0 +1,28 @@
+[
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "StructurePiece",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/StructurePiece.java",
+    "rust_file": "crates/pumpkin-world/src/generation/structure/structures/mod.rs",
+    "total_methods": 34,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 14,
+    "absent_workspace_wide": [
+      "createChest",
+      "createTag",
+      "fillColumnDown",
+      "generateAirBox",
+      "getGenDepth",
+      "getLocatorPosition",
+      "getWorldPos",
+      "getWorldX",
+      "getWorldY",
+      "getWorldZ",
+      "isCloseToChunk",
+      "move",
+      "setGenDepth",
+      "setOrientation"
+    ],
+    "note": "round12 broader pool: leads 1-14 of 14 for StructurePiece"
+  }
+]

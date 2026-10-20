@@ -1,0 +1,77 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTagQueryPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundTagQueryPacket.java",
+    "rust_file": "crates/pumpkin/src/net/java/play/tag_query.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getTransactionId",
+      "isSkippable",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "DriedGhastBlock",
+    "vanilla_path": "net/minecraft/world/level/block/DriedGhastBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/dried_ghast.rs",
+    "total_methods": 13,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "animateTick",
+      "createBlockStateDefinition",
+      "getHydrationLevel"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LongJumpToRandomPos",
+    "vanilla_path": "net/minecraft/world/entity/ai/behavior/LongJumpToRandomPos.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/long_jump_to_random_pos.rs",
+    "total_methods": 8,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "PossibleJump",
+      "defaultAcceptableLandingSpot",
+      "getJumpCandidate"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundPlayerActionPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundPlayerActionPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/bedrock/server/player_action.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getAction",
+      "getSequence",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "ShearsItem",
+    "vanilla_path": "net/minecraft/world/item/ShearsItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/shears.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createToolProperties",
+      "mineBlock",
+      "useOn"
+    ]
+  }
+]

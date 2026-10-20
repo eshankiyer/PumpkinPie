@@ -1,0 +1,7 @@
+{
+  "pass": false,
+  "item": "goalremove",
+  "stage_failed": "test",
+  "reason": "test_failure",
+  "log_tail": "   Compiling pumpkin-codecs v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-codecs)\n   Compiling pumpkin v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin)\n   Compiling pumpkin-nbt v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-nbt)\n   Compiling pumpkin-util v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-util)\n   Compiling pumpkin-data v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-data)\n   Compiling pumpkin-config v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-config)\n   Compiling pumpkin-macros v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-macros)\n   Compiling pumpkin-world v0.1.0-dev+26.2 (/home/eshanki/pumpkin-wt/gate-0e9fnob9/pumpkin-world)"
+}

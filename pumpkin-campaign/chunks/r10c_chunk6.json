@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 44,
+    "elsewhere_in_workspace": 59,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "stopRiding",
+      "swing",
+      "take",
+      "tickDeath",
+      "tickHeadTurn",
+      "tickRidden",
+      "travel",
+      "travelFlying",
+      "travelInWater",
+      "triggerOnDeathMobEffects",
+      "tryAddFrost",
+      "updateDataBeforeSync",
+      "updateInvisibilityStatus",
+      "updateSwingTime",
+      "updateUsingItem",
+      "updateWalkAnimation",
+      "wasExperienceConsumed",
+      "wasRecentlyStabbed",
+      "waypointIcon",
+      "wouldNotSuffocateAtTargetPose"
+    ],
+    "note": "leads 181-200 of 200 for LivingEntity"
+  }
+]

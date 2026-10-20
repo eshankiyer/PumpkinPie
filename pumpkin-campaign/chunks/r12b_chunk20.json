@@ -1,0 +1,26 @@
+[
+  {
+    "subsystem": "item",
+    "vanilla_class": "CrossbowItem",
+    "vanilla_path": "net/minecraft/world/item/CrossbowItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/crossbow.rs",
+    "total_methods": 17,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "ChargingSounds",
+      "createProjectile",
+      "getAllSupportedProjectiles",
+      "getChargeDuration",
+      "getDefaultProjectileRange",
+      "getSupportedHeldProjectiles",
+      "getUseAnimation",
+      "performShooting",
+      "releaseUsing",
+      "shootProjectile",
+      "use",
+      "useOnRelease"
+    ],
+    "note": "round12 broader pool: leads 1-12 of 12 for CrossbowItem"
+  }
+]

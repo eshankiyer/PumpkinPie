@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlockBehaviour",
+    "vanilla_path": "net/minecraft/world/level/block/state/BlockBehaviour.java",
+    "rust_file": "crates/pumpkin/src/block/mod.rs",
+    "total_methods": 124,
+    "in_declaring_file": 12,
+    "elsewhere_in_workspace": 25,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "affectNeighborsAfterRemoval",
+      "air",
+      "blocksMotion",
+      "bounceRestitution",
+      "canOcclude",
+      "defaultDestroyTime",
+      "defaultMapColor",
+      "destroyTime",
+      "dynamicShape",
+      "effectiveDescriptionId",
+      "effectiveDrops",
+      "emissiveRendering",
+      "entityCanStandOn",
+      "entityCanStandOnFace",
+      "explosionResistance",
+      "forceSolidOff",
+      "forceSolidOn",
+      "friction",
+      "getBlockSupportShape",
+      "getCollisionShape"
+    ],
+    "note": "leads 1-20 of 86 for BlockBehaviour"
+  }
+]

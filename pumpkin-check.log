@@ -1,0 +1,1356 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.189
+   Compiling syn v2.0.119
+    Checking cfg-if v1.0.4
+   Compiling syn v3.0.3
+    Checking typenum v1.20.1
+   Compiling zeroize_derive v1.5.0
+    Checking subtle v2.6.1
+   Compiling serde_core v1.0.229
+    Checking zeroize v1.9.0
+   Compiling version_check v0.9.5
+   Compiling serde_derive v1.0.229
+   Compiling serde v1.0.229
+    Checking getrandom v0.2.17
+   Compiling autocfg v1.5.1
+   Compiling generic-array v0.14.7
+    Checking rand_core v0.6.4
+   Compiling getrandom v0.4.3
+    Checking smallvec v1.15.2
+    Checking memchr v2.8.3
+    Checking crypto-common v0.1.7
+    Checking log v0.4.33
+   Compiling jobserver v0.1.35
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v2.0.1
+    Checking const-oid v0.9.6
+   Compiling cc v1.3.0
+    Checking block-buffer v0.10.4
+    Checking pin-project-lite v0.2.17
+    Checking digest v0.10.7
+    Checking rand_core v0.10.1
+    Checking bytes v1.12.1
+    Checking scopeguard v1.2.0
+    Checking lock_api v0.4.14
+   Compiling parking_lot_core v0.9.12
+    Checking parking_lot v0.12.5
+    Checking mio v1.2.2
+    Checking errno v0.3.14
+    Checking signal-hook-registry v1.4.8
+    Checking hybrid-array v0.4.13
+   Compiling tokio-macros v2.7.2
+    Checking socket2 v0.6.5
+    Checking tokio v1.53.1
+   Compiling num-traits v0.2.19
+    Checking foldhash v0.2.0
+    Checking once_cell v1.21.4
+   Compiling crc32fast v1.5.0
+    Checking hashbrown v0.17.1
+   Compiling synstructure v0.13.2
+    Checking base64ct v1.8.3
+   Compiling ring v0.17.14
+    Checking bitflags v2.13.1
+    Checking cpufeatures v0.2.17
+   Compiling zmij v1.0.23
+   Compiling thiserror-impl v2.0.19
+   Compiling serde_json v1.0.151
+   Compiling libm v0.2.16
+    Checking const-oid v0.10.2
+   Compiling semver v1.0.28
+    Checking cmov v0.5.4
+    Checking ctutils v0.4.2
+    Checking crypto-common v0.2.2
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror v2.0.19
+   Compiling displaydoc v0.2.6
+    Checking itoa v1.0.18
+    Checking futures-core v0.3.33
+    Checking stable_deref_trait v1.2.1
+   Compiling thiserror v1.0.69
+   Compiling zerofrom-derive v0.1.7
+    Checking block-buffer v0.12.1
+   Compiling thiserror-impl v1.0.69
+    Checking base64 v0.22.1
+    Checking digest v0.11.3
+    Checking zerofrom v0.1.8
+   Compiling yoke-derive v0.8.2
+    Checking equivalent v1.0.2
+    Checking untrusted v0.9.0
+    Checking futures-sink v0.3.33
+   Compiling zerocopy v0.8.55
+   Compiling getrandom v0.3.4
+    Checking yoke v0.8.3
+    Checking futures-channel v0.3.33
+    Checking indexmap v2.14.0
+    Checking tracing-core v0.1.36
+   Compiling futures-macro v0.3.33
+   Compiling rustls v0.23.42
+    Checking futures-io v0.3.33
+    Checking futures-task v0.3.33
+   Compiling wasmtime-internal-core v47.0.2
+    Checking ipnet v2.12.0
+    Checking slab v0.4.12
+    Checking futures-util v0.3.33
+   Compiling zerovec-derive v0.11.3
+   Compiling async-trait v0.1.91
+    Checking lazy_static v1.5.0
+    Checking percent-encoding v2.3.2
+    Checking zerovec v0.11.6
+    Checking ppv-lite86 v0.2.21
+    Checking rand_core v0.9.5
+    Checking tracing v0.1.44
+    Checking http v1.4.2
+   Compiling rustc_version v0.4.1
+    Checking pem-rfc7468 v1.0.0
+   Compiling memoffset v0.7.1
+   Compiling heck v0.5.0
+    Checking cpubits v0.1.1
+    Checking fnv v1.0.7
+    Checking cpufeatures v0.3.0
+    Checking der v0.8.1
+    Checking rand_chacha v0.9.0
+    Checking sha2 v0.10.9
+    Checking rustls-pki-types v1.15.1
+   Compiling cranelift-srcgen v0.134.2
+   Compiling portable-atomic v1.14.0
+   Compiling cranelift-assembler-x64-meta v0.134.2
+    Checking rand v0.9.5
+    Checking crypto-bigint v0.7.5
+    Checking cranelift-bitset v0.134.2
+    Checking pin-utils v0.1.0
+   Compiling httparse v1.10.1
+    Checking simd-adler32 v0.3.10
+    Checking bitflags v1.3.2
+    Checking nix v0.26.4
+    Checking spki v0.8.0
+    Checking tinystr v0.8.3
+    Checking ff v0.14.0
+   Compiling pulley-macros v47.0.2
+    Checking rustc-hash v2.1.3
+    Checking litemap v0.8.2
+    Checking adler2 v2.0.1
+   Compiling crossbeam-utils v0.8.22
+   Compiling target-lexicon v0.13.5
+   Compiling rustix v1.1.4
+    Checking writeable v0.6.3
+    Checking icu_locale_core v2.2.0
+    Checking miniz_oxide v0.8.9
+    Checking webrtc-util v0.17.2
+    Checking cranelift-entity v0.134.2
+    Checking rustls-webpki v0.103.13
+    Checking potential_utf v0.1.5
+    Checking zerotrie v0.2.4
+    Checking cobs v0.3.0
+    Checking md-5 v0.10.6
+    Checking block-padding v0.3.3
+   Compiling icu_normalizer_data v2.2.0
+    Checking utf8_iter v1.0.4
+    Checking hashbrown v0.16.1
+   Compiling icu_properties_data v2.2.0
+   Compiling cranelift-isle v0.134.2
+    Checking linux-raw-sys v0.12.1
+    Checking gimli v0.33.0
+    Checking icu_collections v2.2.0
+    Checking inout v0.1.4
+    Checking icu_provider v2.2.0
+    Checking postcard v1.1.3
+    Checking cranelift-bforest v0.134.2
+   Compiling pulley-interpreter v47.0.2
+    Checking flate2 v1.1.9
+    Checking group v0.14.0
+    Checking pkcs8 v0.11.0
+    Checking signature v3.0.0
+   Compiling anyhow v1.0.104
+    Checking winnow v1.0.4
+    Checking base16ct v1.0.0
+   Compiling cranelift-codegen-shared v0.134.2
+   Compiling cranelift-codegen-meta v0.134.2
+    Checking toml_parser v1.1.2+spec-1.1.0
+    Checking sec1 v0.8.1
+    Checking cipher v0.4.4
+   Compiling cranelift-assembler-x64 v0.134.2
+    Checking tokio-util v0.7.19
+    Checking futures-executor v0.3.33
+    Checking pem-rfc7468 v0.7.0
+    Checking hmac v0.12.1
+    Checking serde_spanned v1.1.1
+   Compiling num-conv v0.2.2
+    Checking toml_writer v1.1.2+spec-1.1.0
+   Compiling pkg-config v0.3.33
+    Checking allocator-api2 v0.2.21
+   Compiling object v0.39.1
+   Compiling time-core v0.1.9
+   Compiling siphasher v1.0.3
+    Checking leb128fmt v0.1.0
+    Checking either v1.16.0
+   Compiling phf_shared v0.14.0
+   Compiling time-macros v0.2.32
+    Checking bumpalo v3.20.3
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+    Checking der v0.7.10
+    Checking futures v0.3.33
+   Compiling cranelift-codegen v0.134.2
+    Checking icu_properties v2.2.0
+    Checking icu_normalizer v2.2.0
+    Checking elliptic-curve v0.14.1
+    Checking uuid v1.24.0
+    Checking wasmparser v0.252.0
+    Checking hmac v0.13.0
+   Compiling wasmtime-internal-versioned-export-macros v47.0.2
+   Compiling num-derive v0.5.1
+   Compiling rustversion v1.0.23
+    Checking arbitrary v1.4.2
+    Checking termcolor v1.4.1
+    Checking deranged v0.5.8
+    Checking num_threads v0.1.7
+    Checking powerfmt v0.2.0
+   Compiling fastrand v2.5.0
+   Compiling phf_generator v0.14.0
+    Checking time v0.3.54
+    Checking wasmprinter v0.252.0
+    Checking cranelift-control v0.134.2
+    Checking rfc6979 v0.6.0
+    Checking idna_adapter v1.2.2
+    Checking spki v0.7.3
+    Checking regalloc2 v0.15.2
+    Checking wasm-encoder v0.252.0
+    Checking wnaf v0.14.0
+    Checking primefield v0.14.0
+    Checking webpki-roots v1.0.9
+    Checking sha2 v0.11.0
+    Checking universal-hash v0.5.1
+    Checking atomic-waker v1.1.2
+    Checking minimal-lexical v0.2.1
+   Compiling crossbeam-epoch v0.9.20
+    Checking wasmtime-internal-component-util v47.0.2
+    Checking opaque-debug v0.3.1
+    Checking wasmtime-environ v47.0.2
+    Checking nom v7.1.3
+    Checking primeorder v0.14.0
+    Checking pkcs8 v0.10.2
+    Checking idna v1.1.0
+    Checking ecdsa v0.17.0
+   Compiling phf_macros v0.14.0
+    Checking pumpkin-codecs v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-codecs)
+    Checking ureq-proto v0.6.0
+    Checking pkcs1 v0.8.0-rc.4
+    Checking crypto-primes v0.7.2
+    Checking form_urlencoded v1.2.2
+    Checking ff v0.13.1
+   Compiling io-lifetimes v2.0.4
+    Checking cesu8 v1.1.0
+    Checking base16ct v0.2.0
+   Compiling io-lifetimes v3.0.1
+   Compiling crossbeam-deque v0.8.7
+   Compiling zstd-safe v7.2.4
+    Checking byteorder v1.5.0
+    Checking utf8-zero v0.8.1
+    Checking ureq v3.3.0
+    Checking sec1 v0.7.3
+    Checking pumpkin-nbt v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-nbt)
+    Checking group v0.13.0
+    Checking url v2.5.8
+    Checking rsa v0.10.0-rc.18
+    Checking arc-swap v1.9.2
+    Checking p384 v0.14.0
+    Checking rusticata-macros v4.1.0
+    Checking hkdf v0.12.4
+    Checking chacha20 v0.10.1
+    Checking num-integer v0.1.46
+   Compiling asn1-rs-derive v0.5.1
+    Checking aead v0.5.2
+    Checking crypto-bigint v0.5.5
+   Compiling asn1-rs-impl v0.2.0
+   Compiling ptr_meta_derive v0.3.2
+    Checking md5 v0.8.1
+   Compiling id-arena v2.3.0
+   Compiling wasmtime-internal-unwinder v47.0.2
+    Checking colored v3.1.1
+   Compiling io-extras v0.19.0
+    Checking crc-catalog v2.5.0
+    Checking base64 v0.23.1
+    Checking crc v3.4.0
+    Checking pumpkin-util v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-util)
+   Compiling wit-parser v0.252.0
+    Checking elliptic-curve v0.13.8
+    Checking ptr_meta v0.3.2
+    Checking asn1-rs v0.6.2
+    Checking rand v0.10.2
+    Checking polyval v0.6.2
+   Compiling wasmtime-internal-fiber v47.0.2
+    Checking ctr v0.9.2
+    Checking http-body v1.1.0
+    Checking toml_datetime v0.7.5+spec-1.1.0
+   Compiling curve25519-dalek-derive v0.1.1
+    Checking dirs-sys-next v0.1.2
+   Compiling wasmtime-internal-cranelift v47.0.2
+   Compiling oid-registry v0.7.1
+   Compiling cap-primitives v4.0.2
+   Compiling wasmtime-internal-component-macro v47.0.2
+   Compiling rayon-core v1.13.0
+   Compiling wasmtime-internal-cache v47.0.2
+    Checking winnow v0.7.15
+    Checking toml v0.9.12+spec-1.1.0
+    Checking directories-next v2.0.0
+    Checking ghash v0.5.1
+    Checking fs-set-times v0.20.3
+    Checking zstd v0.13.3
+   Compiling wasmtime-internal-wit-bindgen v47.0.2
+    Checking rancor v0.1.3
+    Checking num-bigint v0.4.8
+    Checking cranelift-native v0.134.2
+    Checking cranelift-frontend v0.134.2
+   Compiling wasmtime v47.0.2
+    Checking itertools v0.14.0
+    Checking rfc6979 v0.4.0
+    Checking aes v0.8.4
+    Checking rustix-linux-procfs v0.1.1
+   Compiling curve25519-dalek v4.1.3
+    Checking inout v0.2.2
+    Checking signature v2.2.0
+    Checking aho-corasick v1.1.4
+    Checking toml_datetime v1.1.1+spec-1.1.0
+   Compiling slotmap v1.1.1
+   Compiling bytecheck_derive v0.8.3
+   Compiling spin v0.10.1
+    Checking ambient-authority v0.0.2
+   Compiling cap-std v4.0.2
+    Checking regex-syntax v0.8.11
+    Checking static_assertions v1.1.0
+    Checking maybe-owned v0.3.4
+    Checking simdutf8 v0.1.5
+    Checking try-lock v0.2.5
+    Checking want v0.3.1
+    Checking regex-automata v0.4.16
+    Checking bytecheck v0.8.3
+    Checking twox-hash v1.6.3
+    Checking crc-fast v1.10.0
+    Checking toml v1.1.3+spec-1.1.0
+    Checking ecdsa v0.16.9
+    Checking cipher v0.5.2
+    Checking aes-gcm v0.10.3
+    Checking der-parser v9.0.0
+    Checking phf v0.14.0
+    Checking primeorder v0.13.6
+    Checking h2 v0.4.15
+    Checking crossbeam-channel v0.5.16
+    Checking crossbeam-queue v0.3.13
+    Checking memfd v0.6.5
+    Checking rtp v0.17.2
+    Checking wasmtime-internal-jit-icache-coherence v47.0.2
+    Checking sha1 v0.10.7
+   Compiling substring v1.4.5
+   Compiling munge_macro v0.4.7
+    Checking encoding_rs v0.8.35
+   Compiling proc-macro-error-attr2 v2.0.0
+    Checking data-encoding v2.11.1
+   Compiling cfg_aliases v0.2.2
+   Compiling cap-fs-ext v4.0.2
+    Checking httpdate v1.0.3
+    Checking tower-service v0.3.3
+    Checking pointers v0.1.0
+   Compiling inotify-sys v0.1.8
+   Compiling pumpkin-world v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-world)
+    Checking hashbrown v0.14.5
+    Checking compression-core v0.4.32
+    Checking lz4_flex v0.11.6
+    Checking compression-codecs v0.4.38
+    Checking dashmap v6.2.1
+    Checking lz4-java-wrc v0.2.0
+    Checking crossfire v3.1.19
+    Checking hyper v1.11.0
+   Compiling nix v0.31.3
+    Checking x509-parser v0.16.0
+   Compiling proc-macro-error2 v2.0.1
+    Checking munge v0.4.7
+    Checking crossbeam v0.8.4
+   Compiling pumpkin-data v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-data)
+    Checking rayon v1.12.0
+    Checking pumpkin-config v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-config)
+    Checking rend v0.5.4
+    Checking http-body-util v0.1.4
+    Checking stun v0.17.2
+    Checking poly1305 v0.8.0
+    Checking waitgroup v0.1.2
+    Checking yasna v0.5.2
+    Checking itertools v0.15.0
+    Checking chacha20 v0.9.1
+    Checking rtcp v0.17.2
+   Compiling heapless v0.7.17
+   Compiling curve25519-dalek v5.0.0
+    Checking pem v3.0.6
+   Compiling rkyv_derive v0.8.18
+    Checking socket2 v0.5.10
+    Checking sync_wrapper v1.0.2
+    Checking ruzstd v0.9.0
+    Checking tower-layer v0.3.3
+    Checking xxhash-rust v0.8.18
+    Checking webrtc-mdns v0.17.2
+    Checking rkyv v0.8.18
+    Checking rcgen v0.13.2
+    Checking webrtc-srtp v0.17.2
+    Checking chacha20poly1305 v0.10.1
+    Checking turn v0.17.2
+    Checking x25519-dalek v2.0.1
+   Compiling pumpkin-macros v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-macros)
+    Checking wasmtime-wasi-io v47.0.2
+    Checking async-compression v0.4.43
+    Checking p256 v0.13.2
+    Checking p384 v0.13.1
+    Checking aes v0.9.1
+    Checking cfb8 v0.9.1
+    Checking ccm v0.5.0
+    Checking webrtc-sctp v0.17.2
+    Checking hash32 v0.2.1
+    Checking cbc v0.1.2
+    Checking fdeflate v0.3.7
+   Compiling rustc_version_runtime v0.3.0
+    Checking spin v0.9.9
+    Checking pxfm v0.1.30
+   Compiling tracing-serde-structured v0.4.0
+    Checking same-file v1.0.6
+    Checking mime v0.3.17
+    Checking axum-core v0.5.6
+    Checking walkdir v2.5.0
+    Checking moxcms v0.8.1
+    Checking png v0.18.1
+    Checking dtls v0.17.2
+    Checking webrtc-data v0.17.2
+    Checking inotify v0.11.4
+    Checking sdp v0.17.2
+    Checking wasmtime-wasi v47.0.2
+    Checking pumpkin-protocol v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-protocol)
+    Checking webrtc-ice v0.17.2
+    Checking interceptor v0.17.2
+    Checking tower v0.5.3
+    Checking hyper-util v0.1.20
+    Checking webrtc-media v0.17.2
+    Checking matchers v0.2.0
+    Checking regex v1.13.1
+    Checking ed25519 v3.0.0
+    Checking tokio-rustls v0.26.4
+    Checking sharded-slab v0.1.7
+    Checking notify-types v2.1.0
+    Checking smol_str v0.2.2
+    Checking thread_local v1.1.10
+    Checking bytemuck v1.25.2
+    Checking nu-ansi-term v0.50.3
+    Checking matchit v0.8.4
+    Checking utf8parse v0.2.2
+    Checking hex v0.4.3
+    Checking byteorder-lite v0.1.0
+    Checking unicase v2.9.0
+    Checking unicode-segmentation v1.13.3
+   Compiling pumpkin v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin)
+    Checking unicode-width v0.2.2
+    Checking rustyline v18.0.1
+    Checking image v0.25.10
+    Checking webrtc v0.17.2
+    Checking axum v0.8.9
+    Checking tracing-subscriber v0.3.23
+    Checking notify v8.2.0
+    Checking wasmtime-wasi-http v47.0.2
+    Checking ed25519-dalek v3.0.0
+    Checking pumpkin-inventory v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-inventory)
+    Checking pumpkin-registry v0.1.0-dev+26.2-26.40 (/tmp/pumpkin-integration.kXd71s/crates/pumpkin-registry)
+    Checking num-bigint v0.5.1
+    Checking wasm-encoder v0.255.0
+    Checking wasmparser v0.255.0
+    Checking sha1 v0.11.0
+    Checking ordered-float v5.3.0
+    Checking sysinfo v0.39.6
+   Compiling serde_repr v0.1.21
+    Checking libloading v0.9.0
+error[E0432]: unresolved import `num_integer`
+ --> crates/pumpkin/src/entity/item.rs:4:5
+  |
+4 | use num_integer::Integer;
+  |     ^^^^^^^^^^^ use of unresolved module or unlinked crate `num_integer`
+  |
+  = help: if you wanted to use a crate named `num_integer`, use `cargo add num_integer` to add it to your `Cargo.toml`
+
+error[E0599]: no method named `is_multiple_of` found for type `i32` in the current scope
+   --> crates/pumpkin/src/entity/item.rs:422:18
+    |
+419 |               && self
+    |  ________________-
+420 | |                 .item_age
+421 | |                 .load(Ordering::Relaxed)
+422 | |                 .is_multiple_of(ITEM_UPDATE_INTERVAL);
+    | |_________________-^^^^^^^^^^^^^^
+    |
+   ::: /home/eshanki/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-integer-0.1.46/src/lib.rs:219:8
+    |
+219 |       fn is_multiple_of(&self, other: &Self) -> bool;
+    |          -------------- the method is available for `i32` here
+    |
+    = help: items from traits can only be used if the trait is in scope
+help: trait `Integer` which provides `is_multiple_of` is implemented but not in scope; perhaps you want to import it
+    |
+  1 + use num_integer::Integer;
+    |
+help: there is a method `next_multiple_of` with a similar name
+    |
+422 -                 .is_multiple_of(ITEM_UPDATE_INTERVAL);
+422 +                 .next_multiple_of(ITEM_UPDATE_INTERVAL);
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:190:27
+    |
+190 |         let stack = stack.lock().await;
+    |                           ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:214:38
+    |
+214 |             let current = body_stack.lock().await;
+    |                                      ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:224:18
+    |
+224 |                 .await
+    |                  ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+224 -                 .await
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:234:33
+    |
+234 |         let new_body = new_body.lock().await.clone();
+    |                                 ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:250:18
+    |
+250 |                 .await
+    |                  ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+250 -                 .await
+    |
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:901:36
+    |
+901 |         if self.is_tempting(&*main.lock().await) {
+    |                                    ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/sulfur_cube.rs:905:32
+    |
+905 |         self.is_tempting(&*off.lock().await)
+    |                                ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/witch.rs:123:14
+    |
+118 |           let item = living
+    |  ____________________-
+119 | |             .entity_equipment
+120 | |             .lock()
+121 | |             .await
+122 | |             .get(&EquipmentSlot::MAIN_HAND)
+123 | |             .lock()
+    | |             -^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+    | |_____________|
+    |
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/mob/witch.rs:131:14
+    |
+131 |             .await;
+    |              ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+131 -             .await;
+131 +             ;
+    |
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/mob/witch.rs:224:14
+    |
+224 |             .await;
+    |              ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+224 -             .await;
+224 +             ;
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/mod.rs:425:35
+    |
+425 |         let held_item = held_item.lock().await;
+    |                                   ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/mod.rs:511:35
+    |
+511 |         let held_item = held_item.lock().await;
+    |                                   ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0308]: mismatched types
+  --> crates/pumpkin/src/entity/passive/happy_ghast.rs:74:9
+   |
+73 |       async fn body_armor_stack(&self) -> Arc<tokio::sync::Mutex<ItemStack>> {
+   |                                           ---------------------------------- expected `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>` because of return type
+74 | /         self.mob_entity
+75 | |             .living_entity
+76 | |             .entity_equipment
+77 | |             .lock()
+78 | |             .await
+79 | |             .get(&EquipmentSlot::BODY)
+   | |______________________________________^ expected `Arc<Mutex<ItemStack>>`, found `ItemStack`
+   |
+   = note: expected struct `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>`
+              found struct `pumpkin_data::item_stack::ItemStack`
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/passive/happy_ghast.rs:111:68
+    |
+111 |             equipment.put(&EquipmentSlot::BODY, new_stack.clone()).await
+    |                                                                    ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+111 -             equipment.put(&EquipmentSlot::BODY, new_stack.clone()).await
+111 +             equipment.put(&EquipmentSlot::BODY, new_stack.clone())
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/player.rs:1143:18
+     |
+1142 |               let density_level = item_stack
+     |  _________________________________-
+1143 | |                 .lock()
+     | |                 -^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+     | |_________________|
+     |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/player.rs:1211:18
+     |
+1210 |               let wind_burst_level = item_stack
+     |  ____________________________________-
+1211 | |                 .lock()
+     | |                 -^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+     | |_________________|
+     |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/player.rs:3630:14
+     |
+3629 |           let has_aqua_affinity = helmet
+     |  _________________________________-
+3630 | |             .lock()
+     | |             -^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+     | |_____________|
+     |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/player.rs:4835:26
+     |
+4835 |         let item = stack.lock().await;
+     |                          ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/player.rs:4851:30
+     |
+4851 |             let item = stack.lock().await;
+     |                              ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+   --> crates/pumpkin/src/entity/projectile/fishing_bobber.rs:189:18
+    |
+186 |               let luck_of_the_sea = player
+    |  ___________________________________-
+187 | |                 .inventory
+188 | |                 .held_item()
+189 | |                 .lock()
+    | |                 -^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+    | |_________________|
+    |
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+   --> crates/pumpkin/src/entity/projectile/fishing_bobber.rs:272:60
+    |
+272 |         let main_hand_is_rod = owner.inventory.held_item().lock().await.item.id
+    |                                                            ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/projectile/fishing_bobber.rs:274:69
+    |
+274 |         let off_hand_is_rod = owner.inventory.off_hand_item().await.lock().await.item.id
+    |                                                                     ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+   --> crates/pumpkin/src/entity/projectile/fishing_bobber.rs:313:26
+    |
+312 |                       reduction += held
+    |  __________________________________-
+313 | |                         .lock()
+    | |                         -^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+    | |_________________________|
+    |
+
+error[E0599]: no method named `len` found for struct `tokio::sync::RwLock<T>` in the current scope
+   --> crates/pumpkin/src/item/items/bucket.rs:132:53
+    |
+132 |         for i in 0..player.inventory.main_inventory.len() {
+    |                                                     ^^^ method not found in `tokio::sync::RwLock<[pumpkin_data::item_stack::ItemStack; 36]>`
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/world/raid.rs:414:26
+    |
+414 |                         .await;
+    |                          ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+414 -                         .await;
+414 +                         ;
+    |
+
+error[E0599]: no method named `lock` found for mutable reference `&'a mut pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/block/blocks/respawn_anchor.rs:53:40
+   |
+53 |             let item = args.item_stack.lock().await.item;
+   |                                        ^^^^ method not found in `&'a mut pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for mutable reference `&'a mut pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/block/blocks/respawn_anchor.rs:68:33
+   |
+68 |                 args.item_stack.lock().await.decrement(1);
+   |                                 ^^^^ method not found in `&'a mut pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for mutable reference `&'a mut pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/block/blocks/campfire.rs:70:44
+   |
+70 |             let mut item = args.item_stack.lock().await;
+   |                                            ^^^^ method not found in `&'a mut pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+  --> crates/pumpkin/src/block/blocks/ice.rs:50:33
+   |
+50 |                 let tool = tool.lock().await;
+   |                                 ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+  --> crates/pumpkin/src/block/blocks/infested.rs:27:33
+   |
+27 |                 let tool = tool.lock().await;
+   |                                 ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for mutable reference `&'a mut pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/block/blocks/vault.rs:40:50
+   |
+40 |             let mut item_stack = args.item_stack.lock().await;
+   |                                                  ^^^^ method not found in `&'a mut pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for mutable reference `&'a mut pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/block/blocks/copper_golem_statue.rs:142:47
+    |
+142 |             let item: &Item = args.item_stack.lock().await.item;
+    |                                               ^^^^ method not found in `&'a mut pumpkin_data::item_stack::ItemStack`
+
+error[E0608]: cannot index into a value of type `tokio::sync::RwLock<[pumpkin_data::item_stack::ItemStack; 3]>`
+   --> crates/pumpkin/src/block/entities/furnace_like_block_entity.rs:330:42
+    |
+330 | ...                   && self.items[1].lock().await.item.id
+    |                                    ^^^
+    |
+   ::: crates/pumpkin/src/block/entities/blasting_furnace.rs:60:1
+    |
+ 60 | impl_inventory_for_cooking!(BlastingFurnaceBlockEntity, CookingRecipeKind::Blasting);
+    | ------------------------------------------------------------------------------------ in this macro invocation
+    |
+    = note: this error originates in the macro `impl_inventory_for_cooking` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0608]: cannot index into a value of type `tokio::sync::RwLock<[pumpkin_data::item_stack::ItemStack; 5]>`
+   --> crates/pumpkin/src/block/entities/brewing_stand.rs:318:43
+    |
+318 |                 && (slot > 2 || self.items[slot].lock().await.is_empty())
+    |                                           ^^^^^^
+
+error[E0608]: cannot index into a value of type `tokio::sync::RwLock<[pumpkin_data::item_stack::ItemStack; 3]>`
+   --> crates/pumpkin/src/block/entities/furnace_like_block_entity.rs:330:42
+    |
+330 | ...                   && self.items[1].lock().await.item.id
+    |                                    ^^^
+    |
+   ::: crates/pumpkin/src/block/entities/furnace.rs:60:1
+    |
+ 60 | impl_inventory_for_cooking!(FurnaceBlockEntity, CookingRecipeKind::Smelting);
+    | ---------------------------------------------------------------------------- in this macro invocation
+    |
+    = note: this error originates in the macro `impl_inventory_for_cooking` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0608]: cannot index into a value of type `tokio::sync::RwLock<[pumpkin_data::item_stack::ItemStack; 3]>`
+   --> crates/pumpkin/src/block/entities/furnace_like_block_entity.rs:330:42
+    |
+330 | ...                   && self.items[1].lock().await.item.id
+    |                                    ^^^
+    |
+   ::: crates/pumpkin/src/block/entities/smoker.rs:60:1
+    |
+ 60 | impl_inventory_for_cooking!(SmokerBlockEntity, CookingRecipeKind::Smoking);
+    | -------------------------------------------------------------------------- in this macro invocation
+    |
+    = note: this error originates in the macro `impl_inventory_for_cooking` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0433]: cannot find type `Block` in this scope
+   --> crates/pumpkin/src/command/commands/clone.rs:177:45
+    |
+177 | ...                   let block = Block::from_state_id(state_id);
+    |                                   ^^^^^ use of undeclared type `Block`
+    |
+help: there is an enum variant `crate::command::args::Arg::Block` and 10 others; try using the variant's enum
+    |
+177 -                                 let block = Block::from_state_id(state_id);
+177 +                                 let block = crate::command::args::Arg::from_state_id(state_id);
+    |
+177 -                                 let block = Block::from_state_id(state_id);
+177 +                                 let block = crate::command::args::block::BlockPredicate::from_state_id(state_id);
+    |
+177 -                                 let block = Block::from_state_id(state_id);
+177 +                                 let block = crate::entity::ai::brain::memory::PositionTracker::from_state_id(state_id);
+    |
+177 -                                 let block = Block::from_state_id(state_id);
+177 +                                 let block = crate::entity::projectile::ProjectileHit::from_state_id(state_id);
+    |
+    = and 6 other candidates
+
+error[E0308]: mismatched types
+   --> crates/pumpkin/src/command/commands/time.rs:190:42
+    |
+190 |                     level_time.send_time(world).await;
+    |                                --------- ^^^^^ expected `&World`, found `Arc<World>`
+    |                                |
+    |                                arguments to this method are incorrect
+    |
+    = note: expected reference `&world::World`
+                  found struct `Arc<world::World>`
+note: method defined here
+   --> crates/pumpkin/src/world/time.rs:132:18
+    |
+132 |     pub async fn send_time(&self, world: &World) {
+    |                  ^^^^^^^^^        -------------
+help: consider borrowing here
+    |
+190 |                     level_time.send_time(&world).await;
+    |                                          +
+
+error[E0308]: mismatched types
+   --> crates/pumpkin/src/command/commands/time.rs:205:42
+    |
+205 |                     level_time.send_time(world).await;
+    |                                --------- ^^^^^ expected `&World`, found `Arc<World>`
+    |                                |
+    |                                arguments to this method are incorrect
+    |
+    = note: expected reference `&world::World`
+                  found struct `Arc<world::World>`
+note: method defined here
+   --> crates/pumpkin/src/world/time.rs:132:18
+    |
+132 |     pub async fn send_time(&self, world: &World) {
+    |                  ^^^^^^^^^        -------------
+help: consider borrowing here
+    |
+205 |                     level_time.send_time(&world).await;
+    |                                          +
+
+error[E0308]: mismatched types
+   --> crates/pumpkin/src/command/commands/time.rs:216:42
+    |
+216 |                     level_time.send_time(world).await;
+    |                                --------- ^^^^^ expected `&World`, found `Arc<World>`
+    |                                |
+    |                                arguments to this method are incorrect
+    |
+    = note: expected reference `&world::World`
+                  found struct `Arc<world::World>`
+note: method defined here
+   --> crates/pumpkin/src/world/time.rs:132:18
+    |
+132 |     pub async fn send_time(&self, world: &World) {
+    |                  ^^^^^^^^^        -------------
+help: consider borrowing here
+    |
+216 |                     level_time.send_time(&world).await;
+    |                                          +
+
+error[E0308]: mismatched types
+   --> crates/pumpkin/src/command/commands/time.rs:232:42
+    |
+232 |                     level_time.send_time(world).await;
+    |                                --------- ^^^^^ expected `&World`, found `Arc<World>`
+    |                                |
+    |                                arguments to this method are incorrect
+    |
+    = note: expected reference `&world::World`
+                  found struct `Arc<world::World>`
+note: method defined here
+   --> crates/pumpkin/src/world/time.rs:132:18
+    |
+132 |     pub async fn send_time(&self, world: &World) {
+    |                  ^^^^^^^^^        -------------
+help: consider borrowing here
+    |
+232 |                     level_time.send_time(&world).await;
+    |                                          +
+
+error[E0308]: mismatched types
+    --> crates/pumpkin/src/entity/ai/goal/break_door.rs:158:60
+     |
+ 158 |                 world.set_block_breaking(entity, door_pos, -1).await;
+     |                       ------------------                   ^^ expected `BlockBreakingProgress`, found integer
+     |                       |
+     |                       arguments to this method are incorrect
+     |
+note: method defined here
+    --> crates/pumpkin/src/world/mod.rs:4882:25
+     |
+4882 |     pub(crate) async fn set_block_breaking(
+     |                         ^^^^^^^^^^^^^^^^^^
+...
+4886 |         progress: BlockBreakingProgress,
+     |         -------------------------------
+
+error[E0308]: mismatched types
+    --> crates/pumpkin/src/entity/ai/goal/break_door.rs:176:60
+     |
+ 176 |                 world.set_block_breaking(entity, door_pos, progress).await;
+     |                       ------------------                   ^^^^^^^^ expected `BlockBreakingProgress`, found `i32`
+     |                       |
+     |                       arguments to this method are incorrect
+     |
+note: method defined here
+    --> crates/pumpkin/src/world/mod.rs:4882:25
+     |
+4882 |     pub(crate) async fn set_block_breaking(
+     |                         ^^^^^^^^^^^^^^^^^^
+...
+4886 |         progress: BlockBreakingProgress,
+     |         -------------------------------
+
+error[E0599]: no method named `try_lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/ai/goal/flee_sun.rs:129:46
+    |
+129 |                 if let Ok(stack) = head_item.try_lock()
+    |                                              ^^^^^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/ai/goal/piglin_admire.rs:301:41
+    |
+301 |                 let mut stack = offhand.lock().await;
+    |                                         ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:2716:39
+     |
+2716 |                 let stack = stack_arc.lock().await;
+     |                                       ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:2733:39
+     |
+2733 |                 let stack = stack_arc.lock().await;
+     |                                       ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `get_or_insert` found for struct `tokio::sync::MutexGuard<'_, EntityEquipment>` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:2816:32
+     |
+2816 |                     *equipment.get_or_insert(slot).lock().await = stack;
+     |                                ^^^^^^^^^^^^^ method not found in `tokio::sync::MutexGuard<'_, EntityEquipment>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:3205:47
+     |
+3205 |                         let stack = stack_arc.lock().await;
+     |                                               ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:3233:26
+     |
+3232 |                       let breach_level = held
+     |  ________________________________________-
+3233 | |                         .lock()
+     | |                         -^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+     | |_________________________|
+     |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:3295:47
+     |
+3295 |                         let stack = stack_arc.lock().await;
+     |                                               ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+    --> crates/pumpkin/src/entity/living.rs:3500:51
+     |
+3500 |                         let mut stack = stack_arc.lock().await;
+     |                                                   ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0282]: type annotations needed for `std::option::Option<_>`
+    --> crates/pumpkin/src/entity/living.rs:3803:33
+     |
+3803 | ...                   let mut slot_to_sync = None;
+     |                           ^^^^^^^^^^^^^^^^   ---- type must be known at this point
+     |
+help: consider giving `slot_to_sync` an explicit type, where the type for type parameter `T` is specified
+     |
+3803 |                             let mut slot_to_sync: std::option::Option<T> = None;
+     |                                                 ++++++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> crates/pumpkin/src/entity/mob/illusioner.rs:53:17
+     |
+  51 |             .insert(
+     |              ------ arguments to this method are incorrect
+  52 |                 EquipmentSlot::MAIN_HAND,
+  53 |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::BOW))),
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `ItemStack`, found `Arc<Mutex<ItemStack>>`
+     |
+     = note: expected struct `pumpkin_data::item_stack::ItemStack`
+                found struct `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>`
+help: the return type of this call is `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>` due to the type of the argument passed
+    --> crates/pumpkin/src/entity/mob/illusioner.rs:44:9
+     |
+  44 | /         mob_arc
+  45 | |             .mob_entity
+  46 | |             .living_entity
+  47 | |             .entity_equipment
+...    |
+  53 | |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::BOW))),
+     | |                 --------------------------------------------------- this argument influences the return type of `insert`
+  54 | |             );
+     | |_____________^
+note: method defined here
+    --> /home/eshanki/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/collections/hash/map.rs:1333:12
+     |
+1333 |     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+     |            ^^^^^^
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/mob/piglin.rs:139:83
+    |
+139 |             let previous = equipment.put(&EquipmentSlot::OFF_HAND, taken.clone()).await;
+    |                                                                                   ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+139 -             let previous = equipment.put(&EquipmentSlot::OFF_HAND, taken.clone()).await;
+139 +             let previous = equipment.put(&EquipmentSlot::OFF_HAND, taken.clone());
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/piglin.rs:189:41
+    |
+189 |                 let mut stack = offhand.lock().await;
+    |                                         ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0308]: mismatched types
+    --> crates/pumpkin/src/entity/mob/pillager.rs:61:17
+     |
+  59 |             .insert(
+     |              ------ arguments to this method are incorrect
+  60 |                 EquipmentSlot::MAIN_HAND,
+  61 |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::CROSSBOW))),
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `ItemStack`, found `Arc<Mutex<ItemStack>>`
+     |
+     = note: expected struct `pumpkin_data::item_stack::ItemStack`
+                found struct `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>`
+help: the return type of this call is `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>` due to the type of the argument passed
+    --> crates/pumpkin/src/entity/mob/pillager.rs:52:9
+     |
+  52 | /         mob_arc
+  53 | |             .mob_entity
+  54 | |             .living_entity
+  55 | |             .entity_equipment
+...    |
+  61 | |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::CROSSBOW))),
+     | |                 -------------------------------------------------------- this argument influences the return type of `insert`
+  62 | |             );
+     | |_____________^
+note: method defined here
+    --> /home/eshanki/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/collections/hash/map.rs:1333:12
+     |
+1333 |     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+     |            ^^^^^^
+
+error[E0308]: mismatched types
+    --> crates/pumpkin/src/entity/mob/vex.rs:61:17
+     |
+  59 |             .insert(
+     |              ------ arguments to this method are incorrect
+  60 |                 EquipmentSlot::MAIN_HAND,
+  61 |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::IRON_SWORD))),
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `ItemStack`, found `Arc<Mutex<ItemStack>>`
+     |
+     = note: expected struct `pumpkin_data::item_stack::ItemStack`
+                found struct `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>`
+help: the return type of this call is `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>` due to the type of the argument passed
+    --> crates/pumpkin/src/entity/mob/vex.rs:52:9
+     |
+  52 | /         mob_arc
+  53 | |             .mob_entity
+  54 | |             .living_entity
+  55 | |             .entity_equipment
+...    |
+  61 | |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::IRON_SWORD))),
+     | |                 ---------------------------------------------------------- this argument influences the return type of `insert`
+  62 | |             );
+     | |_____________^
+note: method defined here
+    --> /home/eshanki/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/collections/hash/map.rs:1333:12
+     |
+1333 |     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+     |            ^^^^^^
+
+error[E0308]: mismatched types
+    --> crates/pumpkin/src/entity/mob/vindicator.rs:55:17
+     |
+  53 |             .insert(
+     |              ------ arguments to this method are incorrect
+  54 |                 EquipmentSlot::MAIN_HAND,
+  55 |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::IRON_AXE))),
+     |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `ItemStack`, found `Arc<Mutex<ItemStack>>`
+     |
+     = note: expected struct `pumpkin_data::item_stack::ItemStack`
+                found struct `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>`
+help: the return type of this call is `Arc<tokio::sync::Mutex<pumpkin_data::item_stack::ItemStack>>` due to the type of the argument passed
+    --> crates/pumpkin/src/entity/mob/vindicator.rs:46:9
+     |
+  46 | /         mob_arc
+  47 | |             .mob_entity
+  48 | |             .living_entity
+  49 | |             .entity_equipment
+...    |
+  55 | |                 Arc::new(Mutex::new(ItemStack::new(1, &Item::IRON_AXE))),
+     | |                 -------------------------------------------------------- this argument influences the return type of `insert`
+  56 | |             );
+     | |_____________^
+note: method defined here
+    --> /home/eshanki/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/collections/hash/map.rs:1333:12
+     |
+1333 |     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
+     |            ^^^^^^
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/mob/vindicator.rs:181:18
+    |
+181 |                 .await;
+    |                  ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+181 -                 .await;
+181 +                 ;
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/zombie/husk.rs:152:45
+    |
+152 |             let main_hand_empty = held_item.lock().await.is_empty();
+    |                                             ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/mob/mod.rs:785:34
+    |
+785 |             let mut stack = item.lock().await;
+    |                                  ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/passive/allay.rs:309:34
+    |
+309 |             let held = held_slot.lock().await.clone();
+    |                                  ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/passive/allay.rs:332:28
+    |
+332 |                 *held_slot.lock().await = to_give;
+    |                            ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/passive/allay.rs:342:55
+    |
+342 |                     std::mem::replace(&mut *held_slot.lock().await, ItemStack::EMPTY.clone());
+    |                                                       ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/passive/equine/mod.rs:315:31
+    |
+315 |             let stack = stack.lock().await;
+    |                               ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0277]: `pumpkin_data::item_stack::ItemStack` is not a future
+   --> crates/pumpkin/src/entity/passive/equine/mod.rs:336:22
+    |
+336 |                     .await
+    |                      ^^^^^ `pumpkin_data::item_stack::ItemStack` is not a future
+    |
+    = help: the trait `futures::Future` is not implemented for `pumpkin_data::item_stack::ItemStack`
+    = note: pumpkin_data::item_stack::ItemStack must be a future or must implement `IntoFuture` to be awaited
+    = note: required for `pumpkin_data::item_stack::ItemStack` to implement `std::future::IntoFuture`
+help: remove the `.await`
+    |
+336 -                     .await
+    |
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/entity/passive/equine/mod.rs:700:35
+    |
+700 |                 let stack = stack.lock().await;
+    |                                   ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+   --> crates/pumpkin/src/item/items/bucket.rs:680:44
+    |
+680 |                 let held_stack = held_item.lock().await;
+    |                                            ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+  --> crates/pumpkin/src/item/items/experience_bottle.rs:64:47
+   |
+64 |                 let mut main_hand = held_item.lock().await;
+   |                                               ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/item/items/experience_bottle.rs:75:50
+   |
+75 |                 let mut off_hand = off_hand_item.lock().await;
+   |                                                  ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+  --> crates/pumpkin/src/item/items/firework_rocket.rs:85:43
+   |
+85 |                     let stack = main_hand.lock().await.clone();
+   |                                           ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/item/items/firework_rocket.rs:90:42
+   |
+90 |                     let stack = off_hand.lock().await.clone();
+   |                                          ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+   --> crates/pumpkin/src/item/items/firework_rocket.rs:111:35
+    |
+111 |                         main_hand.lock().await.decrement(1);
+    |                                   ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+   --> crates/pumpkin/src/item/items/firework_rocket.rs:117:30
+    |
+113 | /                         player
+114 | |                             .inventory
+115 | |                             .off_hand_item()
+116 | |                             .await
+117 | |                             .lock()
+    | |                             -^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+    | |_____________________________|
+    |
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+  --> crates/pumpkin/src/item/items/spyglass.rs:61:30
+   |
+61 |             let stack = held.lock().await.clone();
+   |                              ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for opaque type `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>` in the current scope
+  --> crates/pumpkin/src/item/items/wind_charge.rs:58:47
+   |
+58 |                 let mut main_hand = held_item.lock().await;
+   |                                               ^^^^ method not found in `impl futures::Future<Output = pumpkin_data::item_stack::ItemStack>`
+
+error[E0599]: no method named `lock` found for struct `pumpkin_data::item_stack::ItemStack` in the current scope
+  --> crates/pumpkin/src/item/items/wind_charge.rs:69:50
+   |
+69 |                 let mut off_hand = off_hand_item.lock().await;
+   |                                                  ^^^^ method not found in `pumpkin_data::item_stack::ItemStack`
+
+error[E0560]: struct `LevelTime` has no field named `rain_time`
+   --> crates/pumpkin/src/world/time.rs:109:13
+    |
+109 |             rain_time: 0,
+    |             ^^^^^^^^^ `LevelTime` does not have this field
+    |
+    = note: available fields are: `partial_tick`, `rate`, `paused`
+
+error[E0382]: use of moved value: `item`
+   --> crates/pumpkin/src/block/blocks/redstone/dropper.rs:243:51
+    |
+161 |                 if let Some((slot_index, mut item)) = dropper.get_random_slot().await {
+    |                                          -------- move occurs because `item` has type `pumpkin_data::item_stack::ItemStack`, which does not implement the `Copy` trait
+...
+208 |                     dropper.set_stack(slot_index, item).await;
+    |                                                   ---- value moved here
+...
+243 |                     dropper.set_stack(slot_index, item).await;
+    |                                                   ^^^^ value used here after move
+
+warning: unused variable: `dyn_self`
+    --> crates/pumpkin/src/entity/living.rs:1623:18
+     |
+1623 |         let Some(dyn_self) = world.get_entity_by_id(self.entity.entity_id) else {
+     |                  ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_dyn_self`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable `best_profession` is assigned to, but never used
+    --> crates/pumpkin/src/entity/passive/villager/mod.rs:1686:25
+     |
+1686 |                     let mut best_profession = VillagerProfession::None;
+     |                         ^^^^^^^^^^^^^^^^^^^
+     |
+     = note: consider using `_best_profession` instead
+
+warning: value assigned to `best_profession` is never read
+    --> crates/pumpkin/src/entity/passive/villager/mod.rs:1705:33
+     |
+1705 | ...                   best_profession = prof;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0277, E0282, E0308, E0382, E0432, E0433, E0560, E0599, E0608.
+For more information about an error, try `rustc --explain E0277`.
+warning: `pumpkin` (lib) generated 3 warnings
+error: could not compile `pumpkin` (lib) due to 82 previous errors; 3 warnings emitted

@@ -1,0 +1,35 @@
+running 5 specs, gpu=1 builds=2
+
+[09-instant-double-apply] iter 1: generating
+[09-instant-double-apply] iter 1: replied in 20s
+[10-instant-undead] iter 1: generating
+[09-instant-double-apply] iter 1: applied 1, failed 0
+[09-instant-double-apply] iter 1: building
+[10-instant-undead] iter 1: replied in 53s
+[11-lightning-raining-at] iter 1: generating
+[10-instant-undead] iter 1: applied 1, failed 0
+[10-instant-undead] iter 1: building
+[11-lightning-raining-at] iter 1: replied in 40s
+[14-mushroom-light-gate] iter 1: generating
+[11-lightning-raining-at] iter 1: applied 1, failed 0
+[14-mushroom-light-gate] iter 1: replied in 7s
+[17-goalselector-remove] iter 1: generating
+[14-mushroom-light-gate] iter 1: applied 1, failed 0
+[17-goalselector-remove] iter 1: replied in 16s
+[17-goalselector-remove] iter 1: applied 1, failed 0
+[09-instant-double-apply] iter 1: build failed, 376 chars back to model
+[11-lightning-raining-at] iter 1: building
+[09-instant-double-apply] iter 2: generating
+[10-instant-undead] iter 1: build failed, 374 chars back to model
+[14-mushroom-light-gate] iter 1: building
+[09-instant-double-apply] iter 2: replied in 31s
+[10-instant-undead] iter 2: generating
+[09-instant-double-apply] iter 2: applied 1, failed 0
+[10-instant-undead] iter 2: replied in 62s
+[10-instant-undead] iter 2: applied 0, failed 1
+[10-instant-undead]     why: the replacement is identical to the current function
+[10-instant-undead] iter 3: generating
+[11-lightning-raining-at] iter 1: build failed, 373 chars back to model
+[17-goalselector-remove] iter 1: building
+[14-mushroom-light-gate] iter 1: build failed, 573 chars back to model
+[09-instant-double-apply] iter 2: building

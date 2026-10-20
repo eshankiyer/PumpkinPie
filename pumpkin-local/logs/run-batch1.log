@@ -1,0 +1,30 @@
+running 10 specs, gpu=1 builds=2
+
+[09-instant-double-apply] iter 1: generating
+[09-instant-double-apply] iter 1: replied in 19s
+[10-instant-undead] iter 1: generating
+[09-instant-double-apply] iter 1: applied 0, failed 2
+[09-instant-double-apply]     why: diff 0: could not apply (error: repository lacks the necessary blob to perform 3-way merge.
+Falling back to direct application...
+error: patch failed: pumpkin/src/item/potion.rs:1
+error)
+[09-instant-double-apply]     why: context not found or not unique, starting: if is_instant {
+[10-instant-undead] iter 1: replied in 31s
+[11-lightning-raining-at] iter 1: generating
+[10-instant-undead] iter 1: applied 0, failed 1
+[10-instant-undead]     why: diff 0: could not apply (error: repository lacks the necessary blob to perform 3-way merge.
+Falling back to direct application...
+error: patch failed: pumpkin/src/entity/living.rs:1
+err)
+[11-lightning-raining-at] iter 1: replied in 20s
+[12-piston-pushed-state] iter 1: generating
+[11-lightning-raining-at] iter 1: applied 0, failed 1
+[11-lightning-raining-at]     why: diff 0: could not apply (error: repository lacks the necessary blob to perform 3-way merge.
+Falling back to direct application...
+error: patch failed: pumpkin/src/world/mod.rs:1
+error: )
+[12-piston-pushed-state] iter 1: replied in 19s
+[13-aec-nbt] iter 1: generating
+[12-piston-pushed-state] iter 1: applied 1, failed 1
+[12-piston-pushed-state]     why: context not found or not unique, starting: fn write_nbt<'a>(
+[12-piston-pushed-state] iter 1: building

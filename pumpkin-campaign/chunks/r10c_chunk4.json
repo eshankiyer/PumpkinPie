@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Player",
+    "vanilla_path": "net/minecraft/world/entity/player/Player.java",
+    "rust_file": "crates/pumpkin/src/entity/player.rs",
+    "total_methods": 201,
+    "in_declaring_file": 30,
+    "elsewhere_in_workspace": 31,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "sendOverlayMessage",
+      "setLastDeathLocation",
+      "setReducedDebugInfo",
+      "setRemainingFireTicks",
+      "setScore",
+      "setShoulderParrotLeft",
+      "setShoulderParrotRight",
+      "shouldRotateWithMinecart",
+      "shouldShowName",
+      "stabAttack",
+      "startFallFlying",
+      "startSleepInBed",
+      "stopSleepInBed",
+      "tickRegeneration",
+      "travel",
+      "triggerRecipeCrafted",
+      "tryToStartFallFlying",
+      "updateIsUnderwater",
+      "updateTutorialInventoryAction",
+      "wantsToStopRiding"
+    ],
+    "note": "leads 121-140 of 140 for Player"
+  }
+]

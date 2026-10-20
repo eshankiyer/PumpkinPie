@@ -1,0 +1,26 @@
+[
+  {
+    "subsystem": "inventory",
+    "vanilla_class": "CraftingMenu",
+    "vanilla_path": "net/minecraft/world/inventory/CraftingMenu.java",
+    "rust_file": "crates/pumpkin-inventory/src/crafting/crafting_screen_handler.rs",
+    "total_methods": 12,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "absent_workspace_wide": [
+      "beginPlacingRecipe",
+      "canTakeItemForPickAll",
+      "finishPlacingRecipe",
+      "getInputGridSlots",
+      "getRecipeBookType",
+      "getResultSlot",
+      "owner",
+      "quickMoveStack",
+      "removed",
+      "slotChangedCraftingGrid",
+      "slotsChanged",
+      "stillValid"
+    ],
+    "note": "round12 broader pool: leads 1-12 of 12 for CraftingMenu"
+  }
+]

@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundSetSimulationDistancePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundSetSimulationDistancePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/set_simulation_distance.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundSetTimePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundSetTimePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/bedrock/client/set_time.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundShowDialogPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundShowDialogPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/config/show_dialog.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundStartConfigurationPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundStartConfigurationPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/start_configuration.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundStatusResponsePacket",
+    "vanilla_path": "net/minecraft/network/protocol/status/ClientboundStatusResponsePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/status/status_response.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundStopSoundPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundStopSoundPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/stop_sound.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundStoreCookiePacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundStoreCookiePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/store_cookie.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTabListPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundTabListPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/tab_list.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTeleportEntityPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundTeleportEntityPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/teleport_entity.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTestInstanceBlockStatus",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundTestInstanceBlockStatus.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/test_instance_block_status.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTickingStatePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundTickingStatePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/ticking_state.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTickingStepPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundTickingStepPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/ticking_step.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundTransferPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundTransferPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/bedrock/client/transfer.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundUpdateRecipesPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundUpdateRecipesPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/update_recipes.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "CocoaBlock",
+    "vanilla_path": "net/minecraft/world/level/block/CocoaBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/cocoa.rs",
+    "total_methods": 11,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  }
+]

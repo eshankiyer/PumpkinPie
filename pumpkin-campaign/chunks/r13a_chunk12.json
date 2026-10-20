@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "HopperBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/HopperBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/hopper.rs",
+    "total_methods": 19,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 4,
+    "absent_workspace_wide": [
+      "createMenu",
+      "getContainerSize",
+      "getItemsAtAndAbove",
+      "getLevelX",
+      "getLevelY",
+      "getLevelZ",
+      "isGridAligned",
+      "pushItemsTick",
+      "removeItem",
+      "setItems"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for HopperBlockEntity"
+  }
+]

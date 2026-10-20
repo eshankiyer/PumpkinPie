@@ -1,0 +1,16 @@
+=== CLIPPY /home/eshanki/pumpkin-wt/loose-coverage-4
+crates/pumpkin/src/world/mod.rs:5:5: error: unused import: `pumpkin_data::attributes::Attributes`
+crates/pumpkin/src/entity/mod.rs:5820:25: error: float type suffix should not be separated by an underscore: help: remove the underscore: `0.2f64`
+crates/pumpkin/src/entity/mod.rs:5827:14: error: float type suffix should not be separated by an underscore: help: remove the underscore: `0.2f64`
+crates/pumpkin/src/block/blocks/cauldron.rs:338:1: error: items after a test module
+crates/pumpkin/src/entity/living.rs:117:1: error: this could be a `const fn`
+crates/pumpkin/src/entity/living.rs:4520:13: error: all if blocks contain the same code at the start
+crates/pumpkin/src/entity/living.rs:8015:31: error: redundant clone: help: remove this
+crates/pumpkin/src/entity/player.rs:7221:37: error: temporary with significant `Drop` in `if let` scrutinee will live until the end of the `if let` expression
+crates/pumpkin/src/entity/mod.rs:1274:1: error: more than 3 bools in function parameters
+crates/pumpkin/src/entity/mod.rs:1666:5: error: this function has too many lines (106/100)
+crates/pumpkin/src/entity/mod.rs:3876:5: error: unused `async` for function with no await statements
+crates/pumpkin/src/entity/player.rs:4485:14: error: this lint expectation is unfulfilled
+error: could not compile `pumpkin` (lib) due to 8 previous errors
+error: could not compile `pumpkin` (lib test) due to 12 previous errors
+=== TESTS

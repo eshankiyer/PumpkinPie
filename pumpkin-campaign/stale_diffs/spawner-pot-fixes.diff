@@ -1,0 +1,300 @@
+commit 1bf145c8ed31f4f9e200ae114eb5cc92a98d4fbb
+Author: Eshan I. <79593316+eshankiyer@users.noreply.github.com>
+Date:   Tue Aug 4 10:34:12 2026 -0400
+
+    fix(block): drop experience when a mob spawner is broken
+    
+    Vanilla's SpawnerBlock#spawnAfterBreak (net/minecraft/world/level/block/SpawnerBlock.java)
+    rolls `15 + random.nextInt(15) + random.nextInt(15)` (range 15-43 inclusive) and pops it
+    as experience orbs on every player break. The spawner's override does not route through
+    Block#tryDropExperience/EnchantmentHelper#processBlockExperience the way ore blocks
+    (DropExperienceBlock) do, and dropResources always calls spawnAfterBreak with
+    dropExperience=true regardless of the tool used (Block.java dropResources overloads) -
+    so Silk Touch does not suppress this drop, it only prevents obtaining the spawner block
+    itself, which was already the case here since spawner has no loot table drop wired up.
+    
+    Pumpkin's SpawnerBlock had no `broken` hook at all, so breaking a spawner dropped no XP.
+    Wire it up reusing the existing ExperienceOrbEntity::spawn helper (same one used by
+    furnace/blast_furnace/smoker/hopper), with a pure spawner_break_experience() helper and
+    a range unit test.
+
+diff --git a/pumpkin/src/block/blocks/spawner.rs b/pumpkin/src/block/blocks/spawner.rs
+index ec132ff9..dfc01f1c 100644
+--- a/pumpkin/src/block/blocks/spawner.rs
++++ b/pumpkin/src/block/blocks/spawner.rs
+@@ -1,13 +1,23 @@
+ use std::sync::Arc;
+ 
+ use crate::block::entities::mob_spawner::MobSpawnerBlockEntity;
++use crate::entity::experience_orb::ExperienceOrbEntity;
+ use pumpkin_macros::pumpkin_block;
++use pumpkin_util::random::{RandomGenerator, RandomImpl, get_seed, xoroshiro128::Xoroshiro};
+ 
+-use crate::block::{BlockBehaviour, BlockFuture, PlacedArgs};
++use crate::block::{BlockBehaviour, BlockFuture, BrokenArgs, PlacedArgs};
+ 
+ #[pumpkin_block("minecraft:spawner")]
+ pub struct SpawnerBlock;
+ 
++/// `SpawnerBlock#spawnAfterBreak` in vanilla: `15 + random.nextInt(15) + random.nextInt(15)`,
++/// giving a range of 15-43 inclusive. Unlike ore blocks, the spawner's override does not
++/// route through `Block#tryDropExperience`/`EnchantmentHelper#processBlockExperience`, so
++/// Silk Touch does not suppress this drop (only the block item itself is never obtainable).
++fn spawner_break_experience(random: &mut RandomGenerator) -> i32 {
++    15 + random.next_bounded_i32(15) + random.next_bounded_i32(15)
++}
++
+ impl BlockBehaviour for SpawnerBlock {
+     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+         Box::pin(async move {
+@@ -15,4 +25,29 @@ impl BlockBehaviour for SpawnerBlock {
+             args.world.add_block_entity(Arc::new(hopper_block_entity));
+         })
+     }
++
++    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
++        Box::pin(async move {
++            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
++            let amount = spawner_break_experience(&mut random);
++            if amount > 0 {
++                ExperienceOrbEntity::spawn(args.world, args.position.to_f64(), amount as u32).await;
++            }
++        })
++    }
++}
++
++#[cfg(test)]
++mod test {
++    use super::spawner_break_experience;
++    use pumpkin_util::random::{RandomGenerator, xoroshiro128::Xoroshiro};
++
++    #[test]
++    fn experience_is_within_vanilla_range() {
++        for seed in 0..1000u64 {
++            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
++            let amount = spawner_break_experience(&mut random);
++            assert!((15..=43).contains(&amount), "amount {amount} out of range");
++        }
++    }
+ }
+=== plus uncommitted ===
+diff --git a/pumpkin/src/block/entities/decorated_pot.rs b/pumpkin/src/block/entities/decorated_pot.rs
+index 4905c4d6..f22ab7ba 100644
+--- a/pumpkin/src/block/entities/decorated_pot.rs
++++ b/pumpkin/src/block/entities/decorated_pot.rs
+@@ -1,11 +1,72 @@
+ use super::BlockEntity;
++use pumpkin_data::BlockStateId;
++use pumpkin_data::block_properties::{BlockProperties, DecoratedPotLikeProperties};
++use pumpkin_data::data_component::DataComponent;
++use pumpkin_data::data_component_impl::PotDecorationsImpl;
++use pumpkin_data::item::Item;
+ use pumpkin_data::item_stack::ItemStack;
+ use pumpkin_nbt::compound::NbtCompound;
+ use pumpkin_nbt::tag::NbtTag;
+ use pumpkin_util::math::position::BlockPos;
++use std::borrow::Cow;
+ use std::pin::Pin;
++use std::sync::Arc;
+ use tokio::sync::Mutex;
+ 
++use crate::world::World;
++
++/// Vanilla item name used for an unset sherd slot (`PotDecorations#getItem`,
++/// `DecoratedPotBlockEntity.java`). Every corner defaults to a plain brick.
++const DEFAULT_SHERD: &str = "minecraft:brick";
++
++/// Resolves the raw `sherds` NBT list (order: back, left, right, front, matching
++/// `PotDecorations`) into 4 item registry names, defaulting missing/invalid
++/// entries to brick.
++fn sherd_names(sherds: Option<&[NbtTag]>) -> [Cow<'static, str>; 4] {
++    let mut names = [
++        Cow::Borrowed(DEFAULT_SHERD),
++        Cow::Borrowed(DEFAULT_SHERD),
++        Cow::Borrowed(DEFAULT_SHERD),
++        Cow::Borrowed(DEFAULT_SHERD),
++    ];
++    if let Some(list) = sherds {
++        for (slot, tag) in names.iter_mut().zip(list.iter()) {
++            if let Some(name) = tag.extract_string() {
++                *slot = Cow::Owned(name.to_string());
++            }
++        }
++    }
++    names
++}
++
++/// Builds the item(s) dropped when a decorated pot is destroyed, matching the
++/// `minecraft:alternatives` entry in `data/minecraft/loot_table/blocks/decorated_pot.json`:
++/// cracked pots drop their 4 individual sherds, intact pots drop a single
++/// `decorated_pot` item that carries the pattern via the `pot_decorations` component.
++fn break_drops(sherds: Option<&[NbtTag]>, cracked: bool) -> Vec<ItemStack> {
++    let names = sherd_names(sherds);
++    if cracked {
++        names
++            .iter()
++            .map(|name| {
++                let item = Item::from_registry_key(name).unwrap_or(&Item::BRICK);
++                ItemStack::new(1, item)
++            })
++            .collect()
++    } else if names.iter().all(|name| name == DEFAULT_SHERD) {
++        vec![ItemStack::new(1, &Item::DECORATED_POT)]
++    } else {
++        vec![ItemStack::new_with_component(
++            1,
++            &Item::DECORATED_POT,
++            vec![(
++                DataComponent::PotDecorations,
++                Some(Box::new(PotDecorationsImpl { decorations: names })),
++            )],
++        )]
++    }
++}
++
+ pub struct DecoratedPotBlockEntity {
+     pub position: BlockPos,
+     pub sherds: Mutex<Option<Vec<NbtTag>>>,
+@@ -69,6 +130,35 @@ impl BlockEntity for DecoratedPotBlockEntity {
+         Some(nbt)
+     }
+ 
++    /// `DecoratedPotBlock#getDrops` + `data/minecraft/loot_table/blocks/decorated_pot.json`:
++    /// runs while the entity is still present, before the generic block-entity removal in
++    /// `World::set_block_state`, so the sherd pattern and stashed item are still readable here.
++    fn on_block_replaced<'a>(
++        self: Arc<Self>,
++        world: Arc<World>,
++        position: BlockPos,
++        old_state_id: BlockStateId,
++    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
++    where
++        Self: 'a,
++    {
++        Box::pin(async move {
++            let cracked = DecoratedPotLikeProperties::from_state_id(
++                old_state_id,
++                &pumpkin_data::Block::DECORATED_POT,
++            )
++            .cracked;
++            let sherds = self.sherds.lock().await.clone();
++            for stack in break_drops(sherds.as_deref(), cracked) {
++                world.drop_stack(&position, stack).await;
++            }
++            let stashed = self.item.lock().await.take();
++            if let Some(stashed) = stashed {
++                world.drop_stack(&position, stashed).await;
++            }
++        })
++    }
++
+     fn as_any(&self) -> &dyn std::any::Any {
+         self
+     }
+@@ -85,3 +175,67 @@ impl DecoratedPotBlockEntity {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod test {
++    use super::{break_drops, sherd_names};
++    use pumpkin_data::item::Item;
++    use pumpkin_nbt::tag::NbtTag;
++
++    fn sherd_list(names: &[&str]) -> Vec<NbtTag> {
++        names
++            .iter()
++            .map(|name| NbtTag::String((*name).into()))
++            .collect()
++    }
++
++    #[test]
++    fn no_sherds_defaults_to_all_brick() {
++        let names = sherd_names(None);
++        assert!(names.iter().all(|name| name == "minecraft:brick"));
++    }
++
++    #[test]
++    fn partial_sherds_keep_stored_entries_and_default_the_rest() {
++        let list = sherd_list(&[
++            "minecraft:angler_pottery_sherd",
++            "minecraft:archer_pottery_sherd",
++        ]);
++        let names = sherd_names(Some(&list));
++        assert_eq!(names[0], "minecraft:angler_pottery_sherd");
++        assert_eq!(names[1], "minecraft:archer_pottery_sherd");
++        assert_eq!(names[2], "minecraft:brick");
++        assert_eq!(names[3], "minecraft:brick");
++    }
++
++    #[test]
++    fn uncracked_plain_pot_drops_single_decorated_pot() {
++        let drops = break_drops(None, false);
++        assert_eq!(drops.len(), 1);
++        assert_eq!(drops[0].item.id, Item::DECORATED_POT.id);
++        assert!(drops[0].patch.is_empty());
++    }
++
++    #[test]
++    fn uncracked_decorated_pot_drops_single_item_with_pattern_component() {
++        let list = sherd_list(&["minecraft:angler_pottery_sherd"]);
++        let drops = break_drops(Some(&list), false);
++        assert_eq!(drops.len(), 1);
++        assert_eq!(drops[0].item.id, Item::DECORATED_POT.id);
++        assert!(!drops[0].patch.is_empty());
++    }
++
++    #[test]
++    fn cracked_pot_drops_four_individual_sherds() {
++        let list = sherd_list(&[
++            "minecraft:angler_pottery_sherd",
++            "minecraft:archer_pottery_sherd",
++        ]);
++        let drops = break_drops(Some(&list), true);
++        assert_eq!(drops.len(), 4);
++        assert_eq!(drops[0].item.registry_key, "angler_pottery_sherd");
++        assert_eq!(drops[1].item.registry_key, "archer_pottery_sherd");
++        assert_eq!(drops[2].item.id, Item::BRICK.id);
++        assert_eq!(drops[3].item.id, Item::BRICK.id);
++    }
++}
+diff --git a/pumpkin/src/block/entities/mod.rs b/pumpkin/src/block/entities/mod.rs
+index 6216853c..e1b13b20 100644
+--- a/pumpkin/src/block/entities/mod.rs
++++ b/pumpkin/src/block/entities/mod.rs
+@@ -136,6 +136,7 @@ pub trait BlockEntity: Any + Send + Sync {
+         self: Arc<Self>,
+         world: Arc<World>,
+         position: BlockPos,
++        _old_state_id: BlockStateId,
+     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+     where
+         Self: 'a,
+diff --git a/pumpkin/src/block/entities/shulker_box.rs b/pumpkin/src/block/entities/shulker_box.rs
+index d24d18af..dce94588 100644
+--- a/pumpkin/src/block/entities/shulker_box.rs
++++ b/pumpkin/src/block/entities/shulker_box.rs
+@@ -79,6 +79,7 @@ impl BlockEntity for ShulkerBoxBlockEntity {
+         self: Arc<Self>,
+         _world: Arc<World>,
+         _position: BlockPos,
++        _old_state_id: pumpkin_data::BlockStateId,
+     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+     where
+         Self: 'a,
+diff --git a/pumpkin/src/world/mod.rs b/pumpkin/src/world/mod.rs
+index fe0bc731..4f89e774 100644
+--- a/pumpkin/src/world/mod.rs
++++ b/pumpkin/src/world/mod.rs
+@@ -4811,7 +4811,9 @@ impl World {
+             && old_block.default_state.block_entity_type != u16::MAX
+             && let Some(entity) = self.get_block_entity(position)
+         {
+-            entity.on_block_replaced(self.clone(), *position).await;
++            entity
++                .on_block_replaced(self.clone(), *position, replaced_block_state_id)
++                .await;
+             self.remove_block_entity(position);
+         }
+ 

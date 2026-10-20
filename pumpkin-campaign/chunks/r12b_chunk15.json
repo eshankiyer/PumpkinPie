@@ -1,0 +1,32 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "ChestBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ChestBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/chests.rs",
+    "total_methods": 31,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 9,
+    "absent_workspace_wide": [
+      "acceptDouble",
+      "acceptNone",
+      "acceptSingle",
+      "affectNeighborsAfterRemoval",
+      "blockEntityType",
+      "chestCanConnectTo",
+      "combine",
+      "createBlockStateDefinition",
+      "getBlockType",
+      "getChestType",
+      "getCloseChestSound",
+      "getConnectedBlockPos",
+      "getOpenChestSound",
+      "getOpenChestStat",
+      "hasAnalogOutputSignal",
+      "newBlockEntity",
+      "opennessCombiner",
+      "useWithoutItem"
+    ],
+    "note": "round12 broader pool: leads 1-18 of 18 for ChestBlock"
+  }
+]

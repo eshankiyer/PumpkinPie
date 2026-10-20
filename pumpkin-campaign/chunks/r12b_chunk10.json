@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "TestInstanceBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/TestInstanceBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/test_instance_block.rs",
+    "total_methods": 44,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 9,
+    "absent_workspace_wide": [
+      "ErrorMarker",
+      "clearErrorMarkers",
+      "encaseStructure",
+      "errorMessage",
+      "export",
+      "exportTest",
+      "getBeamSections",
+      "getErrorMarkers",
+      "getRenderableBox",
+      "getStartCorner",
+      "getStructureBoundingBox",
+      "getStructureBounds",
+      "getStructurePos",
+      "getStructureSize",
+      "getTestBoundingBox",
+      "getTestBounds",
+      "getTestName",
+      "getUpdatePacket",
+      "getUpdateTag",
+      "markError",
+      "processStructureBoundary",
+      "removeBarriers",
+      "renderMode",
+      "resetTest",
+      "runTest"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 33 for TestInstanceBlockEntity"
+  }
+]

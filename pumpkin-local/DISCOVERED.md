@@ -1,0 +1,111 @@
+# Discovered parity gaps (oracle-observed)
+
+Auto-filed by oracle_discover.py. Each line is a live vanilla-vs-Pumpkin difference; vanilla output is observed, not guessed. Promote real behaviour gaps into WORKQUEUE.md as confirmed (the evidence is already here); drop cosmetic or config-only diffs. NOT auto-fixed.
+
+- [ ] `command:advancement` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for error...dvancement<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:attribute` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorattribute<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:clone` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorclone<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:datapack` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errordatapack<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:debug` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errordebug<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:execute` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorexecute<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:fillbiome` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorfillbiome<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:forceload` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorforceload<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:function` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorfunction<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:jfr` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorjfr<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:locate` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorlocate<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:loot` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorloot<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:place` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorplace<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:random` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorrandom<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:recipe` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorrecipe<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:ride` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorride<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:schedule` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorschedule<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:scoreboard` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorscoreboard<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:spreadplayers` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for error...eadplayers<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:tag` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errortag<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:team` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errorteam<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+- [ ] `command:tick` (high, 2026-07-29 20:39) - Pumpkin does not implement this command
+    - vanilla: `Unknown or incomplete command. See below for errortick<--[HERE]`
+    - pumpkin: `Unknown command: %s. Please check that the command exists and that you have permission to use it.`
+
+- [ ] `sweep:selector:type_namespaced` (suspected, 2026-07-30 08:34) - @e[type=minecraft:pig] namespaced entity type
+    - seq: `kill @e[type=minecraft:pig,limit=0]`
+    - vanilla: `[REJECTED] Limit must be at least 1...pig,limit=0]<--[HERE]`
+    - pumpkin: `[UNKNOWN_ENTITY] Invalid or unknown entity type 'minecraft'...l @e[type=minecraft:pig,limit=0]<--[HERE]`
+- [ ] `sweep:selector:type_negated` (suspected, 2026-07-30 08:34) - @e[type=!minecraft:player] negated type
+    - seq: `kill @e[type=!minecraft:player,limit=0]`
+    - vanilla: `[REJECTED] Limit must be at least 1...yer,limit=0]<--[HERE]`
+    - pumpkin: `[UNKNOWN_ENTITY] Invalid or unknown entity type 'minecraft'...l @e[type=!minecraft:player,limit=0]<--[HERE]`
+- [ ] `sweep:selector:type_tag` (suspected, 2026-07-30 08:34) - @e[type=#minecraft:skeletons] entity type tag
+    - seq: `kill @e[type=#minecraft:skeletons,limit=0]`
+    - vanilla: `[REJECTED] Limit must be at least 1...ons,limit=0]<--[HERE]`
+    - pumpkin: `[UNKNOWN_ENTITY] Invalid or unknown entity type ''...l @e[type=#minecraft:skeletons,limit=0]<--[HERE]`
+- [ ] `sweep:argument:summon_rel_norun` (suspected, 2026-07-30 08:34) - summon at relative coords via rcon (no origin)
+    - seq: `summon minecraft:pig ~ ~ ~`
+    - vanilla: `[SUCCESS] Summoned new Pig`
+    - pumpkin: `[REJECTED] Incorrect argument for command...:pig ~ ~ ~<--[HERE]`
+- [ ] `sweep:argument:give_component` (suspected, 2026-07-30 08:34) - give with a data-component argument
+    - seq: `give @a[limit=0] minecraft:stone[minecraft:custom_name='x'] 1`
+    - vanilla: `[REJECTED] Limit must be at least 1... @a[limit=0] minecraft:stone[minecraft:custom_name='x'] 1<--[HERE]`
+    - pumpkin: `[SUCCESS] Gave 1 * [Stone] to 0`
+- [ ] `sweep:argument:particle_named` (suspected, 2026-07-30 08:34) - particle by name with coords
+    - seq: `particle minecraft:flame 0 200 0 0 0 0 0 1 force`
+    - vanilla: `[SUCCESS] The particle was not visible for anybody`
+    - pumpkin: `[REJECTED] Incorrect argument for command...0 0 0 0 1 force<--[HERE]`
+- [ ] `sweep:summon_nbt:nogravity` (suspected, 2026-07-30 08:34) - summon armor_stand with {NoGravity:1b}
+    - seq: `summon minecraft:armor_stand 2 200 2 {NoGravity:1b}`
+    - vanilla: `[SUCCESS] Summoned new Armor Stand`
+    - pumpkin: `[REJECTED] Incorrect argument for command...d 2 200 2 {NoGravity:1b}<--[HERE]`
+- [ ] `sweep:summon_nbt:customname` (suspected, 2026-07-30 08:34) - summon with a CustomName component
+    - seq: `summon minecraft:armor_stand 2 200 2 {CustomName:'{"text":"x"}'}`
+    - vanilla: `[SUCCESS] Summoned new {"text":"x"}`
+    - pumpkin: `[REJECTED] Incorrect argument for command...d 2 200 2 {CustomName:'{"text":"x"}'}<--[HERE]`
+- [ ] `sweep:summon_nbt:tags` (suspected, 2026-07-30 08:34) - summon carrying scoreboard Tags
+    - seq: `summon minecraft:armor_stand 2 200 2 {Tags:["sweep"]}`
+    - vanilla: `[SUCCESS] Summoned new Armor Stand`
+    - pumpkin: `[REJECTED] Incorrect argument for command...d 2 200 2 {Tags:["sweep"]}<--[HERE]`
+- [ ] `sweep:summon_nbt:passengers` (suspected, 2026-07-30 08:34) - summon with a Passengers stack
+    - seq: `summon minecraft:armor_stand 2 200 2 {Passengers:[{id:"minecraft:pig"}]}`
+    - vanilla: `[SUCCESS] Summoned new Armor Stand`
+    - pumpkin: `[REJECTED] Incorrect argument for command...d 2 200 2 {Passengers:[{id:"minecraft:pig"}]}<--[HERE]`

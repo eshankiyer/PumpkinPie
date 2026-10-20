@@ -1,0 +1,39 @@
+You are porting forward REAL, already-designed parity fixes that were written against an
+old, now-stale checkout of this repo (some from before a full crates/ directory
+restructure). The current tree has moved on by roughly 850 commits since these were
+written. Do NOT git-apply these patches directly - they will not apply cleanly and even
+where they do, file layout and neighboring code have likely changed. Instead, for each
+.diff file in this directory:
+
+1. Read the diff to understand the INTENT: what vanilla behavior it adds/fixes, and why
+   (commit messages and comments in the diff explain the reasoning - read them).
+2. Find the current equivalent file(s) in this tree (paths have likely changed - the old
+   diffs predate the crates/ restructure, so e.g. `pumpkin-data/src/blocks.rs` is now
+   `crates/pumpkin-data/src/blocks.rs`, `pumpkin/src/...` is now `crates/pumpkin/src/...`).
+3. CHECK WHETHER THIS WAS ALREADY FIXED by someone else in the intervening 850 commits -
+   grep for the specific behavior/method the diff adds. If it's already there (even
+   differently implemented), write NOT_NEEDED in WAVE_REPORT.md with the current file that
+   already covers it and do nothing further for that diff.
+4. If genuinely still missing: re-implement the SAME behavioral fix against the CURRENT
+   code, following current conventions/neighboring style (which may differ from the old
+   diff's style) rather than copy-pasting the stale diff text.
+5. Cite the vanilla source (file:lines) fresh from ~/pumpkin-vanilla-26.2/decompiled for
+   any vanilla behavior claim in the diff - do not trust the old diff's citations without
+   re-reading the source yourself, they may be stale or the diff author may have been
+   wrong.
+
+Files in this directory:
+FILES_LIST
+
+Hard rules:
+- Every change carries a comment citing the vanilla file and line numbers you read THIS
+  run.
+- Match surrounding style exactly. No emojis. Comments minimal and factual.
+- Do NOT run cargo build/clippy/test, they are too slow - grep for exact signatures instead
+  of guessing them.
+- Do NOT commit, do NOT touch git. Delete the .diff files from the worktree once you're
+  done with each (they are reference material, not part of the change).
+
+End by appending to WAVE_REPORT.md one row per .diff file: NOT_NEEDED (already covered,
+name the file) or PORTED (what you changed and where), plus any vanilla citations you
+re-verified.

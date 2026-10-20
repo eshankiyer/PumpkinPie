@@ -1,0 +1,7 @@
+{
+  "pass": false,
+  "item": "A3",
+  "stage_failed": "static",
+  "reason": "noop:no_logic_touched",
+  "log_tail": ""
+}

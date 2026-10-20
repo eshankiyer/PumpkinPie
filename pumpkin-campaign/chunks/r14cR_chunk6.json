@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundChatCommandPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundChatCommandPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/chat_command.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundChatCommandSignedPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundChatCommandSignedPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/chat_command_signed.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundClientInformationPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ServerboundClientInformationPacket.java",
+    "rust_file": "crates/pumpkin/src/net/java/config/client_information.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundClientTickEndPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundClientTickEndPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/client_tick_end.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundCommandSuggestionPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundCommandSuggestionPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/command_suggestion.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundConfigurationAcknowledgedPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundConfigurationAcknowledgedPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/configuration_acknowledged.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundContainerButtonClickPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundContainerButtonClickPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/container_button_click.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundContainerClickPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundContainerClickPacket.java",
+    "rust_file": "crates/pumpkin-inventory/src/container_click.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundContainerSlotStateChangedPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundContainerSlotStateChangedPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/container_slot_state_changed.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundCookieResponsePacket",
+    "vanilla_path": "net/minecraft/network/protocol/cookie/ServerboundCookieResponsePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/cookie_response.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundCustomClickActionPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ServerboundCustomClickActionPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/custom_click_action.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundCustomPayloadPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ServerboundCustomPayloadPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/custom_payload.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundDebugSubscriptionRequestPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundDebugSubscriptionRequestPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/debug_subscription_request.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundEditBookPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundEditBookPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/edit_book.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ServerboundInteractPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ServerboundInteractPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/server/play/interact.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  }
+]

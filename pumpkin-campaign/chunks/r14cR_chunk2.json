@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "FrostedIceBlock",
+    "vanilla_path": "net/minecraft/world/level/block/FrostedIceBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/frosted_ice.rs",
+    "total_methods": 6,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "FurnaceBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/FurnaceBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/furnace.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createMenu"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "GameModeCommand",
+    "vanilla_path": "net/minecraft/server/commands/GameModeCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/gamemode.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "setGameMode"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "GateBehavior",
+    "vanilla_path": "net/minecraft/world/entity/ai/behavior/GateBehavior.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/behavior/gate.rs",
+    "total_methods": 7,
+    "in_declaring_file": 5,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "debugString"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "GlazedTerracottaBlock",
+    "vanilla_path": "net/minecraft/world/level/block/GlazedTerracottaBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/glazed_terracotta.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Goal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/Goal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/mod.rs",
+    "total_methods": 12,
+    "in_declaring_file": 9,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getServerLevel"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "HangingRootsBlock",
+    "vanilla_path": "net/minecraft/world/level/block/HangingRootsBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/hanging_roots.rs",
+    "total_methods": 6,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "HangingSignItem",
+    "vanilla_path": "net/minecraft/world/item/HangingSignItem.java",
+    "rust_file": "crates/pumpkin/src/block/entities/hanging_sign.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "canPlace"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "HasSturdyFacePredicate",
+    "vanilla_path": "net/minecraft/world/level/levelgen/blockpredicates/HasSturdyFacePredicate.java",
+    "rust_file": "crates/pumpkin-world/src/generation/block_predicate.rs",
+    "total_methods": 2,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "HayBlock",
+    "vanilla_path": "net/minecraft/world/level/block/HayBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/hay.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "fallOn"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "HeavyCoreBlock",
+    "vanilla_path": "net/minecraft/world/level/block/HeavyCoreBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/heavy_core.rs",
+    "total_methods": 7,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "HugeMushroomBlock",
+    "vanilla_path": "net/minecraft/world/level/block/HugeMushroomBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/huge_mushroom.rs",
+    "total_methods": 6,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "InkSacItem",
+    "vanilla_path": "net/minecraft/world/item/InkSacItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/ink_sac.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "tryApplyToSign"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "InteractWithDoor",
+    "vanilla_path": "net/minecraft/world/entity/ai/behavior/InteractWithDoor.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/interact_with_door.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "closeDoorsThatIHaveOpenedOrPassedThrough"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "ItemFrameItem",
+    "vanilla_path": "net/minecraft/world/item/ItemFrameItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/item_frame.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "mayPlace"
+    ]
+  }
+]

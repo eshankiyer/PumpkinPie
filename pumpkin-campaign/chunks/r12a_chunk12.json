@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "lighting",
+    "vanilla_class": "LightEngine",
+    "vanilla_path": "net/minecraft/world/level/lighting/LightEngine.java",
+    "rust_file": "crates/pumpkin-world/src/lighting/engine.rs",
+    "total_methods": 29,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 1,
+    "absent_workspace_wide": [
+      "checkBlock",
+      "decreaseAllDirections",
+      "decreaseSkipOneDirection",
+      "enqueueDecrease",
+      "enqueueIncrease",
+      "getDebugData",
+      "getDebugSectionType",
+      "getFromLevel",
+      "getLightValue",
+      "getOcclusionShape",
+      "getOpacity",
+      "hasDifferentLightProperties",
+      "hasLightWork",
+      "increaseLightFromEmission",
+      "increaseOnlyOneDirection",
+      "increaseSkipOneDirection",
+      "increaseSkySourceInDirections",
+      "isEmptyShape",
+      "isFromEmptyShape",
+      "isIncreaseFromEmission",
+      "queueSectionData",
+      "retainData",
+      "setLightEnabled",
+      "shapeOccludes",
+      "shouldPropagateInDirection"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 26 for LightEngine"
+  }
+]

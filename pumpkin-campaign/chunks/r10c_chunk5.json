@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Entity",
+    "vanilla_path": "net/minecraft/world/entity/Entity.java",
+    "rust_file": "crates/pumpkin/src/entity/mod.rs",
+    "total_methods": 422,
+    "in_declaring_file": 67,
+    "elsewhere_in_workspace": 73,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "isInterpolating",
+      "isInvisibleTo",
+      "isInvulnerableToBase",
+      "isInvulnerableToPiercingWeapon",
+      "isLocalClientAuthoritative",
+      "isLocalInstanceAuthoritative",
+      "isOnPortalCooldown",
+      "isOnRails",
+      "isPassengerOfSameVehicle",
+      "isPushedByFluid",
+      "isShiftKeyDown",
+      "isSteppingCarefully",
+      "isSupportedBy",
+      "isSuppressingBounce",
+      "isVisuallyCrawling",
+      "isVisuallySwimming",
+      "killedEntity",
+      "lavaHurt",
+      "lavaIgnite",
+      "lerpHeadTo"
+    ],
+    "note": "leads 161-180 of 281 for Entity"
+  }
+]

@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "BlockBehaviour",
+    "vanilla_path": "net/minecraft/world/level/block/state/BlockBehaviour.java",
+    "rust_file": "crates/pumpkin/src/block/mod.rs",
+    "total_methods": 124,
+    "in_declaring_file": 12,
+    "elsewhere_in_workspace": 25,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "getDescriptionId",
+      "getDestroyProgress",
+      "getDestroySpeed",
+      "getDrops",
+      "getEntityInsideCollisionShape",
+      "getFaceOcclusionShape",
+      "getInteractionShape",
+      "getLightDampening",
+      "getLightEmission",
+      "getLootTable",
+      "getMapColor",
+      "getMaxHorizontalOffset",
+      "getMaxVerticalOffset",
+      "getOcclusionShape",
+      "getPistonPushReaction",
+      "getRenderShape",
+      "getShadeBrightness",
+      "getSignal",
+      "getSoundType",
+      "getVisualShape"
+    ],
+    "note": "leads 21-40 of 86 for BlockBehaviour"
+  }
+]

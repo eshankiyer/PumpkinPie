@@ -1,0 +1,23 @@
+[
+  {
+    "subsystem": "server_level",
+    "vanilla_class": "ServerEntity",
+    "vanilla_path": "net/minecraft/server/level/ServerEntity.java",
+    "rust_file": "crates/pumpkin/src/server/mod.rs",
+    "total_methods": 9,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "absent_workspace_wide": [
+      "addPairing",
+      "getLastSentMovement",
+      "getLastSentXRot",
+      "getLastSentYHeadRot",
+      "getLastSentYRot",
+      "getPositionBase",
+      "removePairing",
+      "sendChanges",
+      "sendPairingData"
+    ],
+    "note": "round13 broader pool: leads 1-9 of 9 for ServerEntity"
+  }
+]

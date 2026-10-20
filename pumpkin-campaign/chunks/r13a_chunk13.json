@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "chunk",
+    "vanilla_class": "PalettedContainer",
+    "vanilla_path": "net/minecraft/world/level/chunk/PalettedContainer.java",
+    "rust_file": "crates/pumpkin-world/src/chunk/palette.rs",
+    "total_methods": 22,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 9,
+    "absent_workspace_wide": [
+      "acquire",
+      "codecRO",
+      "codecRW",
+      "forEachInPalette",
+      "getAndSet",
+      "getAndSetUnchecked",
+      "getSerializedSize",
+      "maybeHas",
+      "onResize",
+      "recreate"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for PalettedContainer"
+  }
+]

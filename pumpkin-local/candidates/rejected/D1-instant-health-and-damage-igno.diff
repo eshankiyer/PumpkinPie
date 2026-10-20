@@ -1,0 +1,30 @@
+diff --git a/pumpkin/src/entity/living.rs b/pumpkin/src/entity/living.rs
+index 6f56270..9b898d6 100644
+--- a/pumpkin/src/entity/living.rs
++++ b/pumpkin/src/entity/living.rs
+@@ -879,6 +879,25 @@ impl LivingEntity {
+             let speed =
+                 effective_speed * 0.216_000_02 / (slipperiness * slipperiness * slipperiness);
+ 
++    /// Check if this entity is undead (same classification as Smite enchantment).
++    #[must_use]
++    fn is_undead(&self) -> bool {
++        self.entity.entity_type == &EntityType::ZOMBIE
++            || self.entity.entity_type == &EntityType::DROWNED
++            || self.entity.entity_type == &EntityType::HUSK
++            || self.entity.entity_type == &EntityType::ZOMBIE_VILLAGER
++            || self.entity.entity_type == &EntityType::ZOMBIFIED_PIGLIN
++            || self.entity.entity_type == &EntityType::SKELETON
++            || self.entity.entity_type == &EntityType::BOGGED
++            || self.entity.entity_type == &EntityType::PARCHED
++            || self.entity.entity_type == &EntityType::WITHER_SKELETON
++            || self.entity.entity_type == &EntityType::STRAY
++            || self.entity.entity_type == &EntityType::PHANTOM
++            || self.entity.entity_type == &EntityType::WITHER
++            || self.entity.entity_type == &EntityType::ZOMBIE_HORSE
++            || self.entity.entity_type == &EntityType::SKELETON_HORSE
++    }
++
+             (speed, slipperiness * 0.91)
+         } else {
+             let speed = if let Some(player) = caller.get_player() {

@@ -1,0 +1,35 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 44,
+    "elsewhere_in_workspace": 59,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "getItemBySlot",
+      "getItemHeldByArm",
+      "getJumpBoostPower",
+      "getLastClimbablePos",
+      "getLastHurtByMobTimestamp",
+      "getLastHurtByPlayerMemoryTime",
+      "getLastHurtMobTimestamp",
+      "getLiquidCollisionShape",
+      "getLocalBoundsForPose",
+      "getLootTableSeed",
+      "getLuck",
+      "getMaxAbsorption",
+      "getMaxFallDistance",
+      "getMaxHeadRotationRelativeToBody",
+      "getNoActionTime",
+      "getOffhandItem",
+      "getPassengerRidingPosition",
+      "getPreciseBodyRotation",
+      "getProjectile",
+      "getRelativePortalPosition"
+    ],
+    "note": "leads 61-80 of 200 for LivingEntity"
+  }
+]

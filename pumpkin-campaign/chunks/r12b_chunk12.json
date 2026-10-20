@@ -1,0 +1,39 @@
+[
+  {
+    "subsystem": "commands",
+    "vanilla_class": "EntitySelectorParser",
+    "vanilla_path": "net/minecraft/commands/arguments/selector/EntitySelectorParser.java",
+    "rust_file": "crates/pumpkin/src/command/argument_types/entity_selector/parser.rs",
+    "total_methods": 37,
+    "in_declaring_file": 10,
+    "elsewhere_in_workspace": 2,
+    "absent_workspace_wide": [
+      "advancementsOption",
+      "allowSelectors",
+      "gamemodeOption",
+      "isTag",
+      "limitToType",
+      "limitedOption",
+      "nameOption",
+      "scoresOption",
+      "setDeltaX",
+      "setDeltaY",
+      "setDeltaZ",
+      "setDistance",
+      "setMaxResults",
+      "setOrder",
+      "setRotX",
+      "setRotY",
+      "setSuggestions",
+      "setWorldLimited",
+      "setX",
+      "setY",
+      "setZ",
+      "shouldInvertValue",
+      "sortedOption",
+      "teamOption",
+      "typeOption"
+    ],
+    "note": "round12 broader pool: leads 1-25 of 25 for EntitySelectorParser"
+  }
+]

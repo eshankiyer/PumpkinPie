@@ -1,0 +1,32 @@
+[
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "BoundingBox",
+    "vanilla_path": "net/minecraft/world/level/levelgen/structure/BoundingBox.java",
+    "rust_file": "crates/pumpkin-util/src/math/boundingbox.rs",
+    "total_methods": 28,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 9,
+    "absent_workspace_wide": [
+      "encapsulate",
+      "encapsulating",
+      "encapsulatingBoxes",
+      "encapsulatingPositions",
+      "equals",
+      "forAllCorners",
+      "fromCorners",
+      "getXSpan",
+      "getYSpan",
+      "getZSpan",
+      "hashCode",
+      "infinite",
+      "inflatedBy",
+      "intersectingChunks",
+      "isInside",
+      "move",
+      "moved",
+      "orientBox"
+    ],
+    "note": "round12 broader pool: leads 1-18 of 18 for BoundingBox"
+  }
+]

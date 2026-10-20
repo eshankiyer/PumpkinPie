@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Brain",
+    "vanilla_path": "net/minecraft/world/entity/ai/Brain.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/brain/mod.rs",
+    "total_methods": 32,
+    "in_declaring_file": 18,
+    "elsewhere_in_workspace": 4,
+    "absent_workspace_wide": [
+      "acceptEmpty",
+      "eraseMemory",
+      "forEach",
+      "getMemory",
+      "hasMemoryValue",
+      "provider",
+      "setMemory",
+      "setMemoryWithExpiry",
+      "setSchedule",
+      "updateActivityFromSchedule"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for Brain"
+  }
+]

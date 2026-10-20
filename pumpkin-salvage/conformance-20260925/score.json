@@ -1,0 +1,138 @@
+{
+ "milestone": "26.2",
+ "coverage": {
+  "pct": 40.72,
+  "covered": 1077,
+  "total": 2824,
+  "method": "mechanical name match (exact struct/enum name, case-insensitive struct name, or exact snake_case filename) across the full enumerated vanilla class list -- no AI, no sampling",
+  "by_subsystem": {
+   "block": {
+    "total": 457,
+    "covered": 282,
+    "coverage_pct": 61.71
+   },
+   "entity": {
+    "total": 638,
+    "covered": 262,
+    "coverage_pct": 41.07
+   },
+   "item": {
+    "total": 300,
+    "covered": 79,
+    "coverage_pct": 26.33
+   },
+   "inventory": {
+    "total": 62,
+    "covered": 20,
+    "coverage_pct": 32.26
+   },
+   "material": {
+    "total": 11,
+    "covered": 4,
+    "coverage_pct": 36.36
+   },
+   "food": {
+    "total": 4,
+    "covered": 2,
+    "coverage_pct": 50.0
+   },
+   "border": {
+    "total": 3,
+    "covered": 1,
+    "coverage_pct": 33.33
+   },
+   "gameevent": {
+    "total": 13,
+    "covered": 5,
+    "coverage_pct": 38.46
+   },
+   "worldgen": {
+    "total": 405,
+    "covered": 131,
+    "coverage_pct": 32.35
+   },
+   "lighting": {
+    "total": 14,
+    "covered": 1,
+    "coverage_pct": 7.14
+   },
+   "chunk": {
+    "total": 51,
+    "covered": 8,
+    "coverage_pct": 15.69
+   },
+   "protocol": {
+    "total": 282,
+    "covered": 173,
+    "coverage_pct": 61.35
+   },
+   "commands": {
+    "total": 210,
+    "covered": 94,
+    "coverage_pct": 44.76
+   },
+   "storage": {
+    "total": 143,
+    "covered": 7,
+    "coverage_pct": 4.9
+   },
+   "saveddata": {
+    "total": 12,
+    "covered": 4,
+    "coverage_pct": 33.33
+   },
+   "server_level": {
+    "total": 40,
+    "covered": 4,
+    "coverage_pct": 10.0
+   }
+  }
+ },
+ "fidelity_sample": {
+  "pass_rate_pct": 50.0,
+  "n": 16,
+  "passed": 8,
+  "failed": 8,
+  "method": "stratified random sample (seed 262, up to 6 per subsystem) of COVERED classes only, compared against decompiled vanilla by an AI agent reading both sides",
+  "checked_subsystems": [
+   "block",
+   "entity",
+   "inventory"
+  ],
+  "unchecked_subsystems": [
+   "border",
+   "chunk",
+   "commands",
+   "food",
+   "gameevent",
+   "item",
+   "lighting",
+   "material",
+   "protocol",
+   "saveddata",
+   "server_level",
+   "storage",
+   "worldgen"
+  ],
+  "by_subsystem": {
+   "block": {
+    "n": 6,
+    "pass": 4,
+    "fail": 2
+   },
+   "entity": {
+    "n": 6,
+    "pass": 2,
+    "fail": 4
+   },
+   "inventory": {
+    "n": 4,
+    "pass": 2,
+    "fail": 2
+   }
+  },
+  "caveat": "This is a partial sample, not a full measurement. Do not report fidelity_pass_rate_pct as if it applies to unchecked_subsystems."
+ },
+ "composite_estimate_pct": 20.36,
+ "composite_caveat": "coverage_pct_x (40.72%) is a real full-population measurement. fidelity_pass_rate_pct (50.0%) is from a 16-unit sample covering only ['block', 'entity', 'inventory'], not ['border', 'chunk', 'commands', 'food', 'gameevent', 'item', 'lighting', 'material', 'protocol', 'saveddata', 'server_level', 'storage', 'worldgen']. composite_estimate_pct = coverage * fidelity is therefore an ESTIMATE that assumes the sampled fidelity rate generalizes to unchecked subsystems and to match-kind categories not yet spot-checked. State the sample size whenever this number is quoted."
+}

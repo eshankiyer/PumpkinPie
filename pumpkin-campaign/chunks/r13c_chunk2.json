@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "LivingEntity",
+    "vanilla_path": "net/minecraft/world/entity/LivingEntity.java",
+    "rust_file": "crates/pumpkin/src/entity/living.rs",
+    "total_methods": 304,
+    "in_declaring_file": 73,
+    "elsewhere_in_workspace": 66,
+    "absent_workspace_wide": [
+      "dealDefaultKnockback",
+      "die",
+      "doAutoAttackOnTouch",
+      "doHurtTarget",
+      "doPush",
+      "dropAllDeathLoot",
+      "dropCustomDeathLoot",
+      "dropExperience",
+      "dropFromEntityInteractLootTable",
+      "dropFromGiftLootTable",
+      "dropFromLootTable",
+      "dropFromShearingLootTable",
+      "equipmentHasChanged",
+      "getAbsorptionAmount",
+      "getAgeScale",
+      "getArmorCoverPercentage",
+      "getAttackAnim",
+      "getAttackRangeWith",
+      "getAttributeBaseValue",
+      "getAttributes"
+    ],
+    "note": "round13 leads 21-40 of 164 for LivingEntity"
+  }
+]

@@ -1,0 +1,65 @@
+running 6 specs, gpu=1 builds=2
+
+[02-growth-rates] resetting worktree left dirty by an earlier spec
+[02-growth-rates] iter 1: generating
+[11-lightning-raining-at] resetting worktree left dirty by an earlier spec
+[15-tripwire-avoid-traps] resetting worktree left dirty by an earlier spec
+[16-tripwire-shears-durability] resetting worktree left dirty by an earlier spec
+[02-growth-rates] iter 1: replied in 242s
+[02-growth-rates] iter 1: applied 1, failed 0
+[09-instant-double-apply] iter 1: generating
+[02-growth-rates] iter 1: building
+[02-growth-rates] assertions failed: ASSERT_ABSENT still present: random_range(0..5)
+[09-instant-double-apply] iter 1: replied in 2083s
+[09-instant-double-apply] iter 1: applied 0, failed 1
+[09-instant-double-apply]     why: empty reply
+[09-instant-double-apply] iter 2: generating
+[09-instant-double-apply] iter 2: replied in 1825s
+[11-lightning-raining-at] iter 1: generating
+[09-instant-double-apply] iter 2: applied 1, failed 0
+[09-instant-double-apply] iter 2: building
+[09-instant-double-apply] deleted 1 unused import(s) outside the model's span
+[09-instant-double-apply] unused imports were the only errors, rebuilding
+[09-instant-double-apply] iter 2: cargo test (full suite)
+[09-instant-double-apply] BUILD AND TESTS CLEAN, probe=NONE
+[11-lightning-raining-at] iter 1: replied in 798s
+[15-tripwire-avoid-traps] iter 1: generating
+[11-lightning-raining-at] iter 1: applied 1, failed 0
+[11-lightning-raining-at] iter 1: building
+[11-lightning-raining-at] iter 1: build failed, 373 chars back to model
+[11-lightning-raining-at]     err: error[E0599]: no method named `is_raining_at_unchecked` found for reference `&std::sync::Arc<world::World>` in the current scope
+[11-lightning-raining-at]     injecting real API of World
+[15-tripwire-avoid-traps] iter 1: replied in 1434s
+[16-tripwire-shears-durability] iter 1: generating
+[15-tripwire-avoid-traps] iter 1: applied 1, failed 0
+[15-tripwire-avoid-traps] iter 1: building
+[15-tripwire-avoid-traps] iter 1: build failed, 841 chars back to model
+[15-tripwire-avoid-traps]     err: error[E0379]: functions in trait impls cannot be declared const
+[16-tripwire-shears-durability] iter 1: replied in 2018s
+[16-tripwire-shears-durability] iter 1: applied 0, failed 1
+[16-tripwire-shears-durability]     why: empty reply
+[02-growth-rates] iter 2: generating
+[02-growth-rates] iter 2: replied in 625s
+[13-aec-nbt] iter 1: generating
+[02-growth-rates] iter 2: applied 0, failed 1
+[02-growth-rates]     why: the replacement is identical to the current function
+[13-aec-nbt] iter 1: replied in 2208s
+[13-aec-nbt] iter 1: applied 0, failed 0
+[11-lightning-raining-at] iter 2: generating
+[11-lightning-raining-at] iter 2: replied in 549s
+[11-lightning-raining-at] iter 2: applied 0, failed 1
+[11-lightning-raining-at]     why: CANNOT: `is_raining_at_unchecked` is not visible in the provided API listing or shown code
+[15-tripwire-avoid-traps] iter 2: generating
+[15-tripwire-avoid-traps] iter 2: replied in 1829s
+[16-tripwire-shears-durability] iter 2: generating
+[15-tripwire-avoid-traps] iter 2: applied 1, failed 0
+[15-tripwire-avoid-traps] iter 2: building
+[15-tripwire-avoid-traps] iter 2: build failed, 800 chars back to model
+[15-tripwire-avoid-traps]     err: error[E0379]: functions in trait impls cannot be declared const
+[15-tripwire-avoid-traps] iter 2 scored (1, -9), worse than iter 1 (1, -7): rolled back to best
+[15-tripwire-avoid-traps]     injecting real API of EntityBase
+[16-tripwire-shears-durability] model call failed: timed out
+[02-growth-rates] triage at iter 3: RETRY: Iter 1 compiled but failed an assertion, and iter 2 returned the unmodified function, indicating the model needs another attempt to correctl
+[13-aec-nbt] iter 2: generating
+[13-aec-nbt] iter 2: replied in 2038s
+[13-aec-nbt] iter 2: applied 0, failed 0

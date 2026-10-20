@@ -1,0 +1,197 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "CatSitOnBlockGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/CatSitOnBlockGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/cat_sit_on_block.rs",
+    "total_methods": 5,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "isValidTarget"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "ChainBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ChainBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/chain.rs",
+    "total_methods": 7,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "ChestBoat",
+    "vanilla_path": "net/minecraft/world/entity/vehicle/boat/ChestBoat.java",
+    "rust_file": "crates/pumpkin/src/entity/vehicle/chest_boat.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "rideHeight"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "ChorusPlantBlock",
+    "vanilla_path": "net/minecraft/world/level/block/ChorusPlantBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/chorus_plant.rs",
+    "total_methods": 8,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition"
+    ]
+  },
+  {
+    "subsystem": "server_level",
+    "vanilla_class": "ClientInformation",
+    "vanilla_path": "net/minecraft/server/level/ClientInformation.java",
+    "rust_file": "crates/pumpkin/src/net/java/config/client_information.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createDefault"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundAwardStatsPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundAwardStatsPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/award_stats.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundBlockEntityDataPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundBlockEntityDataPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/block_entity_data.rs",
+    "total_methods": 6,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 5,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundBlockUpdatePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundBlockUpdatePacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/block_update.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundBundleDelimiterPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundBundleDelimiterPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/bundle_delimiter.rs",
+    "total_methods": 1,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundChangeDifficultyPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundChangeDifficultyPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/change_difficulty.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundChunkBatchStartPacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundChunkBatchStartPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/play/chunk_batch_start.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundClearDialogPacket",
+    "vanilla_path": "net/minecraft/network/protocol/common/ClientboundClearDialogPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/config/clear_dialog.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundCodeOfConductPacket",
+    "vanilla_path": "net/minecraft/network/protocol/configuration/ClientboundCodeOfConductPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/config/code_of_conduct.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundContainerClosePacket",
+    "vanilla_path": "net/minecraft/network/protocol/game/ClientboundContainerClosePacket.java",
+    "rust_file": "crates/pumpkin/src/net/bedrock/play/container_close.rs",
+    "total_methods": 3,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  },
+  {
+    "subsystem": "protocol",
+    "vanilla_class": "ClientboundCookieRequestPacket",
+    "vanilla_path": "net/minecraft/network/protocol/cookie/ClientboundCookieRequestPacket.java",
+    "rust_file": "crates/pumpkin-protocol/src/java/client/config/cookie_request.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "type"
+    ]
+  }
+]

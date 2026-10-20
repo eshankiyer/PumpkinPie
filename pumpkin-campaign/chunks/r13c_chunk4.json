@@ -1,0 +1,34 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "Player",
+    "vanilla_path": "net/minecraft/world/entity/player/Player.java",
+    "rust_file": "crates/pumpkin/src/entity/player.rs",
+    "total_methods": 201,
+    "in_declaring_file": 49,
+    "elsewhere_in_workspace": 36,
+    "absent_workspace_wide": [
+      "isLocalClientAuthoritative",
+      "isLocalPlayer",
+      "isMobilityRestricted",
+      "isPushedByFluid",
+      "isReducedDebugInfo",
+      "isScoping",
+      "isSecondaryUseActive",
+      "isStayingOnGroundSurface",
+      "isTextFilteringEnabled",
+      "isWithinBlockInteractionRange",
+      "killedEntity",
+      "magicCrit",
+      "mayBuild",
+      "nameAndId",
+      "onAboveBubbleColumn",
+      "onAttack",
+      "onEnchantmentPerformed",
+      "onInsideBubbleColumn",
+      "onUpdateAbilities",
+      "openCommandBlock"
+    ],
+    "note": "round13 leads 61-80 of 116 for Player"
+  }
+]

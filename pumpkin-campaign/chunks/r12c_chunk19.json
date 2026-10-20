@@ -1,0 +1,26 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "DecoratedPotBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/DecoratedPotBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/decorated_pot.rs",
+    "total_methods": 20,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 3,
+    "absent_workspace_wide": [
+      "collectImplicitComponents",
+      "createDecoratedPotInstance",
+      "createDecoratedPotTemplate",
+      "getContainerBlockEntity",
+      "getLootTableSeed",
+      "getTheItem",
+      "getUpdatePacket",
+      "getUpdateTag",
+      "removeComponentsFromTag",
+      "setLootTableSeed",
+      "setTheItem",
+      "splitTheItem"
+    ],
+    "note": "round12 broader pool: leads 1-12 of 12 for DecoratedPotBlockEntity"
+  }
+]

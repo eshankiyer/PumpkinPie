@@ -1,0 +1,82 @@
+running 3 specs, gpu=1 builds=1
+
+[20-locate-structure-by-name] iter 1: generating
+[21-locate-sets-containing] waiting for worktree /home/eshanki/pumpkin-wt/locate
+[22-locate-horizontal-distance] waiting for worktree /home/eshanki/pumpkin-wt/locate
+[20-locate-structure-by-name] iter 1: replied in 34s
+[20-locate-structure-by-name] iter 1: applied 1, failed 0
+[20-locate-structure-by-name] iter 1: building
+[20-locate-structure-by-name] iter 1: build failed, 288 chars back to model
+[20-locate-structure-by-name] iter 2: generating
+[20-locate-structure-by-name] iter 2: replied in 37s
+[20-locate-structure-by-name] iter 2: applied 1, failed 0
+[20-locate-structure-by-name] iter 2: building
+[20-locate-structure-by-name] iter 2: build failed, 288 chars back to model
+[20-locate-structure-by-name] iter 3: generating
+[20-locate-structure-by-name] iter 3: replied in 37s
+[20-locate-structure-by-name] iter 3: applied 1, failed 0
+[20-locate-structure-by-name] iter 3: building
+[20-locate-structure-by-name] iter 3: build failed, 410 chars back to model
+[20-locate-structure-by-name] iter 4: generating
+[20-locate-structure-by-name] iter 4: replied in 34s
+[20-locate-structure-by-name] iter 4: applied 1, failed 0
+[20-locate-structure-by-name] iter 4: building
+[20-locate-structure-by-name] iter 4: cargo test locate::tests::structure_by_name
+[20-locate-structure-by-name] iter 4: TESTS FAILED
+[20-locate-structure-by-name] gave up after max iterations
+[21-locate-sets-containing] resetting worktree left dirty by an earlier spec
+[21-locate-sets-containing] iter 1: generating
+[21-locate-sets-containing] iter 1: replied in 35s
+[21-locate-sets-containing] iter 1: applied 1, failed 0
+[21-locate-sets-containing] iter 1: building
+[21-locate-sets-containing] iter 1: cargo test locate::tests::sets_containing
+[21-locate-sets-containing] iter 1: TESTS FAILED
+[21-locate-sets-containing] iter 2: generating
+[21-locate-sets-containing] iter 2: replied in 134s
+[21-locate-sets-containing] iter 2: applied 1, failed 0
+[21-locate-sets-containing] iter 2: building
+[21-locate-sets-containing] iter 2: build failed, 128 chars back to model
+[21-locate-sets-containing] iter 3: generating
+[21-locate-sets-containing] iter 3: replied in 38s
+[21-locate-sets-containing] iter 3: applied 1, failed 0
+[21-locate-sets-containing] iter 3: building
+[21-locate-sets-containing] iter 3: build failed, 128 chars back to model
+[21-locate-sets-containing] iter 4: generating
+[21-locate-sets-containing] iter 4: replied in 31s
+[21-locate-sets-containing] iter 4: applied 0, failed 1
+[21-locate-sets-containing]     why: the replacement is identical to the current function
+[21-locate-sets-containing] gave up after max iterations
+[22-locate-horizontal-distance] resetting worktree left dirty by an earlier spec
+[22-locate-horizontal-distance] iter 1: generating
+[22-locate-horizontal-distance] iter 1: replied in 31s
+[22-locate-horizontal-distance] iter 1: applied 1, failed 0
+[22-locate-horizontal-distance] iter 1: building
+[22-locate-horizontal-distance] iter 1: cargo test locate::tests::horizontal_distance
+[22-locate-horizontal-distance] iter 1: TESTS FAILED
+[22-locate-horizontal-distance] iter 2: generating
+[22-locate-horizontal-distance] iter 2: replied in 40s
+[22-locate-horizontal-distance] iter 2: applied 1, failed 0
+[22-locate-horizontal-distance] iter 2: building
+[22-locate-horizontal-distance] iter 2: build failed, 121 chars back to model
+[22-locate-horizontal-distance] iter 3: generating
+[22-locate-horizontal-distance] iter 3: replied in 35s
+[22-locate-horizontal-distance] iter 3: applied 1, failed 0
+[22-locate-horizontal-distance] iter 3: building
+[22-locate-horizontal-distance] iter 3: build failed, 121 chars back to model
+[22-locate-horizontal-distance] iter 4: generating
+[22-locate-horizontal-distance] iter 4: replied in 36s
+[22-locate-horizontal-distance] iter 4: applied 0, failed 1
+[22-locate-horizontal-distance]     why: could not locate a unique function matching: pub fn horizontal_distance(a: BlockPos, b: BlockPos) -> i32 {
+[22-locate-horizontal-distance] gave up after max iterations
+
+===== ALL DONE =====
+0/3 specs built clean in 19 min
+
+FAILED    20-locate-structure-by-name  max iterations
+FAILED    21-locate-sets-containing  max iterations
+FAILED    22-locate-horizontal-distance  max iterations
+
+Diffs: /tmp/pumpkin_<name>.diff
+Nothing was pushed. Review, then: python3 driver.py --rebase-only
+
+Marker written to /tmp/pumpkin_run_DONE.txt

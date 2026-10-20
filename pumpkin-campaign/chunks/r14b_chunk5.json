@@ -1,0 +1,212 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "IceBlock",
+    "vanilla_path": "net/minecraft/world/level/block/IceBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/ice.rs",
+    "total_methods": 5,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "meltsInto",
+      "playerDestroy"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "JukeboxSong",
+    "vanilla_path": "net/minecraft/world/item/JukeboxSong.java",
+    "rust_file": "crates/pumpkin-data/src/generated/jukebox_song.rs",
+    "total_methods": 3,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "fromStack",
+      "hasFinished"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "KelpBlock",
+    "vanilla_path": "net/minecraft/world/level/block/KelpBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/kelp.rs",
+    "total_methods": 8,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 6,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getBlocksToGrowWhenBonemealed",
+      "getBodyBlock"
+    ]
+  },
+  {
+    "subsystem": "item",
+    "vanilla_class": "LingeringPotionItem",
+    "vanilla_path": "net/minecraft/world/item/LingeringPotionItem.java",
+    "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createPotion",
+      "use"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "MangrovePropaguleBlock",
+    "vanilla_path": "net/minecraft/world/level/block/MangrovePropaguleBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/mangrove_propagule.rs",
+    "total_methods": 12,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 4,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "createNewHangingPropagule"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "MangroveRootsBlock",
+    "vanilla_path": "net/minecraft/world/level/block/MangroveRootsBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/mangrove_roots.rs",
+    "total_methods": 5,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "skipRendering"
+    ]
+  },
+  {
+    "subsystem": "material",
+    "vanilla_class": "MapColor",
+    "vanilla_path": "net/minecraft/world/level/material/MapColor.java",
+    "rust_file": "crates/pumpkin-data/src/generated/map_color.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "calculateARGBColor",
+      "getColorFromPackedId"
+    ]
+  },
+  {
+    "subsystem": "saveddata",
+    "vanilla_class": "MapDecoration",
+    "vanilla_path": "net/minecraft/world/level/saveddata/maps/MapDecoration.java",
+    "rust_file": "crates/pumpkin/src/world/map.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getSpriteLocation",
+      "renderOnFrame"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "MegaJungleTrunkPlacer",
+    "vanilla_path": "net/minecraft/world/level/levelgen/feature/trunkplacers/MegaJungleTrunkPlacer.java",
+    "rust_file": "crates/pumpkin-world/src/generation/feature/features/tree/trunk/mega_jungle.rs",
+    "total_methods": 2,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 0,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeTrunk",
+      "type"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "OminousItemSpawner",
+    "vanilla_path": "net/minecraft/world/entity/OminousItemSpawner.java",
+    "rust_file": "crates/pumpkin/src/entity/ominous_item_spawner.rs",
+    "total_methods": 13,
+    "in_declaring_file": 8,
+    "elsewhere_in_workspace": 3,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "addParticles",
+      "getPistonPushReaction"
+    ]
+  },
+  {
+    "subsystem": "entity",
+    "vanilla_class": "PanicGoal",
+    "vanilla_path": "net/minecraft/world/entity/ai/goal/PanicGoal.java",
+    "rust_file": "crates/pumpkin/src/entity/ai/goal/escape_danger.rs",
+    "total_methods": 7,
+    "in_declaring_file": 4,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "findRandomPosition",
+      "shouldPanic"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "PitcherCropBlock",
+    "vanilla_path": "net/minecraft/world/level/block/PitcherCropBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/plant/crop/pitcher_crop.rs",
+    "total_methods": 15,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 7,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "createBlockStateDefinition",
+      "getCollisionShape"
+    ]
+  },
+  {
+    "subsystem": "commands",
+    "vanilla_class": "PlaceCommand",
+    "vanilla_path": "net/minecraft/server/commands/PlaceCommand.java",
+    "rust_file": "crates/pumpkin/src/command/commands/place.rs",
+    "total_methods": 5,
+    "in_declaring_file": 1,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "placeFeature",
+      "placeJigsaw"
+    ]
+  },
+  {
+    "subsystem": "worldgen",
+    "vanilla_class": "PlacedFeature",
+    "vanilla_path": "net/minecraft/world/level/levelgen/placement/PlacedFeature.java",
+    "rust_file": "crates/pumpkin-data/src/generated/placed_feature.rs",
+    "total_methods": 4,
+    "in_declaring_file": 0,
+    "elsewhere_in_workspace": 2,
+    "client_only_skipped": 0,
+    "absent_workspace_wide": [
+      "getFeatures",
+      "placeWithBiomeCheck"
+    ]
+  },
+  {
+    "subsystem": "block",
+    "vanilla_class": "PotentSulfurBlock",
+    "vanilla_path": "net/minecraft/world/level/block/PotentSulfurBlock.java",
+    "rust_file": "crates/pumpkin/src/block/blocks/potent_sulfur.rs",
+    "total_methods": 6,
+    "in_declaring_file": 2,
+    "elsewhere_in_workspace": 1,
+    "client_only_skipped": 1,
+    "absent_workspace_wide": [
+      "animateTick",
+      "createBlockStateDefinition"
+    ]
+  }
+]

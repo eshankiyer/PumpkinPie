@@ -1,0 +1,25 @@
+[
+  {
+    "subsystem": "block",
+    "vanilla_class": "SculkSensorBlockEntity",
+    "vanilla_path": "net/minecraft/world/level/block/entity/SculkSensorBlockEntity.java",
+    "rust_file": "crates/pumpkin/src/block/entities/sculk_sensor.rs",
+    "total_methods": 15,
+    "in_declaring_file": 3,
+    "elsewhere_in_workspace": 1,
+    "absent_workspace_wide": [
+      "canReceiveVibration",
+      "canTriggerAvoidVibration",
+      "createVibrationUser",
+      "getLastVibrationFrequency",
+      "getListener",
+      "getPositionSource",
+      "getVibrationData",
+      "getVibrationUser",
+      "onDataChanged",
+      "onReceiveVibration",
+      "requiresAdjacentChunksToBeTicking"
+    ],
+    "note": "round13 broader pool: leads 1-11 of 11 for SculkSensorBlockEntity"
+  }
+]

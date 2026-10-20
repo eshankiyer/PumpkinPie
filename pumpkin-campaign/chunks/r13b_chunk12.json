@@ -1,0 +1,24 @@
+[
+  {
+    "subsystem": "entity",
+    "vanilla_class": "PolarBear",
+    "vanilla_path": "net/minecraft/world/entity/animal/polarbear/PolarBear.java",
+    "rust_file": "crates/pumpkin/src/entity/passive/polar_bear.rs",
+    "total_methods": 29,
+    "in_declaring_file": 6,
+    "elsewhere_in_workspace": 13,
+    "absent_workspace_wide": [
+      "alertOther",
+      "checkAndPerformAttack",
+      "checkPolarBearSpawnRules",
+      "finalizeSpawn",
+      "getFollowDistance",
+      "getPersistentAngerEndTime",
+      "getStandingAnimationScale",
+      "getWaterSlowDown",
+      "playStepSound",
+      "setPersistentAngerEndTime"
+    ],
+    "note": "round13 broader pool: leads 1-10 of 10 for PolarBear"
+  }
+]

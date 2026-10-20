@@ -1,0 +1,22 @@
+diff --git a/pumpkin/src/command/commands/locate.rs b/pumpkin/src/command/commands/locate.rs
+index 6bd6115..c1ca453 100644
+--- a/pumpkin/src/command/commands/locate.rs
++++ b/pumpkin/src/command/commands/locate.rs
+@@ -133,13 +133,11 @@ pub fn sets_containing(key: StructureKeys) -> Vec<&'static StructureSet> {
+ /// Y is ignored because the search itself is horizontal and the finder returns a
+ /// column whose height is not known without generating the chunk.
+ #[allow(dead_code, reason = "used once the executor is wired")]
+-#[expect(
+-    clippy::todo,
+-    unused_variables,
+-    reason = "scaffold stub, filled by spec 22; remove this attribute when filling"
+-)]
+ pub fn horizontal_distance(a: BlockPos, b: BlockPos) -> i32 {
+-    todo!("STUB: see tests::horizontal_distance_*")
++    let dx = a.0.x as f64 - b.0.x as f64;
++    let dz = a.0.z as f64 - b.0.z as f64;
++
++    f64::hypot(dx, dz).round() as i32
+ }
+ 
+ /// A structure name argument.

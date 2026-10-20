@@ -1,0 +1,5 @@
+ M crates/pumpkin-world/src/generation/feature/features/coral/coral_mushroom.rs
+ M crates/pumpkin/src/block/blocks/coral/coral_fan.rs
+ M crates/pumpkin/src/block/blocks/coral/coral_plant.rs
+ M crates/pumpkin/src/block/blocks/coral/mod.rs
+?? WAVE_REPORT.md
