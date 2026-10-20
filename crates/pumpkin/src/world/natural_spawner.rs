@@ -1,7 +1,8 @@
 use crate::entity::EntityBase;
 use crate::entity::passive::tropical_fish::TropicalFishEntity;
 use crate::entity::r#type::{
-    check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules, from_type,
+    SpawnRuleContext, check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules,
+    from_type,
 };
 use crate::world::World;
 use arc_swap::ArcSwap;
@@ -677,7 +678,13 @@ pub fn spawn_mobs_for_chunk_generation(
                         spawn_z,
                         entity_type,
                     )
-                    && check_spawn_rules(entity_type, world, &spawn_rule_pos, false)
+                    && check_spawn_rules(
+                        entity_type,
+                        world,
+                        &spawn_rule_pos,
+                        SpawnRuleContext::ChunkGeneration,
+                        false,
+                    )
                     && check_spawn_obstruction_state(
                         spawn_rule_pos.0.y,
                         world.sea_level,
@@ -1026,7 +1033,13 @@ pub fn is_valid_spawn_position_for_type(
     if !is_spawn_position_ok(world, block_pos, entity_type) {
         return false;
     }
-    if !check_spawn_rules(entity_type, world, block_pos, is_thundering) {
+    if !check_spawn_rules(
+        entity_type,
+        world,
+        block_pos,
+        SpawnRuleContext::Natural,
+        is_thundering,
+    ) {
         return false;
     }
     if !check_spawn_obstruction(world, block_pos, entity_type) {
@@ -1280,13 +1293,26 @@ pub fn is_valid_empty_spawn_block(
     entity_type.fire_immune || !block.has_tag(&MINECRAFT_FIRE)
 }
 
-/// Matches the support-block portion of vanilla `Mob.checkMobSpawnRules`.
-/// Magma blocks override `Block.isValidSpawn` and only permit fire-immune
-/// entities; a generic sturdy top-face check is not sufficient here.
 fn is_valid_spawn_support(state: &'static BlockState, entity_type: &'static EntityType) -> bool {
-    state.is_side_solid(BlockDirection::Up)
-        && state.luminance < 14
-        && (entity_type.fire_immune || Block::from_state_id(state.id) != &Block::MAGMA_BLOCK)
+    let block = Block::from_state_id(state.id);
+
+    match block.name {
+        "bedrock" | "glass" | "moving_piston" | "repeater" | "barrier" | "chorus_flower"
+        | "scaffolding" | "tinted_glass" => false,
+        name if name.ends_with("_trapdoor")
+            || name == "copper_grate"
+            || name.ends_with("_copper_grate") =>
+        {
+            false
+        }
+        "soul_sand" | "carved_pumpkin" | "jack_o_lantern" | "redstone_lamp" | "mud" => true,
+        name if name.ends_with("_leaves") || name == "firefly_bush" => {
+            entity_type.id == EntityType::OCELOT.id || entity_type.id == EntityType::PARROT.id
+        }
+        "ice" | "frosted_ice" => entity_type.id == EntityType::POLAR_BEAR.id,
+        "magma_block" => entity_type.fire_immune,
+        _ => state.is_side_solid(BlockDirection::Up) && state.luminance < 14,
+    }
 }
 
 #[cfg(test)]
@@ -1318,6 +1344,38 @@ mod tests {
 
         assert!(!is_valid_spawn_support(magma, &EntityType::ZOMBIE));
         assert!(is_valid_spawn_support(magma, &EntityType::BLAZE));
+    }
+
+    #[test]
+    fn support_overrides_match_blocks_is_valid_spawn_predicates() {
+        assert!(!is_valid_spawn_support(
+            Block::BEDROCK.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::COPPER_GRATE.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::JACK_O_LANTERN.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::OAK_LEAVES.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::OAK_LEAVES.default_state,
+            &EntityType::PARROT
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::ICE.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::ICE.default_state,
+            &EntityType::POLAR_BEAR
+        ));
     }
 
     /// Vanilla `WeightedList` picks entries proportionally to `weight` (e.g. `warm_ocean`'s

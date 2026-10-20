@@ -189,6 +189,18 @@ pub enum BlockPlacingError {
     InvalidGamemode,
 }
 
+/// Matches `ServerGamePacketListenerImpl.handleUseItemOn`'s hit-location
+/// guard. The packet stores the hit point relative to the block position, so
+/// vanilla accepts points whose distance from the block center is strictly
+/// below `1.0000001` on every axis.
+fn valid_block_hit_cursor(cursor_pos: &Vector3<f32>) -> bool {
+    const LIMIT: f64 = 1.0000001;
+
+    (f64::from(cursor_pos.x) - 0.5).abs() < LIMIT
+        && (f64::from(cursor_pos.y) - 0.5).abs() < LIMIT
+        && (f64::from(cursor_pos.z) - 0.5).abs() < LIMIT
+}
+
 impl std::fmt::Display for BlockPlacingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
@@ -2511,6 +2523,15 @@ impl JavaClient {
         let position = use_item_on.position;
         let cursor_pos = use_item_on.cursor_pos;
 
+        if !valid_block_hit_cursor(&cursor_pos) {
+            tracing::warn!(
+                ?position,
+                ?cursor_pos,
+                "rejecting invalid block hit location"
+            );
+            return Ok(());
+        }
+
         let mut should_try_decrement = false;
 
         if !player.can_interact_with_block_at(&position, 1.0) {
@@ -3351,7 +3372,7 @@ mod tests {
     use super::{
         MovementCheckContext, TeleportConfirmAction, attack_target_is_in_range,
         has_finite_position, movement_requires_correction, pvp_allows_attack,
-        teleport_confirm_action, uses_main_hand,
+        teleport_confirm_action, uses_main_hand, valid_block_hit_cursor,
     };
 
     #[test]
@@ -3376,6 +3397,15 @@ mod tests {
         // The client-settings encoding must stay as it was.
         assert_eq!(Hand::try_from(0).ok(), Some(Hand::Left));
         assert_eq!(Hand::try_from(1).ok(), Some(Hand::Right));
+    }
+
+    #[test]
+    fn block_hit_cursor_matches_vanilla_bounds() {
+        assert!(valid_block_hit_cursor(&Vector3::new(0.5, 0.5, 0.5)));
+        assert!(valid_block_hit_cursor(&Vector3::new(-0.5, 1.5, 0.5)));
+        assert!(!valid_block_hit_cursor(&Vector3::new(-0.500001, 0.5, 0.5)));
+        assert!(!valid_block_hit_cursor(&Vector3::new(0.5, 1.500001, 0.5)));
+        assert!(!valid_block_hit_cursor(&Vector3::new(f32::NAN, 0.5, 0.5)));
     }
 
     #[test]
